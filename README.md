@@ -25,6 +25,7 @@ poetry shell
 
 ## Project Structure #WIP
 
+```
 isrm-wrapper/
 ├── src/isrm_wrapper/    # Main package code
 ├── data/
@@ -32,6 +33,7 @@ isrm-wrapper/
 │   └── processed/      # Generated concentration outputs
 ├── tests/              # Unit tests
 └── docs/               # Documentation
+```
 
 ## Requirements #WIP
 
