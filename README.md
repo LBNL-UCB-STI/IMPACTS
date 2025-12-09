@@ -9,6 +9,14 @@ This package provides utilities to:
 - Map these relationships to ISRM grid cells
 - Process BEAM emission data for air quality analysis
 
+### Data Sources
+
+The InMAP ISRM (Intervention Source-Receptor Matrix) is downloaded based on configuration, with the default location being:
+- **S3 Bucket**: `s3://inmap-model/isrm_v1.2.1.zarr/`
+- **Version**: v1.2.1
+
+This ISRM matrix is then combined with the NOx-to-NO2 matrix calculated in-house to produce the final source-receptor relationships for air quality analysis.
+
 ## Installation #WIP
 
 ```bash
@@ -47,5 +55,3 @@ See `CONTRIBUTING.rst` for guidelines.
 ## License #WIP
 
 See `LICENSE.txt` for details.
-
-
