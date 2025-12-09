@@ -14,7 +14,7 @@ This package provides utilities to:
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd isrm-wrapper
+cd impacts
 
 # Install dependencies with Poetry
 poetry install

@@ -1,5 +1,5 @@
 """
-    Setup file for isrm-wrapper.
+    Setup file for impacts.
     Use setup.cfg to configure your project.
 
     This file was generated with PyScaffold 4.6.
