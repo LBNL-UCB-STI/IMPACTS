@@ -1,6 +1,6 @@
-# ISRM Wrapper
+# IMPACTS: Intersection of Mobility Patterns and Air Concentration in Transportation Systems
 
-A Python toolkit for working with InMAP Source-Receptor Matrices (ISRM) and converting BEAM emission outputs into pollutant concentrations.
+A Python toolkit for working with InMAP/AERMOD Source-Receptor Matrices (ISRM) and converting BEAM emission outputs into pollutant concentrations.
 
 ## Overview
 
