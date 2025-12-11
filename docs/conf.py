@@ -34,7 +34,7 @@ except ImportError:
     from sphinx import apidoc
 
 output_dir = os.path.join(__location__, "api")
-module_dir = os.path.join(__location__, "../src/isrm_wrapper")
+module_dir = os.path.join(__location__, "../src/impacts")
 try:
     shutil.rmtree(output_dir)
 except FileNotFoundError:

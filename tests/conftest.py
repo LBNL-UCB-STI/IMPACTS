@@ -1,5 +1,5 @@
 """
-    Dummy conftest.py for isrm_wrapper.
+    Dummy conftest.py for impacts.
 
     If you don't know what this is for, just leave it empty.
     Read more about conftest.py under:
