@@ -17,6 +17,28 @@ The InMAP ISRM (Intervention Source-Receptor Matrix) is downloaded based on conf
 
 This ISRM matrix is then combined with the NOx-to-NO2 matrix calculated in-house to produce the final source-receptor relationships for air quality analysis.
 
+## PILATES Integration (Container)
+
+This repository follows the frism-light container pattern so it can be wired into PILATES as a model step. The container entrypoint is `python -m impacts`, and it expects standard mounts:
+
+- `/input`: input data for preprocessing
+- `/output`: generated outputs
+
+Example usage:
+
+```bash
+docker build -t impacts .
+docker run --rm -v /path/in:/input -v /path/out:/output impacts --all
+```
+
+List or run specific steps:
+
+```bash
+python -m impacts --list-steps
+python -m impacts --step convert_cmaq_polygon
+```
+
+
 ## Installation #WIP
 
 ```bash
