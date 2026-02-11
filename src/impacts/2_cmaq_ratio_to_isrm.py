@@ -23,12 +23,11 @@ def grid_polygons_from_centers(df: pd.DataFrame) -> gpd.GeoDataFrame:
 
 
 def main() -> None:
-    mywd = "~/Dropbox/Research/SmartGrid_Behavioral/TransportationInitiative/ATLAS/BEAM_AQM/Rscripts"
-    os.chdir(os.path.expanduser(mywd))
+    data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 
-    isrm = gpd.read_file(os.path.join("..", "Data", "fromYuhan", "isrm_polygon", "isrm_polygon.shp"))
+    isrm = gpd.read_file(os.path.join(data_dir, "isrm_polygon", "isrm_polygon.shp"))
 
-    rdata_path = os.path.join("..", "RData", "cmaqtestNO2_ratio.RData")
+    rdata_path = os.path.join(data_dir, "cmaqtestNO2_ratio.RData")
     rdata = functions.read_rdata(rdata_path)
     if "pdat" not in rdata:
         raise KeyError("Expected 'pdat' in cmaqtestNO2_ratio.RData")
@@ -42,7 +41,7 @@ def main() -> None:
     mm = grid_polygons_from_centers(pdat[["x", "y", "value", "col", "row"]])
     mm = mm.drop(columns=["value"])
 
-    shp_path = os.path.join("..", "RData", "baaqmd.shp")
+    shp_path = os.path.join(data_dir, "baaqmd.shp")
     mm.to_file(shp_path)
 
     mm = mm.to_crs(isrm.crs)
@@ -59,7 +58,7 @@ def main() -> None:
 
     no2ratio = grouped.rename(columns={"value": "NO2_NOx_ratio"})
     functions.write_rdata(
-        os.path.join("..", "RData", "sfb.no2ratio_isrmGRID.RData"),
+        os.path.join(data_dir, "sfb.no2ratio_isrmGRID.RData"),
         {"no2ratio": no2ratio},
     )
 

@@ -7,17 +7,14 @@ from impacts import functions
 
 
 def main() -> None:
-    mywd = "~/Dropbox/Research/SmartGrid_Behavioral/TransportationInitiative/ATLAS/BEAM_AQM/Rscripts"
-    os.chdir(os.path.expanduser(mywd))
+    data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 
-    rdatdir = os.path.join("..", "RData")
-
-    res_data = functions.read_rdata(os.path.join(rdatdir, "SFB_NOX_NOX_ISRM.RData"))
+    res_data = functions.read_rdata(os.path.join(data_dir, "SFB_NOX_NOX_ISRM.RData"))
     if "res" not in res_data:
         raise KeyError("Expected 'res' in SFB_NOX_NOX_ISRM.RData")
     res = res_data["res"].copy()
 
-    no2ratio_data = functions.read_rdata(os.path.join(rdatdir, "sfb.no2ratio_isrmGRID.RData"))
+    no2ratio_data = functions.read_rdata(os.path.join(data_dir, "sfb.no2ratio_isrmGRID.RData"))
     if "no2ratio" not in no2ratio_data:
         raise KeyError("Expected 'no2ratio' in sfb.no2ratio_isrmGRID.RData")
     no2ratio = no2ratio_data["no2ratio"].copy()
@@ -45,7 +42,7 @@ def main() -> None:
     res_dat = dat[cols].transpose()
     res_dat.columns = dat["isrm"].to_numpy()
 
-    functions.write_rdata(os.path.join(rdatdir, "NOx_to_NO2_ISRM.RData"), {"res.dat": res_dat})
+    functions.write_rdata(os.path.join(data_dir, "NOx_to_NO2_ISRM.RData"), {"res.dat": res_dat})
 
     try:
         import matplotlib.pyplot as plt

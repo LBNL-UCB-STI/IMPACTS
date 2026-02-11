@@ -23,10 +23,9 @@ def grid_polygons_from_centers(df: pd.DataFrame) -> gpd.GeoDataFrame:
 
 
 def main() -> None:
-    mywd = "~/Dropbox/Research/SmartGrid_Behavioral/TransportationInitiative/ATLAS/BEAM_AQM/Rscripts"
-    os.chdir(os.path.expanduser(mywd))
+    data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 
-    rdata_path = os.path.join("..", "..", "RData", "cmaqtestNO2_ratio.RData")
+    rdata_path = os.path.join(data_dir, "cmaqtestNO2_ratio.RData")
     rdata = functions.read_rdata(rdata_path)
     if "pdat" not in rdata:
         raise KeyError("Expected 'pdat' in cmaqtestNO2_ratio.RData")
@@ -39,7 +38,7 @@ def main() -> None:
     gdf = grid_polygons_from_centers(pdat[["x", "y", "value", "col", "row"]])
     gdf = gdf.drop(columns=["value"])
 
-    out_path = os.path.join("..", "..", "RData", "baaqmd.shp")
+    out_path = os.path.join(data_dir, "baaqmd.shp")
     gdf.to_file(out_path)
 
 

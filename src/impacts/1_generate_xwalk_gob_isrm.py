@@ -38,13 +38,11 @@ def _extract_ids(files: Iterable[str]) -> list[str]:
 
 
 def main() -> None:
-    mywd = "~/Dropbox/Research/SmartGrid_Behavioral/TransportationInitiative/ATLAS/BEAM_AQM/Rscripts"
-    os.chdir(os.path.expanduser(mywd))
+    data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 
-    datdir = os.path.join("..", "InMap", "NOx_SFB_InMapRun", "sfbay_isrm_geopoints_inmap_1.9.6")
-    rdatdir = os.path.join("..", "RData")
+    datdir = os.path.join(data_dir, "sfbay_isrm_geopoints_inmap_1.9.6")
 
-    isrm_path = os.path.join("..", "Data", "fromYuhan", "isrm_polygon", "isrm_polygon.shp")
+    isrm_path = os.path.join(data_dir, "isrm_polygon", "isrm_polygon.shp")
     bounding_box = functions.get_bounding_box()
 
     idlist = _extract_ids(os.listdir(datdir))
@@ -60,7 +58,7 @@ def main() -> None:
         raise RuntimeError("No results produced from map_to_isrm")
 
     res_df = pd.concat(results)
-    out_path = os.path.join(rdatdir, "SFB_NOX_NOX_ISRM.RData")
+    out_path = os.path.join(data_dir, "SFB_NOX_NOX_ISRM.RData")
     functions.write_rdata(out_path, {"res": res_df})
 
 
