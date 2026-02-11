@@ -1,0 +1,383 @@
+"""ISRM NOx-to-NO2 pipeline.
+
+Converts InMAP NOx source-receptor matrix outputs into a NOx-to-NO2 ISRM
+for the SF Bay Area, using CMAQ NO2/NOx ratios as a scaling factor.
+
+Steps:
+  0. convert_cmaq_polygon  - Turn CMAQ NO2/NOx ratio into ISRM-gridded polygons
+  1. generate_xwalk        - Read InMAP NOx output and build GOB-to-ISRM crosswalk
+  2. cmaq_ratio_to_isrm    - Map CMAQ NO2/NOx ratio onto ISRM grid
+  3. nox_to_no2_isrm       - Convert NOx-to-NOx ISRM into NOx-to-NO2 ISRM
+"""
+
+import os
+import re
+import time
+from multiprocessing import Pool
+from typing import Dict, Iterable, List, Optional
+
+import numpy as np
+import pandas as pd
+
+try:
+    import geopandas as gpd
+    from shapely.geometry import box
+except ImportError as exc:
+    raise ImportError("geopandas and shapely are required to run this pipeline") from exc
+
+
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+
+
+# ---------------------------------------------------------------------------
+# BAAQMD / CMAQ grid constants
+# ---------------------------------------------------------------------------
+
+PROJ_BAAQMD = "+proj=lcc +lat_1=60 +lat_2=30 +lon_0=-120.5 +lat_0=37 +datum=NAD83"
+NCOL = 164
+NROW = 224
+X0 = -220000
+Y0 = -16000
+DX = 1000  # 1km grid resolution
+DY = 1000
+
+SF_BAY_COUNTIES = {
+    "alameda",
+    "contra costa",
+    "marin",
+    "napa",
+    "san francisco",
+    "san mateo",
+    "santa clara",
+    "solano",
+    "sonoma",
+}
+
+
+# ---------------------------------------------------------------------------
+# I/O helpers
+# ---------------------------------------------------------------------------
+
+def read_rdata(path: str) -> Dict[str, object]:
+    """Read an .RData file and return a dict of objects."""
+    try:
+        import pyreadr
+    except ImportError as exc:
+        raise ImportError("pyreadr is required to read .RData files") from exc
+    return pyreadr.read_r(path)
+
+
+def write_rdata(path: str, objects: Dict[str, object]) -> None:
+    """Write objects to an .RData file."""
+    try:
+        import pyreadr
+    except ImportError as exc:
+        raise ImportError("pyreadr is required to write .RData files") from exc
+    pyreadr.write_rdata(path, objects)
+
+
+# ---------------------------------------------------------------------------
+# Coordinate helpers
+# ---------------------------------------------------------------------------
+
+def cr_xy(col: Iterable[float], row: Iterable[float]) -> pd.DataFrame:
+    """Convert BAAQMD grid col/row to projected LCC x/y (cell centers)."""
+    col_arr = np.asarray(col, dtype=float)
+    row_arr = np.asarray(row, dtype=float)
+    x = (col_arr - 1) * DX + X0 + DX / 2
+    y = (row_arr - 1) * DY + Y0 + DY / 2
+    return pd.DataFrame({"x": x, "y": y})
+
+
+def grid_polygons_from_centers(df: pd.DataFrame) -> gpd.GeoDataFrame:
+    """Create 1km x 1km grid polygons from center-point coordinates."""
+    half_dx = DX / 2
+    half_dy = DY / 2
+    geometry = [
+        box(x - half_dx, y - half_dy, x + half_dx, y + half_dy)
+        for x, y in zip(df["x"], df["y"])
+    ]
+    return gpd.GeoDataFrame(df.copy(), geometry=geometry, crs=PROJ_BAAQMD)
+
+
+# ---------------------------------------------------------------------------
+# Bounding box
+# ---------------------------------------------------------------------------
+
+def _filter_bay_area_counties(counties: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Filter a counties GeoDataFrame to the 9 SF Bay Area counties."""
+    if "region" in counties.columns and "subregion" in counties.columns:
+        return counties[
+            (counties["region"].str.lower() == "california")
+            & (counties["subregion"].str.lower().isin(SF_BAY_COUNTIES))
+        ]
+    if "STATE_NAME" in counties.columns and "NAME" in counties.columns:
+        return counties[
+            (counties["STATE_NAME"].str.lower() == "california")
+            & (counties["NAME"].str.lower().isin(SF_BAY_COUNTIES))
+        ]
+    raise ValueError("County dataset missing expected columns for filtering")
+
+
+def get_bounding_box() -> gpd.GeoSeries:
+    """Return SF Bay Area bounding box from env var or counties shapefile."""
+    bbox_env = os.getenv("IMPACTS_BOUNDING_BOX")
+    if bbox_env:
+        parts = [float(part) for part in bbox_env.split(",")]
+        if len(parts) != 4:
+            raise ValueError("IMPACTS_BOUNDING_BOX must be minx,miny,maxx,maxy")
+        minx, miny, maxx, maxy = parts
+        return gpd.GeoSeries([box(minx, miny, maxx, maxy)], crs="EPSG:4326")
+
+    counties_path = os.getenv("IMPACTS_COUNTIES_PATH")
+    if not counties_path:
+        raise ValueError("Set IMPACTS_BOUNDING_BOX or IMPACTS_COUNTIES_PATH to compute bounding_box")
+
+    counties = gpd.read_file(counties_path)
+    filtered = _filter_bay_area_counties(counties).to_crs("EPSG:4326")
+    minx, miny, maxx, maxy = filtered.total_bounds
+    minx -= 0.02
+    miny -= 0.02
+    maxx += 0.02
+    maxy += 0.02
+    return gpd.GeoSeries([box(minx, miny, maxx, maxy)], crs="EPSG:4326")
+
+
+# ---------------------------------------------------------------------------
+# GOB-to-ISRM mapping (used by step 1)
+# ---------------------------------------------------------------------------
+
+def map_to_isrm(
+    output_dir: str,
+    isrm_source_grid: str,
+    isrm: gpd.GeoDataFrame,
+    bounding_box: gpd.GeoSeries,
+) -> Optional[pd.DataFrame]:
+    """Map a single InMAP GOB output to ISRM grid via area-weighted averaging."""
+    start = time.time()
+
+    shp_path = os.path.join(output_dir, f"isrm_{isrm_source_grid}_geopoint.shp")
+    dat = gpd.read_file(shp_path)
+    if dat.empty:
+        return None
+
+    pdat = dat.to_crs("EPSG:4326")
+    pisrm = isrm.to_crs("EPSG:4326")
+
+    sf_isrm = gpd.clip(pisrm, bounding_box)
+    sf_dat = gpd.clip(pdat, bounding_box)
+    if sf_isrm.empty or sf_dat.empty:
+        return None
+
+    psf_isrm = sf_isrm.to_crs(isrm.crs)
+    psf_dat = sf_dat.copy()
+    psf_dat["gobid"] = np.arange(1, len(psf_dat) + 1)
+    psf_dat = psf_dat.to_crs(isrm.crs)
+
+    kk = gpd.overlay(psf_dat, psf_isrm, how="intersection")
+    if kk.empty:
+        return None
+
+    kk = kk[kk.geometry.type.isin(["Polygon", "MultiPolygon"])]
+    if kk.empty:
+        return None
+
+    kk["area"] = kk.geometry.area
+
+    grouped = (
+        kk.drop(columns="geometry")
+        .groupby("isrm")
+        .apply(lambda frame: np.sum(frame["NOx"] * frame["area"]) / np.sum(frame["area"]))
+        .reset_index(name="NOx")
+    )
+    grouped = grouped.sort_values("isrm")
+
+    res = pd.DataFrame([grouped["NOx"].to_numpy()], columns=grouped["isrm"].to_numpy())
+    res.index = [isrm_source_grid]
+
+    _ = time.time() - start
+    return res
+
+
+# ---------------------------------------------------------------------------
+# Step 0: Convert CMAQ polygon
+# ---------------------------------------------------------------------------
+
+def convert_cmaq_polygon(data_dir: str = DATA_DIR) -> None:
+    """Load CMAQ NO2/NOx ratio and write BAAQMD grid as a shapefile."""
+    rdata = read_rdata(os.path.join(data_dir, "cmaqtestNO2_ratio.RData"))
+    if "pdat" not in rdata:
+        raise KeyError("Expected 'pdat' in cmaqtestNO2_ratio.RData")
+    pdat = rdata["pdat"].copy()
+
+    coords = cr_xy(pdat["col"], pdat["row"])
+    pdat[["x", "y"]] = coords
+
+    gdf = grid_polygons_from_centers(pdat[["x", "y", "value", "col", "row"]])
+    gdf = gdf.drop(columns=["value"])
+
+    gdf.to_file(os.path.join(data_dir, "baaqmd.shp"))
+
+
+# ---------------------------------------------------------------------------
+# Step 1: Generate crosswalk GOB <-> ISRM (parallel)
+# ---------------------------------------------------------------------------
+
+_ISRM = None
+_BOUNDING_BOX = None
+_DATDIR = None
+
+
+def _init_worker(isrm_path: str, bbox_wkb: bytes, datdir: str) -> None:
+    """Initializer for each multiprocessing worker."""
+    global _ISRM, _BOUNDING_BOX, _DATDIR
+    _ISRM = gpd.read_file(isrm_path)
+    _BOUNDING_BOX = gpd.GeoSeries.from_wkb([bbox_wkb], crs="EPSG:4326")
+    _DATDIR = datdir
+
+
+def _map_one(isrm_source_grid: str) -> Optional[pd.DataFrame]:
+    """Map a single ISRM source grid (worker function)."""
+    return map_to_isrm(_DATDIR, isrm_source_grid, _ISRM, _BOUNDING_BOX)
+
+
+def _extract_ids(files: Iterable[str]) -> List[str]:
+    """Extract sorted unique ISRM IDs from filenames like isrm_00843_*."""
+    ids = []
+    for name in files:
+        match = re.match(r"^isrm_(\d+)", name)
+        if match:
+            ids.append(match.group(1))
+    return sorted(set(ids))
+
+
+def generate_xwalk(data_dir: str = DATA_DIR, n_workers: int = 6) -> None:
+    """Build NOx-to-NOx ISRM crosswalk from InMAP geopoint outputs."""
+    datdir = os.path.join(data_dir, "sfbay_isrm_geopoints_inmap_1.9.6")
+    isrm_path = os.path.join(data_dir, "isrm_polygon", "isrm_polygon.shp")
+    bounding_box = get_bounding_box()
+
+    idlist = _extract_ids(os.listdir(datdir))
+    bbox_wkb = bounding_box.iloc[0].wkb
+
+    results = []
+    with Pool(processes=n_workers, initializer=_init_worker,
+              initargs=(isrm_path, bbox_wkb, datdir)) as pool:
+        for res in pool.map(_map_one, idlist):
+            if res is not None:
+                results.append(res)
+
+    if not results:
+        raise RuntimeError("No results produced from map_to_isrm")
+
+    res_df = pd.concat(results)
+    write_rdata(os.path.join(data_dir, "SFB_NOX_NOX_ISRM.RData"), {"res": res_df})
+
+
+# ---------------------------------------------------------------------------
+# Step 2: CMAQ ratio to ISRM grid
+# ---------------------------------------------------------------------------
+
+def cmaq_ratio_to_isrm(data_dir: str = DATA_DIR) -> None:
+    """Intersect CMAQ NO2/NOx ratio grid with ISRM and compute area-weighted averages."""
+    isrm = gpd.read_file(os.path.join(data_dir, "isrm_polygon", "isrm_polygon.shp"))
+
+    rdata = read_rdata(os.path.join(data_dir, "cmaqtestNO2_ratio.RData"))
+    if "pdat" not in rdata:
+        raise KeyError("Expected 'pdat' in cmaqtestNO2_ratio.RData")
+    pdat = rdata["pdat"].copy()
+
+    pdat["col"] = pdat["x"]
+    pdat["row"] = pdat["y"]
+    coords = cr_xy(pdat["col"], pdat["row"])
+    pdat[["x", "y"]] = coords
+
+    mm = grid_polygons_from_centers(pdat[["x", "y", "value", "col", "row"]])
+    mm = mm.drop(columns=["value"])
+    mm.to_file(os.path.join(data_dir, "baaqmd.shp"))
+
+    mm = mm.to_crs(isrm.crs)
+    kk = gpd.overlay(mm, isrm, how="intersection")
+    kk["area"] = kk.geometry.area
+
+    merged = kk.merge(pdat, on=["col", "row"], how="left")
+    grouped = (
+        merged.drop(columns="geometry")
+        .groupby("isrm")
+        .apply(lambda frame: (frame["value"] * frame["area"]).sum() / frame["area"].sum())
+        .reset_index(name="value")
+    )
+
+    no2ratio = grouped.rename(columns={"value": "NO2_NOx_ratio"})
+    write_rdata(
+        os.path.join(data_dir, "sfb.no2ratio_isrmGRID.RData"),
+        {"no2ratio": no2ratio},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Step 3: NOx to NO2 ISRM
+# ---------------------------------------------------------------------------
+
+def nox_to_no2_isrm(data_dir: str = DATA_DIR) -> None:
+    """Multiply NOx ISRM by NO2/NOx ratio to produce NOx-to-NO2 ISRM."""
+    res_data = read_rdata(os.path.join(data_dir, "SFB_NOX_NOX_ISRM.RData"))
+    if "res" not in res_data:
+        raise KeyError("Expected 'res' in SFB_NOX_NOX_ISRM.RData")
+    res = res_data["res"].copy()
+
+    no2ratio_data = read_rdata(os.path.join(data_dir, "sfb.no2ratio_isrmGRID.RData"))
+    if "no2ratio" not in no2ratio_data:
+        raise KeyError("Expected 'no2ratio' in sfb.no2ratio_isrmGRID.RData")
+    no2ratio = no2ratio_data["no2ratio"].copy()
+
+    res.index = pd.to_numeric(res.index, errors="coerce").astype(int)
+    res.columns = [int(col) for col in res.columns]
+
+    s_isrm = res.index.to_numpy()
+    s_isrm = s_isrm[(s_isrm > 3) & (s_isrm != 3554)]
+    res = res.loc[s_isrm, s_isrm]
+
+    if 843 not in no2ratio["isrm"].astype(int).to_numpy():
+        extra = pd.DataFrame({"isrm": [843], "NO2_NOx_ratio": [0.94]})
+        no2ratio = pd.concat([no2ratio, extra], ignore_index=True)
+
+    dat = res.transpose()
+    dat["isrm"] = dat.index.astype(int)
+    dat = dat.merge(no2ratio, on="isrm", how="left")
+
+    cols = [col for col in dat.columns if isinstance(col, int) and 843 <= col <= 3706]
+    dat[cols] = dat[cols].multiply(dat["NO2_NOx_ratio"], axis=0)
+
+    res_dat = dat[cols].transpose()
+    res_dat.columns = dat["isrm"].to_numpy()
+
+    write_rdata(os.path.join(data_dir, "NOx_to_NO2_ISRM.RData"), {"res.dat": res_dat})
+
+
+# ---------------------------------------------------------------------------
+# Step registry and main
+# ---------------------------------------------------------------------------
+
+STEPS = {
+    "convert_cmaq_polygon": convert_cmaq_polygon,
+    "generate_xwalk": generate_xwalk,
+    "cmaq_ratio_to_isrm": cmaq_ratio_to_isrm,
+    "nox_to_no2_isrm": nox_to_no2_isrm,
+}
+
+DEFAULT_STEP_ORDER = list(STEPS.keys())
+
+
+def run_pipeline(steps: Optional[List[str]] = None, data_dir: str = DATA_DIR) -> None:
+    """Run the specified steps (or all steps) in order."""
+    if steps is None:
+        steps = DEFAULT_STEP_ORDER
+    for step_name in steps:
+        print(f"Running step: {step_name}")
+        STEPS[step_name](data_dir)
+        print(f"Completed step: {step_name}")
+
+
+if __name__ == "__main__":
+    run_pipeline()
