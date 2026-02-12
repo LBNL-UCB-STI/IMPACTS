@@ -3,7 +3,7 @@ import os
 import sys
 from typing import List, Optional
 
-from impacts.isrm_nox_to_no2 import DEFAULT_STEP_ORDER, STEPS, run_pipeline
+from impacts.isrm_nox_to_no2 import DEFAULT_STEP_ORDER, INPUT_DIR, OUTPUT_DIR, run_pipeline
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -27,9 +27,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run all steps in the default order.",
     )
     parser.add_argument(
-        "--data-dir",
+        "--input-dir",
         default=None,
-        help="Path to the data directory (default: <repo>/data).",
+        help="Path to the input data directory (default: <repo>/data/input).",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Path to the output data directory (default: <repo>/data/output).",
     )
     parser.add_argument(
         "--bounding-box",
@@ -72,10 +77,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.counties_path:
         os.environ["IMPACTS_COUNTIES_PATH"] = args.counties_path
 
-    from impacts.isrm_nox_to_no2 import DATA_DIR
-    data_dir = args.data_dir or DATA_DIR
+    input_dir = args.input_dir or INPUT_DIR
+    output_dir = args.output_dir or OUTPUT_DIR
 
-    run_pipeline(steps, data_dir)
+    run_pipeline(steps, input_dir, output_dir)
     return 0
 
 

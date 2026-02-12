@@ -26,7 +26,8 @@ except ImportError as exc:
     raise ImportError("geopandas and shapely are required to run this pipeline") from exc
 
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+INPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "input")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "output")
 
 
 # ---------------------------------------------------------------------------
@@ -59,21 +60,12 @@ SF_BAY_COUNTIES = {
 # ---------------------------------------------------------------------------
 
 def read_rdata(path: str) -> Dict[str, object]:
-    """Read an .RData file and return a dict of objects."""
+    """Read an .RData file and return a dict of objects (for legacy input data)."""
     try:
         import pyreadr
     except ImportError as exc:
         raise ImportError("pyreadr is required to read .RData files") from exc
     return pyreadr.read_r(path)
-
-
-def write_rdata(path: str, objects: Dict[str, object]) -> None:
-    """Write objects to an .RData file."""
-    try:
-        import pyreadr
-    except ImportError as exc:
-        raise ImportError("pyreadr is required to write .RData files") from exc
-    pyreadr.write_rdata(path, objects)
 
 
 # ---------------------------------------------------------------------------
@@ -203,9 +195,9 @@ def map_to_isrm(
 # Step 0: Convert CMAQ polygon
 # ---------------------------------------------------------------------------
 
-def convert_cmaq_polygon(data_dir: str = DATA_DIR) -> None:
-    """Load CMAQ NO2/NOx ratio and write BAAQMD grid as a shapefile."""
-    rdata = read_rdata(os.path.join(data_dir, "cmaqtestNO2_ratio.RData"))
+def convert_cmaq_polygon(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR) -> None:
+    """Load CMAQ NO2/NOx ratio and write BAAQMD grid as a GeoJSON file."""
+    rdata = read_rdata(os.path.join(input_dir, "cmaqtestNO2_ratio.RData"))
     if "pdat" not in rdata:
         raise KeyError("Expected 'pdat' in cmaqtestNO2_ratio.RData")
     pdat = rdata["pdat"].copy()
@@ -216,7 +208,7 @@ def convert_cmaq_polygon(data_dir: str = DATA_DIR) -> None:
     gdf = grid_polygons_from_centers(pdat[["x", "y", "value", "col", "row"]])
     gdf = gdf.drop(columns=["value"])
 
-    gdf.to_file(os.path.join(data_dir, "baaqmd.shp"))
+    gdf.to_file(os.path.join(output_dir, "baaqmd.geojson"), driver="GeoJSON")
 
 
 # ---------------------------------------------------------------------------
@@ -251,10 +243,10 @@ def _extract_ids(files: Iterable[str]) -> List[str]:
     return sorted(set(ids))
 
 
-def generate_xwalk(data_dir: str = DATA_DIR, n_workers: int = 6) -> None:
+def generate_xwalk(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR, n_workers: int = 6) -> None:
     """Build NOx-to-NOx ISRM crosswalk from InMAP geopoint outputs."""
-    datdir = os.path.join(data_dir, "sfbay_isrm_geopoints_inmap_1.9.6")
-    isrm_path = os.path.join(data_dir, "isrm_polygon", "isrm_polygon.shp")
+    datdir = os.path.join(input_dir, "sfbay_isrm_geopoints_inmap_1.9.6")
+    isrm_path = os.path.join(input_dir, "isrm_polygon", "isrm_polygon.shp")
     bounding_box = get_bounding_box()
 
     idlist = _extract_ids(os.listdir(datdir))
@@ -271,18 +263,18 @@ def generate_xwalk(data_dir: str = DATA_DIR, n_workers: int = 6) -> None:
         raise RuntimeError("No results produced from map_to_isrm")
 
     res_df = pd.concat(results)
-    write_rdata(os.path.join(data_dir, "SFB_NOX_NOX_ISRM.RData"), {"res": res_df})
+    res_df.to_parquet(os.path.join(output_dir, "nox_nox_isrm.parquet"))
 
 
 # ---------------------------------------------------------------------------
 # Step 2: CMAQ ratio to ISRM grid
 # ---------------------------------------------------------------------------
 
-def cmaq_ratio_to_isrm(data_dir: str = DATA_DIR) -> None:
+def cmaq_ratio_to_isrm(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR) -> None:
     """Intersect CMAQ NO2/NOx ratio grid with ISRM and compute area-weighted averages."""
-    isrm = gpd.read_file(os.path.join(data_dir, "isrm_polygon", "isrm_polygon.shp"))
+    isrm = gpd.read_file(os.path.join(input_dir, "isrm_polygon", "isrm_polygon.shp"))
 
-    rdata = read_rdata(os.path.join(data_dir, "cmaqtestNO2_ratio.RData"))
+    rdata = read_rdata(os.path.join(input_dir, "cmaqtestNO2_ratio.RData"))
     if "pdat" not in rdata:
         raise KeyError("Expected 'pdat' in cmaqtestNO2_ratio.RData")
     pdat = rdata["pdat"].copy()
@@ -294,7 +286,7 @@ def cmaq_ratio_to_isrm(data_dir: str = DATA_DIR) -> None:
 
     mm = grid_polygons_from_centers(pdat[["x", "y", "value", "col", "row"]])
     mm = mm.drop(columns=["value"])
-    mm.to_file(os.path.join(data_dir, "baaqmd.shp"))
+    mm.to_file(os.path.join(output_dir, "baaqmd.geojson"), driver="GeoJSON")
 
     mm = mm.to_crs(isrm.crs)
     kk = gpd.overlay(mm, isrm, how="intersection")
@@ -309,27 +301,18 @@ def cmaq_ratio_to_isrm(data_dir: str = DATA_DIR) -> None:
     )
 
     no2ratio = grouped.rename(columns={"value": "NO2_NOx_ratio"})
-    write_rdata(
-        os.path.join(data_dir, "sfb.no2ratio_isrmGRID.RData"),
-        {"no2ratio": no2ratio},
-    )
+    no2ratio.to_parquet(os.path.join(output_dir, "no2_nox_ratio_isrm.parquet"), index=False)
 
 
 # ---------------------------------------------------------------------------
 # Step 3: NOx to NO2 ISRM
 # ---------------------------------------------------------------------------
 
-def nox_to_no2_isrm(data_dir: str = DATA_DIR) -> None:
+def nox_to_no2_isrm(output_dir: str = OUTPUT_DIR) -> None:
     """Multiply NOx ISRM by NO2/NOx ratio to produce NOx-to-NO2 ISRM."""
-    res_data = read_rdata(os.path.join(data_dir, "SFB_NOX_NOX_ISRM.RData"))
-    if "res" not in res_data:
-        raise KeyError("Expected 'res' in SFB_NOX_NOX_ISRM.RData")
-    res = res_data["res"].copy()
+    res = pd.read_parquet(os.path.join(output_dir, "nox_nox_isrm.parquet"))
 
-    no2ratio_data = read_rdata(os.path.join(data_dir, "sfb.no2ratio_isrmGRID.RData"))
-    if "no2ratio" not in no2ratio_data:
-        raise KeyError("Expected 'no2ratio' in sfb.no2ratio_isrmGRID.RData")
-    no2ratio = no2ratio_data["no2ratio"].copy()
+    no2ratio = pd.read_parquet(os.path.join(output_dir, "no2_nox_ratio_isrm.parquet"))
 
     res.index = pd.to_numeric(res.index, errors="coerce").astype(int)
     res.columns = [int(col) for col in res.columns]
@@ -352,7 +335,7 @@ def nox_to_no2_isrm(data_dir: str = DATA_DIR) -> None:
     res_dat = dat[cols].transpose()
     res_dat.columns = dat["isrm"].to_numpy()
 
-    write_rdata(os.path.join(data_dir, "NOx_to_NO2_ISRM.RData"), {"res.dat": res_dat})
+    res_dat.to_parquet(os.path.join(output_dir, "nox_to_no2_isrm.parquet"))
 
 
 # ---------------------------------------------------------------------------
@@ -360,22 +343,26 @@ def nox_to_no2_isrm(data_dir: str = DATA_DIR) -> None:
 # ---------------------------------------------------------------------------
 
 STEPS = {
-    "convert_cmaq_polygon": convert_cmaq_polygon,
-    "generate_xwalk": generate_xwalk,
-    "cmaq_ratio_to_isrm": cmaq_ratio_to_isrm,
-    "nox_to_no2_isrm": nox_to_no2_isrm,
+    "convert_cmaq_polygon": lambda i, o: convert_cmaq_polygon(i, o),
+    "generate_xwalk": lambda i, o: generate_xwalk(i, o),
+    "cmaq_ratio_to_isrm": lambda i, o: cmaq_ratio_to_isrm(i, o),
+    "nox_to_no2_isrm": lambda i, o: nox_to_no2_isrm(o),
 }
 
 DEFAULT_STEP_ORDER = list(STEPS.keys())
 
 
-def run_pipeline(steps: Optional[List[str]] = None, data_dir: str = DATA_DIR) -> None:
+def run_pipeline(
+    steps: Optional[List[str]] = None,
+    input_dir: str = INPUT_DIR,
+    output_dir: str = OUTPUT_DIR,
+) -> None:
     """Run the specified steps (or all steps) in order."""
     if steps is None:
         steps = DEFAULT_STEP_ORDER
     for step_name in steps:
         print(f"Running step: {step_name}")
-        STEPS[step_name](data_dir)
+        STEPS[step_name](input_dir, output_dir)
         print(f"Completed step: {step_name}")
 
 
