@@ -48,6 +48,11 @@ docs/_build/*
 cover/*
 MANIFEST
 
+# Data directories (local/runtime artifacts)
+data/
+input/
+output/
+
 # Per-project virtualenvs
 .venv*/
 .conda*/

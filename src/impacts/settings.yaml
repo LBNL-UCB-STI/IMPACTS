@@ -1,0 +1,52 @@
+main:
+  mapping_section: osm_grid
+  rates_section: emissions_rates
+  dispersion_section: dispersion_isrm
+  events_section: emissions_events
+  emissions_mapping_section: emissions_grid_mapping
+  nox_to_no2_section: nox_to_no2
+
+osm_grid:
+  osm_links_path: null
+  grid_cells_path: ../../data/input/grid_polygon/grid_polygon.shp
+  beam_network_path: null
+  precomputed_beam_osm_path: null
+  output_dir: tmp
+  beam_osm_mapped_output_path: tmp/beam_osm_mapped.geojson
+  beam_osm_grid_intersection_output_path: tmp/beam_osm_grid_intersection.geojson
+  beam_osm_id_col: attributeOrigId
+  beam_length_col: linkLength
+  beam_osm_epsg: 4326
+  grid_epsg: 4326
+  output_epsg: 26910
+
+emissions_rates:
+  rates_dir: null
+  default_rate_basis: per_event
+
+emissions_events:
+  events_input_path: null
+  link_length_path: null
+  output_path: tmp/skims_emissions.parquet
+  iteration: 0
+  use_rates: true
+
+emissions_grid_mapping:
+  skims_input_path: null
+  mapping_input_path: null
+  output_path: tmp/emissions_grid_allocated.parquet
+  group_cols: null
+
+dispersion_isrm:
+  isrm_url: s3://inmap-model/isrm_v1.2.1.zarr/
+  emissions_input_path: null
+  concentration_output_path: tmp/grid_concentration.parquet
+  concentration_factor: 28766.639
+  include_bc: false
+  include_health: false
+
+nox_to_no2:
+  input_dir: ../../data/input
+  output_dir: ../../data/output
+  bounding_box: null
+  counties_path: null

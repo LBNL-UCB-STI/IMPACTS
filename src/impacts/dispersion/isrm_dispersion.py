@@ -12,9 +12,17 @@ import numpy as np
 import pandas as pd
 
 try:
-    from impacts.network2grid.network_grid_clipping import load_workflow_config
+    from impacts.network2grid.network_grid_clipping import (
+        DEFAULT_WORKFLOW_CONFIG_PATH,
+        load_workflow_config,
+        resolve_path_from_workflow,
+    )
 except ImportError:
-    from ..network2grid.network_grid_clipping import load_workflow_config
+    from ..network2grid.network_grid_clipping import (
+        DEFAULT_WORKFLOW_CONFIG_PATH,
+        load_workflow_config,
+        resolve_path_from_workflow,
+    )
 
 
 @dataclass
@@ -32,7 +40,9 @@ class DispersionConfig:
 DEFAULT_DISPERSION_CONFIG = DispersionConfig()
 
 
-def load_dispersion_config(config_path: str = "src/impacts/config/workflow.yaml") -> DispersionConfig:
+def load_dispersion_config(
+    config_path: Optional[str] = None,
+) -> DispersionConfig:
     """Build dispersion config from workflow YAML."""
     workflow = load_workflow_config(config_path)
     main = workflow.get("main", {}) or {}
@@ -41,7 +51,13 @@ def load_dispersion_config(config_path: str = "src/impacts/config/workflow.yaml"
 
     allowed = {f.name for f in fields(DispersionConfig)}
     config_kwargs = {k: v for k, v in section.items() if k in allowed}
-    return DispersionConfig(**config_kwargs)
+    cfg = DispersionConfig(**config_kwargs)
+    cfg.emissions_input_path = resolve_path_from_workflow(cfg.emissions_input_path, config_path)
+    cfg.concentration_output_path = (
+        resolve_path_from_workflow(cfg.concentration_output_path, config_path)
+        or cfg.concentration_output_path
+    )
+    return cfg
 
 
 def _first_existing(df: pd.DataFrame, candidates: Iterable[str]) -> Optional[str]:
@@ -276,7 +292,7 @@ def run_dispersion_from_file(
 
 
 def run_dispersion_from_workflow_config(
-    config_path: str = "src/impacts/config/workflow.yaml",
+    config_path: Optional[str] = None,
 ) -> pd.DataFrame:
     """Run dispersion using `dispersion_isrm` section in workflow config."""
     cfg = load_dispersion_config(config_path)

@@ -9,9 +9,17 @@ from typing import Dict, Iterable, List, Optional
 import pandas as pd
 
 try:
-    from impacts.network2grid.network_grid_clipping import load_workflow_config
+    from impacts.network2grid.network_grid_clipping import (
+        DEFAULT_WORKFLOW_CONFIG_PATH,
+        load_workflow_config,
+        resolve_path_from_workflow,
+    )
 except ImportError:
-    from ..network2grid.network_grid_clipping import load_workflow_config
+    from ..network2grid.network_grid_clipping import (
+        DEFAULT_WORKFLOW_CONFIG_PATH,
+        load_workflow_config,
+        resolve_path_from_workflow,
+    )
 
 
 REQUIRED_EVENT_COLS = [
@@ -126,7 +134,7 @@ def read_rates_directory(
 
 
 def load_rates_from_workflow(
-    workflow_config_path: str = "src/impacts/config/workflow.yaml",
+    workflow_config_path: Optional[str] = None,
     rates_section: Optional[str] = None,
 ) -> Optional[pd.DataFrame]:
     workflow = load_workflow_config(workflow_config_path)
@@ -137,7 +145,8 @@ def load_rates_from_workflow(
     if not rates_dir:
         return None
     default_rate_basis = section.get("default_rate_basis", "per_event")
-    return read_rates_directory(str(rates_dir), default_rate_basis=str(default_rate_basis))
+    resolved_rates_dir = resolve_path_from_workflow(str(rates_dir), workflow_config_path)
+    return read_rates_directory(str(resolved_rates_dir), default_rate_basis=str(default_rate_basis))
 
 
 def _weighted_avg(group: pd.DataFrame, col: str, wcol: str = "observations") -> float:
@@ -358,7 +367,7 @@ def build_skims_emissions_from_events(
     network_path: Optional[str] = None,
     rates_df: Optional[pd.DataFrame] = None,
     iterations: int = 1,
-    workflow_config_path: str = "src/impacts/config/workflow.yaml",
+    workflow_config_path: Optional[str] = None,
     rates_section: Optional[str] = None,
 ) -> pd.DataFrame:
     """Return a skimsEmissions-like structure from BEAM events.
@@ -402,3 +411,42 @@ def write_skims_emissions(df: pd.DataFrame, output_path: str) -> None:
         df.to_csv(output_path, index=False, compression="gzip")
     else:
         raise ValueError("output_path must end with .csv.gz or .parquet")
+
+
+def build_skims_emissions_from_workflow(
+    workflow_config_path: Optional[str] = None,
+) -> pd.DataFrame:
+    """Build and write skims-like emissions using workflow config."""
+    workflow = load_workflow_config(workflow_config_path)
+    main = workflow.get("main", {}) or {}
+    events_section_name = main.get("events_section", "emissions_events")
+    events_section = workflow.get(events_section_name, {}) or {}
+
+    events_path = resolve_path_from_workflow(events_section.get("events_input_path"), workflow_config_path)
+    network_path = resolve_path_from_workflow(events_section.get("link_length_path"), workflow_config_path)
+    output_path = resolve_path_from_workflow(events_section.get("output_path"), workflow_config_path)
+    iterations = int(events_section.get("iteration", 0))
+    use_rates = bool(events_section.get("use_rates", True))
+
+    if not events_path:
+        raise ValueError("workflow section `emissions_events` requires events_input_path")
+    if not output_path:
+        raise ValueError("workflow section `emissions_events` requires output_path")
+
+    rates_df = None
+    if use_rates:
+        rates_df = load_rates_from_workflow(
+            workflow_config_path=workflow_config_path,
+            rates_section=main.get("rates_section", "emissions_rates"),
+        )
+
+    df = build_skims_emissions_from_events(
+        events_path=events_path,
+        network_path=network_path,
+        rates_df=rates_df,
+        iterations=iterations,
+        workflow_config_path=workflow_config_path,
+        rates_section=main.get("rates_section", "emissions_rates"),
+    )
+    write_skims_emissions(df, output_path)
+    return df

@@ -293,7 +293,7 @@ GRID_grid = gpd.read_file('grid_polygon/grid_polygon.shp')
 counties_shapefile = gpd.read_file('/Users/cpoliziani/Downloads/region_county_5910830457166027147/region_county.shp')
 
 # Optional BEAM-OSM-GRID mapping configuration.
-WORKFLOW_CONFIG_PATH = "src/impacts/config/workflow.yaml"
+WORKFLOW_CONFIG_PATH = "src/impacts/settings.yaml"
 MAPPING_CFG = load_mapping_config(WORKFLOW_CONFIG_PATH)
 
 EMFACT_VMT_filepath = 'Default_MTC_2018_Annual_vmt_20240313111517.csv'

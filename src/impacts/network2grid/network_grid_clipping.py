@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from dataclasses import fields
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -25,6 +26,10 @@ except ImportError:
         map_skims_emissions_to_intersection as _map_skims_emissions_to_intersection_impl,
     )
 
+
+DEFAULT_WORKFLOW_CONFIG_PATH = Path(__file__).resolve().parents[1] / "settings.yaml"
+
+
 @dataclass
 class EmissionsMappingConfig:
     """Configuration for BEAM-OSM-GRID mapping workflow."""
@@ -34,6 +39,8 @@ class EmissionsMappingConfig:
     beam_network_path: Optional[str] = None
     precomputed_beam_osm_path: Optional[str] = None
     output_dir: str = "src/impacts/tmp"
+    beam_osm_mapped_output_path: Optional[str] = None
+    beam_osm_grid_intersection_output_path: Optional[str] = None
     beam_osm_id_col: str = "attributeOrigId"
     beam_length_col: str = "linkLength"
     beam_osm_epsg: int = 4326
@@ -91,9 +98,47 @@ def _simple_yaml_load(text: str):
     return data
 
 
-def load_workflow_config(config_path: str = "src/impacts/config/workflow.yaml"):
+def _resolve_workflow_config_path(config_path: str | Path | None = None) -> Path:
+    env_candidates = [
+        os.getenv("IMPACTS_WORKFLOW_PATH"),
+        os.getenv("PILATES_IMPACTS_WORKFLOW_PATH"),
+        os.getenv("PILATES_WORKFLOW_PATH"),
+    ]
+
+    candidates = []
+    if config_path is not None:
+        candidates.append(Path(config_path))
+    candidates.extend(Path(p) for p in env_candidates if p)
+    candidates.append(DEFAULT_WORKFLOW_CONFIG_PATH)
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    # Fall back to provided path even if it does not exist yet.
+    if config_path is not None:
+        return Path(config_path)
+    return DEFAULT_WORKFLOW_CONFIG_PATH
+
+
+def _resolve_path_from_workflow(path: Optional[str], config_path: str | Path | None = None) -> Optional[str]:
+    if path is None:
+        return None
+    p = str(path).strip()
+    if not p:
+        return p
+    if _is_remote_path(p):
+        return p
+    path_obj = Path(p)
+    if path_obj.is_absolute():
+        return str(path_obj)
+    workflow_path = _resolve_workflow_config_path(config_path)
+    return str((workflow_path.parent / path_obj).resolve())
+
+
+def load_workflow_config(config_path: str | Path | None = None):
     """Load workflow config from YAML (with fallback simple parser)."""
-    cfg_path = Path(config_path)
+    cfg_path = _resolve_workflow_config_path(config_path)
     if not cfg_path.exists():
         return {"main": {}, "osm_grid": {}}
 
@@ -113,7 +158,7 @@ def load_workflow_config(config_path: str = "src/impacts/config/workflow.yaml"):
     return loaded
 
 
-def load_mapping_config(config_path: str = "src/impacts/config/workflow.yaml"):
+def load_mapping_config(config_path: str | Path | None = None):
     """Build `EmissionsMappingConfig` from workflow YAML."""
     workflow = load_workflow_config(config_path)
     main = workflow.get("main", {}) or {}
@@ -123,6 +168,16 @@ def load_mapping_config(config_path: str = "src/impacts/config/workflow.yaml"):
     allowed = {f.name for f in fields(EmissionsMappingConfig)}
     config_kwargs = {k: v for k, v in section.items() if k in allowed}
     cfg = EmissionsMappingConfig(**config_kwargs)
+    for key in (
+        "osm_links_path",
+        "grid_cells_path",
+        "beam_network_path",
+        "precomputed_beam_osm_path",
+        "output_dir",
+        "beam_osm_mapped_output_path",
+        "beam_osm_grid_intersection_output_path",
+    ):
+        setattr(cfg, key, _resolve_path_from_workflow(getattr(cfg, key), config_path))
     return cfg
 
 
@@ -160,13 +215,17 @@ def map_beam_network_to_osm(
     beam_network_path: str,
     output_path: Optional[str] = None,
     network_osm_id_col: str = "attributeOrigId",
+    config_path: str | Path | None = None,
 ):
     """Map BEAM links to OSM geometries using shared OSM IDs."""
     _validate_local_path(osm_path, "OSM network path")
     _validate_local_path(beam_network_path, "BEAM network path")
 
     if output_path is None:
-        output_path = "src/impacts/tmp/beam_osm_mapped.geojson"
+        cfg = load_mapping_config(config_path)
+        output_path = cfg.beam_osm_mapped_output_path or str(
+            Path(cfg.output_dir) / "beam_osm_mapped.geojson"
+        )
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     mapped = osm_chordify.map_osm_with_beam_network(
@@ -186,6 +245,7 @@ def intersect_beam_osm_with_grid(
     grid_epsg: int = 4326,
     output_epsg: int = 26910,
     beam_length_col: str = "linkLength",
+    config_path: str | Path | None = None,
 ):
     """Intersect mapped BEAM+OSM links with grid cells.
 
@@ -197,7 +257,10 @@ def intersect_beam_osm_with_grid(
     _validate_local_path(grid_cells_path, "grid cells path")
 
     if output_path is None:
-        output_path = "src/impacts/tmp/beam_osm_grid_intersection.geojson"
+        cfg = load_mapping_config(config_path)
+        output_path = cfg.beam_osm_grid_intersection_output_path or str(
+            Path(cfg.output_dir) / "beam_osm_grid_intersection.geojson"
+        )
 
     if isinstance(beam_osm_path, gpd.GeoDataFrame):
         beam_osm_gdf = beam_osm_path
@@ -232,3 +295,35 @@ def intersect_beam_osm_with_grid(
 def map_skims_emissions_to_intersection(*args, **kwargs):
     """Map skims emissions to BEAM+OSM+GRID intersection."""
     return _map_skims_emissions_to_intersection_impl(*args, **kwargs)
+
+
+def run_emissions_grid_mapping_from_workflow(
+    config_path: str | Path | None = None,
+):
+    """Run skims-to-grid emissions mapping from workflow config."""
+    workflow = load_workflow_config(config_path)
+    main = workflow.get("main", {}) or {}
+    section_name = main.get("emissions_mapping_section", "emissions_grid_mapping")
+    section = workflow.get(section_name, {}) or {}
+
+    skims_path = resolve_path_from_workflow(section.get("skims_input_path"), config_path)
+    mapping_path = resolve_path_from_workflow(section.get("mapping_input_path"), config_path)
+    output_path = resolve_path_from_workflow(section.get("output_path"), config_path)
+    group_cols = section.get("group_cols")
+
+    if not skims_path or not mapping_path or not output_path:
+        raise ValueError(
+            "workflow section `emissions_grid_mapping` requires "
+            "skims_input_path, mapping_input_path, and output_path"
+        )
+
+    return _map_skims_emissions_to_intersection_impl(
+        skims_path=skims_path,
+        mapping_path=mapping_path,
+        output_path=output_path,
+        group_cols=group_cols,
+    )
+
+
+resolve_workflow_config_path = _resolve_workflow_config_path
+resolve_path_from_workflow = _resolve_path_from_workflow
