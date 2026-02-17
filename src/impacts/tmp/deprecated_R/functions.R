@@ -134,7 +134,7 @@ map_to_isrm <- function(output_dir, isrm_source_grid, isrm, bounding_box){
   require(gridExtra) # plot multiple plots
   #remotes::install_github("https://github.com/dkahle/ggmap")
   require(ggmap) # remotes::install_github("dkahle/ggmap") # devtools::install_github("dkahle/ggmap")
- # register_stadiamaps('REDACTED_STADIA_KEY') ## you can request this key yourself
+ # register_stadiamaps(Sys.getenv("STADIA_MAPS_API_KEY")) ## request your own key
   
  
   tic()
@@ -179,4 +179,3 @@ map_to_isrm <- function(output_dir, isrm_source_grid, isrm, bounding_box){
   toc()
   return(res)
 }
-

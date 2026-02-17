@@ -9,40 +9,40 @@ from impacts import functions
 def main() -> None:
     data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 
-    res_data = functions.read_rdata(os.path.join(data_dir, "SFB_NOX_NOX_ISRM.RData"))
+    res_data = functions.read_rdata(os.path.join(data_dir, "SFB_NOX_NOX_GRID.RData"))
     if "res" not in res_data:
-        raise KeyError("Expected 'res' in SFB_NOX_NOX_ISRM.RData")
+        raise KeyError("Expected 'res' in SFB_NOX_NOX_GRID.RData")
     res = res_data["res"].copy()
 
-    no2ratio_data = functions.read_rdata(os.path.join(data_dir, "sfb.no2ratio_isrmGRID.RData"))
+    no2ratio_data = functions.read_rdata(os.path.join(data_dir, "sfb.no2ratio_gridGRID.RData"))
     if "no2ratio" not in no2ratio_data:
-        raise KeyError("Expected 'no2ratio' in sfb.no2ratio_isrmGRID.RData")
+        raise KeyError("Expected 'no2ratio' in sfb.no2ratio_gridGRID.RData")
     no2ratio = no2ratio_data["no2ratio"].copy()
 
     res.index = pd.to_numeric(res.index, errors="coerce").astype(int)
     res.columns = [int(col) for col in res.columns]
 
-    s_isrm = res.index.to_numpy()
-    s_isrm = s_isrm[(s_isrm > 3) & (s_isrm != 3554)]
+    s_grid = res.index.to_numpy()
+    s_grid = s_grid[(s_grid > 3) & (s_grid != 3554)]
 
-    res = res.loc[s_isrm, s_isrm]
+    res = res.loc[s_grid, s_grid]
 
-    missing = no2ratio["isrm"].astype(int)
+    missing = no2ratio["grid"].astype(int)
     if 843 not in missing.to_numpy():
-        extra = pd.DataFrame({"isrm": [843], "NO2_NOx_ratio": [0.94]})
+        extra = pd.DataFrame({"grid": [843], "NO2_NOx_ratio": [0.94]})
         no2ratio = pd.concat([no2ratio, extra], ignore_index=True)
 
     dat = res.transpose()
-    dat["isrm"] = dat.index.astype(int)
-    dat = dat.merge(no2ratio, on="isrm", how="left")
+    dat["grid"] = dat.index.astype(int)
+    dat = dat.merge(no2ratio, on="grid", how="left")
 
     cols = [col for col in dat.columns if isinstance(col, int) and 843 <= col <= 3706]
     dat[cols] = dat[cols].multiply(dat["NO2_NOx_ratio"], axis=0)
 
     res_dat = dat[cols].transpose()
-    res_dat.columns = dat["isrm"].to_numpy()
+    res_dat.columns = dat["grid"].to_numpy()
 
-    functions.write_rdata(os.path.join(data_dir, "NOx_to_NO2_ISRM.RData"), {"res.dat": res_dat})
+    functions.write_rdata(os.path.join(data_dir, "NOx_to_NO2_GRID.RData"), {"res.dat": res_dat})
 
     try:
         import matplotlib.pyplot as plt

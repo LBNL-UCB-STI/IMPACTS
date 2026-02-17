@@ -3,12 +3,12 @@ import os
 import sys
 from typing import List, Optional
 
-from impacts.isrm_nox_to_no2 import DEFAULT_STEP_ORDER, INPUT_DIR, OUTPUT_DIR, run_pipeline
+from impacts.grid_nox_to_no2 import DEFAULT_STEP_ORDER, INPUT_DIR, OUTPUT_DIR, run_pipeline
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run IMPACTS preprocessing steps for ISRM outputs."
+        description="Run IMPACTS preprocessing steps for GRID outputs."
     )
     parser.add_argument(
         "--list-steps",

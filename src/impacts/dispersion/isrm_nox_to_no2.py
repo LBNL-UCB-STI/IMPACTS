@@ -1,13 +1,13 @@
-"""ISRM NOx-to-NO2 pipeline.
+"""GRID NOx-to-NO2 pipeline.
 
-Converts InMAP NOx source-receptor matrix outputs into a NOx-to-NO2 ISRM
+Converts InMAP NOx source-receptor matrix outputs into a NOx-to-NO2 GRID
 for the SF Bay Area, using CMAQ NO2/NOx ratios as a scaling factor.
 
 Steps:
-  0. convert_cmaq_polygon  - Turn CMAQ NO2/NOx ratio into ISRM-gridded polygons
-  1. generate_xwalk        - Read InMAP NOx output and build GOB-to-ISRM crosswalk
-  2. cmaq_ratio_to_isrm    - Map CMAQ NO2/NOx ratio onto ISRM grid
-  3. nox_to_no2_isrm       - Convert NOx-to-NOx ISRM into NOx-to-NO2 ISRM
+  0. convert_cmaq_polygon  - Turn CMAQ NO2/NOx ratio into GRID-gridded polygons
+  1. generate_xwalk        - Read InMAP NOx output and build GOB-to-GRID crosswalk
+  2. cmaq_ratio_to_grid    - Map CMAQ NO2/NOx ratio onto GRID grid
+  3. nox_to_no2_grid       - Convert NOx-to-NOx GRID into NOx-to-NO2 GRID
 """
 
 import os
@@ -136,37 +136,37 @@ def get_bounding_box() -> gpd.GeoSeries:
 
 
 # ---------------------------------------------------------------------------
-# GOB-to-ISRM mapping (used by step 1)
+# GOB-to-GRID mapping (used by step 1)
 # ---------------------------------------------------------------------------
 
-def map_to_isrm(
+def map_to_grid(
     output_dir: str,
-    isrm_source_grid: str,
-    isrm: gpd.GeoDataFrame,
+    grid_source_grid: str,
+    grid: gpd.GeoDataFrame,
     bounding_box: gpd.GeoSeries,
 ) -> Optional[pd.DataFrame]:
-    """Map a single InMAP GOB output to ISRM grid via area-weighted averaging."""
+    """Map a single InMAP GOB output to GRID grid via area-weighted averaging."""
     start = time.time()
 
-    shp_path = os.path.join(output_dir, f"isrm_{isrm_source_grid}_geopoint.shp")
+    shp_path = os.path.join(output_dir, f"grid_{grid_source_grid}_geopoint.shp")
     dat = gpd.read_file(shp_path)
     if dat.empty:
         return None
 
     pdat = dat.to_crs("EPSG:4326")
-    pisrm = isrm.to_crs("EPSG:4326")
+    pgrid = grid.to_crs("EPSG:4326")
 
-    sf_isrm = gpd.clip(pisrm, bounding_box)
+    sf_grid = gpd.clip(pgrid, bounding_box)
     sf_dat = gpd.clip(pdat, bounding_box)
-    if sf_isrm.empty or sf_dat.empty:
+    if sf_grid.empty or sf_dat.empty:
         return None
 
-    psf_isrm = sf_isrm.to_crs(isrm.crs)
+    psf_grid = sf_grid.to_crs(grid.crs)
     psf_dat = sf_dat.copy()
     psf_dat["gobid"] = np.arange(1, len(psf_dat) + 1)
-    psf_dat = psf_dat.to_crs(isrm.crs)
+    psf_dat = psf_dat.to_crs(grid.crs)
 
-    kk = gpd.overlay(psf_dat, psf_isrm, how="intersection")
+    kk = gpd.overlay(psf_dat, psf_grid, how="intersection")
     if kk.empty:
         return None
 
@@ -178,14 +178,14 @@ def map_to_isrm(
 
     grouped = (
         kk.drop(columns="geometry")
-        .groupby("isrm")
+        .groupby("grid")
         .apply(lambda frame: np.sum(frame["NOx"] * frame["area"]) / np.sum(frame["area"]))
         .reset_index(name="NOx")
     )
-    grouped = grouped.sort_values("isrm")
+    grouped = grouped.sort_values("grid")
 
-    res = pd.DataFrame([grouped["NOx"].to_numpy()], columns=grouped["isrm"].to_numpy())
-    res.index = [isrm_source_grid]
+    res = pd.DataFrame([grouped["NOx"].to_numpy()], columns=grouped["grid"].to_numpy())
+    res.index = [grid_source_grid]
 
     _ = time.time() - start
     return res
@@ -212,41 +212,41 @@ def convert_cmaq_polygon(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DI
 
 
 # ---------------------------------------------------------------------------
-# Step 1: Generate crosswalk GOB <-> ISRM (parallel)
+# Step 1: Generate crosswalk GOB <-> GRID (parallel)
 # ---------------------------------------------------------------------------
 
-_ISRM = None
+_GRID = None
 _BOUNDING_BOX = None
 _DATDIR = None
 
 
-def _init_worker(isrm_path: str, bbox_wkb: bytes, datdir: str) -> None:
+def _init_worker(grid_path: str, bbox_wkb: bytes, datdir: str) -> None:
     """Initializer for each multiprocessing worker."""
-    global _ISRM, _BOUNDING_BOX, _DATDIR
-    _ISRM = gpd.read_file(isrm_path)
+    global _GRID, _BOUNDING_BOX, _DATDIR
+    _GRID = gpd.read_file(grid_path)
     _BOUNDING_BOX = gpd.GeoSeries.from_wkb([bbox_wkb], crs="EPSG:4326")
     _DATDIR = datdir
 
 
-def _map_one(isrm_source_grid: str) -> Optional[pd.DataFrame]:
-    """Map a single ISRM source grid (worker function)."""
-    return map_to_isrm(_DATDIR, isrm_source_grid, _ISRM, _BOUNDING_BOX)
+def _map_one(grid_source_grid: str) -> Optional[pd.DataFrame]:
+    """Map a single GRID source grid (worker function)."""
+    return map_to_grid(_DATDIR, grid_source_grid, _GRID, _BOUNDING_BOX)
 
 
 def _extract_ids(files: Iterable[str]) -> List[str]:
-    """Extract sorted unique ISRM IDs from filenames like isrm_00843_*."""
+    """Extract sorted unique GRID IDs from filenames like grid_00843_*."""
     ids = []
     for name in files:
-        match = re.match(r"^isrm_(\d+)", name)
+        match = re.match(r"^grid_(\d+)", name)
         if match:
             ids.append(match.group(1))
     return sorted(set(ids))
 
 
 def generate_xwalk(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR, n_workers: int = 6) -> None:
-    """Build NOx-to-NOx ISRM crosswalk from InMAP geopoint outputs."""
-    datdir = os.path.join(input_dir, "sfbay_isrm_geopoints_inmap_1.9.6")
-    isrm_path = os.path.join(input_dir, "isrm_polygon", "isrm_polygon.shp")
+    """Build NOx-to-NOx GRID crosswalk from InMAP geopoint outputs."""
+    datdir = os.path.join(input_dir, "sfbay_grid_geopoints_inmap_1.9.6")
+    grid_path = os.path.join(input_dir, "grid_polygon", "grid_polygon.shp")
     bounding_box = get_bounding_box()
 
     idlist = _extract_ids(os.listdir(datdir))
@@ -254,25 +254,25 @@ def generate_xwalk(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR, n_w
 
     results = []
     with Pool(processes=n_workers, initializer=_init_worker,
-              initargs=(isrm_path, bbox_wkb, datdir)) as pool:
+              initargs=(grid_path, bbox_wkb, datdir)) as pool:
         for res in pool.map(_map_one, idlist):
             if res is not None:
                 results.append(res)
 
     if not results:
-        raise RuntimeError("No results produced from map_to_isrm")
+        raise RuntimeError("No results produced from map_to_grid")
 
     res_df = pd.concat(results)
-    res_df.to_parquet(os.path.join(output_dir, "nox_nox_isrm.parquet"))
+    res_df.to_parquet(os.path.join(output_dir, "nox_nox_grid.parquet"))
 
 
 # ---------------------------------------------------------------------------
-# Step 2: CMAQ ratio to ISRM grid
+# Step 2: CMAQ ratio to GRID grid
 # ---------------------------------------------------------------------------
 
-def cmaq_ratio_to_isrm(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR) -> None:
-    """Intersect CMAQ NO2/NOx ratio grid with ISRM and compute area-weighted averages."""
-    isrm = gpd.read_file(os.path.join(input_dir, "isrm_polygon", "isrm_polygon.shp"))
+def cmaq_ratio_to_grid(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR) -> None:
+    """Intersect CMAQ NO2/NOx ratio grid with GRID and compute area-weighted averages."""
+    grid = gpd.read_file(os.path.join(input_dir, "grid_polygon", "grid_polygon.shp"))
 
     rdata = read_rdata(os.path.join(input_dir, "cmaqtestNO2_ratio.RData"))
     if "pdat" not in rdata:
@@ -288,54 +288,54 @@ def cmaq_ratio_to_isrm(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR)
     mm = mm.drop(columns=["value"])
     mm.to_file(os.path.join(output_dir, "baaqmd.geojson"), driver="GeoJSON")
 
-    mm = mm.to_crs(isrm.crs)
-    kk = gpd.overlay(mm, isrm, how="intersection")
+    mm = mm.to_crs(grid.crs)
+    kk = gpd.overlay(mm, grid, how="intersection")
     kk["area"] = kk.geometry.area
 
     merged = kk.merge(pdat, on=["col", "row"], how="left")
     grouped = (
         merged.drop(columns="geometry")
-        .groupby("isrm")
+        .groupby("grid")
         .apply(lambda frame: (frame["value"] * frame["area"]).sum() / frame["area"].sum())
         .reset_index(name="value")
     )
 
     no2ratio = grouped.rename(columns={"value": "NO2_NOx_ratio"})
-    no2ratio.to_parquet(os.path.join(output_dir, "no2_nox_ratio_isrm.parquet"), index=False)
+    no2ratio.to_parquet(os.path.join(output_dir, "no2_nox_ratio_grid.parquet"), index=False)
 
 
 # ---------------------------------------------------------------------------
-# Step 3: NOx to NO2 ISRM
+# Step 3: NOx to NO2 GRID
 # ---------------------------------------------------------------------------
 
-def nox_to_no2_isrm(output_dir: str = OUTPUT_DIR) -> None:
-    """Multiply NOx ISRM by NO2/NOx ratio to produce NOx-to-NO2 ISRM."""
-    res = pd.read_parquet(os.path.join(output_dir, "nox_nox_isrm.parquet"))
+def nox_to_no2_grid(output_dir: str = OUTPUT_DIR) -> None:
+    """Multiply NOx GRID by NO2/NOx ratio to produce NOx-to-NO2 GRID."""
+    res = pd.read_parquet(os.path.join(output_dir, "nox_nox_grid.parquet"))
 
-    no2ratio = pd.read_parquet(os.path.join(output_dir, "no2_nox_ratio_isrm.parquet"))
+    no2ratio = pd.read_parquet(os.path.join(output_dir, "no2_nox_ratio_grid.parquet"))
 
     res.index = pd.to_numeric(res.index, errors="coerce").astype(int)
     res.columns = [int(col) for col in res.columns]
 
-    s_isrm = res.index.to_numpy()
-    s_isrm = s_isrm[(s_isrm > 3) & (s_isrm != 3554)]
-    res = res.loc[s_isrm, s_isrm]
+    s_grid = res.index.to_numpy()
+    s_grid = s_grid[(s_grid > 3) & (s_grid != 3554)]
+    res = res.loc[s_grid, s_grid]
 
-    if 843 not in no2ratio["isrm"].astype(int).to_numpy():
-        extra = pd.DataFrame({"isrm": [843], "NO2_NOx_ratio": [0.94]})
+    if 843 not in no2ratio["grid"].astype(int).to_numpy():
+        extra = pd.DataFrame({"grid": [843], "NO2_NOx_ratio": [0.94]})
         no2ratio = pd.concat([no2ratio, extra], ignore_index=True)
 
     dat = res.transpose()
-    dat["isrm"] = dat.index.astype(int)
-    dat = dat.merge(no2ratio, on="isrm", how="left")
+    dat["grid"] = dat.index.astype(int)
+    dat = dat.merge(no2ratio, on="grid", how="left")
 
     cols = [col for col in dat.columns if isinstance(col, int) and 843 <= col <= 3706]
     dat[cols] = dat[cols].multiply(dat["NO2_NOx_ratio"], axis=0)
 
     res_dat = dat[cols].transpose()
-    res_dat.columns = dat["isrm"].to_numpy()
+    res_dat.columns = dat["grid"].to_numpy()
 
-    res_dat.to_parquet(os.path.join(output_dir, "nox_to_no2_isrm.parquet"))
+    res_dat.to_parquet(os.path.join(output_dir, "nox_to_no2_grid.parquet"))
 
 
 # ---------------------------------------------------------------------------
@@ -345,8 +345,8 @@ def nox_to_no2_isrm(output_dir: str = OUTPUT_DIR) -> None:
 STEPS = {
     "convert_cmaq_polygon": lambda i, o: convert_cmaq_polygon(i, o),
     "generate_xwalk": lambda i, o: generate_xwalk(i, o),
-    "cmaq_ratio_to_isrm": lambda i, o: cmaq_ratio_to_isrm(i, o),
-    "nox_to_no2_isrm": lambda i, o: nox_to_no2_isrm(o),
+    "cmaq_ratio_to_grid": lambda i, o: cmaq_ratio_to_grid(i, o),
+    "nox_to_no2_grid": lambda i, o: nox_to_no2_grid(o),
 }
 
 DEFAULT_STEP_ORDER = list(STEPS.keys())

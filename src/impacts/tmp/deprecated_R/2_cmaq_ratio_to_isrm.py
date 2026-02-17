@@ -25,7 +25,7 @@ def grid_polygons_from_centers(df: pd.DataFrame) -> gpd.GeoDataFrame:
 def main() -> None:
     data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 
-    isrm = gpd.read_file(os.path.join(data_dir, "isrm_polygon", "isrm_polygon.shp"))
+    grid = gpd.read_file(os.path.join(data_dir, "grid_polygon", "grid_polygon.shp"))
 
     rdata_path = os.path.join(data_dir, "cmaqtestNO2_ratio.RData")
     rdata = functions.read_rdata(rdata_path)
@@ -44,21 +44,21 @@ def main() -> None:
     shp_path = os.path.join(data_dir, "baaqmd.shp")
     mm.to_file(shp_path)
 
-    mm = mm.to_crs(isrm.crs)
-    kk = gpd.overlay(mm, isrm, how="intersection")
+    mm = mm.to_crs(grid.crs)
+    kk = gpd.overlay(mm, grid, how="intersection")
     kk["area"] = kk.geometry.area
 
     merged = kk.merge(pdat, on=["col", "row"], how="left")
     grouped = (
         merged.drop(columns="geometry")
-        .groupby("isrm")
+        .groupby("grid")
         .apply(lambda frame: (frame["value"] * frame["area"]).sum() / frame["area"].sum())
         .reset_index(name="value")
     )
 
     no2ratio = grouped.rename(columns={"value": "NO2_NOx_ratio"})
     functions.write_rdata(
-        os.path.join(data_dir, "sfb.no2ratio_isrmGRID.RData"),
+        os.path.join(data_dir, "sfb.no2ratio_gridGRID.RData"),
         {"no2ratio": no2ratio},
     )
 

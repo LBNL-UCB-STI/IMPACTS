@@ -24,7 +24,7 @@ import argparse
 import logging
 import sys
 
-from isrm_wrapper import __version__
+from grid_wrapper import __version__
 
 __author__ = "Haitam Laarabi"
 __copyright__ = "Haitam Laarabi"
@@ -76,7 +76,7 @@ def parse_args(args):
     parser.add_argument(
         "--version",
         action="version",
-        version=f"isrm-wrapper {__version__}",
+        version=f"grid-wrapper {__version__}",
     )
     parser.add_argument(dest="n", help="n-th Fibonacci number", type=int, metavar="INT")
     parser.add_argument(

@@ -157,34 +157,34 @@ def get_bounding_box() -> "gpd.GeoSeries":
     return gpd.GeoSeries([box(minx, miny, maxx, maxy)], crs="EPSG:4326")
 
 
-def map_to_isrm(
+def map_to_grid(
     output_dir: str,
-    isrm_source_grid: str,
-    isrm: "gpd.GeoDataFrame",
+    grid_source_grid: str,
+    grid: "gpd.GeoDataFrame",
     bounding_box: "gpd.GeoSeries",
 ) -> Optional[pd.DataFrame]:
     _ensure_geopandas()
     start = time.time()
 
-    shp_path = os.path.join(output_dir, f"isrm_{isrm_source_grid}_geopoint.shp")
+    shp_path = os.path.join(output_dir, f"grid_{grid_source_grid}_geopoint.shp")
     dat = gpd.read_file(shp_path)
     if dat.empty:
         return None
 
     pdat = dat.to_crs("EPSG:4326")
-    pisrm = isrm.to_crs("EPSG:4326")
+    pgrid = grid.to_crs("EPSG:4326")
 
-    sf_isrm = gpd.clip(pisrm, bounding_box)
+    sf_grid = gpd.clip(pgrid, bounding_box)
     sf_dat = gpd.clip(pdat, bounding_box)
-    if sf_isrm.empty or sf_dat.empty:
+    if sf_grid.empty or sf_dat.empty:
         return None
 
-    psf_isrm = sf_isrm.to_crs(isrm.crs)
+    psf_grid = sf_grid.to_crs(grid.crs)
     psf_dat = sf_dat.copy()
     psf_dat["gobid"] = np.arange(1, len(psf_dat) + 1)
-    psf_dat = psf_dat.to_crs(isrm.crs)
+    psf_dat = psf_dat.to_crs(grid.crs)
 
-    kk = gpd.overlay(psf_dat, psf_isrm, how="intersection")
+    kk = gpd.overlay(psf_dat, psf_grid, how="intersection")
     if kk.empty:
         return None
 
@@ -196,14 +196,14 @@ def map_to_isrm(
 
     grouped = (
         kk.drop(columns="geometry")
-        .groupby("isrm")
+        .groupby("grid")
         .apply(lambda frame: np.sum(frame["NOx"] * frame["area"]) / np.sum(frame["area"]))
         .reset_index(name="NOx")
     )
-    grouped = grouped.sort_values("isrm")
+    grouped = grouped.sort_values("grid")
 
-    res = pd.DataFrame([grouped["NOx"].to_numpy()], columns=grouped["isrm"].to_numpy())
-    res.index = [isrm_source_grid]
+    res = pd.DataFrame([grouped["NOx"].to_numpy()], columns=grouped["grid"].to_numpy())
+    res.index = [grid_source_grid]
 
     _ = time.time() - start
     return res

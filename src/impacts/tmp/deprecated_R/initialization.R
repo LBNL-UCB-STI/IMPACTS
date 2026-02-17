@@ -47,8 +47,8 @@ p_load(grid)
 p_load(gridExtra) # plot multiple plots
 #remotes::install_github("https://github.com/dkahle/ggmap")
 library(ggmap) # remotes::install_github("dkahle/ggmap") # devtools::install_github("dkahle/ggmap")
-register_stadiamaps('REDACTED_STADIA_KEY') ## you can request this key yourself
+register_stadiamaps(Sys.getenv("STADIA_MAPS_API_KEY")) ## request your own key
 
 p_load(tidycensus)
 
-census_api_key("REDACTED_CENSUS_KEY")
+census_api_key(Sys.getenv("CENSUS_API_KEY"))
