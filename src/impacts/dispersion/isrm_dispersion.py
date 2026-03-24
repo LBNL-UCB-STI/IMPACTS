@@ -38,6 +38,16 @@ class DispersionConfig:
 
 
 DEFAULT_DISPERSION_CONFIG = DispersionConfig()
+DEFAULT_EMISSIONS_COLUMNS = {
+    "grid_id": "GRID",
+    "rog": "tons_per_year_ROG",
+    "nox": "tons_per_year_NOx",
+    "nh3": "tons_per_year_NH3",
+    "sox": "tons_per_year_SOx",
+    "pm25": "tons_per_year_PM2_5",
+    "bcv1": "tons_per_year_BCV1",
+    "bcv3": "tons_per_year_BCV3",
+}
 
 
 def load_dispersion_config(
@@ -85,9 +95,23 @@ def _get_column_or_zero(df: pd.DataFrame, ordered_names: Iterable[str]) -> pd.Se
     return pd.to_numeric(df[name], errors="coerce").fillna(0.0).astype(float)
 
 
-def prepare_grid_emissions(emissions_df: pd.DataFrame) -> pd.DataFrame:
+def _resolve_emissions_columns(config: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    resolved = DEFAULT_EMISSIONS_COLUMNS.copy()
+    if config:
+        resolved.update({k: v for k, v in config.items() if v})
+    return resolved
+
+
+def prepare_grid_emissions(
+    emissions_df: pd.DataFrame,
+    emissions_columns: Optional[Dict[str, str]] = None,
+) -> pd.DataFrame:
     """Normalize emissions to ISRM input species and aggregate by grid."""
-    grid_col = _first_existing(emissions_df, ["GRID", "grid", "zone", "cell_id", "Location"])
+    columns = _resolve_emissions_columns(emissions_columns)
+    grid_col = _first_existing(
+        emissions_df,
+        [columns["grid_id"], "GRID", "grid", "zone", "cell_id", "Location"],
+    )
     if grid_col is None:
         raise ValueError("No grid id column found. Expected GRID/grid/zone/cell_id/Location")
 
@@ -100,7 +124,9 @@ def prepare_grid_emissions(emissions_df: pd.DataFrame) -> pd.DataFrame:
     df["tons_per_year_ROG"] = _get_column_or_zero(
         df,
         [
+            columns["rog"],
             "tons_per_year_ROG",
+            "tons_per_year_ROG_allocated",
             "em_ROG_allocated",
             "em_ROG",
             "em_VOC_allocated",
@@ -109,28 +135,36 @@ def prepare_grid_emissions(emissions_df: pd.DataFrame) -> pd.DataFrame:
     )
     df["tons_per_year_NOx"] = _get_column_or_zero(
         df,
-        ["tons_per_year_NOx", "em_NOx_allocated", "em_NOx", "em_NOX_allocated", "em_NOX"],
+        [columns["nox"], "tons_per_year_NOx", "tons_per_year_NOx_allocated", "em_NOx_allocated", "em_NOx", "em_NOX_allocated", "em_NOX"],
     )
     df["tons_per_year_NH3"] = _get_column_or_zero(
         df,
-        ["tons_per_year_NH3", "em_NH3_allocated", "em_NH3"],
+        [columns["nh3"], "tons_per_year_NH3", "tons_per_year_NH3_allocated", "em_NH3_allocated", "em_NH3"],
     )
     df["tons_per_year_SOx"] = _get_column_or_zero(
         df,
-        ["tons_per_year_SOx", "em_SOx_allocated", "em_SOx", "em_SOX_allocated", "em_SOX"],
+        [columns["sox"], "tons_per_year_SOx", "tons_per_year_SOx_allocated", "em_SOx_allocated", "em_SOx", "em_SOX_allocated", "em_SOX"],
     )
     df["tons_per_year_PM2_5"] = _get_column_or_zero(
         df,
         [
+            columns["pm25"],
             "tons_per_year_PM2_5",
+            "tons_per_year_PM2_5_allocated",
             "em_PM2_5_allocated",
             "em_PM2_5",
             "em_PM25_allocated",
             "em_PM25",
         ],
     )
-    df["tons_per_year_BCV1"] = _get_column_or_zero(df, ["tons_per_year_BCV1", "em_BCV1_allocated", "em_BCV1"])
-    df["tons_per_year_BCV3"] = _get_column_or_zero(df, ["tons_per_year_BCV3", "em_BCV3_allocated", "em_BCV3"])
+    df["tons_per_year_BCV1"] = _get_column_or_zero(
+        df,
+        [columns["bcv1"], "tons_per_year_BCV1", "tons_per_year_BCV1_allocated", "em_BCV1_allocated", "em_BCV1"],
+    )
+    df["tons_per_year_BCV3"] = _get_column_or_zero(
+        df,
+        [columns["bcv3"], "tons_per_year_BCV3", "tons_per_year_BCV3_allocated", "em_BCV3_allocated", "em_BCV3"],
+    )
 
     return (
         df.groupby("GRID", dropna=False)[
@@ -176,9 +210,10 @@ def compute_isrm_concentrations(
     factor: float = 28766.639,
     include_bc: bool = False,
     include_health: bool = False,
+    emissions_columns: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
     """Compute concentration fields from grid emissions using ISRM."""
-    emis = prepare_grid_emissions(grid_emissions_df)
+    emis = prepare_grid_emissions(grid_emissions_df, emissions_columns=emissions_columns)
 
     if emis.empty:
         raise ValueError("No emissions rows found after GRID normalization.")
@@ -263,6 +298,7 @@ def run_dispersion_from_file(
     factor: float = 28766.639,
     include_bc: bool = False,
     include_health: bool = False,
+    emissions_columns: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
     """Read grid emissions and write ISRM concentration outputs."""
     emissions_df = _read_table(emissions_input_path)
@@ -273,6 +309,7 @@ def run_dispersion_from_file(
         factor=factor,
         include_bc=include_bc,
         include_health=include_health,
+        emissions_columns=emissions_columns,
     )
 
     if output_path:

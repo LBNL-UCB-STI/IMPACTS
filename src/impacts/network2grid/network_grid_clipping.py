@@ -16,6 +16,7 @@ from typing import Optional
 
 import geopandas as gpd
 import osm_chordify
+import pandas as pd
 
 try:
     from .emissions_grid_mapping import (
@@ -35,17 +36,24 @@ class EmissionsMappingConfig:
     """Configuration for BEAM-OSM-GRID mapping workflow."""
 
     osm_links_path: Optional[str] = None
-    grid_cells_path: str = "data/input/grid_polygon/grid_polygon.shp"
+    inmap_grid_path: str = "data/input/grid_polygon/grid_polygon.shp"
     beam_network_path: Optional[str] = None
     precomputed_beam_osm_path: Optional[str] = None
     output_dir: str = "src/impacts/tmp"
     beam_osm_mapped_output_path: Optional[str] = None
-    beam_osm_grid_intersection_output_path: Optional[str] = None
+    beam_osm_county_intersection_output_path: Optional[str] = None
+    beam_osm_inmap_grid_intersection_output_path: Optional[str] = None
+    beam_osm_aermod_grid_intersection_output_path: Optional[str] = None
     beam_osm_id_col: str = "attributeOrigId"
     beam_length_col: str = "linkLength"
     beam_osm_epsg: int = 4326
-    grid_epsg: int = 4326
+    inmap_grid_epsg: int = 4326
+    aermod_grid_epsg: int = 4326
     output_epsg: int = 26910
+    county_state_fips: Optional[str] = None
+    county_fips_codes: Optional[list[str]] = None
+    county_area_name: str = "county"
+    aermod_grid_path: Optional[str] = None
 
 
 DEFAULT_MAPPING_CONFIG = EmissionsMappingConfig()
@@ -175,6 +183,7 @@ def load_mapping_config(config_path: str | Path | None = None):
         "precomputed_beam_osm_path",
         "output_dir",
         "beam_osm_mapped_output_path",
+        "beam_osm_county_intersection_output_path",
         "beam_osm_grid_intersection_output_path",
     ):
         setattr(cfg, key, _resolve_path_from_workflow(getattr(cfg, key), config_path))
@@ -196,6 +205,9 @@ def _save_geodataframe(gdf: gpd.GeoDataFrame, output_path: str) -> None:
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     suffix = out.suffix.lower()
+    if suffix == ".parquet":
+        gdf.to_parquet(out, index=False)
+        return
     if suffix == ".geojson":
         gdf.to_file(out, driver="GeoJSON")
         return
@@ -224,7 +236,7 @@ def map_beam_network_to_osm(
     if output_path is None:
         cfg = load_mapping_config(config_path)
         output_path = cfg.beam_osm_mapped_output_path or str(
-            Path(cfg.output_dir) / "beam_osm_mapped.geojson"
+            Path(cfg.output_dir) / "beam_osm_mapped.parquet"
         )
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -258,35 +270,78 @@ def intersect_beam_osm_with_grid(
 
     if output_path is None:
         cfg = load_mapping_config(config_path)
-        output_path = cfg.beam_osm_grid_intersection_output_path or str(
-            Path(cfg.output_dir) / "beam_osm_grid_intersection.geojson"
+        output_path = (
+            cfg.beam_osm_inmap_grid_intersection_output_path
+            or cfg.beam_osm_grid_intersection_output_path
+            or str(Path(cfg.output_dir) / "beam_osm_inmap_grid_intersection.parquet")
         )
 
-    if isinstance(beam_osm_path, gpd.GeoDataFrame):
-        beam_osm_gdf = beam_osm_path
-    else:
-        beam_osm_gdf = gpd.read_file(beam_osm_path)
-
-    proportional_cols = None
-    if beam_length_col in beam_osm_gdf.columns:
-        proportional_cols = [beam_length_col]
+    road_network = beam_osm_path if isinstance(beam_osm_path, gpd.GeoDataFrame) else str(beam_osm_path)
 
     result = osm_chordify.intersect_road_network_with_zones(
-        road_network=beam_osm_gdf,
+        road_network=road_network,
         road_network_epsg=beam_osm_epsg,
         zones=grid_cells_path,
-        zones_epsg=grid_epsg,
-        proportional_cols=proportional_cols,
         output_path=None,
         output_epsg=output_epsg,
     )
-    result["edge_length_in_cell_m"] = result["proportional_length_m"]
+    if "zone_link_length_m" in result.columns and "edge_length_in_cell_m" not in result.columns:
+        result["edge_length_in_cell_m"] = result["zone_link_length_m"]
+    if "zone_link_length_m" in result.columns and "proportional_length_m" not in result.columns:
+        result["proportional_length_m"] = result["zone_link_length_m"]
 
-    if proportional_cols:
-        col = proportional_cols[0]
-        p_col = f"proportional_{col}"
-        if p_col in result.columns:
-            result["beam_length_in_cell"] = result[p_col]
+    edge_beam_length_col = f"edge_{beam_length_col}"
+    beam_length_source_col = None
+    if edge_beam_length_col in result.columns:
+        beam_length_source_col = edge_beam_length_col
+    elif "edge_link_length_m" in result.columns:
+        beam_length_source_col = "edge_link_length_m"
+
+    if beam_length_source_col and "zone_edge_proportion" in result.columns:
+        result["beam_length_in_cell"] = (
+            pd.to_numeric(result[beam_length_source_col], errors="coerce").fillna(0.0)
+            * pd.to_numeric(result["zone_edge_proportion"], errors="coerce").fillna(0.0)
+        )
+
+    _save_geodataframe(result, output_path)
+    return result
+
+
+def intersect_beam_osm_with_counties(
+    beam_osm_path,
+    *,
+    state_fips: str,
+    county_fips_codes: list[str],
+    output_path: Optional[str] = None,
+    beam_osm_epsg: int = 4326,
+    output_epsg: int = 26910,
+    config_path: str | Path | None = None,
+    area_name: str = "county",
+):
+    """Intersect mapped BEAM+OSM links with county zones via FIPS codes."""
+    if isinstance(beam_osm_path, str):
+        _validate_local_path(beam_osm_path, "BEAM+OSM mapped path")
+
+    if output_path is None:
+        cfg = load_mapping_config(config_path)
+        output_path = cfg.beam_osm_county_intersection_output_path or str(
+            Path(cfg.output_dir) / "beam_osm_county_intersection.parquet"
+        )
+
+    road_network = beam_osm_path if isinstance(beam_osm_path, gpd.GeoDataFrame) else str(beam_osm_path)
+    result = osm_chordify.intersect_road_network_with_county_zones(
+        road_network=road_network,
+        road_network_epsg=beam_osm_epsg,
+        state_fips=str(state_fips),
+        county_fips_codes=[str(code) for code in county_fips_codes],
+        output_path=None,
+        output_epsg=output_epsg,
+        area_name=area_name,
+    )
+    if "zone_link_length_m" in result.columns and "edge_length_in_cell_m" not in result.columns:
+        result["edge_length_in_cell_m"] = result["zone_link_length_m"]
+    if "zone_link_length_m" in result.columns and "proportional_length_m" not in result.columns:
+        result["proportional_length_m"] = result["zone_link_length_m"]
 
     _save_geodataframe(result, output_path)
     return result

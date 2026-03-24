@@ -5,20 +5,36 @@ main:
   events_section: emissions_events
   emissions_mapping_section: emissions_grid_mapping
   nox_to_no2_section: nox_to_no2
+  population_section: activitysim_population
+  pilates_section: pilates_terminal_contract
 
 osm_grid:
   osm_links_path: null
-  grid_cells_path: ../../data/input/grid_polygon/grid_polygon.shp
+  osm_pbf_path: null
+  beam_mapdb_path: null
+  inmap_grid_path: ../../data/input/grid_polygon/grid_polygon.shp
   beam_network_path: null
   precomputed_beam_osm_path: null
   output_dir: tmp
-  beam_osm_mapped_output_path: tmp/beam_osm_mapped.geojson
-  beam_osm_grid_intersection_output_path: tmp/beam_osm_grid_intersection.geojson
+  beam_osm_mapped_output_path: tmp/beam_osm_mapped.parquet
+  beam_osm_county_intersection_output_path: tmp/beam_osm_county_intersection.parquet
+  beam_osm_inmap_grid_intersection_output_path: tmp/beam_osm_inmap_grid_intersection.parquet
+  beam_osm_aermod_grid_intersection_output_path: tmp/beam_osm_aermod_grid_intersection.parquet
   beam_osm_id_col: attributeOrigId
   beam_length_col: linkLength
   beam_osm_epsg: 4326
-  grid_epsg: 4326
+  aermod_grid_epsg: 4326
+  inmap_grid_epsg: 4326
   output_epsg: 26910
+  county_state_fips: null
+  county_fips_codes: null
+  county_area_name: county
+  aermod_grid_path: null
+  beam_network_columns:
+    osm_id: attributeOrigId
+    length: linkLength
+  grid_columns:
+    cell_id: grid
 
 emissions_rates:
   rates_dir: null
@@ -30,12 +46,57 @@ emissions_events:
   output_path: tmp/skims_emissions.parquet
   iteration: 0
   use_rates: true
+  events_columns:
+    type: type
+    vehicle: vehicle
+    vehicle_type: vehicleType
+    departure_time: departureTime
+    links: links
+    link_travel_time: linkTravelTime
+    length: length
+  network_columns:
+    link_id: linkId
+    link_length: linkLength
 
 emissions_grid_mapping:
   skims_input_path: null
   mapping_input_path: null
-  output_path: tmp/emissions_grid_allocated.parquet
+  output_path: tmp/emissions_inmap_grid_allocated.parquet
   group_cols: null
+  prepared_skims_group_cols:
+    - linkId
+    - vehicleTypeId
+    - process
+  prepared_pollutants:
+    - NH3
+    - NOx
+    - PM2_5
+    - SOx
+    - ROG
+    - BCh
+  county_correction_factors_path: null
+  county_correction_columns:
+    county_fips: COUNTYFP
+    vmt_factor: corr_VMT_by_county
+    trips_factor: corr_trips_by_county
+  # Legacy BEAM_EMFAC freight notebook uses 330 operating days when
+  # annualizing representative daily emissions to tons/year. Keep this
+  # configurable here instead of hard-coding it in Python.
+  annualization_days: 330.0
+  skims_columns:
+    hour: hour
+    link_id: linkId
+    vehicle_type: vehicleTypeId
+    process: process
+    emissions: emissions
+    observations: observations
+    iterations: iterations
+    travel_time: travelTimeInSecond
+    parking_duration: parkingDurationInSecond
+  mapping_columns:
+    link_id: edge_linkId
+    proportion: zone_edge_proportion
+    grid_id: GRID
 
 dispersion_isrm:
   isrm_url: s3://inmap-model/isrm_v1.2.1.zarr/
@@ -44,9 +105,53 @@ dispersion_isrm:
   concentration_factor: 28766.639
   include_bc: false
   include_health: false
+  emissions_columns:
+    grid_id: GRID
+    rog: tons_per_year_ROG
+    nox: tons_per_year_NOx
+    nh3: tons_per_year_NH3
+    sox: tons_per_year_SOx
+    pm25: tons_per_year_PM2_5
+    bcv1: tons_per_year_BCV1
+    bcv3: tons_per_year_BCV3
 
 nox_to_no2:
   input_dir: ../../data/input
   output_dir: ../../data/output
   bounding_box: null
   counties_path: null
+
+activitysim_population:
+  persons_path: null
+  households_path: null
+  land_use_path: null
+  population_cell_mapping_path: null
+  persons_columns:
+    household_id: household_id
+    cell_id: cell_id
+    age: age
+    sex: sex
+    income: income
+  households_columns:
+    household_id: household_id
+    cell_id: cell_id
+    income: income
+    income_category: income_category
+  population_mapping_columns:
+    household_id: household_id
+    cell_id: cell_id
+
+pilates_terminal_contract:
+  local_input_dir: null
+  local_output_dir: null
+  container_input_dir: /input
+  container_output_dir: /output
+  entrypoint: python -m impacts run
+  command_template: python -m impacts run --input-manifest {input_manifest} --output-dir {output_dir}
+  canonical_output_filenames:
+    - impacts_exposure_table.parquet
+    - impacts_exposure_table.csv.gz
+  manifest_filenames:
+    - inputs_manifest.yaml
+    - run_manifest.yaml
+    - postprocess_manifest.yaml

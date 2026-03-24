@@ -1,0 +1,22 @@
+run:
+  models:
+    impacts: impacts
+
+impacts:
+  local_input_dir: ./impacts/input
+  local_output_dir: ./impacts/output
+  container_input_dir: /input
+  container_output_dir: /output
+  entrypoint: python -m impacts run
+  command_template: python -m impacts run --input-manifest {container_input_dir}/inputs_manifest.yaml --output-dir {container_output_dir}
+  canonical_output_filenames:
+    - impacts_exposure_table.parquet
+    - impacts_exposure_table.csv.gz
+  manifest_filenames:
+    - inputs_manifest.yaml
+    - run_manifest.yaml
+    - postprocess_manifest.yaml
+  placeholders:
+    zone_geometry_context: null
+    land_use_context: null
+    osm_map_reference: null

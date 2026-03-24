@@ -1,0 +1,5 @@
+vehicleTypeId,process,pollutant,rate,rate_basis
+car,RUNEX,NOx,1.0,per_mile
+car,RUNLOSS,PM2_5,0.5,per_event
+car,PMBW,PM2_5,0.2,per_mile
+car,PMTW,PM2_5,0.1,per_mile

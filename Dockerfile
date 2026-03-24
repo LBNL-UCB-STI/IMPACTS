@@ -6,11 +6,12 @@ RUN micromamba install -y -n base -f /tmp/env.yml && \
     micromamba clean --all --yes
 
 COPY src /work/src
-COPY data /work/data
 COPY README.md /work/README.md
 COPY README.rst /work/README.rst
 COPY setup.cfg /work/setup.cfg
+COPY setup.py /work/setup.py
 COPY pyproject.toml /work/pyproject.toml
+RUN pip install --no-cache-dir .
 
 ENV PYTHONPATH=/work/src
 WORKDIR /work
