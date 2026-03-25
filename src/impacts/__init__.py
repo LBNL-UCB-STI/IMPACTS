@@ -15,4 +15,17 @@ except PackageNotFoundError:  # pragma: no cover
 finally:
     del version, PackageNotFoundError
 
-__all__ = ["__version__"]
+from .runtime_config import ImpactsRuntimeConfig
+from .runtime_config import OutputSettings
+from .runtime_config import ProcessingSettings
+from .runtime_config import RuntimeInputs
+from .runtime_config import SharedContext
+
+__all__ = [
+    "__version__",
+    "ImpactsRuntimeConfig",
+    "OutputSettings",
+    "ProcessingSettings",
+    "RuntimeInputs",
+    "SharedContext",
+]

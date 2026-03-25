@@ -13,6 +13,8 @@ import pandas as pd
 from .contract_utils import load_structured_file
 from .contract_utils import parquet_available
 from .contract_utils import write_structured_file
+from .manifest_models import PostprocessManifest
+from .manifest_models import RunManifest
 
 logger = logging.getLogger(__name__)
 
@@ -56,38 +58,20 @@ def _ordered_unique(items: Iterable[str]) -> list[str]:
 def _population_by_cell(
     persons_path: Optional[str],
     households_path: Optional[str],
-    mapping_path: Optional[str],
     persons_columns: Optional[Dict[str, str]] = None,
     households_columns: Optional[Dict[str, str]] = None,
-    population_mapping_columns: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
     if not persons_path and not households_path:
         return pd.DataFrame(columns=["cell_id", "population_total", "households_total", "population_mix"])
 
     households = _read_table(households_path) if households_path else pd.DataFrame()
     persons = _read_table(persons_path) if persons_path else pd.DataFrame()
-    pop_mapping = _read_table(mapping_path) if mapping_path else pd.DataFrame()
-
     persons_cfg = _resolve_column_config(persons_columns, {"household_id": "household_id", "cell_id": "cell_id", "age": "age", "sex": "sex", "income": "income"})
     households_cfg = _resolve_column_config(households_columns, {"household_id": "household_id", "cell_id": "cell_id", "income": "income", "income_category": "income_category"})
-    mapping_cfg = _resolve_column_config(population_mapping_columns, {"household_id": "household_id", "cell_id": "cell_id"})
 
     hh_id_col = _first_existing(households.columns, [households_cfg["household_id"], "household_id", "householdId", "hh_id"])
     person_hh_col = _first_existing(persons.columns, [persons_cfg["household_id"], "household_id", "householdId", "hh_id"])
     cell_col = _first_existing(households.columns, [households_cfg["cell_id"], "cell_id", "GRID", "grid", "zone", "home_cell_id", "TAZ"])
-
-    if cell_col is None and not pop_mapping.empty and hh_id_col:
-        mapping_hh_col = _first_existing(pop_mapping.columns, [mapping_cfg["household_id"], hh_id_col, "household_id", "householdId", "hh_id"])
-        mapping_cell_col = _first_existing(pop_mapping.columns, [mapping_cfg["cell_id"], "cell_id", "GRID", "grid", "zone", "home_cell_id", "TAZ"])
-        if mapping_hh_col and mapping_cell_col and not households.empty:
-            households = households.merge(
-                pop_mapping[[mapping_hh_col, mapping_cell_col]].rename(
-                    columns={mapping_hh_col: hh_id_col, mapping_cell_col: "cell_id"}
-                ),
-                how="left",
-                on=hh_id_col,
-            )
-            cell_col = "cell_id"
 
     if cell_col is None and _first_existing(persons.columns, [persons_cfg["cell_id"], "cell_id", "GRID", "grid", "zone", "home_cell_id", "TAZ"]):
         cell_col = _first_existing(persons.columns, [persons_cfg["cell_id"], "cell_id", "GRID", "grid", "zone", "home_cell_id", "TAZ"])
@@ -183,11 +167,9 @@ def create_canonical_exposure_table(
     concentration_path: str,
     persons_path: Optional[str] = None,
     households_path: Optional[str] = None,
-    population_cell_mapping_path: Optional[str] = None,
     concentration_columns: Optional[Dict[str, str]] = None,
     persons_columns: Optional[Dict[str, str]] = None,
     households_columns: Optional[Dict[str, str]] = None,
-    population_mapping_columns: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
     concentration = _read_table(concentration_path).copy()
     concentration_cfg = _resolve_column_config(concentration_columns, {"grid_id": "GRID"})
@@ -201,10 +183,8 @@ def create_canonical_exposure_table(
     pop_by_cell = _population_by_cell(
         persons_path=persons_path,
         households_path=households_path,
-        mapping_path=population_cell_mapping_path,
         persons_columns=persons_columns,
         households_columns=households_columns,
-        population_mapping_columns=population_mapping_columns,
     )
     merged = concentration.merge(pop_by_cell, how="left", on="cell_id")
     merged["population_total"] = merged["population_total"].fillna(0).astype(int)
@@ -218,7 +198,7 @@ def postprocess_from_run_manifest(
     output_dir: str | Path,
     manifest_path: str | Path | None = None,
 ) -> Dict[str, Any]:
-    run_manifest = load_structured_file(run_manifest_path)
+    run_manifest = RunManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
     logger.info("Postprocess: loaded run manifest %s", Path(run_manifest_path).resolve())
     raw_outputs = run_manifest.get("raw_outputs", {}) or {}
     concentration_path = raw_outputs.get("grid_concentration")
@@ -236,11 +216,9 @@ def postprocess_from_run_manifest(
         concentration_path=concentration_path,
         persons_path=population_inputs.get("persons_path"),
         households_path=population_inputs.get("households_path"),
-        population_cell_mapping_path=population_inputs.get("population_cell_mapping_path"),
         concentration_columns=pipeline.get("dispersion_emissions_columns"),
         persons_columns=population_inputs.get("persons_columns"),
         households_columns=population_inputs.get("households_columns"),
-        population_mapping_columns=population_inputs.get("population_mapping_columns"),
     )
     canonical_path = canonical_dir / (
         "impacts_exposure_table.parquet" if parquet_available() else "impacts_exposure_table.csv.gz"
@@ -268,25 +246,33 @@ def postprocess_from_run_manifest(
             ),
         },
         "notes": [
-            "Population mix is derived from staged ActivitySim-like tables when cell ids or a population_cell_mapping are available.",
+            "Population mix is derived from staged ActivitySim-like tables when those tables carry usable cell ids.",
             "Geometry reference is currently a stable cell identifier placeholder.",
         ],
     }
     output_manifest = Path(manifest_path) if manifest_path else output_root / "postprocess_manifest.yaml"
     postprocess_manifest["postprocess_manifest_path"] = str(output_manifest)
-    write_structured_file(output_manifest, postprocess_manifest)
+    typed_manifest = PostprocessManifest.from_dict(postprocess_manifest)
+    write_structured_file(output_manifest, typed_manifest.to_dict())
     logger.info("Postprocess complete: canonical artifact %s", canonical_path)
     logger.info("Postprocess manifest written: %s", output_manifest)
-    return postprocess_manifest
+    return typed_manifest.to_dict()
 
 
-def impacts_postprocess(
-    run_manifest_path: str | Path,
-    output_dir: str | Path,
+def postprocess_from_runtime_config(
+    runtime_config_path: str | Path,
+    workspace: str | Path,
     manifest_path: str | Path | None = None,
 ) -> Dict[str, Any]:
+    from impacts.runner import run_from_runtime_config
+
+    workspace_root = Path(workspace).resolve()
+    run_manifest = run_from_runtime_config(
+        runtime_config_path=runtime_config_path,
+        workspace=workspace_root,
+    )
     return postprocess_from_run_manifest(
-        run_manifest_path=run_manifest_path,
-        output_dir=output_dir,
+        run_manifest_path=run_manifest["run_manifest_path"],
+        output_dir=workspace_root / "output",
         manifest_path=manifest_path,
     )

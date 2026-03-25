@@ -1,0 +1,2 @@
+"""Config builders for impacts."""
+

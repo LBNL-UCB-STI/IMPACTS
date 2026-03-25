@@ -1,0 +1,54 @@
+# Native executable runtime config for the standalone/example impacts run.
+# In integrated PILATES runs, derive the equivalent resolved config from:
+# - the main PILATES settings
+# - pilates_model_config.yaml runtime_overrides
+shared:
+  region: sfbay
+  start_year: 2017
+  geography:
+    fips:
+      state: "06"
+      counties:
+        - "001"
+        - "013"
+        - "041"
+        - "055"
+        - "075"
+        - "081"
+        - "085"
+        - "095"
+        - "097"
+    local_crs: "EPSG:26910"
+
+inputs:
+  beam_network: upstream/network.csv.gz
+  emissions_skims: upstream/0.skimsEmissionsTotals_5pct_sample.csv.gz
+  osm_pbf: upstream/sfbay-cbg5500-weakConn-network.osm.pbf
+  households_asim_out:
+  persons_asim_out:
+
+emissions:
+  annualization_days: 330
+  activity_correction_factors_file: upstream/activity_corrections.csv
+  pollutants:
+    - NH3
+    - NOx
+    - PM2_5
+    - SOx
+    - ROG
+    - BCh
+
+dispersions:
+  inmap:
+    isrm_zarr_directory: ~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr
+    isrm_zarr_s3bucket: s3://inmap-model/isrm_v1.2.1.zarr/
+    grid_path: upstream/isrm_polygon/isrm_polygon.shp
+    grid_epsg:
+    grid_id: isrm
+  aermod:
+    grid_path: upstream/subgrid100M/fineMesh100m.shp
+    grid_epsg:
+    grid_id:
+
+outputs:
+  output_dir: ./impacts/output

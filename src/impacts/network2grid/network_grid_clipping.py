@@ -8,9 +8,6 @@ impacts workflow.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from dataclasses import fields
-import json
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -26,11 +23,6 @@ except ImportError:
     from impacts.emissions.emissions_grid_mapping import (
         map_skims_emissions_to_intersection as _map_skims_emissions_to_intersection_impl,
     )
-
-
-DEFAULT_WORKFLOW_CONFIG_PATH = Path(__file__).resolve().parents[1] / "settings.yaml"
-
-
 @dataclass
 class EmissionsMappingConfig:
     """Configuration for BEAM-OSM-GRID mapping workflow."""
@@ -57,137 +49,6 @@ class EmissionsMappingConfig:
 
 
 DEFAULT_MAPPING_CONFIG = EmissionsMappingConfig()
-
-
-def _parse_scalar(raw: str):
-    value = raw.strip()
-    if value in ("", "null", "Null", "NULL", "none", "None", "~"):
-        return None
-    if value in ("true", "True", "TRUE"):
-        return True
-    if value in ("false", "False", "FALSE"):
-        return False
-    if (value.startswith('"') and value.endswith('"')) or (
-        value.startswith("'") and value.endswith("'")
-    ):
-        return value[1:-1]
-    try:
-        if "." in value:
-            return float(value)
-        return int(value)
-    except ValueError:
-        return value
-
-
-def _simple_yaml_load(text: str):
-    """Minimal YAML parser for nested dicts with scalar values."""
-    data = {}
-    current_section = None
-    for line in text.splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        indent = len(line) - len(line.lstrip(" "))
-        if ":" not in line:
-            continue
-        key, raw_val = line.split(":", 1)
-        key = key.strip()
-        raw_val = raw_val.strip()
-        if indent == 0:
-            if raw_val == "":
-                data[key] = {}
-                current_section = key
-            else:
-                data[key] = _parse_scalar(raw_val)
-                current_section = None
-        else:
-            if current_section is None:
-                continue
-            data[current_section][key] = _parse_scalar(raw_val)
-    return data
-
-
-def _resolve_workflow_config_path(config_path: str | Path | None = None) -> Path:
-    env_candidates = [
-        os.getenv("IMPACTS_WORKFLOW_PATH"),
-        os.getenv("PILATES_IMPACTS_WORKFLOW_PATH"),
-        os.getenv("PILATES_WORKFLOW_PATH"),
-    ]
-
-    candidates = []
-    if config_path is not None:
-        candidates.append(Path(config_path))
-    candidates.extend(Path(p) for p in env_candidates if p)
-    candidates.append(DEFAULT_WORKFLOW_CONFIG_PATH)
-
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-
-    # Fall back to provided path even if it does not exist yet.
-    if config_path is not None:
-        return Path(config_path)
-    return DEFAULT_WORKFLOW_CONFIG_PATH
-
-
-def _resolve_path_from_workflow(path: Optional[str], config_path: str | Path | None = None) -> Optional[str]:
-    if path is None:
-        return None
-    p = str(path).strip()
-    if not p:
-        return p
-    if _is_remote_path(p):
-        return p
-    path_obj = Path(p)
-    if path_obj.is_absolute():
-        return str(path_obj)
-    workflow_path = _resolve_workflow_config_path(config_path)
-    return str((workflow_path.parent / path_obj).resolve())
-
-
-def load_workflow_config(config_path: str | Path | None = None):
-    """Load workflow config from YAML (with fallback simple parser)."""
-    cfg_path = _resolve_workflow_config_path(config_path)
-    if not cfg_path.exists():
-        return {"main": {}, "osm_grid": {}}
-
-    text = cfg_path.read_text(encoding="utf-8")
-    try:
-        import yaml  # type: ignore
-
-        loaded = yaml.safe_load(text) or {}
-    except Exception:
-        loaded = _simple_yaml_load(text)
-
-    if not isinstance(loaded, dict):
-        try:
-            loaded = json.loads(text)
-        except Exception:
-            loaded = {}
-    return loaded
-
-
-def load_mapping_config(config_path: str | Path | None = None):
-    """Build `EmissionsMappingConfig` from workflow YAML."""
-    workflow = load_workflow_config(config_path)
-    main = workflow.get("main", {}) or {}
-    section_name = main.get("mapping_section", "osm_grid")
-    section = workflow.get(section_name, {}) or {}
-
-    allowed = {f.name for f in fields(EmissionsMappingConfig)}
-    config_kwargs = {k: v for k, v in section.items() if k in allowed}
-    cfg = EmissionsMappingConfig(**config_kwargs)
-    for key in (
-        "osm_links_path",
-        "grid_cells_path",
-        "beam_network_path",
-        "precomputed_beam_osm_path",
-        "output_dir",
-        "beam_osm_mapped_output_path",
-        "beam_osm_county_intersection_output_path",
-        "beam_osm_grid_intersection_output_path",
-    ):
-        setattr(cfg, key, _resolve_path_from_workflow(getattr(cfg, key), config_path))
-    return cfg
 
 
 def _is_remote_path(path: str) -> bool:
@@ -222,22 +83,26 @@ def _save_geodataframe(gdf: gpd.GeoDataFrame, output_path: str) -> None:
     gdf.to_file(out.with_suffix(".geojson"), driver="GeoJSON")
 
 
+def _load_geodataframe(path_or_gdf):
+    if isinstance(path_or_gdf, gpd.GeoDataFrame):
+        return path_or_gdf.copy()
+    path = Path(path_or_gdf)
+    if path.suffix.lower() == ".parquet":
+        return gpd.read_parquet(path)
+    return gpd.read_file(path)
+
+
 def map_beam_network_to_osm(
     osm_path: str,
     beam_network_path: str,
-    output_path: Optional[str] = None,
+    output_path: str,
     network_osm_id_col: str = "attributeOrigId",
-    config_path: str | Path | None = None,
+    output_epsg: Optional[int] = None,
 ):
     """Map BEAM links to OSM geometries using shared OSM IDs."""
     _validate_local_path(osm_path, "OSM network path")
     _validate_local_path(beam_network_path, "BEAM network path")
 
-    if output_path is None:
-        cfg = load_mapping_config(config_path)
-        output_path = cfg.beam_osm_mapped_output_path or str(
-            Path(cfg.output_dir) / "beam_osm_mapped.parquet"
-        )
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     mapped = osm_chordify.map_osm_with_beam_network(
@@ -246,35 +111,35 @@ def map_beam_network_to_osm(
         network_osm_id_col=network_osm_id_col,
         output_path=output_path,
     )
+    if output_epsg is not None:
+        mapped_gdf = _load_geodataframe(output_path).to_crs(epsg=output_epsg)
+        _save_geodataframe(mapped_gdf, output_path)
+        return mapped_gdf
     return mapped
 
 
 def intersect_beam_osm_with_grid(
     beam_osm_path,
     grid_cells_path: str,
-    output_path: Optional[str] = None,
+    output_path: str,
     beam_osm_epsg: int = 4326,
     grid_epsg: int = 4326,
     output_epsg: int = 26910,
     beam_length_col: str = "linkLength",
-    config_path: str | Path | None = None,
+    road_buffer_filter_m: Optional[float] = None,
 ):
     """Intersect mapped BEAM+OSM links with grid cells.
 
     Produces per-cell segments and computes edge length within each GRID
     cell via the intersection proportion.
+
+    road_buffer_filter_m controls the built-in osm-chordify prefilter:
+    pass None to disable it or a positive value (e.g. 100.0) to retain only
+    grid cells within that buffer distance of the road network.
     """
     if isinstance(beam_osm_path, str):
         _validate_local_path(beam_osm_path, "BEAM+OSM mapped path")
     _validate_local_path(grid_cells_path, "grid cells path")
-
-    if output_path is None:
-        cfg = load_mapping_config(config_path)
-        output_path = (
-            cfg.beam_osm_inmap_grid_intersection_output_path
-            or cfg.beam_osm_grid_intersection_output_path
-            or str(Path(cfg.output_dir) / "beam_osm_inmap_grid_intersection.parquet")
-        )
 
     road_network = beam_osm_path if isinstance(beam_osm_path, gpd.GeoDataFrame) else str(beam_osm_path)
 
@@ -284,6 +149,7 @@ def intersect_beam_osm_with_grid(
         zones=grid_cells_path,
         output_path=None,
         output_epsg=output_epsg,
+        road_buffer_filter_m=road_buffer_filter_m,
     )
     if "zone_link_length_m" in result.columns and "edge_length_in_cell_m" not in result.columns:
         result["edge_length_in_cell_m"] = result["zone_link_length_m"]
@@ -312,28 +178,25 @@ def intersect_beam_osm_with_counties(
     *,
     state_fips: str,
     county_fips_codes: list[str],
-    output_path: Optional[str] = None,
+    output_path: str,
     beam_osm_epsg: int = 4326,
     output_epsg: int = 26910,
-    config_path: str | Path | None = None,
     area_name: str = "county",
+    boundary_year: int = 2023,
 ):
     """Intersect mapped BEAM+OSM links with county zones via FIPS codes."""
     if isinstance(beam_osm_path, str):
         _validate_local_path(beam_osm_path, "BEAM+OSM mapped path")
 
-    if output_path is None:
-        cfg = load_mapping_config(config_path)
-        output_path = cfg.beam_osm_county_intersection_output_path or str(
-            Path(cfg.output_dir) / "beam_osm_county_intersection.parquet"
-        )
-
     road_network = beam_osm_path if isinstance(beam_osm_path, gpd.GeoDataFrame) else str(beam_osm_path)
+    county_work_dir = str(Path(output_path).resolve().parent)
     result = osm_chordify.intersect_road_network_with_county_zones(
         road_network=road_network,
         road_network_epsg=beam_osm_epsg,
-        state_fips=str(state_fips),
+        state_fips_code=str(state_fips),
         county_fips_codes=[str(code) for code in county_fips_codes],
+        year=int(boundary_year),
+        work_dir=county_work_dir,
         output_path=None,
         output_epsg=output_epsg,
         area_name=area_name,
@@ -350,35 +213,3 @@ def intersect_beam_osm_with_counties(
 def map_skims_emissions_to_intersection(*args, **kwargs):
     """Map skims emissions to BEAM+OSM+GRID intersection."""
     return _map_skims_emissions_to_intersection_impl(*args, **kwargs)
-
-
-def run_emissions_grid_mapping_from_workflow(
-    config_path: str | Path | None = None,
-):
-    """Run skims-to-grid emissions mapping from workflow config."""
-    workflow = load_workflow_config(config_path)
-    main = workflow.get("main", {}) or {}
-    section_name = main.get("emissions_mapping_section", "emissions_grid_mapping")
-    section = workflow.get(section_name, {}) or {}
-
-    skims_path = resolve_path_from_workflow(section.get("skims_input_path"), config_path)
-    mapping_path = resolve_path_from_workflow(section.get("mapping_input_path"), config_path)
-    output_path = resolve_path_from_workflow(section.get("output_path"), config_path)
-    group_cols = section.get("group_cols")
-
-    if not skims_path or not mapping_path or not output_path:
-        raise ValueError(
-            "workflow section `emissions_grid_mapping` requires "
-            "skims_input_path, mapping_input_path, and output_path"
-        )
-
-    return _map_skims_emissions_to_intersection_impl(
-        skims_path=skims_path,
-        mapping_path=mapping_path,
-        output_path=output_path,
-        group_cols=group_cols,
-    )
-
-
-resolve_workflow_config_path = _resolve_workflow_config_path
-resolve_path_from_workflow = _resolve_path_from_workflow

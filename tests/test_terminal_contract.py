@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import geopandas as gpd
+import osm_chordify
 import pandas as pd
 import pytest
 import zarr
@@ -13,17 +14,27 @@ from shapely.geometry import Polygon
 from impacts.__main__ import main
 from impacts.contract_utils import load_structured_file
 from impacts.contract_utils import parquet_available
+from impacts.config.builders import build_runtime_config_from_pilates
+from impacts.config.builders import build_runtime_config_from_runtime_yaml
 from impacts.postprocessor import create_canonical_exposure_table
 from impacts.postprocessor import _read_table
+from impacts.postprocessor import postprocess_from_runtime_config
 from impacts.postprocessor import postprocess_from_run_manifest
 from impacts.preprocessor import preprocess_workflow
+from impacts.runner import _write_geoparquet_allocation
+from impacts.runner import run_from_runtime_config
 from impacts.runner import run_from_input_manifest
 from impacts.emissions.emissions_grid_mapping import distribute_to_intersection
 from impacts.emissions.emissions_grid_mapping import annualize_prepared_skims_for_grid_allocation
 from impacts.emissions.emissions_grid_mapping import aggregate_allocated_intersection_rows
-from impacts.emissions.emissions_grid_mapping import apply_county_process_corrections
+from impacts.emissions.emissions_grid_mapping import apply_activity_corrections
 from impacts.emissions.emissions_grid_mapping import prepare_skims_for_grid_allocation
+from impacts.manifest_models import InputsManifest
+from impacts.manifest_models import PipelineConfig
+from impacts.manifest_models import PostprocessManifest
+from impacts.manifest_models import RunManifest
 from impacts.network2grid.network_grid_clipping import intersect_beam_osm_with_grid
+from impacts.runtime_config import ImpactsRuntimeConfig
 
 def _write_csv(path: Path, rows):
     pd.DataFrame(rows).to_csv(path, index=False)
@@ -102,37 +113,40 @@ def _build_test_workspace(tmp_path: Path) -> Path:
         ],
     )
 
-    workflow = tmp_path / "workflow.yaml"
-    workflow.write_text(
+    runtime_config = tmp_path / "runtime.yaml"
+    runtime_config.write_text(
         "\n".join(
             [
-                "main:",
-                "  events_section: emissions_events",
-                "  rates_section: emissions_rates",
-                "  emissions_mapping_section: emissions_grid_mapping",
-                "  dispersion_section: dispersion_isrm",
-                "  population_section: activitysim_population",
-                "emissions_events:",
-                "  events_input_path: upstream/events.csv",
-                "  link_length_path: upstream/network.csv",
-                "  iteration: 1",
-                "  use_rates: true",
-                "emissions_rates:",
-                "  rates_dir: upstream/rates",
-                "emissions_grid_mapping:",
-                "  mapping_input_path: upstream/mapping.csv",
-                "dispersion_isrm:",
-                f"  isrm_url: {isrm_path}",
-                "  concentration_factor: 1.0",
-                "  include_health: true",
-                "activitysim_population:",
-                "  persons_path: upstream/persons.csv",
-                "  households_path: upstream/households.csv",
+                "shared:",
+                "  region: sfbay",
+                "  geography:",
+                "    fips:",
+                '      state: "06"',
+                "      counties:",
+                '        - "001"',
+                "    local_crs: EPSG:26910",
+                "inputs:",
+                "  beam_network: upstream/network.csv",
+                "  emissions_skims: upstream/skims.csv",
+                "  osm_pbf: upstream/network.osm.pbf",
+                "emissions:",
+                "  annualization_days: 365",
+                "  pollutants: [NOx, PM2_5]",
+                "dispersions:",
+                "  inmap:",
+                f"    isrm_zarr_directory: {isrm_path}",
+                "    grid_path: upstream/mapping.csv",
+                "  aermod:",
+                "    grid_path: null",
+                "  persons_asim_out: upstream/persons.csv",
+                "  households_asim_out: upstream/households.csv",
+                "outputs:",
+                "  output_dir: output",
             ]
         ),
         encoding="utf-8",
     )
-    return workflow
+    return runtime_config
 
 
 def _build_skims_first_workspace(tmp_path: Path) -> Path:
@@ -172,28 +186,39 @@ def _build_skims_first_workspace(tmp_path: Path) -> Path:
             {"person_id": 11, "household_id": 1, "age": 12, "sex": "F"},
         ],
     )
-    workflow = tmp_path / "workflow_skims.yaml"
-    workflow.write_text(
+    runtime = tmp_path / "runtime_skims.yaml"
+    runtime.write_text(
         "\n".join(
             [
-                "main:",
-                "  emissions_mapping_section: emissions_grid_mapping",
-                "  dispersion_section: dispersion_isrm",
-                "  population_section: activitysim_population",
-                "emissions_grid_mapping:",
-                "  skims_input_path: upstream/skims.csv",
-                "  mapping_input_path: upstream/mapping.csv",
-                "dispersion_isrm:",
-                f"  isrm_url: {isrm_path}",
-                "  concentration_factor: 1.0",
-                "activitysim_population:",
-                "  persons_path: upstream/persons.csv",
-                "  households_path: upstream/households.csv",
+                "shared:",
+                "  region: sfbay",
+                "  geography:",
+                "    fips:",
+                '      state: "06"',
+                "      counties:",
+                '        - "001"',
+                "inputs:",
+                "  beam_network: upstream/skims.csv",
+                "  emissions_skims: upstream/skims.csv",
+                "  osm_pbf: upstream/skims.csv",
+                "  persons_asim_out: upstream/persons.csv",
+                "  households_asim_out: upstream/households.csv",
+                "emissions:",
+                "  annualization_days: 365",
+                "  pollutants: [NOx, PM2_5]",
+                "dispersions:",
+                "  inmap:",
+                f"    isrm_zarr_directory: {isrm_path}",
+                "    grid_path: upstream/mapping.csv",
+                "  aermod:",
+                "    grid_path: null",
+                "outputs:",
+                "  output_dir: output",
             ]
         ),
         encoding="utf-8",
     )
-    return workflow
+    return runtime
 
 
 def test_preprocess_manifest_generation(tmp_path: Path):
@@ -206,10 +231,671 @@ def test_preprocess_manifest_generation(tmp_path: Path):
     assert Path(manifest["pipeline"]["mapping_input_path"]).exists()
     assert Path(manifest["population_inputs"]["persons_path"]).exists()
     assert manifest["pipeline"]["use_precomputed_mapping"] is True
-    assert "src/impacts/tmp" in manifest["legacy_paths_not_wired"]
     assert manifest["pipeline"]["network_columns"]["link_id"] == "linkId"
     assert manifest["pipeline"]["dispersion_emissions_columns"]["grid_id"] == "GRID"
     assert manifest["pipeline"]["prepared_skims_input_path"] is None
+
+
+def test_impacts_runtime_config_native_schema_round_trip():
+    payload = {
+        "shared": {
+            "region": "sfbay",
+            "geography": {
+                "fips": {"state": "06", "counties": ["001", "013"]},
+                "local_crs": "EPSG:7131",
+                "zones": {
+                    "zone_type": "taz",
+                    "source_file": "/abs/path/taz.geojson",
+                    "source_crs": "EPSG:4326",
+                    "canonical_id_col": "taz1454",
+                    "activitysim_index_col": "TAZ",
+                },
+                "alternative_zones": {
+                    "zone_type": "taz",
+                    "source_file": "/abs/path/alt_taz.shp",
+                    "source_crs": "EPSG:26910",
+                    "canonical_id_col": "taz1454",
+                    "activitysim_index_col": "TAZ",
+                },
+            },
+            "skims": {
+                "zone_type": "taz",
+                "fname": "as-base-skims-sfbay-taz.omx",
+                "origin_fname": "as-origin-skims-sfbay-taz.csv.gz",
+                "geoms_fname": "clipped_tazs.csv",
+                "geoms_index_col": "taz1454",
+            },
+        },
+        "inputs": {
+            "beam_network": "/abs/path/network.parquet",
+            "emissions_skims": "/abs/path/skims.parquet",
+            "osm_pbf": "/abs/path/network.osm.pbf",
+            "activity_corrections": "/abs/path/activity_corrections.csv",
+            "households_asim_out": "/abs/path/households.parquet",
+            "persons_asim_out": "/abs/path/persons.parquet",
+        },
+        "emissions": {
+            "annualization_days": 365,
+            "activity_correction_factors_file": "/abs/path/activity_corrections.csv",
+            "pollutants": ["PM2_5", "NOx"],
+        },
+        "dispersions": {
+            "inmap": {
+                "isrm_zarr_directory": "/abs/path/isrm.zarr",
+                "isrm_zarr_s3bucket": None,
+                "grid_path": "/abs/path/inmap_grid.parquet",
+                "grid_epsg": 4326,
+                "grid_id": "zone_isrm",
+            },
+            "aermod": {
+                "grid_path": "/abs/path/aermod_grid.parquet",
+                "grid_epsg": 26910,
+                "grid_id": None,
+            },
+        },
+        "outputs": {
+            "output_dir": "/abs/path/output",
+            "exposure_table": "/abs/path/output/exposure_table.parquet",
+        },
+    }
+
+    config = ImpactsRuntimeConfig.from_dict(payload)
+
+    assert config.shared_context.region == "sfbay"
+    assert config.shared_context.geography.fips.state == "06"
+    assert config.shared_context.geography.fips.counties == ["001", "013"]
+    assert config.shared_context.geography.alternative_zones.source_file == "/abs/path/alt_taz.shp"
+    assert config.shared_context.skims.fname == "as-base-skims-sfbay-taz.omx"
+    assert config.inputs.beam_network == "/abs/path/network.parquet"
+    assert config.inputs.activity_corrections == "/abs/path/activity_corrections.csv"
+    assert config.inputs.isrm_zarr == "/abs/path/isrm.zarr"
+    assert config.processing.grid.inmap_grid_path == "/abs/path/inmap_grid.parquet"
+    assert config.processing.grid.aermod_grid_epsg == 26910
+    assert config.processing.mapping_columns.proportion == "zone_edge_proportion"
+    assert config.processing.dispersion.emissions_columns.pm25 == "tons_per_year_PM2_5"
+    assert config.outputs.output_dir == "/abs/path/output"
+    assert config.to_dict()["shared"]["geography"]["fips"]["state"] == "06"
+    assert config.to_dict()["emissions"]["annualization_days"] == 365
+    assert config.to_dict()["dispersions"]["inmap"]["grid_path"] == "/abs/path/inmap_grid.parquet"
+
+
+def test_impacts_runtime_config_requires_core_sections():
+    with pytest.raises(ValueError, match="shared_context.geography.fips.state"):
+        ImpactsRuntimeConfig.from_dict(
+            {
+                "shared": {"geography": {"fips": {}}},
+                "inputs": {
+                    "beam_network": "/abs/path/network.parquet",
+                    "emissions_skims": "/abs/path/skims.parquet",
+                    "osm_pbf": "/abs/path/network.osm.pbf",
+                },
+                "processing": {
+                    "pollutants": ["PM2_5"],
+                    "annualization_days": 365,
+                    "grid": {"inmap_grid_path": "/abs/path/inmap_grid.parquet"},
+                },
+                "outputs": {"output_dir": "/abs/path/output"},
+            }
+        )
+
+
+def test_manifest_models_round_trip():
+    pipeline = PipelineConfig.from_dict(
+        {
+            "beam_network_path": "/tmp/network.csv",
+            "beam_osm_id_col": "attributeOrigId",
+            "beam_length_col": "linkLength",
+            "beam_osm_epsg": 4326,
+            "output_epsg": 7131,
+            "inmap_grid_path": "/tmp/inmap_grid.shp",
+            "inmap_grid_epsg": 4326,
+            "mapping_columns": {"link_id": "edge_linkId", "proportion": "zone_edge_proportion", "grid_id": "zone_isrm"},
+            "skims_columns": {"link_id": "linkId", "vehicle_type": "vehicleTypeId"},
+            "isrm_url": "/tmp/isrm.zarr",
+        }
+    )
+    inputs_manifest = InputsManifest.from_dict(
+        {
+            "contract_version": "1",
+            "model": "impacts",
+            "runtime_config_source": "/tmp/runtime.yaml",
+            "staging_dir": "/tmp/workspace",
+            "input_dir": "/tmp/workspace/input",
+            "inputs_manifest_path": "/tmp/workspace/inputs_manifest.yaml",
+            "maintained_execution_path": ["impacts.runner"],
+            "inputs": {"runtime_config": {"path": "/tmp/runtime.yaml"}},
+            "pipeline": pipeline.to_dict(),
+            "pilates_contract": {"stage": "terminal_postprocessing"},
+            "population_inputs": {},
+            "notes": ["ok"],
+        }
+    )
+    run_manifest = RunManifest.from_dict(
+        {
+            "contract_version": "1",
+            "model": "impacts",
+            "input_manifest_path": "/tmp/workspace/inputs_manifest.yaml",
+            "output_dir": "/tmp/workspace/output",
+            "raw_output_dir": "/tmp/workspace/output/raw",
+            "command": "python -m impacts run",
+            "image": "unknown",
+            "raw_outputs": {"skims_emissions": "/tmp/workspace/output/raw/skims.parquet"},
+            "pipeline": pipeline.to_dict(),
+            "population_inputs": {},
+            "deterministic_contract": {"uses_only_manifest_paths": True},
+            "execution": {"stopped_after": "dispersion"},
+            "run_manifest_path": "/tmp/workspace/output/run_manifest.yaml",
+        }
+    )
+    post_manifest = PostprocessManifest.from_dict(
+        {
+            "contract_version": "1",
+            "model": "impacts",
+            "run_manifest_path": "/tmp/workspace/output/run_manifest.yaml",
+            "output_dir": "/tmp/workspace/output",
+            "canonical_artifact": {"path": "/tmp/workspace/output/canonical/exposure.parquet"},
+            "validation": {"grid_concentration_exists": True},
+            "notes": ["ok"],
+            "postprocess_manifest_path": "/tmp/workspace/output/postprocess_manifest.yaml",
+        }
+    )
+
+    assert inputs_manifest.to_dict()["model"] == "impacts"
+    assert inputs_manifest.to_dict()["pipeline"]["beam_osm_id_col"] == "attributeOrigId"
+    assert run_manifest.to_dict()["raw_outputs"]["skims_emissions"].endswith("skims.parquet")
+    assert post_manifest.to_dict()["canonical_artifact"]["path"].endswith("exposure.parquet")
+
+
+def test_run_manifest_model_requires_raw_skims_output():
+    with pytest.raises(ValueError, match="raw_outputs.skims_emissions"):
+        RunManifest.from_dict(
+            {
+                "contract_version": "1",
+                "model": "impacts",
+                "input_manifest_path": "/tmp/workspace/inputs_manifest.yaml",
+                "output_dir": "/tmp/workspace/output",
+                "raw_output_dir": "/tmp/workspace/output/raw",
+                "command": "python -m impacts run",
+                "image": "unknown",
+                "raw_outputs": {},
+                "pipeline": {},
+                "population_inputs": {},
+                "deterministic_contract": {},
+                "execution": {},
+                "run_manifest_path": "/tmp/workspace/output/run_manifest.yaml",
+            }
+        )
+
+
+def test_derive_runtime_config_from_pilates_uses_shared_geography_and_runtime_overrides(tmp_path: Path):
+    beam_output_dir = tmp_path / "beam_output"
+    run_dir = beam_output_dir / "sfbay" / "year-2017-iteration-1"
+    iters_dir = run_dir / "ITERS" / "it.3"
+    iters_dir.mkdir(parents=True)
+    (iters_dir / "3.skimsEmissionsTotals.csv.gz").write_text("placeholder", encoding="utf-8")
+    (run_dir / "network.csv.gz").write_text("placeholder", encoding="utf-8")
+
+    pilates_settings = tmp_path / "pilates_settings.yaml"
+    pilates_settings.write_text(
+        "\n".join(
+            [
+                "run:",
+                "  region: sfbay",
+                "shared:",
+                "  geography:",
+                "    FIPS:",
+                '      state: "06"',
+                "      counties:",
+                '        - "001"',
+                '        - "013"',
+                "    local_crs: EPSG:7131",
+                "  skims:",
+                "    zone_type: taz",
+                "    fname: as-base-skims-sfbay-taz.omx",
+                "    origin_fname: as-origin-skims-sfbay-taz.csv.gz",
+                "    geoms_fname: clipped_tazs.csv",
+                "    geoms_index_col: taz1454",
+                "activitysim:",
+                "  file_format: parquet",
+                "  local_output_folder: pilates/activitysim/output/",
+                "  output_tables:",
+                "    prefix: final_",
+                "    tables:",
+                    "      - households",
+                    "      - persons",
+                "beam:",
+                "  local_input_folder: pilates/beam/production/",
+                f"  local_output_folder: {beam_output_dir}",
+                "  router_directory: r5/sfbay-cbg5500-weakConn-network",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    model_config = tmp_path / "pilates_model_config.yaml"
+    model_config.write_text(
+        "\n".join(
+            [
+                "impacts:",
+                "  runtime_overrides:",
+                "    emissions:",
+                "      annualization_days: 365",
+                "      pollutants: [PM2_5, NOx]",
+                "      activity_correction_factors_file: null",
+                "    dispersions:",
+                "      inmap:",
+                "        isrm_zarr_directory: /path/that/does/not/exist",
+                "        isrm_zarr_s3bucket: s3://example/isrm.zarr",
+                "        grid_path: upstream/isrm_polygon.shp",
+                "        grid_epsg: 4326",
+                "        grid_id: zone_isrm",
+                "      aermod:",
+                "        grid_path: null",
+                "        grid_epsg: 4326",
+                "        grid_id: null",
+                "    outputs:",
+                "      output_dir: /tmp/impacts-out",
+                "      output_epsg: 7131",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    runtime_config = build_runtime_config_from_pilates(
+        pilates_settings=pilates_settings,
+        impacts_overlay=model_config,
+    )
+
+    assert runtime_config.shared_context.region == "sfbay"
+    assert runtime_config.shared_context.geography.fips.state == "06"
+    assert runtime_config.shared_context.geography.fips.counties == ["001", "013"]
+    assert runtime_config.shared_context.geography.local_crs == "EPSG:7131"
+    assert runtime_config.shared_context.skims.fname == "as-base-skims-sfbay-taz.omx"
+    assert runtime_config.inputs.beam_network == str(run_dir / "network.csv.gz")
+    assert runtime_config.inputs.emissions_skims == str(iters_dir / "3.skimsEmissionsTotals.csv.gz")
+    assert runtime_config.inputs.isrm_zarr == "s3://example/isrm.zarr"
+    assert (
+        runtime_config.inputs.osm_pbf
+        == "pilates/beam/production/r5/sfbay-cbg5500-weakConn-network/sfbay-cbg5500-weakConn-network.osm.pbf"
+    )
+    assert runtime_config.inputs.households_asim_out == "pilates/activitysim/output/final_households.parquet"
+    assert runtime_config.inputs.persons_asim_out == "pilates/activitysim/output/final_persons.parquet"
+    assert runtime_config.processing.grid.inmap_grid_path == "upstream/isrm_polygon.shp"
+    assert runtime_config.processing.grid.inmap_grid_epsg == 4326
+    assert runtime_config.processing.mapping_columns.grid_id == "zone_isrm"
+    assert runtime_config.outputs.output_dir == "/tmp/impacts-out"
+
+
+def test_derive_runtime_config_output_dir_from_pilates_run_settings(tmp_path: Path):
+    pilates_settings = tmp_path / "pilates_settings.yaml"
+    pilates_settings.write_text(
+        "\n".join(
+            [
+                "run:",
+                "  region: sfbay",
+                "  output_directory: /tmp/pilates-output",
+                "  output_run_name: scenario-a",
+                "shared:",
+                "  geography:",
+                "    FIPS:",
+                '      state: "06"',
+                "      counties:",
+                '        - "001"',
+                "    local_crs: EPSG:7131",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    model_config = tmp_path / "pilates_model_config.yaml"
+    model_config.write_text(
+        "\n".join(
+            [
+                "impacts:",
+                "  runtime_overrides:",
+                "    inputs:",
+                "      osm_pbf: upstream/network.osm.pbf",
+                "      beam_network: upstream/network.csv.gz",
+                "      emissions_skims: upstream/skims.csv.gz",
+                "    processing:",
+                "      pollutants: [PM2_5]",
+                "      annualization_days: 365",
+                "      grid:",
+                "        inmap_grid_path: upstream/isrm_polygon.shp",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    runtime_config = build_runtime_config_from_pilates(
+        pilates_settings=pilates_settings,
+        impacts_overlay=model_config,
+    )
+
+    assert runtime_config.outputs.output_dir == "/tmp/pilates-output/scenario-a/impacts"
+
+
+def test_build_runtime_config_from_runtime_yaml(tmp_path: Path):
+    runtime_yaml = tmp_path / "runtime.yaml"
+    runtime_yaml.write_text(
+        "\n".join(
+            [
+                "shared:",
+                "  region: sfbay",
+                "  geography:",
+                "    fips:",
+                '      state: "06"',
+                "      counties:",
+                '        - "001"',
+                '        - "013"',
+                "inputs:",
+                "  beam_network: /abs/path/network.parquet",
+                "  emissions_skims: /abs/path/skims.parquet",
+                "  osm_pbf: /abs/path/network.osm.pbf",
+                "emissions:",
+                "  annualization_days: 365",
+                "  pollutants:",
+                "    - PM2_5",
+                "dispersions:",
+                "  inmap:",
+                "    grid_path: /abs/path/inmap_grid.parquet",
+                "  aermod:",
+                "    grid_path: null",
+                "outputs:",
+                "  output_dir: /abs/path/output",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = build_runtime_config_from_runtime_yaml(runtime_yaml)
+
+    assert config.shared_context.region == "sfbay"
+    assert config.inputs.osm_pbf == "/abs/path/network.osm.pbf"
+    assert config.processing.annualization_days == 365
+
+
+def test_example_runtime_yaml_is_native_runtime_config():
+    runtime_yaml = Path(__file__).resolve().parents[1] / "examples" / "pilates" / "runtime.yaml"
+
+    config = build_runtime_config_from_runtime_yaml(runtime_yaml)
+
+    assert config.shared_context.region == "sfbay"
+    assert config.inputs.beam_network.endswith("upstream/network.csv.gz")
+    assert config.inputs.emissions_skims.endswith("0.skimsEmissionsTotals_5pct_sample.csv.gz")
+    assert config.processing.grid.inmap_grid_path.endswith("upstream/isrm_polygon/isrm_polygon.shp")
+    assert config.inputs.isrm_zarr == "s3://inmap-model/isrm_v1.2.1.zarr/"
+
+
+def test_preprocess_accepts_native_runtime_config(tmp_path: Path):
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    skims_path = upstream / "skims_totals.csv"
+    beam_network_path = upstream / "network.csv"
+    osm_pbf_path = upstream / "network.osm.pbf"
+    inmap_grid_path = upstream / "inmap_grid.shp"
+    households_path = upstream / "households.csv"
+    persons_path = upstream / "persons.csv"
+
+    pd.DataFrame(
+        [
+            {"linkId": 101, "vehicleTypeId": "truck", "process": "RUNEX", "NOx": 10.0, "PM2_5": 1.0, "NH3": 0.0, "SOx": 0.5, "ROG": 0.2, "BCh": 0.1},
+        ]
+    ).to_csv(skims_path, index=False)
+    pd.DataFrame([{"linkId": 101, "linkLength": 1000.0}]).to_csv(beam_network_path, index=False)
+    osm_pbf_path.write_bytes(b"placeholder")
+    gpd.GeoDataFrame(
+        [{"geometry": Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])}],
+        geometry="geometry",
+        crs="EPSG:4326",
+    ).to_file(inmap_grid_path, driver="GeoJSON")
+    pd.DataFrame([{"household_id": 1, "cell_id": 1}]).to_csv(households_path, index=False)
+    pd.DataFrame([{"person_id": 1, "household_id": 1}]).to_csv(persons_path, index=False)
+
+    runtime_yaml = tmp_path / "runtime.yaml"
+    runtime_yaml.write_text(
+        "\n".join(
+            [
+                "shared:",
+                "  region: sfbay",
+                "  geography:",
+                "    fips:",
+                '      state: "06"',
+                "      counties:",
+                '        - "001"',
+                '        - "013"',
+                "    local_crs: EPSG:7131",
+                "inputs:",
+                f"  beam_network: {beam_network_path}",
+                f"  emissions_skims: {skims_path}",
+                f"  osm_pbf: {osm_pbf_path}",
+                f"  households_asim_out: {households_path}",
+                f"  persons_asim_out: {persons_path}",
+                "emissions:",
+                "  pollutants:",
+                "    - PM2_5",
+                "    - NOx",
+                "  annualization_days: 365",
+                "dispersions:",
+                "  inmap:",
+                f"    grid_path: {inmap_grid_path}",
+                "  aermod:",
+                "    grid_path: null",
+                "outputs:",
+                f"  output_dir: {tmp_path / 'output'}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = preprocess_workflow(runtime_yaml, tmp_path / "workspace")
+    validated = InputsManifest.from_dict(manifest)
+
+    assert manifest["pipeline"]["county_state_fips"] == "06"
+    assert manifest["pipeline"]["county_fips_codes"] == ["001", "013"]
+    assert manifest["pipeline"]["beam_osm_epsg"] == 7131
+    assert manifest["pipeline"]["output_epsg"] == 7131
+    assert manifest["pipeline"]["prepared_pollutants"] == ["PM2_5", "NOx"]
+    assert manifest["pipeline"]["annualization_days"] == 365.0
+    assert Path(manifest["pipeline"]["beam_network_path"]).exists()
+    assert Path(manifest["pipeline"]["inmap_grid_path"]).exists()
+    assert Path(manifest["pipeline"]["prepared_skims_input_path"]).exists()
+    assert manifest["pipeline"]["mapping_columns"]["grid_id"] == "grid_id"
+    assert validated.inputs_manifest_path.endswith("inputs_manifest.yaml")
+
+
+def test_preprocess_inferrs_grid_epsg_from_file_crs_and_falls_back_to_local_crs(tmp_path: Path):
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    skims_path = upstream / "skims_totals.csv"
+    beam_network_path = upstream / "network.csv"
+    osm_pbf_path = upstream / "network.osm.pbf"
+    households_path = upstream / "households.csv"
+    persons_path = upstream / "persons.csv"
+    inmap_grid_path = upstream / "inmap_grid.geojson"
+
+    pd.DataFrame(
+        [
+            {"linkId": 101, "vehicleTypeId": "truck", "process": "RUNEX", "NOx": 10.0, "PM2_5": 1.0, "NH3": 0.0, "SOx": 0.5, "ROG": 0.2, "BCh": 0.1},
+        ]
+    ).to_csv(skims_path, index=False)
+    pd.DataFrame([{"linkId": 101, "linkLength": 1000.0}]).to_csv(beam_network_path, index=False)
+    osm_pbf_path.write_bytes(b"placeholder")
+    pd.DataFrame([{"household_id": 1, "cell_id": 1}]).to_csv(households_path, index=False)
+    pd.DataFrame([{"person_id": 1, "household_id": 1}]).to_csv(persons_path, index=False)
+    gpd.GeoDataFrame(
+        [{"grid": 1, "geometry": Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])}],
+        geometry="geometry",
+        crs="EPSG:3857",
+    ).to_file(inmap_grid_path, driver="GeoJSON")
+
+    runtime_yaml = tmp_path / "runtime.yaml"
+    runtime_yaml.write_text(
+        "\n".join(
+            [
+                "shared:",
+                "  geography:",
+                "    fips:",
+                '      state: "06"',
+                "    local_crs: EPSG:7131",
+                "inputs:",
+                f"  beam_network: {beam_network_path}",
+                f"  emissions_skims: {skims_path}",
+                f"  osm_pbf: {osm_pbf_path}",
+                f"  households_asim_out: {households_path}",
+                f"  persons_asim_out: {persons_path}",
+                "emissions:",
+                "  pollutants:",
+                "    - PM2_5",
+                "    - NOx",
+                "  annualization_days: 365",
+                "dispersions:",
+                "  inmap:",
+                f"    grid_path: {inmap_grid_path}",
+                "  aermod:",
+                "    grid_path: null",
+                "outputs:",
+                f"  output_dir: {tmp_path / 'output'}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = preprocess_workflow(runtime_yaml, tmp_path / "workspace")
+
+    assert manifest["pipeline"]["beam_osm_epsg"] == 7131
+    assert manifest["pipeline"]["inmap_grid_epsg"] == 3857
+    assert manifest["pipeline"]["aermod_grid_epsg"] == 7131
+    assert manifest["pipeline"]["output_epsg"] == 7131
+
+
+def test_run_from_runtime_config_delegates_through_preprocess(monkeypatch, tmp_path: Path):
+    calls = {}
+
+    def _fake_preprocess(runtime_config_path, staging_dir, manifest_path=None):
+        calls["preprocess"] = {
+            "runtime_config_path": str(runtime_config_path),
+            "staging_dir": str(staging_dir),
+            "manifest_path": manifest_path,
+        }
+        return {"inputs_manifest_path": str(tmp_path / "workspace" / "inputs_manifest.yaml")}
+
+    def _fake_run(input_manifest_path, output_dir, run_manifest_path=None, run_dispersion=True):
+        calls["run"] = {
+            "input_manifest_path": str(input_manifest_path),
+            "output_dir": str(output_dir),
+            "run_manifest_path": run_manifest_path,
+            "run_dispersion": run_dispersion,
+        }
+        return {"run_manifest_path": str(tmp_path / "workspace" / "output" / "run_manifest.yaml")}
+
+    monkeypatch.setattr("impacts.preprocessor.preprocess_workflow", _fake_preprocess)
+    monkeypatch.setattr("impacts.runner.run_from_input_manifest", _fake_run)
+
+    result = run_from_runtime_config(
+        runtime_config_path=tmp_path / "runtime.yaml",
+        workspace=tmp_path / "workspace",
+        run_dispersion=False,
+    )
+
+    assert result["run_manifest_path"].endswith("run_manifest.yaml")
+    assert calls["preprocess"]["runtime_config_path"].endswith("runtime.yaml")
+    assert calls["preprocess"]["staging_dir"].endswith("workspace")
+    assert calls["run"]["input_manifest_path"].endswith("inputs_manifest.yaml")
+    assert calls["run"]["output_dir"].endswith("workspace/output")
+    assert calls["run"]["run_dispersion"] is False
+
+
+def test_cli_run_accepts_runtime_config_workspace(monkeypatch, tmp_path: Path):
+    calls = {}
+
+    def _fake_run_from_runtime_config(runtime_config_path, workspace, run_manifest_path=None, run_dispersion=True):
+        calls["runtime_run"] = {
+            "runtime_config_path": str(runtime_config_path),
+            "workspace": str(workspace),
+            "run_manifest_path": run_manifest_path,
+            "run_dispersion": run_dispersion,
+        }
+        return {"run_manifest_path": str(tmp_path / "workspace" / "output" / "run_manifest.yaml")}
+
+    monkeypatch.setattr("impacts.runner.run_from_runtime_config", _fake_run_from_runtime_config)
+
+    exit_code = main(
+        [
+            "run",
+            "--config",
+            str(tmp_path / "runtime.yaml"),
+            "--workspace",
+            str(tmp_path / "workspace"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls["runtime_run"]["runtime_config_path"].endswith("runtime.yaml")
+    assert calls["runtime_run"]["workspace"].endswith("workspace")
+
+
+def test_postprocess_from_runtime_config_delegates_through_runner(monkeypatch, tmp_path: Path):
+    calls = {}
+
+    def _fake_runtime_run(runtime_config_path, workspace, run_manifest_path=None, run_dispersion=True):
+        calls["runtime_run"] = {
+            "runtime_config_path": str(runtime_config_path),
+            "workspace": str(workspace),
+            "run_manifest_path": run_manifest_path,
+            "run_dispersion": run_dispersion,
+        }
+        return {"run_manifest_path": str(tmp_path / "workspace" / "output" / "run_manifest.yaml")}
+
+    def _fake_postprocess(run_manifest_path, output_dir, manifest_path=None):
+        calls["postprocess"] = {
+            "run_manifest_path": str(run_manifest_path),
+            "output_dir": str(output_dir),
+            "manifest_path": manifest_path,
+        }
+        return {"postprocess_manifest_path": str(tmp_path / "workspace" / "output" / "postprocess_manifest.yaml")}
+
+    monkeypatch.setattr("impacts.runner.run_from_runtime_config", _fake_runtime_run)
+    monkeypatch.setattr("impacts.postprocessor.postprocess_from_run_manifest", _fake_postprocess)
+
+    result = postprocess_from_runtime_config(
+        runtime_config_path=tmp_path / "runtime.yaml",
+        workspace=tmp_path / "workspace",
+    )
+
+    assert result["postprocess_manifest_path"].endswith("postprocess_manifest.yaml")
+    assert calls["runtime_run"]["runtime_config_path"].endswith("runtime.yaml")
+    assert calls["runtime_run"]["workspace"].endswith("workspace")
+    assert calls["postprocess"]["run_manifest_path"].endswith("run_manifest.yaml")
+    assert calls["postprocess"]["output_dir"].endswith("workspace/output")
+
+
+def test_cli_postprocess_accepts_runtime_config_workspace(monkeypatch, tmp_path: Path):
+    calls = {}
+
+    def _fake_postprocess_from_runtime_config(runtime_config_path, workspace, manifest_path=None):
+        calls["runtime_postprocess"] = {
+            "runtime_config_path": str(runtime_config_path),
+            "workspace": str(workspace),
+            "manifest_path": manifest_path,
+        }
+        return {"postprocess_manifest_path": str(tmp_path / "workspace" / "output" / "postprocess_manifest.yaml")}
+
+    monkeypatch.setattr("impacts.postprocessor.postprocess_from_runtime_config", _fake_postprocess_from_runtime_config)
+
+    exit_code = main(
+        [
+            "postprocess",
+            "--config",
+            str(tmp_path / "runtime.yaml"),
+            "--workspace",
+            str(tmp_path / "workspace"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls["runtime_postprocess"]["runtime_config_path"].endswith("runtime.yaml")
+    assert calls["runtime_postprocess"]["workspace"].endswith("workspace")
 
 
 def test_runner_deterministic_contract(tmp_path: Path):
@@ -623,12 +1309,12 @@ def test_county_corrected_rows_collapse_across_process_within_county():
     assert collapsed.loc[1, "tons_per_year_PM2_5_allocated"] == pytest.approx(1.0)
 
 
-def test_county_process_corrections_use_countyfp_and_process_family(tmp_path: Path):
-    correction_path = tmp_path / "county_corrections.csv"
+def test_activity_corrections_use_countyfp_and_process_family(tmp_path: Path):
+    correction_path = tmp_path / "activity_corrections.csv"
     pd.DataFrame(
         [
-            {"COUNTYFP": "001", "corr_VMT_by_county": 2.0, "corr_trips_by_county": 4.0},
-            {"COUNTYFP": "013", "corr_VMT_by_county": 5.0, "corr_trips_by_county": 10.0},
+            {"countyfp": "001", "vmt_factor": 2.0, "trips_factor": 4.0},
+            {"countyfp": "013", "vmt_factor": 5.0, "trips_factor": 10.0},
         ]
     ).to_csv(correction_path, index=False)
 
@@ -672,7 +1358,7 @@ def test_county_process_corrections_use_countyfp_and_process_family(tmp_path: Pa
         ]
     )
 
-    corrected = apply_county_process_corrections(allocated, str(correction_path))
+    corrected = apply_activity_corrections(allocated, str(correction_path))
 
     def _value(process: str, countyfp: str) -> float:
         row = corrected.loc[
@@ -740,6 +1426,64 @@ def test_grid_allocation_from_county_level_input_matches_on_carried_county_colum
 
     assert list(allocated["zone_isrm"].astype(int)) == [1, 2]
     assert allocated["tons_per_year_NOx_allocated_allocated"].sum() == pytest.approx(10.0)
+    assert allocated.loc[0, "tons_per_year_NOx_allocated_allocated"] == pytest.approx(2.5)
+    assert allocated.loc[1, "tons_per_year_NOx_allocated_allocated"] == pytest.approx(7.5)
+
+
+def test_grid_allocation_uses_latest_mapping_proportion_when_input_already_has_proportion():
+    county_level = pd.DataFrame(
+        [
+            {
+                "linkId": 100,
+                "vehicleTypeId": "truck",
+                "zone_GEOID": "06001",
+                "zone_NAME": "Alameda",
+                "zone_COUNTYFP": "001",
+                "zone_edge_proportion": 0.40,
+                "edge_link_length_m": 123.0,
+                "zone_link_length_m": 49.0,
+                "tons_per_year_NOx_allocated": 10.0,
+            }
+        ]
+    )
+    grid_mapping = pd.DataFrame(
+        [
+            {
+                "edge_linkId": 100,
+                "edge_zone_GEOID": "06001",
+                "edge_zone_NAME": "Alameda",
+                "edge_zone_COUNTYFP": "001",
+                "zone_isrm": 7,
+                "zone_edge_proportion": 0.25,
+                "edge_link_length_m": 100.0,
+                "zone_link_length_m": 25.0,
+            },
+            {
+                "edge_linkId": 100,
+                "edge_zone_GEOID": "06001",
+                "edge_zone_NAME": "Alameda",
+                "edge_zone_COUNTYFP": "001",
+                "zone_isrm": 8,
+                "zone_edge_proportion": 0.75,
+                "edge_link_length_m": 100.0,
+                "zone_link_length_m": 75.0,
+            },
+        ]
+    )
+
+    allocated = distribute_to_intersection(
+        county_level,
+        grid_mapping,
+        proportion_col="zone_edge_proportion",
+        mapping_columns={"link_id": "edge_linkId", "grid_id": "zone_isrm", "proportion": "zone_edge_proportion"},
+    ).sort_values("zone_isrm").reset_index(drop=True)
+
+    assert list(allocated["zone_isrm"].astype(int)) == [7, 8]
+    assert "zone_edge_proportion_map" not in allocated.columns
+    assert "zone_edge_proportion_skims" not in allocated.columns
+    assert list(allocated["zone_edge_proportion"]) == [0.25, 0.75]
+    assert list(allocated["edge_link_length_m"]) == [100.0, 100.0]
+    assert list(allocated["zone_link_length_m"]) == [25.0, 75.0]
     assert allocated.loc[0, "tons_per_year_NOx_allocated_allocated"] == pytest.approx(2.5)
     assert allocated.loc[1, "tons_per_year_NOx_allocated_allocated"] == pytest.approx(7.5)
 
@@ -889,7 +1633,43 @@ def test_fine_grid_allocated_rows_collapse_by_link_vehicle_and_fine_grid_id():
     assert list(collapsed["cell_id"].astype(int)) == [101, 102]
     assert collapsed.loc[0, "tons_per_year_NOx_allocated_allocated_allocated"] == pytest.approx(5.0)
     assert collapsed.loc[0, "zone_edge_proportion"] == pytest.approx(0.25)
-    assert collapsed.loc[1, "tons_per_year_NOx_allocated_allocated_allocated"] == pytest.approx(5.0)
+
+
+def test_write_geoparquet_allocation_joins_grid_geometry(tmp_path: Path):
+    allocated = pd.DataFrame(
+        [
+            {
+                "linkId": 100,
+                "vehicleTypeId": "truck",
+                "zone_isrm": 7,
+                "cell_id": 7,
+                "GRID": 7,
+                "tons_per_year_NOx_allocated_allocated": 2.5,
+            }
+        ]
+    )
+    grid = gpd.GeoDataFrame(
+        [
+            {"zone_isrm": 7, "geometry": Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])},
+        ],
+        geometry="geometry",
+        crs="EPSG:3857",
+    )
+    grid_path = tmp_path / "isrm.geojson"
+    output_path = tmp_path / "allocated.parquet"
+    grid.to_file(grid_path, driver="GeoJSON")
+
+    _write_geoparquet_allocation(
+        allocated,
+        grid_path=str(grid_path),
+        output_path=output_path,
+        output_epsg=3857,
+    )
+
+    written = gpd.read_parquet(output_path)
+    assert written.crs.to_epsg() == 3857
+    assert "geometry" in written.columns
+    assert written.loc[0, "zone_isrm"] == 7
 
 
 def test_grid_intersection_proportions_match_cut_link_lengths(tmp_path: Path):
@@ -935,6 +1715,109 @@ def test_grid_intersection_proportions_match_cut_link_lengths(tmp_path: Path):
     assert result.loc[0, "beam_length_in_cell"] == pytest.approx(1.0)
     assert result.loc[1, "beam_length_in_cell"] == pytest.approx(1.0)
     assert result["zone_edge_proportion"].sum() == pytest.approx(1.0)
+
+
+def test_grid_intersection_prefilters_cells_to_network_extent(tmp_path: Path, monkeypatch):
+    beam_osm = gpd.GeoDataFrame(
+        [
+            {
+                "linkId": 10,
+                "linkLength": 2.0,
+                "attributeOrigId": 10,
+                "geometry": LineString([(0.0, 0.0), (2.0, 0.0)]),
+            }
+        ],
+        geometry="geometry",
+        crs="EPSG:3857",
+    )
+    zones = gpd.GeoDataFrame(
+        [
+            {"zone_code": "near", "geometry": Polygon([(0.0, -1.0), (2.0, -1.0), (2.0, 1.0), (0.0, 1.0)])},
+            {
+                "zone_code": "far",
+                "geometry": Polygon([(100.0, 100.0), (101.0, 100.0), (101.0, 101.0), (100.0, 101.0)]),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:3857",
+    )
+    zones_path = tmp_path / "zones.geojson"
+    zones.to_file(zones_path, driver="GeoJSON")
+
+    captured = {}
+    original = osm_chordify.intersect_road_network_with_zones
+
+    def wrapped(*args, **kwargs):
+        captured["zones"] = kwargs["zones"]
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(osm_chordify, "intersect_road_network_with_zones", wrapped)
+
+    result = intersect_beam_osm_with_grid(
+        beam_osm_path=beam_osm,
+        grid_cells_path=str(zones_path),
+        output_path=str(tmp_path / "intersection.geojson"),
+        beam_osm_epsg=3857,
+        grid_epsg=3857,
+        output_epsg=3857,
+        beam_length_col="linkLength",
+    )
+
+    assert isinstance(captured["zones"], gpd.GeoDataFrame)
+    assert list(captured["zones"]["zone_code"]) == ["near"]
+    assert list(result["zone_zone_code"]) == ["near"]
+
+
+def test_grid_intersection_corridor_prefilter_drops_cells_inside_bbox_but_far_from_roads(
+    tmp_path: Path, monkeypatch
+):
+    beam_osm = gpd.GeoDataFrame(
+        [
+            {
+                "linkId": 10,
+                "linkLength": 100.0,
+                "attributeOrigId": 10,
+                "geometry": LineString([(0.0, 0.0), (100.0, 100.0)]),
+            }
+        ],
+        geometry="geometry",
+        crs="EPSG:3857",
+    )
+    zones = gpd.GeoDataFrame(
+        [
+            {"zone_code": "near_diag", "geometry": Polygon([(48.0, 48.0), (52.0, 48.0), (52.0, 52.0), (48.0, 52.0)])},
+            {"zone_code": "far_corner", "geometry": Polygon([(0.0, 90.0), (10.0, 90.0), (10.0, 100.0), (0.0, 100.0)])},
+        ],
+        geometry="geometry",
+        crs="EPSG:3857",
+    )
+    zones_path = tmp_path / "zones.geojson"
+    zones.to_file(zones_path, driver="GeoJSON")
+
+    captured = {}
+    original = osm_chordify.intersect_road_network_with_zones
+
+    def wrapped(*args, **kwargs):
+        captured["zones"] = kwargs["zones"]
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(osm_chordify, "intersect_road_network_with_zones", wrapped)
+
+    result = intersect_beam_osm_with_grid(
+        beam_osm_path=beam_osm,
+        grid_cells_path=str(zones_path),
+        output_path=str(tmp_path / "intersection.geojson"),
+        beam_osm_epsg=3857,
+        grid_epsg=3857,
+        output_epsg=3857,
+        beam_length_col="linkLength",
+        prefilter_mode="corridor",
+        corridor_buffer_m=10.0,
+    )
+
+    assert isinstance(captured["zones"], gpd.GeoDataFrame)
+    assert list(captured["zones"]["zone_code"]) == ["near_diag"]
+    assert list(result["zone_zone_code"]) == ["near_diag"]
 
 
 def test_postprocess_canonical_exposure_table_generation(tmp_path: Path):
@@ -1027,7 +1910,7 @@ def test_end_to_end_smoke_run(tmp_path: Path):
     workflow = _build_test_workspace(tmp_path)
 
     workspace = tmp_path / "workspace"
-    exit_code = main(["pipeline", "--workflow-config", str(workflow), "--workspace", str(workspace)])
+    exit_code = main(["pipeline", "--config", str(workflow), "--workspace", str(workspace)])
 
     assert exit_code == 0
     inputs_manifest = load_structured_file(workspace / "inputs_manifest.yaml")
@@ -1047,14 +1930,14 @@ def test_end_to_end_smoke_run(tmp_path: Path):
 
 
 def test_standalone_example_run(tmp_path: Path):
-    from examples.pilates.run_example import main as run_example_main
+    from examples.pilates.run_pilates_example import main as run_example_main
 
     example_dir = Path(__file__).resolve().parents[1] / "examples" / "pilates"
     workspace = tmp_path / "example-workspace"
 
     example_isrm = _build_test_isrm_store(tmp_path / "example-isrm.zarr", n_cells=6000)
-    workflow_copy = tmp_path / "example-workflow.yaml"
-    workflow_text = (example_dir / "workflow.yaml").read_text(encoding="utf-8")
+    workflow_copy = tmp_path / "example-runtime.yaml"
+    workflow_text = (example_dir / "runtime.yaml").read_text(encoding="utf-8")
     workflow_text = workflow_text.replace(
         "/Users/haitamlaarabi/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr",
         str(example_isrm),
@@ -1064,7 +1947,7 @@ def test_standalone_example_run(tmp_path: Path):
 
     exit_code = run_example_main(
         [
-            "--workflow-config",
+            "--config",
             str(workflow_copy),
             "--workspace",
             str(workspace),
@@ -1074,8 +1957,8 @@ def test_standalone_example_run(tmp_path: Path):
     assert exit_code == 0
     assert (workspace / "inputs_manifest.yaml").exists()
     assert (workspace / "output" / "run_manifest.yaml").exists()
-    assert (workspace / "output" / "postprocess_manifest.yaml").exists()
+    assert (workspace / "output" / "postprocess_manifest.yaml").exists() is False
     expected_name = (
-        "impacts_exposure_table.parquet" if parquet_available() else "impacts_exposure_table.csv.gz"
+        "emissions_inmap_grid_allocated.parquet" if parquet_available() else "emissions_inmap_grid_allocated.csv.gz"
     )
-    assert (workspace / "output" / "canonical" / expected_name).exists()
+    assert (workspace / "output" / "raw" / expected_name).exists()

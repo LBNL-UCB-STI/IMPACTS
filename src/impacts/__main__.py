@@ -12,44 +12,36 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     preprocess = subparsers.add_parser("preprocess", help="Stage explicit inputs and write inputs_manifest.yaml")
-    preprocess.add_argument("--workflow-config", required=True)
+    preprocess.add_argument("--config", required=True)
     preprocess.add_argument("--staging-dir", required=True)
     preprocess.add_argument("--manifest-path")
-    preprocess_alias = subparsers.add_parser(
-        "impacts_preprocess",
-        help="Alias for preprocess to match the PILATES terminal-model contract naming.",
-    )
-    preprocess_alias.add_argument("--workflow-config", required=True)
-    preprocess_alias.add_argument("--staging-dir", required=True)
-    preprocess_alias.add_argument("--manifest-path")
 
     run = subparsers.add_parser("run", help="Run the maintained impacts pipeline from staged inputs only")
-    run.add_argument("--input-manifest", required=True)
-    run.add_argument("--output-dir", required=True)
+    run_group = run.add_mutually_exclusive_group(required=True)
+    run_group.add_argument("--input-manifest")
+    run_group.add_argument("--config")
+    run.add_argument("--output-dir")
+    run.add_argument("--workspace")
     run.add_argument("--run-manifest")
-    run_alias = subparsers.add_parser(
-        "impacts_run",
-        help="Alias for run to match the PILATES terminal-model contract naming.",
-    )
-    run_alias.add_argument("--input-manifest", required=True)
-    run_alias.add_argument("--output-dir", required=True)
-    run_alias.add_argument("--run-manifest")
 
     postprocess = subparsers.add_parser("postprocess", help="Publish the canonical impacts exposure table artifact")
-    postprocess.add_argument("--run-manifest", required=True)
-    postprocess.add_argument("--output-dir", required=True)
+    postprocess_group = postprocess.add_mutually_exclusive_group(required=True)
+    postprocess_group.add_argument("--run-manifest")
+    postprocess_group.add_argument("--config")
+    postprocess.add_argument("--output-dir")
+    postprocess.add_argument("--workspace")
     postprocess.add_argument("--postprocess-manifest")
-    postprocess_alias = subparsers.add_parser(
-        "impacts_postprocess",
-        help="Alias for postprocess to match the PILATES terminal-model contract naming.",
-    )
-    postprocess_alias.add_argument("--run-manifest", required=True)
-    postprocess_alias.add_argument("--output-dir", required=True)
-    postprocess_alias.add_argument("--postprocess-manifest")
 
     pipeline = subparsers.add_parser("pipeline", help="Run preprocess, run, and postprocess end-to-end")
-    pipeline.add_argument("--workflow-config", required=True)
+    pipeline.add_argument("--config", required=True)
     pipeline.add_argument("--workspace", required=True)
+    derive_runtime = subparsers.add_parser(
+        "derive_runtime_config_from_pilates",
+        help="Generate an impacts runtime config from main PILATES settings and a thin impacts overlay.",
+    )
+    derive_runtime.add_argument("--pilates-settings", required=True)
+    derive_runtime.add_argument("--model-config", required=True)
+    derive_runtime.add_argument("--output", required=True)
 
     sample_events = subparsers.add_parser(
         "sample_events",
@@ -79,34 +71,58 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.command in {"preprocess", "impacts_preprocess"}:
+    if args.command == "preprocess":
         from impacts.preprocessor import preprocess_workflow
 
         preprocess_workflow(
-            workflow_config_path=args.workflow_config,
+            runtime_config_path=args.config,
             staging_dir=args.staging_dir,
             manifest_path=args.manifest_path,
         )
         return 0
 
-    if args.command in {"run", "impacts_run"}:
+    if args.command == "run":
         from impacts.runner import run_from_input_manifest
+        from impacts.runner import run_from_runtime_config
 
-        run_from_input_manifest(
-            input_manifest_path=args.input_manifest,
-            output_dir=args.output_dir,
-            run_manifest_path=args.run_manifest,
-        )
+        if args.input_manifest:
+            if not args.output_dir:
+                parser.error("--output-dir is required with --input-manifest")
+            run_from_input_manifest(
+                input_manifest_path=args.input_manifest,
+                output_dir=args.output_dir,
+                run_manifest_path=args.run_manifest,
+            )
+        else:
+            if not args.workspace:
+                parser.error("--workspace is required with --config")
+            run_from_runtime_config(
+                runtime_config_path=args.config,
+                workspace=args.workspace,
+                run_manifest_path=args.run_manifest,
+            )
         return 0
 
-    if args.command in {"postprocess", "impacts_postprocess"}:
+    if args.command == "postprocess":
         from impacts.postprocessor import postprocess_from_run_manifest
+        from impacts.postprocessor import postprocess_from_runtime_config
 
-        postprocess_from_run_manifest(
-            run_manifest_path=args.run_manifest,
-            output_dir=args.output_dir,
-            manifest_path=args.postprocess_manifest,
-        )
+        if args.run_manifest:
+            if not args.output_dir:
+                parser.error("--output-dir is required with --run-manifest")
+            postprocess_from_run_manifest(
+                run_manifest_path=args.run_manifest,
+                output_dir=args.output_dir,
+                manifest_path=args.postprocess_manifest,
+            )
+        else:
+            if not args.workspace:
+                parser.error("--workspace is required with --config")
+            postprocess_from_runtime_config(
+                runtime_config_path=args.config,
+                workspace=args.workspace,
+                manifest_path=args.postprocess_manifest,
+            )
         return 0
 
     if args.command == "pipeline":
@@ -116,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
 
         workspace = Path(args.workspace).resolve()
         preprocess_manifest = preprocess_workflow(
-            workflow_config_path=args.workflow_config,
+            runtime_config_path=args.config,
             staging_dir=workspace,
         )
         run_manifest = run_from_input_manifest(
@@ -126,6 +142,16 @@ def main(argv: list[str] | None = None) -> int:
         postprocess_from_run_manifest(
             run_manifest_path=run_manifest["run_manifest_path"],
             output_dir=workspace / "output",
+        )
+        return 0
+
+    if args.command == "derive_runtime_config_from_pilates":
+        from impacts.pilates_workflow import derive_runtime_config_from_pilates
+
+        derive_runtime_config_from_pilates(
+            pilates_settings_path=args.pilates_settings,
+            impacts_model_config_path=args.model_config,
+            output_path=args.output,
         )
         return 0
 

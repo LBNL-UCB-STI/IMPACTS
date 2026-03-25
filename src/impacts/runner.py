@@ -8,9 +8,15 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
+import geopandas as gpd
+import pandas as pd
+
 from .contract_utils import parquet_available
 from .contract_utils import load_structured_file
 from .contract_utils import write_structured_file
+from .manifest_models import InputsManifest
+from .manifest_models import PipelineConfig
+from .manifest_models import RunManifest
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +31,61 @@ def _table_path(parent: Path, stem: str) -> Path:
     return _ensure_parent(parent / f"{stem}{suffix}")
 
 
+def _load_grid_geometries(grid_path: str) -> gpd.GeoDataFrame:
+    path = Path(grid_path)
+    if path.suffix.lower() == ".parquet":
+        return gpd.read_parquet(path)
+    return gpd.read_file(path)
+
+
+def _resolve_grid_join_columns(
+    allocated_df: pd.DataFrame,
+    grid_gdf: gpd.GeoDataFrame,
+) -> tuple[str, str]:
+    for left_col in allocated_df.columns:
+        if left_col in grid_gdf.columns:
+            return left_col, left_col
+        base_col = left_col[5:] if left_col.startswith("zone_") else left_col
+        if base_col in grid_gdf.columns:
+            return left_col, base_col
+
+    shared_candidates = ["grid_id", "isrm", "GRID", "cell_id", "OBJECTID", "objectid", "ID", "id"]
+    for left_col in ["zone_grid_id", "zone_isrm", "zone_GRID", "zone_grid100", "cell_id", "GRID", "grid_id"]:
+        if left_col not in allocated_df.columns:
+            continue
+        for right_col in shared_candidates:
+            if right_col in grid_gdf.columns:
+                return left_col, right_col
+
+    raise ValueError("Could not resolve a grid id join between allocated emissions and grid geometry.")
+
+
+def _write_geoparquet_allocation(
+    allocated_df: pd.DataFrame,
+    *,
+    grid_path: str,
+    output_path: Path,
+    output_epsg: int,
+) -> None:
+    grid_gdf = _load_grid_geometries(grid_path)
+    if grid_gdf.crs is None:
+        raise ValueError(f"Grid geometry is missing CRS: {grid_path}")
+    grid_gdf = grid_gdf.to_crs(epsg=output_epsg)
+
+    left_col, right_col = _resolve_grid_join_columns(allocated_df, grid_gdf)
+    geometry_cols = [c for c in grid_gdf.columns if c != "geometry"]
+    joined = allocated_df.merge(
+        grid_gdf[geometry_cols + ["geometry"]],
+        how="left",
+        left_on=left_col,
+        right_on=right_col,
+    )
+    geo = gpd.GeoDataFrame(joined, geometry="geometry", crs=grid_gdf.crs)
+    geo.to_parquet(output_path, index=False)
+    gpkg_path = Path(output_path).with_suffix(".gpkg")
+    geo.to_file(gpkg_path, driver="GPKG")
+
+
 def _load_rates(rates_dir: Optional[str]):
     if not rates_dir:
         return None
@@ -33,7 +94,7 @@ def _load_rates(rates_dir: Optional[str]):
     return read_rates_directory(rates_dir)
 
 
-def _build_mapping_from_staged_inputs(pipeline: Dict[str, Any], raw_dir: Path) -> str:
+def _build_mapping_from_staged_inputs(pipeline: PipelineConfig, raw_dir: Path) -> str:
     from impacts.network2grid.network_grid_clipping import intersect_beam_osm_with_counties
     from impacts.network2grid.network_grid_clipping import intersect_beam_osm_with_grid
     from impacts.network2grid.network_grid_clipping import map_beam_network_to_osm
@@ -42,21 +103,22 @@ def _build_mapping_from_staged_inputs(pipeline: Dict[str, Any], raw_dir: Path) -
     county_mapping_path = raw_dir / "beam_osm_county_intersection.parquet"
     mapping_path = raw_dir / "beam_osm_inmap_grid_intersection.parquet"
     fine_mapping_path = raw_dir / "beam_osm_aermod_grid_intersection.parquet"
-    osm_source = pipeline.get("osm_links_path") or pipeline.get("osm_pbf_path")
+    osm_source = pipeline.osm_links_path or pipeline.osm_pbf_path
     if not osm_source:
         raise ValueError("Mapping build requires staged osm_links_path or osm_pbf_path.")
     logger.info("Stage 1/5: mapping BEAM network to OSM using %s", osm_source)
     map_beam_network_to_osm(
         osm_path=osm_source,
-        beam_network_path=pipeline["beam_network_path"],
+        beam_network_path=pipeline.beam_network_path,
         output_path=str(beam_osm_path),
-        network_osm_id_col=pipeline["beam_osm_id_col"],
+        network_osm_id_col=pipeline.beam_osm_id_col,
+        output_epsg=int(pipeline.output_epsg),
     )
     logger.info("Stage 1/5 complete: wrote %s", beam_osm_path)
 
     county_input = str(beam_osm_path)
-    county_state_fips = pipeline.get("county_state_fips")
-    county_fips_codes = list(pipeline.get("county_fips_codes", []) or [])
+    county_state_fips = pipeline.county_state_fips
+    county_fips_codes = list(pipeline.county_fips_codes or [])
     if county_state_fips and county_fips_codes:
         logger.info(
             "Stage 2/5: intersecting mapped BEAM/OSM network with counties state_fips=%s county_fips=%s",
@@ -68,38 +130,40 @@ def _build_mapping_from_staged_inputs(pipeline: Dict[str, Any], raw_dir: Path) -
             state_fips=str(county_state_fips),
             county_fips_codes=county_fips_codes,
             output_path=str(county_mapping_path),
-            beam_osm_epsg=int(pipeline["beam_osm_epsg"]),
-            output_epsg=int(pipeline["output_epsg"]),
-            area_name=str(pipeline.get("county_area_name", "county")),
+            beam_osm_epsg=int(pipeline.beam_osm_epsg),
+            output_epsg=int(pipeline.output_epsg),
+            area_name=str(pipeline.region or pipeline.county_area_name),
+            boundary_year=int(pipeline.start_year or 2023),
         )
         county_input = str(county_mapping_path)
         logger.info("Stage 2/5 complete: wrote %s", county_mapping_path)
     else:
         logger.info("Stage 2/5 skipped: county FIPS settings not configured")
 
-    inmap_grid_path = pipeline["inmap_grid_path"]
+    inmap_grid_path = pipeline.inmap_grid_path
     logger.info("Stage 3/5: intersecting mapped network with inmap_grid %s", inmap_grid_path)
     intersect_beam_osm_with_grid(
         beam_osm_path=county_input,
         grid_cells_path=inmap_grid_path,
         output_path=str(mapping_path),
-        beam_osm_epsg=int(pipeline["beam_osm_epsg"]),
-        grid_epsg=int(pipeline["inmap_grid_epsg"]),
-        output_epsg=int(pipeline["output_epsg"]),
-        beam_length_col=pipeline["beam_length_col"],
+        beam_osm_epsg=int(pipeline.beam_osm_epsg),
+        grid_epsg=int(pipeline.inmap_grid_epsg),
+        output_epsg=int(pipeline.output_epsg),
+        beam_length_col=pipeline.beam_length_col,
     )
     logger.info("Stage 3/5 complete: wrote %s", mapping_path)
-    aermod_grid_path = pipeline.get("aermod_grid_path")
+    aermod_grid_path = pipeline.aermod_grid_path
     if aermod_grid_path:
         logger.info("Stage 4/6: intersecting inmap_grid-broken network with aermod_grid %s", aermod_grid_path)
         intersect_beam_osm_with_grid(
             beam_osm_path=str(mapping_path),
             grid_cells_path=aermod_grid_path,
             output_path=str(fine_mapping_path),
-            beam_osm_epsg=int(pipeline["output_epsg"]),
-            grid_epsg=int(pipeline["aermod_grid_epsg"]),
-            output_epsg=int(pipeline["output_epsg"]),
-            beam_length_col=pipeline["beam_length_col"],
+            beam_osm_epsg=int(pipeline.output_epsg),
+            grid_epsg=int(pipeline.aermod_grid_epsg or pipeline.output_epsg),
+            output_epsg=int(pipeline.output_epsg),
+            beam_length_col=pipeline.beam_length_col,
+            road_buffer_filter_m=100.0,
         )
         logger.info("Stage 4/6 complete: wrote %s", fine_mapping_path)
     return str(mapping_path)
@@ -116,8 +180,8 @@ def run_from_input_manifest(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         force=False,
     )
-    manifest = load_structured_file(input_manifest_path)
-    pipeline = manifest.get("pipeline", {}) or {}
+    manifest = InputsManifest.from_dict(load_structured_file(input_manifest_path)).to_dict()
+    pipeline = PipelineConfig.from_dict(manifest.get("pipeline", {}) or {})
     population_inputs = manifest.get("population_inputs", {}) or {}
 
     output_root = Path(output_dir).resolve()
@@ -128,20 +192,21 @@ def run_from_input_manifest(
     logger.info("Output directory: %s", output_root)
 
     from impacts.emissions.emissions_grid_mapping import aggregate_allocated_intersection_rows
-    from impacts.emissions.emissions_grid_mapping import apply_county_process_corrections
+    from impacts.emissions.emissions_grid_mapping import apply_activity_corrections
     from impacts.emissions.emissions_grid_mapping import map_skims_emissions_to_intersection
+    from impacts.emissions.emissions_grid_mapping import plot_county_pm25_comparison
     from impacts.emissions.events_to_skims_emissions import build_skims_emissions_from_events
     from impacts.emissions.events_to_skims_emissions import write_skims_emissions
     from impacts.dispersion.isrm_dispersion import run_dispersion_from_file
 
-    mapping_input_path = pipeline.get("mapping_input_path")
+    mapping_input_path = pipeline.mapping_input_path
     if not mapping_input_path:
         mapping_input_path = _build_mapping_from_staged_inputs(pipeline, raw_dir)
     else:
         logger.info("Using staged mapping input: %s", mapping_input_path)
 
-    if pipeline.get("prepared_skims_input_path") or pipeline.get("skims_input_path"):
-        source = Path(pipeline.get("prepared_skims_input_path") or pipeline["skims_input_path"])
+    if pipeline.prepared_skims_input_path or pipeline.skims_input_path:
+        source = Path(pipeline.prepared_skims_input_path or pipeline.skims_input_path)
         if not source.exists():
             raise FileNotFoundError(f"Configured staged skims input not found: {source}")
         skims_path = _ensure_parent(raw_dir / source.name)
@@ -151,20 +216,20 @@ def run_from_input_manifest(
         logger.info("Stage 4/5 complete: raw skims available at %s", skims_path)
     else:
         skims_path = _table_path(raw_dir, "skims_emissions")
-        if not pipeline.get("events_path"):
+        if not pipeline.events_path:
             raise ValueError("Runner requires either staged skims_input_path or staged events_path")
-        logger.info("Stage 4/5: building skims from staged events %s", pipeline["events_path"])
+        logger.info("Stage 4/5: building skims from staged events %s", pipeline.events_path)
         rates_df = None
-        if pipeline.get("use_rates", True):
-            rates_df = _load_rates(pipeline.get("rates_dir"))
-            logger.info("Loaded rates from %s", pipeline.get("rates_dir"))
+        if pipeline.use_rates:
+            rates_df = _load_rates(pipeline.rates_dir)
+            logger.info("Loaded rates from %s", pipeline.rates_dir)
         skims = build_skims_emissions_from_events(
-            events_path=pipeline["events_path"],
-            network_path=pipeline.get("link_length_path"),
+            events_path=pipeline.events_path,
+            network_path=pipeline.link_length_path,
             rates_df=rates_df,
-            iterations=int(pipeline.get("iterations", 0)),
-            events_columns=pipeline.get("events_columns"),
-            network_columns=pipeline.get("network_columns"),
+            iterations=int(pipeline.iterations),
+            events_columns=pipeline.events_columns,
+            network_columns=pipeline.network_columns,
         )
         write_skims_emissions(skims, str(skims_path))
         logger.info("Stage 4/5 complete: wrote %s", skims_path)
@@ -178,18 +243,18 @@ def run_from_input_manifest(
             skims_path=str(skims_path),
             mapping_path=str(county_mapping_candidate),
             output_path=str(county_allocated_raw_path),
-            skims_columns=pipeline.get("skims_columns"),
-            mapping_columns=pipeline.get("mapping_columns"),
+            skims_columns=pipeline.skims_columns,
+            mapping_columns=pipeline.mapping_columns,
         )
         logger.info("Stage 5/7 complete: wrote %s", county_allocated_raw_path)
 
-        if pipeline.get("county_correction_factors_path"):
+        if pipeline.activity_corrections_path:
             county_allocated_corrected_path = _table_path(raw_dir, "emissions_county_allocated_corrected")
             logger.info("Stage 6/7: applying county process corrections to county-broken emissions")
-            county_allocated_corrected = apply_county_process_corrections(
+            county_allocated_corrected = apply_activity_corrections(
                 county_allocated_raw,
-                str(pipeline["county_correction_factors_path"]),
-                correction_columns=pipeline.get("county_correction_columns"),
+                str(pipeline.activity_corrections_path),
+                correction_columns=pipeline.activity_corrections_columns,
             )
             county_allocated_corrected = aggregate_allocated_intersection_rows(
                 county_allocated_corrected,
@@ -207,6 +272,15 @@ def run_from_input_manifest(
                 county_allocated_corrected.to_csv(county_allocated_corrected_path, index=False, compression="gzip")
             logger.info("Stage 6/7 complete: wrote %s", county_allocated_corrected_path)
 
+            plot_path = raw_dir / "county_pm25_before_after_correction.png"
+            logger.info("Stage 6/7: generating county PM2.5 before/after correction plot")
+            plot_county_pm25_comparison(
+                county_allocated_raw,
+                county_allocated_corrected,
+                output_path=str(plot_path),
+            )
+            logger.info("Stage 6/7: county PM2.5 plot saved to %s", plot_path)
+
     grid_allocated_raw_path = _table_path(raw_dir, "emissions_inmap_grid_allocated_raw")
     grid_allocated_path = _table_path(raw_dir, "emissions_inmap_grid_allocated")
     grid_allocation_input_path = county_allocated_corrected_path or skims_path
@@ -219,8 +293,8 @@ def run_from_input_manifest(
         skims_path=str(grid_allocation_input_path),
         mapping_path=str(mapping_input_path),
         output_path=str(grid_allocated_raw_path),
-        skims_columns=pipeline.get("skims_columns"),
-        mapping_columns=pipeline.get("mapping_columns"),
+        skims_columns=pipeline.skims_columns,
+        mapping_columns=pipeline.mapping_columns,
     )
     grid_allocated = aggregate_allocated_intersection_rows(
         grid_allocated,
@@ -233,7 +307,12 @@ def run_from_input_manifest(
         ],
     )
     if grid_allocated_path.suffix.lower() == ".parquet":
-        grid_allocated.to_parquet(grid_allocated_path, index=False)
+        _write_geoparquet_allocation(
+            grid_allocated,
+            grid_path=str(pipeline.inmap_grid_path),
+            output_path=grid_allocated_path,
+            output_epsg=int(pipeline.output_epsg),
+        )
     else:
         grid_allocated.to_csv(grid_allocated_path, index=False, compression="gzip")
     logger.info(
@@ -253,8 +332,8 @@ def run_from_input_manifest(
             skims_path=str(grid_allocated_raw_path),
             mapping_path=str(fine_mapping_candidate),
             output_path=str(fine_grid_allocated_raw_path),
-            skims_columns=pipeline.get("skims_columns"),
-            mapping_columns=pipeline.get("mapping_columns"),
+            skims_columns=pipeline.skims_columns,
+            mapping_columns=pipeline.mapping_columns,
         )
         fine_grid_allocated = aggregate_allocated_intersection_rows(
             fine_grid_allocated,
@@ -263,11 +342,16 @@ def run_from_input_manifest(
                 "vehicleTypeId",
                 "cell_id",
                 "GRID",
-                "zone_grid100",
+                "zone_grid_id",
             ],
         )
         if fine_grid_allocated_path.suffix.lower() == ".parquet":
-            fine_grid_allocated.to_parquet(fine_grid_allocated_path, index=False)
+            _write_geoparquet_allocation(
+                fine_grid_allocated,
+                grid_path=str(pipeline.aermod_grid_path),
+                output_path=fine_grid_allocated_path,
+                output_epsg=int(pipeline.output_epsg),
+            )
         else:
             fine_grid_allocated.to_csv(fine_grid_allocated_path, index=False, compression="gzip")
         logger.info("Stage 8/8 complete: wrote %s", fine_grid_allocated_path)
@@ -279,11 +363,11 @@ def run_from_input_manifest(
         run_dispersion_from_file(
             emissions_input_path=str(grid_allocated_path),
             output_path=str(concentration_path),
-            isrm_url=pipeline["isrm_url"],
-            factor=float(pipeline.get("concentration_factor", 28766.639)),
-            include_bc=bool(pipeline.get("include_bc", False)),
-            include_health=bool(pipeline.get("include_health", False)),
-            emissions_columns=pipeline.get("dispersion_emissions_columns"),
+            isrm_url=pipeline.isrm_url,
+            factor=float(pipeline.concentration_factor or 28766.639),
+            include_bc=bool(pipeline.include_bc),
+            include_health=bool(pipeline.include_health),
+            emissions_columns=pipeline.dispersion_emissions_columns,
         )
         logger.info("Dispersion complete: wrote %s", concentration_path)
     else:
@@ -311,7 +395,7 @@ def run_from_input_manifest(
             "emissions_aermod_grid_allocated": str(fine_grid_allocated_path) if fine_grid_allocated_path else None,
             "grid_concentration": str(concentration_path) if concentration_path else None,
         },
-        "pipeline": pipeline,
+        "pipeline": pipeline.to_dict(),
         "population_inputs": population_inputs,
         "deterministic_contract": {
             "uses_only_manifest_paths": True,
@@ -324,20 +408,28 @@ def run_from_input_manifest(
     }
     output_manifest = Path(run_manifest_path) if run_manifest_path else output_root / "run_manifest.yaml"
     run_manifest["run_manifest_path"] = str(output_manifest)
-    write_structured_file(output_manifest, run_manifest)
+    typed_manifest = RunManifest.from_dict(run_manifest)
+    write_structured_file(output_manifest, typed_manifest.to_dict())
     logger.info("Run manifest written: %s", output_manifest)
-    return run_manifest
+    return typed_manifest.to_dict()
 
 
-def impacts_run(
-    input_manifest_path: str | Path,
-    output_dir: str | Path,
+def run_from_runtime_config(
+    runtime_config_path: str | Path,
+    workspace: str | Path,
     run_manifest_path: str | Path | None = None,
     run_dispersion: bool = True,
 ) -> Dict[str, Any]:
+    from impacts.preprocessor import preprocess_workflow
+
+    workspace_root = Path(workspace).resolve()
+    preprocess_manifest = preprocess_workflow(
+        runtime_config_path=runtime_config_path,
+        staging_dir=workspace_root,
+    )
     return run_from_input_manifest(
-        input_manifest_path=input_manifest_path,
-        output_dir=output_dir,
+        input_manifest_path=preprocess_manifest["inputs_manifest_path"],
+        output_dir=workspace_root / "output",
         run_manifest_path=run_manifest_path,
         run_dispersion=run_dispersion,
     )

@@ -4,25 +4,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from dataclasses import fields
 from pathlib import Path
 from typing import Dict, Iterable, Optional
 
 import numpy as np
 import pandas as pd
-
-try:
-    from impacts.network2grid.network_grid_clipping import (
-        DEFAULT_WORKFLOW_CONFIG_PATH,
-        load_workflow_config,
-        resolve_path_from_workflow,
-    )
-except ImportError:
-    from ..network2grid.network_grid_clipping import (
-        DEFAULT_WORKFLOW_CONFIG_PATH,
-        load_workflow_config,
-        resolve_path_from_workflow,
-    )
 
 
 @dataclass
@@ -48,27 +34,6 @@ DEFAULT_EMISSIONS_COLUMNS = {
     "bcv1": "tons_per_year_BCV1",
     "bcv3": "tons_per_year_BCV3",
 }
-
-
-def load_dispersion_config(
-    config_path: Optional[str] = None,
-) -> DispersionConfig:
-    """Build dispersion config from workflow YAML."""
-    workflow = load_workflow_config(config_path)
-    main = workflow.get("main", {}) or {}
-    section_name = main.get("dispersion_section", "dispersion_isrm")
-    section = workflow.get(section_name, {}) or {}
-
-    allowed = {f.name for f in fields(DispersionConfig)}
-    config_kwargs = {k: v for k, v in section.items() if k in allowed}
-    cfg = DispersionConfig(**config_kwargs)
-    cfg.emissions_input_path = resolve_path_from_workflow(cfg.emissions_input_path, config_path)
-    cfg.concentration_output_path = (
-        resolve_path_from_workflow(cfg.concentration_output_path, config_path)
-        or cfg.concentration_output_path
-    )
-    return cfg
-
 
 def _first_existing(df: pd.DataFrame, candidates: Iterable[str]) -> Optional[str]:
     for col in candidates:
@@ -189,17 +154,20 @@ def load_isrm_store(isrm_url: str = "s3://inmap-model/isrm_v1.2.1.zarr/"):
 
     if isrm_url.startswith("s3://"):
         try:
-            import s3fs
+            import s3fs  # noqa: F401 — required by zarr's fsspec/s3 backend
         except ImportError as exc:
             raise ImportError("s3fs is required to read ISRM zarr from s3:// URLs") from exc
-        fs = s3fs.S3FileSystem(anon=True, client_kwargs={"region_name": "us-east-2"})
-        return zarr.open(s3fs.S3Map(isrm_url, s3=fs, check=False), mode="r")
+        return zarr.open(
+            isrm_url,
+            mode="r",
+            storage_options={"anon": True, "client_kwargs": {"region_name": "us-east-2"}},
+        )
 
     return zarr.open(isrm_url, mode="r")
 
 
 def _matrix_response(sr, species_key: str, source_cells: np.ndarray, source_values: np.ndarray) -> np.ndarray:
-    transfer = sr[species_key].get_orthogonal_selection(([0], source_cells, slice(None)))
+    transfer = sr[species_key].oindex[[0], source_cells, :]
     # transfer shape: (1, n_sources, n_receptors)
     return transfer[0, :, :].T.dot(source_values)
 
@@ -326,21 +294,3 @@ def run_dispersion_from_file(
             raise ValueError("Output path must end with .parquet, .csv, or .csv.gz")
 
     return concentrations
-
-
-def run_dispersion_from_workflow_config(
-    config_path: Optional[str] = None,
-) -> pd.DataFrame:
-    """Run dispersion using `dispersion_isrm` section in workflow config."""
-    cfg = load_dispersion_config(config_path)
-    if not cfg.emissions_input_path:
-        raise ValueError("dispersion config missing emissions_input_path")
-
-    return run_dispersion_from_file(
-        emissions_input_path=cfg.emissions_input_path,
-        output_path=cfg.concentration_output_path,
-        isrm_url=cfg.isrm_url,
-        factor=cfg.concentration_factor,
-        include_bc=cfg.include_bc,
-        include_health=cfg.include_health,
-    )

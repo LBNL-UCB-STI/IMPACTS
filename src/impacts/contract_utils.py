@@ -30,31 +30,87 @@ def _parse_scalar(raw: str):
 
 
 def _simple_yaml_load(text: str):
-    data: Dict[str, Any] = {}
-    current_section: Optional[str] = None
-    for line in text.splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
+    records = []
+    for raw_line in text.splitlines():
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
             continue
-        indent = len(line) - len(line.lstrip(" "))
-        if ":" not in line:
-            continue
-        key, raw_val = line.split(":", 1)
-        key = key.strip()
-        raw_val = raw_val.strip()
-        if indent == 0:
-            if raw_val == "":
-                data[key] = {}
-                current_section = key
-            else:
-                data[key] = _parse_scalar(raw_val)
-                current_section = None
-        else:
-            if current_section is None:
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        stripped = raw_line.strip()
+        records.append((indent, stripped))
+
+    def parse_block(index: int, indent: int):
+        if index >= len(records):
+            return {}, index
+        current_indent, stripped = records[index]
+        if current_indent != indent:
+            return {}, index
+        if stripped.startswith("- "):
+            return parse_list(index, indent)
+        return parse_map(index, indent)
+
+    def parse_map(index: int, indent: int):
+        data: Dict[str, Any] = {}
+        while index < len(records):
+            current_indent, stripped = records[index]
+            if current_indent < indent:
+                break
+            if current_indent > indent:
+                break
+            if stripped.startswith("- "):
+                break
+            if ":" not in stripped:
+                index += 1
                 continue
-            if not isinstance(data[current_section], dict):
-                data[current_section] = {}
-            data[current_section][key] = _parse_scalar(raw_val)
-    return data
+            key, raw_val = stripped.split(":", 1)
+            key = key.strip()
+            raw_val = raw_val.strip()
+            index += 1
+            if raw_val != "":
+                data[key] = _parse_scalar(raw_val)
+                continue
+            if index >= len(records):
+                data[key] = None
+                continue
+            next_indent, next_stripped = records[index]
+            if next_indent <= current_indent:
+                data[key] = None
+            elif next_stripped.startswith("- "):
+                value, index = parse_list(index, next_indent)
+                data[key] = value
+            else:
+                value, index = parse_map(index, next_indent)
+                data[key] = value
+        return data, index
+
+    def parse_list(index: int, indent: int):
+        items = []
+        while index < len(records):
+            current_indent, stripped = records[index]
+            if current_indent < indent:
+                break
+            if current_indent != indent or not stripped.startswith("- "):
+                break
+            value = stripped[2:].strip()
+            index += 1
+            if value:
+                items.append(_parse_scalar(value))
+                continue
+            if index >= len(records):
+                items.append(None)
+                continue
+            next_indent, next_stripped = records[index]
+            if next_indent <= current_indent:
+                items.append(None)
+            elif next_stripped.startswith("- "):
+                value, index = parse_list(index, next_indent)
+                items.append(value)
+            else:
+                value, index = parse_map(index, next_indent)
+                items.append(value)
+        return items, index
+
+    parsed, _ = parse_block(0, records[0][0] if records else 0)
+    return parsed
 
 
 def load_structured_file(path: str | Path) -> Dict[str, Any]:

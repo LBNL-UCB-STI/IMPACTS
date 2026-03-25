@@ -37,7 +37,7 @@ Legacy or exploratory code under `src/impacts/tmp/` is not part of the public ex
 ### Contract shape
 
 1. `preprocess`
-   - resolves explicit upstream inputs from a workflow YAML
+   - resolves explicit upstream inputs from a runtime config YAML
    - stages deterministic inputs into a clean directory
    - writes `inputs_manifest.yaml`
 2. `run`
@@ -52,7 +52,7 @@ Legacy or exploratory code under `src/impacts/tmp/` is not part of the public ex
 ### CLI
 
 ```bash
-python -m impacts preprocess --workflow-config /path/workflow.yaml --staging-dir /path/workspace
+python -m impacts preprocess --config /path/runtime.yaml --staging-dir /path/workspace
 python -m impacts run --input-manifest /path/workspace/inputs_manifest.yaml --output-dir /path/workspace/output
 python -m impacts postprocess --run-manifest /path/workspace/output/run_manifest.yaml --output-dir /path/workspace/output
 ```
@@ -60,7 +60,7 @@ python -m impacts postprocess --run-manifest /path/workspace/output/run_manifest
 End-to-end:
 
 ```bash
-python -m impacts pipeline --workflow-config /path/workflow.yaml --workspace /path/workspace
+python -m impacts pipeline --config /path/runtime.yaml --workspace /path/workspace
 ```
 
 ### Canonical artifact
@@ -79,33 +79,45 @@ Each row is one cell and includes:
 - `households_total`
 - `population_mix` as a structured JSON payload
 
-Population integration is currently best-effort. If staged ActivitySim tables do not yet contain a usable cell identifier, provide a `population_cell_mapping_path` in the workflow config and the postprocessor will use it. When neither is available, the canonical artifact still exists but population mix fields remain empty placeholders.
+Population integration is currently best-effort. Staged ActivitySim tables should carry a usable cell identifier. When they do not, the canonical artifact still exists but population mix fields remain empty placeholders.
 
-### Workflow config inputs
+### Runtime config inputs
 
-The orchestrated contract resolves the following maintained inputs:
+The maintained runtime contract resolves the following inputs from `runtime.yaml`:
 
-- BEAM events via `emissions_events.events_input_path`
-- or precomputed BEAM emissions skims via `emissions_grid_mapping.skims_input_path`
-- link lengths via `emissions_events.link_length_path` or `osm_grid.beam_network_path`
-- emissions rates via `emissions_rates.rates_dir`
-- either:
-  - `emissions_grid_mapping.mapping_input_path`, or
-  - `osm_grid.osm_links_path`, `osm_grid.beam_network_path`, and `osm_grid.grid_cells_path`
-- optional OSM/BEAM source placeholders via `osm_grid.osm_pbf_path` and `osm_grid.beam_mapdb_path`
-- ISRM source via `dispersion_isrm.isrm_url`
-- optional ActivitySim inputs via `activitysim_population.*`
+- `inputs.beam_network`
+- `inputs.emissions_skims`
+- `inputs.osm_pbf`
+- optional `inputs.osm_links`
+- optional `inputs.beam_mapdb`
+- optional `inputs.activity_corrections`
+- optional `inputs.isrm_zarr`
+- optional ActivitySim population tables:
+  - `inputs.households_asim_out`
+  - `inputs.persons_asim_out`
+- `processing.grid.inmap_grid_path`
+- optional `processing.grid.aermod_grid_path`
+- `processing.pollutants`
+- `processing.annualization_days`
+
+Standalone runs should provide these as explicit resolved paths in `runtime.yaml`.
+They do not need to replicate a PILATES or BEAM output directory structure.
+
+Integrated runs are different:
+
+- `adapters/pilates.py` derives concrete runtime paths from PILATES settings
+- this includes BEAM artifact discovery such as:
+  - `inputs.osm_pbf` from `beam.local_input_folder` and `beam.router_directory`
+  - `inputs.beam_network` from the discovered BEAM run root
+  - `inputs.emissions_skims` from the latest discovered `ITERS/it.x/x.skimsEmissionsTotals.csv.gz`
+- execution still consumes only the explicit derived `runtime.yaml`
 
 ### PILATES-facing config stub
 
 A concrete example config block for PILATES lives in [pilates_model_config.yaml](/Users/haitamlaarabi/Workspace/Models/inmap-aermod/impacts/examples/pilates/pilates_model_config.yaml). It includes:
 
-- local input and output dirs
-- container input and output dirs
-- entrypoint and command template
-- canonical output filenames
-- manifest filenames
-- explicit placeholders for integration details that are not finalized yet
+- a thin `impacts.runtime_overrides` section
+- only `impacts`-specific settings that are not already derivable from PILATES shared or BEAM config
 
 ### Docker usage
 
@@ -141,7 +153,7 @@ The repo includes a standalone PILATES example under [examples/pilates](/Users/h
 Run it from the repo root:
 
 ```bash
-python examples/pilates/run_example.py
+python examples/pilates/run_pilates_example.py
 ```
 
 That example:
@@ -150,7 +162,7 @@ That example:
 - runs the maintained contract end to end
 - writes manifests under `examples/pilates/workspace`
 - publishes a canonical exposure table
-- uses a fake in-memory ISRM store by default so it works without external data access
+- uses the configured runtime inputs directly
 
 
 ## Installation #WIP

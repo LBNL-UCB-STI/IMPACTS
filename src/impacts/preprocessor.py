@@ -5,18 +5,20 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
+import geopandas as gpd
+import pandas as pd
+
+from .config.builders import build_runtime_config_from_runtime_yaml
 from .contract_utils import copy_path
 from .contract_utils import file_entry
 from .contract_utils import is_remote_path
-from .contract_utils import load_structured_file
+from .contract_utils import parquet_available
 from .contract_utils import resolve_path
 from .contract_utils import write_structured_file
-from .contract_utils import parquet_available
+from .manifest_models import InputsManifest
 
 
 CONTRACT_VERSION = "1"
-DEFAULT_POPULATION_SECTION = "activitysim_population"
-DEFAULT_PILATES_SECTION = "pilates_terminal_contract"
 DEFAULT_EVENTS_COLUMNS = {
     "type": "type",
     "vehicle": "vehicle",
@@ -50,8 +52,8 @@ DEFAULT_SKIMS_COLUMNS = {
 }
 DEFAULT_MAPPING_COLUMNS = {
     "link_id": "edge_linkId",
-    "proportion": "proportion",
-    "grid_id": "GRID",
+    "proportion": "zone_edge_proportion",
+    "grid_id": None,
 }
 DEFAULT_DISPERSION_EMISSIONS_COLUMNS = {
     "grid_id": "GRID",
@@ -76,20 +78,26 @@ DEFAULT_HOUSEHOLDS_COLUMNS = {
     "income": "income",
     "income_category": "income_category",
 }
-DEFAULT_POPULATION_MAPPING_COLUMNS = {
-    "household_id": "household_id",
-    "cell_id": "cell_id",
-}
 
 
-def _with_defaults(defaults: Dict[str, Any], config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _parse_epsg(value: Any, default: int) -> int:
+    if value is None:
+        return default
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if not text:
+        return default
+    if ":" in text:
+        _, _, suffix = text.rpartition(":")
+        text = suffix
+    return int(text)
+
+
+def _with_defaults(defaults: Dict[str, Any], config: Dict[str, Any] | None) -> Dict[str, Any]:
     merged = defaults.copy()
     merged.update(dict(config or {}))
     return merged
-
-
-def _section(config: Dict[str, Any], name: str) -> Dict[str, Any]:
-    return config.get(name, {}) or {}
 
 
 def _required_local_path(path: Optional[str], label: str) -> str:
@@ -112,6 +120,59 @@ def _optional_local_path(path: Optional[str]) -> Optional[str]:
     if not resolved.exists():
         raise FileNotFoundError(f"Configured path not found: {path}")
     return str(resolved)
+
+
+def _infer_vector_epsg(path: Optional[str]) -> Optional[int]:
+    if not path or is_remote_path(path):
+        return None
+    target = Path(path)
+    if not target.exists():
+        return None
+    try:
+        if target.suffix.lower() == ".parquet":
+            gdf = gpd.read_parquet(target)
+        else:
+            gdf = gpd.read_file(target)
+    except Exception:
+        return None
+    if gdf.crs is None:
+        return None
+    try:
+        return gdf.crs.to_epsg()
+    except Exception:
+        return None
+
+
+def _read_vector(path: str) -> gpd.GeoDataFrame:
+    target = Path(path)
+    if target.suffix.lower() == ".parquet":
+        return gpd.read_parquet(target)
+    return gpd.read_file(target)
+
+
+def _write_vector(gdf: gpd.GeoDataFrame, path: str) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.suffix.lower() == ".parquet":
+        gdf.to_parquet(target, index=False)
+    else:
+        gdf.to_file(target)
+
+
+def _infer_or_create_grid_id(
+    source_path: str,
+    staged_path: str,
+    configured_grid_id: Optional[str],
+) -> str:
+    if configured_grid_id:
+        return configured_grid_id
+
+    gdf = _read_vector(staged_path)
+    synthetic_col = "grid_id"
+    if synthetic_col not in gdf.columns:
+        gdf[synthetic_col] = pd.RangeIndex(start=1, stop=len(gdf) + 1, step=1)
+        _write_vector(gdf, staged_path)
+    return synthetic_col
 
 
 def _stage_local_input(
@@ -169,300 +230,213 @@ def _prepared_table_target(input_root: Path, stem: str) -> Path:
 
 
 def build_inputs_manifest(
-    workflow_config_path: str | Path,
+    runtime_config_path: str | Path,
     staging_dir: str | Path,
 ) -> Dict[str, Any]:
-    config_path = Path(workflow_config_path).resolve()
-    config = load_structured_file(config_path)
-
-    main = _section(config, "main")
-    events_section = _section(config, main.get("events_section", "emissions_events"))
-    rates_section = _section(config, main.get("rates_section", "emissions_rates"))
-    mapping_section = _section(config, main.get("mapping_section", "osm_grid"))
-    emissions_mapping_section = _section(
-        config,
-        main.get("emissions_mapping_section", "emissions_grid_mapping"),
-    )
-    dispersion_section = _section(config, main.get("dispersion_section", "dispersion_isrm"))
-    population_section = _section(
-        config,
-        main.get("population_section", DEFAULT_POPULATION_SECTION),
-    )
-    pilates_section = _section(
-        config,
-        main.get("pilates_section", DEFAULT_PILATES_SECTION),
-    )
+    config_path = Path(runtime_config_path).resolve()
+    runtime_config = build_runtime_config_from_runtime_yaml(config_path)
+    geography = runtime_config.shared_context.geography
+    inputs = runtime_config.inputs
+    processing = runtime_config.processing
+    grid = processing.grid
+    outputs = runtime_config.outputs
 
     workspace_root = Path(staging_dir).resolve()
     input_root = workspace_root / "input"
     input_root.mkdir(parents=True, exist_ok=True)
 
     manifest_inputs: Dict[str, Any] = {}
-
-    workflow_copy = _stage_local_input(
+    runtime_copy = _stage_local_input(
         manifest_inputs=manifest_inputs,
         input_root=input_root,
-        key="workflow_config",
+        key="runtime_config",
         source_path=str(config_path),
-        relative_target="config/workflow_config.yaml",
+        relative_target="config/runtime.yaml",
     )
 
-    events_path = resolve_path(events_section.get("events_input_path"), config_path)
-    skims_input_path = _optional_local_path(
-        resolve_path(emissions_mapping_section.get("skims_input_path"), config_path),
+    skims_input_path = _optional_local_path(resolve_path(inputs.emissions_skims, config_path))
+    if not skims_input_path:
+        raise ValueError("Preprocess requires inputs.emissions_skims")
+
+    staged_skims_input = _stage_local_input(
+        manifest_inputs=manifest_inputs,
+        input_root=input_root,
+        key="skims_input",
+        source_path=skims_input_path,
+        relative_target=f"skims/{Path(skims_input_path).name}",
+        optional=True,
     )
-    staged_events = None
-    if events_path:
-        resolved_events_path = _required_local_path(
-            events_path,
-            "emissions_events.events_input_path",
-        )
-        staged_events = _stage_local_input(
-            manifest_inputs=manifest_inputs,
-            input_root=input_root,
-            key="events",
-            source_path=resolved_events_path,
-            relative_target=f"events/{Path(resolved_events_path).name}",
-        )
-    if not staged_events and not skims_input_path:
-        raise ValueError(
-            "Preprocess requires either emissions_events.events_input_path "
-            "or emissions_grid_mapping.skims_input_path"
-        )
 
-    staged_skims_input = None
-    staged_prepared_skims_input = None
-    staged_county_correction_factors = None
-    if skims_input_path and not is_remote_path(skims_input_path):
-        staged_skims_input = _stage_local_input(
-            manifest_inputs=manifest_inputs,
-            input_root=input_root,
-            key="skims_input",
-            source_path=skims_input_path,
-            relative_target=f"skims/{Path(skims_input_path).name}",
-            optional=True,
-        )
-        from impacts.emissions.emissions_grid_mapping import annualize_prepared_skims_for_grid_allocation
-        from impacts.emissions.emissions_grid_mapping import prepare_skims_for_grid_allocation
+    from impacts.emissions.emissions_grid_mapping import annualize_prepared_skims_for_grid_allocation
+    from impacts.emissions.emissions_grid_mapping import prepare_skims_for_grid_allocation
 
-        prepared_grouped_skims_path = _prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
-        prepare_skims_for_grid_allocation(
-            skims_path=staged_skims_input,
-            output_path=str(prepared_grouped_skims_path),
-            skims_columns=_with_defaults(DEFAULT_SKIMS_COLUMNS, emissions_mapping_section.get("skims_columns", {})),
-            group_cols=list(emissions_mapping_section.get("prepared_skims_group_cols", []) or ["linkId", "vehicleTypeId", "process"]),
-            required_pollutants=list(
-                emissions_mapping_section.get("prepared_pollutants", [])
-                or ["NH3", "NOx", "PM2_5", "SOx", "ROG", "BCh"]
-            ),
-        )
-        prepared_skims_path = _prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
-        annualize_prepared_skims_for_grid_allocation(
-            prepared_skims_path=str(prepared_grouped_skims_path),
-            output_path=str(prepared_skims_path),
-            group_cols=list(emissions_mapping_section.get("prepared_skims_group_cols", []) or ["linkId", "vehicleTypeId", "process"]),
-            required_pollutants=list(
-                emissions_mapping_section.get("prepared_pollutants", [])
-                or ["NH3", "NOx", "PM2_5", "SOx", "ROG", "BCh"]
-            ),
-            annualization_days=float(emissions_mapping_section.get("annualization_days", 330.0) or 330.0),
-        )
-        manifest_inputs["prepared_skims_grouped"] = file_entry(
-            kind="local",
-            path=str(prepared_grouped_skims_path),
-            staged_path=str(prepared_grouped_skims_path),
-            optional=True,
-        )
-        manifest_inputs["prepared_skims_input"] = file_entry(
-            kind="local",
-            path=str(prepared_skims_path),
-            staged_path=str(prepared_skims_path),
-            optional=True,
-        )
-        staged_prepared_skims_input = str(prepared_skims_path)
-
-    county_correction_factors_path = resolve_path(
-        emissions_mapping_section.get("county_correction_factors_path"),
-        config_path,
+    prepared_grouped_skims_path = _prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
+    prepare_skims_for_grid_allocation(
+        skims_path=staged_skims_input,
+        output_path=str(prepared_grouped_skims_path),
+        skims_columns=_with_defaults(DEFAULT_SKIMS_COLUMNS, processing.skims_columns.__dict__),
+        group_cols=list(processing.prepared_skims_group_cols),
+        required_pollutants=list(processing.pollutants),
     )
-    if county_correction_factors_path and not is_remote_path(county_correction_factors_path):
-        staged_county_correction_factors = _stage_local_input(
-            manifest_inputs=manifest_inputs,
-            input_root=input_root,
-            key="county_correction_factors",
-            source_path=county_correction_factors_path,
-            relative_target=f"county/{Path(county_correction_factors_path).name}",
-            optional=True,
-        )
-
-    link_length_source = resolve_path(events_section.get("link_length_path"), config_path)
-    beam_network_source = resolve_path(mapping_section.get("beam_network_path"), config_path)
-    staged_link_lengths = None
-    if link_length_source:
-        staged_link_lengths = _stage_local_input(
-            manifest_inputs=manifest_inputs,
-            input_root=input_root,
-            key="link_lengths",
-            source_path=_required_local_path(link_length_source, "emissions_events.link_length_path"),
-            relative_target=f"network/{Path(link_length_source).name}",
-            optional=True,
-        )
-    elif beam_network_source:
-        beam_network_source = _required_local_path(
-            beam_network_source,
-            "osm_grid.beam_network_path",
-        )
-        staged_link_lengths = _stage_local_input(
-            manifest_inputs=manifest_inputs,
-            input_root=input_root,
-            key="link_lengths",
-            source_path=beam_network_source,
-            relative_target=f"network/{Path(beam_network_source).name}",
-            optional=True,
-        )
-
-    rates_dir = _optional_local_path(resolve_path(rates_section.get("rates_dir"), config_path))
-    staged_rates_dir = None
-    if rates_dir and not is_remote_path(rates_dir):
-        staged_rates_dir = _stage_local_input(
-            manifest_inputs=manifest_inputs,
-            input_root=input_root,
-            key="rates_dir",
-            source_path=rates_dir,
-            relative_target="rates",
-            optional=True,
-        )
-
-    precomputed_mapping_path = _optional_local_path(
-        resolve_path(emissions_mapping_section.get("mapping_input_path"), config_path),
+    prepared_skims_path = _prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
+    annualize_prepared_skims_for_grid_allocation(
+        prepared_skims_path=str(prepared_grouped_skims_path),
+        output_path=str(prepared_skims_path),
+        group_cols=list(processing.prepared_skims_group_cols),
+        required_pollutants=list(processing.pollutants),
+        annualization_days=float(processing.annualization_days),
     )
-    staged_precomputed_mapping = None
-    staged_osm = None
-    staged_beam_network = None
-    staged_grid = None
-    staged_fine_grid = None
-    use_precomputed_mapping = bool(precomputed_mapping_path)
-    if use_precomputed_mapping and not is_remote_path(str(precomputed_mapping_path)):
-        staged_precomputed_mapping = _stage_local_input(
+    manifest_inputs["prepared_skims_grouped"] = file_entry(
+        kind="local",
+        path=str(prepared_grouped_skims_path),
+        staged_path=str(prepared_grouped_skims_path),
+        optional=True,
+    )
+    manifest_inputs["prepared_skims_input"] = file_entry(
+        kind="local",
+        path=str(prepared_skims_path),
+        staged_path=str(prepared_skims_path),
+        optional=True,
+    )
+    staged_prepared_skims_input = str(prepared_skims_path)
+
+    activity_corrections_path = resolve_path(inputs.activity_corrections, config_path)
+    staged_activity_corrections = None
+    if activity_corrections_path and not is_remote_path(activity_corrections_path):
+        staged_activity_corrections = _stage_local_input(
             manifest_inputs=manifest_inputs,
             input_root=input_root,
-            key="mapping_input",
-            source_path=str(precomputed_mapping_path),
-            relative_target=f"mapping/{Path(str(precomputed_mapping_path)).name}",
+            key="activity_corrections",
+            source_path=activity_corrections_path,
+            relative_target=f"activity/{Path(activity_corrections_path).name}",
+            optional=True,
         )
+
+    beam_network_source = _required_local_path(
+        resolve_path(inputs.beam_network, config_path),
+        "inputs.beam_network",
+    )
+    staged_link_lengths = _stage_local_input(
+        manifest_inputs=manifest_inputs,
+        input_root=input_root,
+        key="link_lengths",
+        source_path=beam_network_source,
+        relative_target=f"network/{Path(beam_network_source).name}",
+        optional=True,
+    )
+
+    osm_source = resolve_path(inputs.osm_links, config_path)
+    osm_pbf_source = resolve_path(inputs.osm_pbf, config_path)
+    if osm_source:
+        osm_source = _required_local_path(osm_source, "inputs.osm_links")
+    elif osm_pbf_source:
+        osm_source = _required_local_path(osm_pbf_source, "inputs.osm_pbf")
     else:
-        osm_source = resolve_path(mapping_section.get("osm_links_path"), config_path)
-        osm_pbf_source = resolve_path(mapping_section.get("osm_pbf_path"), config_path)
-        if osm_source:
-            osm_source = _required_local_path(osm_source, "osm_grid.osm_links_path")
-        elif osm_pbf_source:
-            osm_source = _required_local_path(osm_pbf_source, "osm_grid.osm_pbf_path")
-        else:
-            raise ValueError("Either osm_grid.osm_links_path or osm_grid.osm_pbf_path is required.")
-        beam_network_source = _required_local_path(
-            resolve_path(mapping_section.get("beam_network_path"), config_path),
-            "osm_grid.beam_network_path",
-        )
-        grid_source = _required_local_path(
-            resolve_path(
-                mapping_section.get("inmap_grid_path"),
-                config_path,
-            ),
-            "osm_grid.inmap_grid_path",
-        )
-        fine_grid_source = _optional_local_path(
-            resolve_path(
-                mapping_section.get("aermod_grid_path"),
-                config_path,
-            ),
-        )
-        staged_osm = _stage_local_input(
-            manifest_inputs=manifest_inputs,
-            input_root=input_root,
-            key="osm_links",
-            source_path=osm_source,
-            relative_target=f"osm/{Path(osm_source).name}",
-        )
-        staged_beam_network = _stage_local_input(
-            manifest_inputs=manifest_inputs,
-            input_root=input_root,
-            key="beam_network",
-            source_path=beam_network_source,
-            relative_target=f"network/{Path(beam_network_source).name}",
-        )
-        staged_grid = _stage_local_input(
-            manifest_inputs=manifest_inputs,
-            input_root=input_root,
-            key="grid_cells",
-            source_path=grid_source,
-            relative_target=f"grid/{Path(grid_source).name}",
-        )
-        if fine_grid_source:
-            staged_fine_grid = _stage_local_input(
-                manifest_inputs=manifest_inputs,
-                input_root=input_root,
-                key="fine_grid_cells",
-                source_path=fine_grid_source,
-                relative_target=f"fine_grid/{Path(fine_grid_source).name}",
-                optional=True,
-            )
+        raise ValueError("Either inputs.osm_links or inputs.osm_pbf is required.")
 
-    isrm_source = resolve_path(dispersion_section.get("isrm_url"), config_path)
+    inmap_grid_source = _required_local_path(
+        resolve_path(grid.inmap_grid_path, config_path),
+        "processing.grid.inmap_grid_path",
+    )
+    aermod_grid_source = _optional_local_path(resolve_path(grid.aermod_grid_path, config_path))
+    local_output_epsg = _parse_epsg(geography.local_crs, 26910)
+    inmap_grid_epsg = (
+        grid.inmap_grid_epsg
+        or _infer_vector_epsg(inmap_grid_source)
+        or local_output_epsg
+    )
+    aermod_grid_epsg = (
+        grid.aermod_grid_epsg
+        or _infer_vector_epsg(aermod_grid_source)
+        or local_output_epsg
+    )
+
+    staged_osm = _stage_local_input(
+        manifest_inputs=manifest_inputs,
+        input_root=input_root,
+        key="osm_links",
+        source_path=osm_source,
+        relative_target=f"osm/{Path(osm_source).name}",
+    )
+    staged_beam_network = _stage_local_input(
+        manifest_inputs=manifest_inputs,
+        input_root=input_root,
+        key="beam_network",
+        source_path=beam_network_source,
+        relative_target=f"network/{Path(beam_network_source).name}",
+    )
+    staged_inmap_grid = _stage_local_input(
+        manifest_inputs=manifest_inputs,
+        input_root=input_root,
+        key="inmap_grid",
+        source_path=inmap_grid_source,
+        relative_target=f"inmap_grid/{Path(inmap_grid_source).name}",
+    )
+    staged_aermod_grid = None
+    resolved_aermod_grid_id = None
+    if aermod_grid_source:
+        staged_aermod_grid = _stage_local_input(
+            manifest_inputs=manifest_inputs,
+            input_root=input_root,
+            key="aermod_grid",
+            source_path=aermod_grid_source,
+            relative_target=f"aermod_grid/{Path(aermod_grid_source).name}",
+            optional=True,
+        )
+        resolved_aermod_grid_id = _infer_or_create_grid_id(
+            aermod_grid_source,
+            staged_aermod_grid,
+            None,
+        )
+    resolved_inmap_grid_id = _infer_or_create_grid_id(
+        inmap_grid_source,
+        staged_inmap_grid,
+        processing.mapping_columns.grid_id,
+    )
+
     staged_isrm = _stage_optional_input(
         manifest_inputs=manifest_inputs,
         input_root=input_root,
         key="isrm",
-        source_path=isrm_source,
-        relative_target=f"isrm/{Path(str(isrm_source)).name}" if isrm_source and not is_remote_path(str(isrm_source)) else "isrm",
+        source_path=resolve_path(inputs.isrm_zarr, config_path),
+        relative_target="isrm",
     )
-
     staged_persons = _stage_optional_input(
         manifest_inputs=manifest_inputs,
         input_root=input_root,
         key="persons",
-        source_path=_optional_local_path(resolve_path(population_section.get("persons_path"), config_path)),
+        source_path=_optional_local_path(resolve_path(inputs.persons_asim_out, config_path)),
         relative_target="population/persons.csv",
     )
     staged_households = _stage_optional_input(
         manifest_inputs=manifest_inputs,
         input_root=input_root,
         key="households",
-        source_path=_optional_local_path(resolve_path(population_section.get("households_path"), config_path)),
+        source_path=_optional_local_path(resolve_path(inputs.households_asim_out, config_path)),
         relative_target="population/households.csv",
-    )
-    staged_land_use = _stage_optional_input(
-        manifest_inputs=manifest_inputs,
-        input_root=input_root,
-        key="land_use",
-        source_path=_optional_local_path(resolve_path(population_section.get("land_use_path"), config_path)),
-        relative_target="population/land_use.csv",
-    )
-    staged_population_mapping = _stage_optional_input(
-        manifest_inputs=manifest_inputs,
-        input_root=input_root,
-        key="population_cell_mapping",
-        source_path=_optional_local_path(resolve_path(population_section.get("population_cell_mapping_path"), config_path)),
-        relative_target="population/population_cell_mapping.csv",
     )
     staged_osm_pbf = _stage_optional_input(
         manifest_inputs=manifest_inputs,
         input_root=input_root,
         key="osm_pbf",
-        source_path=_optional_local_path(resolve_path(mapping_section.get("osm_pbf_path"), config_path)),
+        source_path=_optional_local_path(resolve_path(inputs.osm_pbf, config_path)),
         relative_target="osm/source.pbf",
     )
     staged_beam_mapdb = _stage_optional_input(
         manifest_inputs=manifest_inputs,
         input_root=input_root,
         key="beam_mapdb",
-        source_path=_optional_local_path(resolve_path(mapping_section.get("beam_mapdb_path"), config_path)),
+        source_path=_optional_local_path(resolve_path(inputs.beam_mapdb, config_path)),
         relative_target="osm/beam.mapdb",
     )
+
+    mapping_columns = _with_defaults(DEFAULT_MAPPING_COLUMNS, processing.mapping_columns.__dict__)
+    mapping_columns["grid_id"] = resolved_inmap_grid_id
 
     manifest: Dict[str, Any] = {
         "contract_version": CONTRACT_VERSION,
         "model": "impacts",
-        "workflow_config_source": str(config_path),
+        "runtime_config_source": str(config_path),
         "staging_dir": str(workspace_root),
         "input_dir": str(input_root),
         "inputs_manifest_path": str(workspace_root / "inputs_manifest.yaml"),
@@ -472,130 +446,93 @@ def build_inputs_manifest(
             "impacts.dispersion.isrm_dispersion",
             "impacts.network2grid.network_grid_clipping",
         ],
-        "legacy_paths_not_wired": [
-            "src/impacts/tmp",
-            "src/impacts/tmp/archive",
-            "src/impacts/tmp/deprecated_R",
-        ],
         "inputs": manifest_inputs,
         "pipeline": {
-            "events_path": staged_events,
+            "events_path": None,
             "skims_input_path": staged_skims_input,
             "prepared_skims_input_path": staged_prepared_skims_input,
             "link_length_path": staged_link_lengths,
-            "rates_dir": staged_rates_dir,
-            "mapping_input_path": staged_precomputed_mapping,
-            "use_precomputed_mapping": use_precomputed_mapping,
+            "rates_dir": None,
+            "mapping_input_path": None,
+            "use_precomputed_mapping": False,
             "osm_links_path": staged_osm,
             "osm_pbf_path": staged_osm_pbf,
             "beam_mapdb_path": staged_beam_mapdb,
             "beam_network_path": staged_beam_network,
-            "inmap_grid_path": staged_grid,
-            "aermod_grid_path": staged_fine_grid,
+            "inmap_grid_path": staged_inmap_grid,
+            "aermod_grid_path": staged_aermod_grid,
             "isrm_url": staged_isrm,
-            "iterations": int(events_section.get("iteration", 0)),
-            "use_rates": bool(events_section.get("use_rates", True)),
-            "beam_osm_id_col": mapping_section.get("beam_osm_id_col", "attributeOrigId"),
-            "beam_length_col": mapping_section.get("beam_length_col", "linkLength"),
-            "beam_osm_epsg": int(mapping_section.get("beam_osm_epsg", 4326)),
-            "inmap_grid_epsg": int(mapping_section.get("inmap_grid_epsg", 4326) or 4326),
-            "aermod_grid_epsg": int(mapping_section.get("aermod_grid_epsg", 4326) or 4326),
-            "output_epsg": int(mapping_section.get("output_epsg", 26910)),
-            "county_state_fips": mapping_section.get("county_state_fips"),
-            "county_fips_codes": list(mapping_section.get("county_fips_codes", []) or []),
-            "county_area_name": mapping_section.get("county_area_name", "county"),
-            "concentration_factor": float(dispersion_section.get("concentration_factor", 28766.639)),
-            "include_bc": bool(dispersion_section.get("include_bc", False)),
-            "include_health": bool(dispersion_section.get("include_health", False)),
-            "events_columns": _with_defaults(DEFAULT_EVENTS_COLUMNS, events_section.get("events_columns", {})),
-            "network_columns": _with_defaults(DEFAULT_NETWORK_COLUMNS, events_section.get("network_columns", {})),
-            "beam_network_columns": _with_defaults(DEFAULT_BEAM_NETWORK_COLUMNS, mapping_section.get("beam_network_columns", {})),
-            "grid_columns": _with_defaults(DEFAULT_GRID_COLUMNS, mapping_section.get("grid_columns", {})),
-            "skims_columns": _with_defaults(DEFAULT_SKIMS_COLUMNS, emissions_mapping_section.get("skims_columns", {})),
-            "mapping_columns": _with_defaults(DEFAULT_MAPPING_COLUMNS, emissions_mapping_section.get("mapping_columns", {})),
-            "prepared_skims_input_path": staged_prepared_skims_input,
-            "prepared_skims_grouped_path": str(manifest_inputs["prepared_skims_grouped"]["staged_path"]) if manifest_inputs.get("prepared_skims_grouped") else None,
-            "prepared_skims_group_cols": list(emissions_mapping_section.get("prepared_skims_group_cols", []) or ["linkId", "vehicleTypeId", "process"]),
-            "prepared_pollutants": list(
-                emissions_mapping_section.get("prepared_pollutants", [])
-                or ["NH3", "NOx", "PM2_5", "SOx", "ROG", "BCh"]
+            "iterations": 0,
+            "use_rates": False,
+            "beam_osm_id_col": processing.beam_osm_id_col,
+            "beam_length_col": processing.beam_length_col,
+            "beam_osm_epsg": int(local_output_epsg),
+            "inmap_grid_epsg": int(inmap_grid_epsg),
+            "aermod_grid_epsg": int(aermod_grid_epsg),
+            "aermod_grid_id": resolved_aermod_grid_id,
+            "output_epsg": int(local_output_epsg),
+            "region": runtime_config.shared_context.region,
+            "start_year": runtime_config.shared_context.start_year,
+            "county_state_fips": geography.fips.state,
+            "county_fips_codes": list(geography.fips.counties),
+            "county_area_name": runtime_config.shared_context.region or processing.county_area_name,
+            "concentration_factor": float(processing.dispersion.concentration_factor),
+            "include_bc": bool(processing.dispersion.include_bc),
+            "include_health": bool(processing.dispersion.include_health),
+            "events_columns": DEFAULT_EVENTS_COLUMNS.copy(),
+            "network_columns": DEFAULT_NETWORK_COLUMNS.copy(),
+            "beam_network_columns": DEFAULT_BEAM_NETWORK_COLUMNS.copy(),
+            "grid_columns": DEFAULT_GRID_COLUMNS.copy(),
+            "skims_columns": _with_defaults(DEFAULT_SKIMS_COLUMNS, processing.skims_columns.__dict__),
+            "mapping_columns": mapping_columns,
+            "prepared_skims_grouped_path": str(prepared_grouped_skims_path),
+            "prepared_skims_group_cols": list(processing.prepared_skims_group_cols),
+            "prepared_pollutants": list(processing.pollutants),
+            "activity_corrections_path": staged_activity_corrections,
+            "activity_corrections_columns": processing.activity_corrections_columns.__dict__.copy(),
+            "annualization_days": float(processing.annualization_days),
+            "dispersion_emissions_columns": _with_defaults(
+                DEFAULT_DISPERSION_EMISSIONS_COLUMNS,
+                processing.dispersion.emissions_columns.__dict__,
             ),
-            "county_correction_factors_path": staged_county_correction_factors,
-            "county_correction_columns": _with_defaults(
-                {
-                    "county_fips": "COUNTYFP",
-                    "vmt_factor": "corr_VMT_by_county",
-                    "trips_factor": "corr_trips_by_county",
-                },
-                emissions_mapping_section.get("county_correction_columns", {}),
-            ),
-            "annualization_days": float(emissions_mapping_section.get("annualization_days", 330.0) or 330.0),
-            "dispersion_emissions_columns": _with_defaults(DEFAULT_DISPERSION_EMISSIONS_COLUMNS, dispersion_section.get("emissions_columns", {})),
         },
         "pilates_contract": {
             "stage": "terminal_postprocessing",
             "runs_after": ["beam", "supply_demand_loop"],
             "upstream_dependency_only": True,
             "publishes_final_artifact_only": True,
-            "local_input_dir": pilates_section.get("local_input_dir", str(input_root)),
-            "local_output_dir": pilates_section.get("local_output_dir", str(workspace_root / "output")),
-            "container_input_dir": pilates_section.get("container_input_dir", "/input"),
-            "container_output_dir": pilates_section.get("container_output_dir", "/output"),
-            "entrypoint": pilates_section.get("entrypoint", "python -m impacts run"),
-            "command_template": pilates_section.get(
-                "command_template",
-                "python -m impacts run --input-manifest {input_manifest} --output-dir {output_dir}",
-            ),
-            "canonical_output_filenames": pilates_section.get(
-                "canonical_output_filenames",
-                ["impacts_exposure_table.parquet", "impacts_exposure_table.csv.gz"],
-            ),
-            "manifest_filenames": pilates_section.get(
-                "manifest_filenames",
-                ["inputs_manifest.yaml", "run_manifest.yaml", "postprocess_manifest.yaml"],
-            ),
-            "placeholders": {
-                "land_use_context": staged_land_use is None,
-                "osm_reference": staged_osm is None and staged_osm_pbf is None and staged_beam_mapdb is None,
-            },
+            "local_input_dir": str(input_root),
+            "local_output_dir": str(outputs.output_dir),
+            "container_input_dir": "/input",
+            "container_output_dir": "/output",
+            "entrypoint": "python -m impacts run",
+            "command_template": "python -m impacts run --input-manifest {input_manifest} --output-dir {output_dir}",
+            "canonical_output_filenames": ["impacts_exposure_table.parquet", "impacts_exposure_table.csv.gz"],
+            "manifest_filenames": ["inputs_manifest.yaml", "run_manifest.yaml", "postprocess_manifest.yaml"],
         },
         "population_inputs": {
             "persons_path": staged_persons,
             "households_path": staged_households,
-            "land_use_path": staged_land_use,
-            "population_cell_mapping_path": staged_population_mapping,
-            "persons_columns": _with_defaults(DEFAULT_PERSONS_COLUMNS, population_section.get("persons_columns", {})),
-            "households_columns": _with_defaults(DEFAULT_HOUSEHOLDS_COLUMNS, population_section.get("households_columns", {})),
-            "population_mapping_columns": _with_defaults(DEFAULT_POPULATION_MAPPING_COLUMNS, population_section.get("population_mapping_columns", {})),
+            "persons_columns": DEFAULT_PERSONS_COLUMNS.copy(),
+            "households_columns": DEFAULT_HOUSEHOLDS_COLUMNS.copy(),
         },
         "notes": [
             "Only maintained modules are part of this contract.",
-            "ActivitySim population integration is currently best-effort and may rely on pre-mapped cell ids or a population_cell_mapping file.",
-            f"Workflow config staged at {workflow_copy}",
+            "ActivitySim population integration is currently best-effort and relies on staged population tables carrying usable cell ids.",
+            f"Runtime config staged at {runtime_copy}",
         ],
     }
     return manifest
 
 
 def preprocess_workflow(
-    workflow_config_path: str | Path,
+    runtime_config_path: str | Path,
     staging_dir: str | Path,
     manifest_path: str | Path | None = None,
 ) -> Dict[str, Any]:
-    manifest = build_inputs_manifest(workflow_config_path=workflow_config_path, staging_dir=staging_dir)
+    manifest = build_inputs_manifest(runtime_config_path=runtime_config_path, staging_dir=staging_dir)
     output_manifest = Path(manifest_path) if manifest_path else Path(manifest["inputs_manifest_path"])
     manifest["inputs_manifest_path"] = str(output_manifest)
-    write_structured_file(output_manifest, manifest)
-    return manifest
-
-
-def impacts_preprocess(
-    workflow_config_path: str | Path,
-    staging_dir: str | Path,
-    manifest_path: str | Path | None = None,
-) -> Dict[str, Any]:
-    return preprocess_workflow(
-        workflow_config_path=workflow_config_path,
-        staging_dir=staging_dir,
-        manifest_path=manifest_path,
-    )
+    typed_manifest = InputsManifest.from_dict(manifest)
+    write_structured_file(output_manifest, typed_manifest.to_dict())
+    return typed_manifest.to_dict()

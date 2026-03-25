@@ -36,9 +36,9 @@ DEFAULT_MAPPING_COLUMNS = {
 DEFAULT_COUNTY_JOIN_COLUMNS = ["zone_GEOID", "zone_NAME", "zone_COUNTYFP"]
 DEFAULT_UPSTREAM_GRID_JOIN_COLUMNS = ["zone_isrm", "GRID", "cell_id"]
 DEFAULT_COUNTY_CORRECTION_COLUMNS = {
-    "county_fips": "COUNTYFP",
-    "vmt_factor": "corr_VMT_by_county",
-    "trips_factor": "corr_trips_by_county",
+    "county_fips": "countyfp",
+    "vmt_factor": "vmt_factor",
+    "trips_factor": "trips_factor",
 }
 DEFAULT_PREPARED_GROUP_COLS = ["linkId", "vehicleTypeId", "process"]
 DEFAULT_PREPARED_POLLUTANTS = ["NH3", "NOx", "PM2_5", "SOx", "ROG", "BCh"]
@@ -405,6 +405,33 @@ def distribute_to_intersection(
     mapping_columns: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
     """Allocate weighted skims values to intersection rows via `proportion`."""
+    weighted_df = weighted_df.copy()
+    mapping_df = mapping_df.copy()
+    latest_intersection_cols = [
+        proportion_col,
+        "edge_link_length_m",
+        "zone_link_length_m",
+    ]
+    stale_merge_cols = [
+        col
+        for col in weighted_df.columns
+        if col.endswith("_map") or col.endswith("_skims")
+    ]
+    if stale_merge_cols:
+        weighted_df = weighted_df.drop(columns=stale_merge_cols)
+    weighted_stale_intersection_cols = [
+        col for col in latest_intersection_cols if col in weighted_df.columns
+    ]
+    if weighted_stale_intersection_cols:
+        weighted_df = weighted_df.drop(columns=weighted_stale_intersection_cols)
+    stale_mapping_cols = [
+        col
+        for col in mapping_df.columns
+        if col.endswith("_map") or col.endswith("_skims")
+    ]
+    if stale_mapping_cols:
+        mapping_df = mapping_df.drop(columns=stale_mapping_cols)
+
     if "linkId" not in weighted_df.columns:
         raise ValueError("Weighted skims dataframe must include linkId.")
     if proportion_col not in mapping_df.columns:
@@ -426,6 +453,8 @@ def distribute_to_intersection(
         right_on=right_on,
         suffixes=("_skims", "_map"),
     )
+    if proportion_col not in merged.columns:
+        raise ValueError(f"Merged mapping is missing required proportion column: {proportion_col}")
 
     observations_source_col = "observations_sum" if "observations_sum" in merged.columns else "observations" if "observations" in merged.columns else None
     if observations_source_col is not None:
@@ -493,9 +522,9 @@ def aggregate_allocated_intersection_rows(
     return aggregated
 
 
-def apply_county_process_corrections(
+def apply_activity_corrections(
     allocated_df: pd.DataFrame,
-    correction_factors_path: str,
+    activity_corrections_path: str,
     *,
     correction_columns: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
@@ -509,15 +538,17 @@ def apply_county_process_corrections(
     Rows without a match or factor default to neutral factor 1.0.
     """
     columns = _resolve_column_config(correction_columns, DEFAULT_COUNTY_CORRECTION_COLUMNS)
-    corrections = _read_table(correction_factors_path)
-    county_source_col = _first_existing(corrections, [columns["county_fips"], "COUNTYFP", "county_fips"])
+    corrections = _read_table(activity_corrections_path)
+    county_source_col = _first_existing(corrections, [columns["county_fips"]])
     if county_source_col is None:
-        raise ValueError("County correction file must include a COUNTYFP/county_fips column.")
+        raise ValueError(
+            f"County correction file must include the configured county FIPS column: {columns['county_fips']}."
+        )
     if "zone_COUNTYFP" not in allocated_df.columns:
         raise ValueError("Allocated county dataframe must include zone_COUNTYFP for county correction matching.")
 
-    vmt_col = _first_existing(corrections, [columns["vmt_factor"], "corr_VMT_by_county"])
-    trips_col = _first_existing(corrections, [columns["trips_factor"], "corr_trips_by_county"])
+    vmt_col = _first_existing(corrections, [columns["vmt_factor"]])
+    trips_col = _first_existing(corrections, [columns["trips_factor"]])
 
     merged = allocated_df.copy()
     factors = corrections.copy()
@@ -551,6 +582,91 @@ def apply_county_process_corrections(
         merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0.0) / correction_factor
 
     return merged.drop(columns=["_county_fips_norm", "_corr_vmt", "_corr_trips"])
+
+
+def plot_county_pm25_comparison(
+    before_df: pd.DataFrame,
+    after_df: pd.DataFrame,
+    *,
+    pm25_col: str = "tons_per_year_PM2_5_allocated",
+    county_col: str = "zone_COUNTYFP",
+    county_name_col: str = "zone_NAME",
+    title: str = "PM2.5 Emissions by County: Before vs After Correction",
+    output_path: Optional[str] = None,
+) -> None:
+    """Generate a grouped bar plot of total PM2.5 per county before and after activity corrections.
+
+    Parameters
+    ----------
+    before_df:
+        Allocated emissions DataFrame before applying corrections.
+    after_df:
+        Allocated emissions DataFrame after applying corrections.
+    pm25_col:
+        Column name for allocated PM2.5 in tons/year.
+    county_col:
+        Column name for county FIPS code.
+    county_name_col:
+        Column name for county display name (optional, falls back to FIPS).
+    title:
+        Plot title.
+    output_path:
+        If provided, save the figure to this path instead of displaying it.
+    """
+    import matplotlib.pyplot as plt
+
+    def _aggregate(df: pd.DataFrame) -> pd.DataFrame:
+        if pm25_col not in df.columns:
+            raise ValueError(f"Column '{pm25_col}' not found in DataFrame.")
+        if county_col not in df.columns:
+            raise ValueError(f"Column '{county_col}' not found in DataFrame.")
+        label_col = county_name_col if county_name_col in df.columns else county_col
+        agg = (
+            df.groupby(county_col, dropna=False)
+            .agg(
+                pm25=(pm25_col, "sum"),
+                label=(label_col, "first"),
+            )
+            .reset_index()
+        )
+        return agg.sort_values(county_col)
+
+    before_agg = _aggregate(before_df)
+    after_agg = _aggregate(after_df)
+
+    all_counties = sorted(set(before_agg[county_col]).union(after_agg[county_col]))
+    before_map = before_agg.set_index(county_col)
+    after_map = after_agg.set_index(county_col)
+
+    labels = [
+        before_map.loc[c, "label"] if c in before_map.index else after_map.loc[c, "label"]
+        for c in all_counties
+    ]
+    before_vals = [before_map.loc[c, "pm25"] if c in before_map.index else 0.0 for c in all_counties]
+    after_vals = [after_map.loc[c, "pm25"] if c in after_map.index else 0.0 for c in all_counties]
+
+    x = np.arange(len(all_counties))
+    width = 0.35
+
+    fig, ax = plt.subplots(figsize=(max(8, len(all_counties) * 1.2), 6))
+    ax.bar(x - width / 2, before_vals, width, label="Before correction", color="steelblue", alpha=0.85)
+    ax.bar(x + width / 2, after_vals, width, label="After correction", color="darkorange", alpha=0.85)
+
+    ax.set_xlabel("County")
+    ax.set_ylabel("Total PM2.5 (tons/year)")
+    ax.set_title(title)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.legend()
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:,.2f}"))
+    fig.tight_layout()
+
+    if output_path:
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    else:
+        plt.show()
+
+    plt.close(fig)
 
 
 def map_skims_emissions_to_intersection(
