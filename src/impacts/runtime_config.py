@@ -348,7 +348,6 @@ class ProcessingSettings:
     grid: GridProcessing
     beam_osm_id_col: str = "attributeOrigId"
     beam_length_col: str = "linkLength"
-    beam_osm_epsg: int
     county_area_name: str = "county"
     prepared_skims_group_cols: List[str] = field(default_factory=lambda: ["linkId", "vehicleTypeId", "process"])
     skims_columns: SkimsColumns = field(default_factory=SkimsColumns)
@@ -367,7 +366,6 @@ class ProcessingSettings:
             grid=GridProcessing.from_dict(payload.get("grid", {}) or {}),
             beam_osm_id_col=_optional_string(payload.get("beam_osm_id_col")) or "attributeOrigId",
             beam_length_col=_optional_string(payload.get("beam_length_col")) or "linkLength",
-            beam_osm_epsg=_required_int(payload.get("beam_osm_epsg"), "processing.beam_osm_epsg"),
             county_area_name=_optional_string(payload.get("county_area_name")) or "county",
             prepared_skims_group_cols=(
                 _coerce_string_list(payload.get("prepared_skims_group_cols"))

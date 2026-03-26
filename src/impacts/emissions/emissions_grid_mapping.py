@@ -631,6 +631,29 @@ def _select_intersection_cols(all_cols: List[str]) -> List[str]:
     ]
 
 
+def _select_intersection_cols_for_allocation(
+    all_cols: List[str],
+    *,
+    map_link_col: str,
+    prop_items: List[tuple],
+) -> List[str]:
+    keep = {map_link_col}
+    keep.update(prop_col for _, prop_col in prop_items)
+    keep.update(col for col in all_cols if col.startswith(("aermod_", "inmap_", "county_")))
+    keep.update(
+        col for col in all_cols
+        if col in {
+            "zone_COUNTYFP",
+            "COUNTYFP",
+            "countyfp",
+            "zone_NAME",
+            "NAME",
+            "edge_linkId",
+        }
+    )
+    return [col for col in all_cols if col in keep and col != "geometry"]
+
+
 def _read_intersection_selective(path: str) -> pd.DataFrame:
     """Load intersection parquet, reading only allocation-relevant columns."""
     p = path.lower()
@@ -643,6 +666,57 @@ def _read_intersection_selective(path: str) -> pd.DataFrame:
         return pd.read_parquet(path, columns=cols)
     except Exception:
         return read_mapping(path)
+
+
+def _read_intersection_for_allocation(
+    path: str,
+    *,
+    map_link_col: str,
+    prop_items: List[tuple],
+) -> pd.DataFrame:
+    p = path.lower()
+    if not p.endswith(".parquet"):
+        frame = read_mapping(path)
+        cols = _select_intersection_cols_for_allocation(
+            list(frame.columns),
+            map_link_col=map_link_col,
+            prop_items=prop_items,
+        )
+        return frame[cols].copy()
+    try:
+        import pyarrow.parquet as pq
+
+        all_cols = pq.read_schema(path).names
+        cols = _select_intersection_cols_for_allocation(
+            all_cols,
+            map_link_col=map_link_col,
+            prop_items=prop_items,
+        )
+        return pd.read_parquet(path, columns=cols)
+    except Exception:
+        frame = read_mapping(path)
+        cols = _select_intersection_cols_for_allocation(
+            list(frame.columns),
+            map_link_col=map_link_col,
+            prop_items=prop_items,
+        )
+        return frame[cols].copy()
+
+
+def _intersection_columns(path: str) -> List[str]:
+    p = path.lower()
+    if p.endswith(".parquet"):
+        try:
+            import pyarrow.parquet as pq
+
+            return list(pq.read_schema(path).names)
+        except Exception:
+            pass
+    return list(read_mapping(path).columns)
+
+
+def _group_frames_by_key(df: pd.DataFrame, key: str) -> Dict[object, pd.DataFrame]:
+    return {group_key: group.reset_index(drop=True) for group_key, group in df.groupby(key, sort=False)}
 
 
 def _allocate_chunk(
@@ -666,6 +740,118 @@ def _allocate_chunk(
         for i, col in enumerate(emission_cols):
             new_cols[f"{col}_{label}_allocated"] = allocated[:, i]
     return pd.concat([merged, pd.DataFrame(new_cols, index=merged.index)], axis=1)
+
+
+def _allocate_link_group(
+    inter_group: pd.DataFrame,
+    skims_group: pd.DataFrame,
+    emission_cols: List[str],
+    prop_items: List[tuple],
+) -> pd.DataFrame:
+    merged = inter_group.merge(skims_group, how="left", on="linkId", sort=False)
+    emission_arrays = [
+        pd.to_numeric(merged[col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32)
+        for col in emission_cols
+    ]
+    merged = merged.drop(columns=emission_cols, errors="ignore")
+    for label, prop_col in prop_items:
+        prop_arr = pd.to_numeric(merged[prop_col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32)
+        for i, col in enumerate(emission_cols):
+            merged[f"{col}_{label}_allocated"] = emission_arrays[i] * prop_arr
+    return merged
+
+
+def allocate_emissions_to_grouped_zone_table(
+    skims_path,
+    intersection_path: str,
+    *,
+    zone_label: str,
+    cell_col: str,
+    mapping_columns: Optional[Dict[str, str]] = None,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+) -> pd.DataFrame:
+    """Allocate emissions directly into grouped zone totals.
+
+    This avoids materializing the full per-piece allocated table first.
+    """
+    import duckdb
+
+    if isinstance(skims_path, pd.DataFrame):
+        skims = skims_path
+    else:
+        skims = read_skims_emissions(skims_path)
+
+    emission_cols = [
+        c for c in skims.columns
+        if c not in _SKIMS_DIMENSION_COLS and pd.api.types.is_numeric_dtype(skims[c])
+    ]
+    map_link_col = (mapping_columns or {}).get("link_id", "edge_linkId")
+    prop_items = _detect_prop_items(_intersection_columns(intersection_path), [zone_label])
+    intersection = _read_intersection_for_allocation(
+        intersection_path,
+        map_link_col=map_link_col,
+        prop_items=prop_items,
+    )
+
+    for _, pc in prop_items:
+        intersection[pc] = pd.to_numeric(intersection[pc], errors="coerce").fillna(0.0).astype(np.float32)
+    map_link_col = _resolve_mapping_link_col(intersection, mapping_columns=mapping_columns)
+    if map_link_col != "linkId":
+        intersection = intersection.rename(columns={map_link_col: "linkId"})
+
+    if cell_col not in intersection.columns:
+        return pd.DataFrame()
+
+    county_col = _first_existing(intersection, ["countyfp", "county_COUNTYFP", "zone_COUNTYFP", "COUNTYFP"])
+    keep_cols = ["linkId", cell_col]
+    if county_col:
+        keep_cols.append(county_col)
+
+    skims_keep = list({"linkId", "vehicleTypeId", "process"} & set(skims.columns)) + emission_cols
+    skims_slim = skims[skims_keep].copy()
+    for col in emission_cols:
+        skims_slim[col] = pd.to_numeric(skims_slim[col], errors="coerce").fillna(0.0).astype(np.float32)
+
+    inter_keep = keep_cols + [prop_items[0][1]]
+    intersection = intersection[inter_keep].copy()
+    proportion_col = prop_items[0][1]
+    county_select = f", i.{county_col} AS countyfp" if county_col else ", NULL AS countyfp"
+    county_group = ", countyfp"
+    emission_selects = [
+        f"SUM(COALESCE(CAST(s.{col} AS DOUBLE), 0.0) * COALESCE(CAST(i.{proportion_col} AS DOUBLE), 0.0)) AS {col}_{zone_label}_allocated"
+        for col in emission_cols
+    ]
+    select_sql = ",\n        ".join(emission_selects)
+
+    con = duckdb.connect(database=":memory:")
+    try:
+        con.register("intersection_df", intersection)
+        con.register("skims_df", skims_slim)
+        result = con.execute(
+            f"""
+            SELECT
+                s.vehicleTypeId,
+                i.{cell_col} AS {cell_col},
+                s.process
+                {county_select},
+                {select_sql}
+            FROM intersection_df AS i
+            INNER JOIN skims_df AS s
+                ON i.linkId = s.linkId
+            WHERE i.{cell_col} IS NOT NULL
+            GROUP BY
+                s.vehicleTypeId,
+                i.{cell_col},
+                s.process
+                {county_group}
+            """
+        ).df()
+    finally:
+        con.close()
+
+    if county_col is None and "countyfp" in result.columns:
+        result = result.drop(columns=["countyfp"])
+    return result
 
 
 def allocate_emissions_to_labeled_intersection(
@@ -705,24 +891,28 @@ def allocate_emissions_to_labeled_intersection(
     else:
         skims = read_skims_emissions(skims_path)
 
-    # Read only allocation-relevant columns from intersection (schema read is free)
-    intersection = _read_intersection_selective(intersection_path)
-
-    prop_items = _detect_prop_items(list(intersection.columns), proportion_labels)
-
     emission_cols = [
         c for c in skims.columns
         if c not in _SKIMS_DIMENSION_COLS and pd.api.types.is_numeric_dtype(skims[c])
     ]
+    map_link_col = (mapping_columns or {}).get("link_id", "edge_linkId")
 
-    # Slim + downcast skims before chunked merges
+    # Read only the narrow set of intersection columns needed for allocation and
+    # downstream county/grid aggregation.
+    prop_items = _detect_prop_items(_intersection_columns(intersection_path), proportion_labels)
+    intersection = _read_intersection_for_allocation(
+        intersection_path,
+        map_link_col=map_link_col,
+        prop_items=prop_items,
+    )
+
+    # Slim + downcast skims before chunked allocation
     skims_keep = list({"linkId", "vehicleTypeId", "process"} & set(skims.columns)) + emission_cols
     skims_slim = skims[skims_keep].copy()
     for col in emission_cols:
         skims_slim[col] = (
             pd.to_numeric(skims_slim[col], errors="coerce").fillna(0.0).astype(np.float32)
         )
-    skims_slim["linkId"] = skims_slim["linkId"].astype("category")
 
     # Downcast proportion columns in intersection to float32
     for _, pc in prop_items:
@@ -730,32 +920,29 @@ def allocate_emissions_to_labeled_intersection(
             pd.to_numeric(intersection[pc], errors="coerce").fillna(0.0).astype(np.float32)
         )
     map_link_col = _resolve_mapping_link_col(intersection, mapping_columns=mapping_columns)
-    intersection[map_link_col] = intersection[map_link_col].astype("category")
+    if map_link_col != "linkId":
+        intersection = intersection.rename(columns={map_link_col: "linkId"})
+    map_link_col = "linkId"
 
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    # Pre-index both DataFrames by linkId once — replaces repeated O(n) isin
-    # scans inside the loop with O(1) dict lookups per chunk.
-    inter_by_link = {lid: grp for lid, grp in intersection.groupby(map_link_col, sort=False)}
-    skims_by_link = {lid: grp for lid, grp in skims_slim.groupby("linkId", sort=False)}
-    unique_link_ids = list(skims_by_link.keys())
+    # Pre-index both DataFrames by linkId once and then allocate by link group.
+    inter_by_link = _group_frames_by_key(intersection, map_link_col)
+    skims_by_link = _group_frames_by_key(skims_slim, "linkId")
+    shared_link_ids = [lid for lid in skims_by_link.keys() if lid in inter_by_link]
     writer = None
     total_rows = 0
 
-    for start in range(0, len(unique_link_ids), chunk_size):
-        batch_ids = unique_link_ids[start : start + chunk_size]
-        inter_parts = [inter_by_link[lid] for lid in batch_ids if lid in inter_by_link]
-        if not inter_parts:
+    for start in range(0, len(shared_link_ids), chunk_size):
+        batch_ids = shared_link_ids[start : start + chunk_size]
+        batch_results = [
+            _allocate_link_group(inter_by_link[lid], skims_by_link[lid], emission_cols, prop_items)
+            for lid in batch_ids
+        ]
+        if not batch_results:
             continue
-        inter_chunk = pd.concat(inter_parts, ignore_index=True)
-        skims_chunk = pd.concat(
-            [skims_by_link[lid] for lid in batch_ids if lid in skims_by_link],
-            ignore_index=True,
-        )
-        chunk_result = _allocate_chunk(
-            inter_chunk, skims_chunk, map_link_col, emission_cols, prop_items
-        )
+        chunk_result = batch_results[0] if len(batch_results) == 1 else pd.concat(batch_results, ignore_index=True)
         total_rows += len(chunk_result)
         if out.suffix.lower() == ".parquet":
             table = pa.Table.from_pandas(chunk_result, preserve_index=False)
@@ -773,5 +960,3 @@ def allocate_emissions_to_labeled_intersection(
         writer.close()
 
     return total_rows
-
-

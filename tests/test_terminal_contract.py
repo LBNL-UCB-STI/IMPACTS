@@ -35,6 +35,7 @@ from impacts.manifest_models import PostprocessManifest
 from impacts.manifest_models import RunManifest
 from impacts.network2grid.network_grid_clipping import intersect_beam_osm_with_grid
 from impacts.runtime_config import ImpactsRuntimeConfig
+from impacts.step3_grid_intersection import _union_county_matches_with_unmatched
 
 def _write_csv(path: Path, rows):
     pd.DataFrame(rows).to_csv(path, index=False)
@@ -1819,6 +1820,44 @@ def test_grid_intersection_corridor_prefilter_drops_cells_inside_bbox_but_far_fr
     assert isinstance(captured["zones"], gpd.GeoDataFrame)
     assert list(captured["zones"]["zone_code"]) == ["near_diag"]
     assert list(result["zone_zone_code"]) == ["near_diag"]
+
+
+def test_county_unmatched_rows_recovered_by_source_id_without_second_spatial_join():
+    source = gpd.GeoDataFrame(
+        {
+            "__source_row_id": [0, 1],
+            "inmap_srm_cell_id": [10, 20],
+            "edge_linkId": [101, 202],
+            "geometry": [
+                Polygon([(0, 0), (1, 0), (1, 1), (0, 1)]),
+                Polygon([(2, 0), (3, 0), (3, 1), (2, 1)]),
+            ],
+        },
+        geometry="geometry",
+        crs="EPSG:3857",
+    )
+    matched = gpd.GeoDataFrame(
+        {
+            "__source_row_id": [0],
+            "inmap_srm_cell_id": [10],
+            "edge_linkId": [101],
+            "county_COUNTYFP": ["001"],
+            "county_NAME": ["Alameda"],
+            "geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])],
+        },
+        geometry="geometry",
+        crs="EPSG:3857",
+    )
+
+    result = _union_county_matches_with_unmatched(source, matched)
+
+    assert len(result) == 2
+    assert "__source_row_id" not in result.columns
+    matched_row = result.loc[result["edge_linkId"] == 101].iloc[0]
+    unmatched_row = result.loc[result["edge_linkId"] == 202].iloc[0]
+    assert matched_row["county_COUNTYFP"] == "001"
+    assert pd.isna(unmatched_row["county_COUNTYFP"])
+    assert pd.isna(unmatched_row["county_NAME"])
 
 
 def test_postprocess_canonical_exposure_table_generation(tmp_path: Path):

@@ -48,21 +48,29 @@ def run(pipeline: PipelineConfig, raw_dir: Path) -> gpd.GeoDataFrame:
 
     # Step 2.1: match BEAM network to OSM
     beam_osm_path = raw_dir / "beam_osm_mapped.parquet"
-    logger.info("Step 2.1: mapping BEAM network to OSM using %s", osm_source)
-    beam_osm_mapped = map_beam_network_to_osm(
-        osm_path=osm_source,
-        beam_network_path=pipeline.beam_network_path,
-        output_path=str(beam_osm_path),
-        network_osm_id_col=pipeline.beam_osm_id_col,
-        output_epsg=int(pipeline.output_epsg),
-    )
-    beam_osm_mapped.to_file(beam_osm_path.with_suffix(".gpkg"), driver="GPKG")
-    logger.info("Step 2.1 complete: wrote %s", beam_osm_path)
+    if beam_osm_path.exists():
+        logger.info("Step 2.1: reusing existing BEAM/OSM mapping %s", beam_osm_path)
+        beam_osm_mapped = gpd.read_parquet(beam_osm_path)
+    else:
+        logger.info("Step 2.1: mapping BEAM network to OSM using %s", osm_source)
+        beam_osm_mapped = map_beam_network_to_osm(
+            osm_path=osm_source,
+            beam_network_path=pipeline.beam_network_path,
+            output_path=str(beam_osm_path),
+            network_osm_id_col=pipeline.beam_osm_id_col,
+            output_epsg=int(pipeline.output_epsg),
+        )
+        beam_osm_mapped.to_file(beam_osm_path.with_suffix(".gpkg"), driver="GPKG")
+        logger.info("Step 2.1 complete: wrote %s", beam_osm_path)
 
     # Step 2.2: buffer links into rectangular polygon corridors
     beam_osm_buffered_path = raw_dir / "beam_osm_buffered.parquet"
-    logger.info("Step 2.2: buffering network links (%gm/lane)", DEFAULT_LANE_WIDTH_M)
-    buffered = _buffer_network_by_lanes(beam_osm_mapped, beam_osm_buffered_path)
-    logger.info("Step 2.2 complete: wrote %s", beam_osm_buffered_path)
+    if beam_osm_buffered_path.exists():
+        logger.info("Step 2.2: reusing existing buffered network %s", beam_osm_buffered_path)
+        buffered = gpd.read_parquet(beam_osm_buffered_path)
+    else:
+        logger.info("Step 2.2: buffering network links (%gm/lane)", DEFAULT_LANE_WIDTH_M)
+        buffered = _buffer_network_by_lanes(beam_osm_mapped, beam_osm_buffered_path)
+        logger.info("Step 2.2 complete: wrote %s", beam_osm_buffered_path)
 
     return buffered

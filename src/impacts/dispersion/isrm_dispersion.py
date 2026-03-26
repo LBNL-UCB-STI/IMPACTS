@@ -44,6 +44,14 @@ def prepare_grid_emissions(emissions_df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("No grid id column found. Expected inmap_srm_cell_id")
 
     emission_cols = [c for c in DEFAULT_EMISSIONS_COLUMNS if c != "inmap_srm_cell_id"]
+    source_column_map = {}
+    for col in emission_cols:
+        if col in emissions_df.columns:
+            source_column_map[col] = col
+            continue
+        labeled = f"{col}_inmap_allocated"
+        if labeled in emissions_df.columns:
+            source_column_map[col] = labeled
 
     df = emissions_df.copy()
     df["GRID"] = pd.to_numeric(df["inmap_srm_cell_id"], errors="coerce")
@@ -51,10 +59,11 @@ def prepare_grid_emissions(emissions_df: pd.DataFrame) -> pd.DataFrame:
     df["GRID"] = df["GRID"].astype(int)
 
     for col in emission_cols:
-        if col not in df.columns:
+        source_col = source_column_map.get(col)
+        if source_col is None:
             df[col] = 0.0
         else:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+            df[col] = pd.to_numeric(df[source_col], errors="coerce").fillna(0.0)
 
     return df.groupby("GRID", dropna=False)[emission_cols].sum().reset_index()
 

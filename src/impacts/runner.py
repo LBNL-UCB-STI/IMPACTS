@@ -55,13 +55,20 @@ def run_from_input_manifest(
     skims_df, skims_path = run_step1(pipeline, raw_dir)
 
     mapping_input_path = pipeline.mapping_input_path
+    mapping_input_df = None
     if not mapping_input_path:
         buffered_network = run_step2(pipeline, raw_dir)
-        mapping_input_path = run_step3(pipeline, raw_dir, buffered_network)
+        mapping_input_path, mapping_input_df = run_step3(pipeline, raw_dir, buffered_network)
     else:
         logger.info("Using staged mapping input: %s", mapping_input_path)
 
-    step4_outputs = run_step4(pipeline, raw_dir, skims_df, mapping_input_path)
+    step4_outputs = run_step4(
+        pipeline,
+        raw_dir,
+        skims_df,
+        mapping_input_path,
+        intersection_df=mapping_input_df,
+    )
 
     concentration_path: Optional[Path] = None
     if run_dispersion:
