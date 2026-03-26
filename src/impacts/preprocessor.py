@@ -6,8 +6,6 @@ from typing import Dict
 from typing import Optional
 
 import geopandas as gpd
-import pandas as pd
-
 from .config.builders import build_runtime_config_from_runtime_yaml
 from .contract_utils import copy_path
 from .contract_utils import file_entry
@@ -15,89 +13,27 @@ from .contract_utils import is_remote_path
 from .contract_utils import parquet_available
 from .contract_utils import resolve_path
 from .contract_utils import write_structured_file
+from .defaults import DEFAULT_HOUSEHOLDS_COLUMNS
+from .defaults import DEFAULT_PERSONS_COLUMNS
 from .manifest_models import InputsManifest
 
 
 CONTRACT_VERSION = "1"
-DEFAULT_EVENTS_COLUMNS = {
-    "type": "type",
-    "vehicle": "vehicle",
-    "vehicle_type": "vehicleType",
-    "departure_time": "departureTime",
-    "links": "links",
-    "link_travel_time": "linkTravelTime",
-    "length": "length",
-}
-DEFAULT_NETWORK_COLUMNS = {
-    "link_id": "linkId",
-    "link_length": "linkLength",
-}
-DEFAULT_BEAM_NETWORK_COLUMNS = {
-    "osm_id": "attributeOrigId",
-    "length": "linkLength",
-}
-DEFAULT_GRID_COLUMNS = {
-    "cell_id": "grid",
-}
-DEFAULT_SKIMS_COLUMNS = {
-    "hour": "hour",
-    "link_id": "linkId",
-    "vehicle_type": "vehicleTypeId",
-    "process": "process",
-    "emissions": "emissions",
-    "observations": "observations",
-    "iterations": "iterations",
-    "travel_time": "travelTimeInSecond",
-    "parking_duration": "parkingDurationInSecond",
-}
-DEFAULT_MAPPING_COLUMNS = {
-    "link_id": "edge_linkId",
-    "proportion": "zone_edge_proportion",
-    "grid_id": None,
-}
-DEFAULT_DISPERSION_EMISSIONS_COLUMNS = {
-    "grid_id": "GRID",
-    "rog": "tons_per_year_ROG",
-    "nox": "tons_per_year_NOx",
-    "nh3": "tons_per_year_NH3",
-    "sox": "tons_per_year_SOx",
-    "pm25": "tons_per_year_PM2_5",
-    "bcv1": "tons_per_year_BCV1",
-    "bcv3": "tons_per_year_BCV3",
-}
-DEFAULT_PERSONS_COLUMNS = {
-    "household_id": "household_id",
-    "cell_id": "cell_id",
-    "age": "age",
-    "sex": "sex",
-    "income": "income",
-}
-DEFAULT_HOUSEHOLDS_COLUMNS = {
-    "household_id": "household_id",
-    "cell_id": "cell_id",
-    "income": "income",
-    "income_category": "income_category",
-}
 
 
-def _parse_epsg(value: Any, default: int) -> int:
-    if value is None:
-        return default
+def _parse_epsg(value: Any) -> int:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        raise ValueError(
+            "geography.local_crs (output EPSG) must be set in the runtime config. "
+            "Example: local_crs: 26910"
+        )
     if isinstance(value, int):
         return value
     text = str(value).strip()
-    if not text:
-        return default
     if ":" in text:
         _, _, suffix = text.rpartition(":")
         text = suffix
     return int(text)
-
-
-def _with_defaults(defaults: Dict[str, Any], config: Dict[str, Any] | None) -> Dict[str, Any]:
-    merged = defaults.copy()
-    merged.update(dict(config or {}))
-    return merged
 
 
 def _required_local_path(path: Optional[str], label: str) -> str:
@@ -159,20 +95,27 @@ def _write_vector(gdf: gpd.GeoDataFrame, path: str) -> None:
         gdf.to_file(target)
 
 
-def _infer_or_create_grid_id(
-    source_path: str,
-    staged_path: str,
-    configured_grid_id: Optional[str],
-) -> str:
-    if configured_grid_id:
-        return configured_grid_id
+def _ensure_grid_cell_id(staged_path: str, cell_id_col: str, source_col: Optional[str] = None) -> str:
+    """Ensure the staged grid file has a ``cell_id_col`` column.
 
+    If ``source_col`` is given, it must exist in the file — raises otherwise.
+    If ``source_col`` is not given, ``cell_id_col`` is created from row numbers.
+    The file is rewritten in place and ``cell_id_col`` is returned.
+    """
     gdf = _read_vector(staged_path)
-    synthetic_col = "grid_id"
-    if synthetic_col not in gdf.columns:
-        gdf[synthetic_col] = pd.RangeIndex(start=1, stop=len(gdf) + 1, step=1)
-        _write_vector(gdf, staged_path)
-    return synthetic_col
+    if cell_id_col in gdf.columns:
+        return cell_id_col
+    if source_col:
+        if source_col not in gdf.columns:
+            raise ValueError(
+                f"Configured grid_id column '{source_col}' not found in {staged_path}. "
+                f"Available columns: {list(gdf.columns)}"
+            )
+        gdf[cell_id_col] = gdf[source_col]
+    else:
+        gdf[cell_id_col] = range(len(gdf))
+    _write_vector(gdf, staged_path)
+    return cell_id_col
 
 
 def _stage_local_input(
@@ -274,7 +217,6 @@ def build_inputs_manifest(
     prepare_skims_for_grid_allocation(
         skims_path=staged_skims_input,
         output_path=str(prepared_grouped_skims_path),
-        skims_columns=_with_defaults(DEFAULT_SKIMS_COLUMNS, processing.skims_columns.__dict__),
         group_cols=list(processing.prepared_skims_group_cols),
         required_pollutants=list(processing.pollutants),
     )
@@ -339,7 +281,7 @@ def build_inputs_manifest(
         "processing.grid.inmap_grid_path",
     )
     aermod_grid_source = _optional_local_path(resolve_path(grid.aermod_grid_path, config_path))
-    local_output_epsg = _parse_epsg(geography.local_crs, 26910)
+    local_output_epsg = _parse_epsg(geography.local_crs)
     inmap_grid_epsg = (
         grid.inmap_grid_epsg
         or _infer_vector_epsg(inmap_grid_source)
@@ -383,16 +325,8 @@ def build_inputs_manifest(
             relative_target=f"aermod_grid/{Path(aermod_grid_source).name}",
             optional=True,
         )
-        resolved_aermod_grid_id = _infer_or_create_grid_id(
-            aermod_grid_source,
-            staged_aermod_grid,
-            None,
-        )
-    resolved_inmap_grid_id = _infer_or_create_grid_id(
-        inmap_grid_source,
-        staged_inmap_grid,
-        processing.mapping_columns.grid_id,
-    )
+        resolved_aermod_grid_id = _ensure_grid_cell_id(staged_aermod_grid, "srv_cell_id", source_col=grid.aermod_grid_id)
+    resolved_inmap_grid_id = _ensure_grid_cell_id(staged_inmap_grid, "srm_cell_id", source_col=grid.inmap_grid_id)
 
     staged_isrm = _stage_optional_input(
         manifest_inputs=manifest_inputs,
@@ -430,7 +364,7 @@ def build_inputs_manifest(
         relative_target="osm/beam.mapdb",
     )
 
-    mapping_columns = _with_defaults(DEFAULT_MAPPING_COLUMNS, processing.mapping_columns.__dict__)
+    mapping_columns = {k: v for k, v in processing.mapping_columns.__dict__.items() if v}
     mapping_columns["grid_id"] = resolved_inmap_grid_id
 
     manifest: Dict[str, Any] = {
@@ -479,11 +413,6 @@ def build_inputs_manifest(
             "concentration_factor": float(processing.dispersion.concentration_factor),
             "include_bc": bool(processing.dispersion.include_bc),
             "include_health": bool(processing.dispersion.include_health),
-            "events_columns": DEFAULT_EVENTS_COLUMNS.copy(),
-            "network_columns": DEFAULT_NETWORK_COLUMNS.copy(),
-            "beam_network_columns": DEFAULT_BEAM_NETWORK_COLUMNS.copy(),
-            "grid_columns": DEFAULT_GRID_COLUMNS.copy(),
-            "skims_columns": _with_defaults(DEFAULT_SKIMS_COLUMNS, processing.skims_columns.__dict__),
             "mapping_columns": mapping_columns,
             "prepared_skims_grouped_path": str(prepared_grouped_skims_path),
             "prepared_skims_group_cols": list(processing.prepared_skims_group_cols),
@@ -491,10 +420,6 @@ def build_inputs_manifest(
             "activity_corrections_path": staged_activity_corrections,
             "activity_corrections_columns": processing.activity_corrections_columns.__dict__.copy(),
             "annualization_days": float(processing.annualization_days),
-            "dispersion_emissions_columns": _with_defaults(
-                DEFAULT_DISPERSION_EMISSIONS_COLUMNS,
-                processing.dispersion.emissions_columns.__dict__,
-            ),
         },
         "pilates_contract": {
             "stage": "terminal_postprocessing",
@@ -513,8 +438,8 @@ def build_inputs_manifest(
         "population_inputs": {
             "persons_path": staged_persons,
             "households_path": staged_households,
-            "persons_columns": DEFAULT_PERSONS_COLUMNS.copy(),
-            "households_columns": DEFAULT_HOUSEHOLDS_COLUMNS.copy(),
+            "persons_columns": list(DEFAULT_PERSONS_COLUMNS),
+            "households_columns": list(DEFAULT_HOUSEHOLDS_COLUMNS),
         },
         "notes": [
             "Only maintained modules are part of this contract.",

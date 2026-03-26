@@ -92,8 +92,10 @@ def _normalize_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "grid": {
             "inmap_grid_path": inmap.get("grid_path"),
             "inmap_grid_epsg": inmap.get("grid_epsg"),
+            "inmap_grid_id": inmap.get("grid_id"),
             "aermod_grid_path": aermod.get("grid_path"),
             "aermod_grid_epsg": aermod.get("grid_epsg"),
+            "aermod_grid_id": aermod.get("grid_id"),
         },
         "mapping_columns": {
             "grid_id": inmap.get("grid_id"),
@@ -225,6 +227,8 @@ class GridProcessing:
     aermod_grid_path: Optional[str] = None
     inmap_grid_epsg: Optional[int] = None
     aermod_grid_epsg: Optional[int] = None
+    inmap_grid_id: Optional[str] = None
+    aermod_grid_id: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "GridProcessing":
@@ -233,6 +237,8 @@ class GridProcessing:
             aermod_grid_path=_optional_string(payload.get("aermod_grid_path")),
             inmap_grid_epsg=_optional_int(payload.get("inmap_grid_epsg")),
             aermod_grid_epsg=_optional_int(payload.get("aermod_grid_epsg")),
+            inmap_grid_id=_optional_string(payload.get("inmap_grid_id")),
+            aermod_grid_id=_optional_string(payload.get("aermod_grid_id")),
         )
 
 
@@ -342,7 +348,7 @@ class ProcessingSettings:
     grid: GridProcessing
     beam_osm_id_col: str = "attributeOrigId"
     beam_length_col: str = "linkLength"
-    beam_osm_epsg: int = 4326
+    beam_osm_epsg: int
     county_area_name: str = "county"
     prepared_skims_group_cols: List[str] = field(default_factory=lambda: ["linkId", "vehicleTypeId", "process"])
     skims_columns: SkimsColumns = field(default_factory=SkimsColumns)
@@ -361,7 +367,7 @@ class ProcessingSettings:
             grid=GridProcessing.from_dict(payload.get("grid", {}) or {}),
             beam_osm_id_col=_optional_string(payload.get("beam_osm_id_col")) or "attributeOrigId",
             beam_length_col=_optional_string(payload.get("beam_length_col")) or "linkLength",
-            beam_osm_epsg=_optional_int(payload.get("beam_osm_epsg")) or 4326,
+            beam_osm_epsg=_required_int(payload.get("beam_osm_epsg"), "processing.beam_osm_epsg"),
             county_area_name=_optional_string(payload.get("county_area_name")) or "county",
             prepared_skims_group_cols=(
                 _coerce_string_list(payload.get("prepared_skims_group_cols"))

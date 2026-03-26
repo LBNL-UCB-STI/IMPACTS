@@ -8,6 +8,8 @@ from typing import Dict, Iterable, List, Optional
 
 import pandas as pd
 
+from impacts.defaults import DEFAULT_BEAM_NETWORK_COLUMNS
+from impacts.defaults import DEFAULT_EVENTS_COLUMNS
 
 REQUIRED_EVENT_COLS = [
     "type",
@@ -18,21 +20,6 @@ REQUIRED_EVENT_COLS = [
     "linkTravelTime",
     "length",
 ]
-
-DEFAULT_EVENTS_COLUMNS = {
-    "type": "type",
-    "vehicle": "vehicle",
-    "vehicle_type": "vehicleType",
-    "departure_time": "departureTime",
-    "links": "links",
-    "link_travel_time": "linkTravelTime",
-    "length": "length",
-}
-
-DEFAULT_NETWORK_COLUMNS = {
-    "link_id": "linkId",
-    "link_length": "linkLength",
-}
 
 SKIMS_COLS = [
     "hour",
@@ -69,12 +56,6 @@ def _parse_float_list(raw: object) -> List[float]:
 def _pollutant_cols(df: pd.DataFrame) -> List[str]:
     return [c for c in df.columns if c.startswith("em_")]
 
-
-def _resolve_column_config(config: Optional[Dict[str, str]], defaults: Dict[str, str]) -> Dict[str, str]:
-    resolved = defaults.copy()
-    if config:
-        resolved.update({k: v for k, v in config.items() if v})
-    return resolved
 
 
 def _read_any_table(path: Path) -> pd.DataFrame:
@@ -160,31 +141,10 @@ def _serialize_emissions(row: pd.Series, pollutant_cols: Iterable[str]) -> str:
     return ";".join(parts)
 
 
-def read_events(events_path: str, events_columns: Optional[Dict[str, str]] = None) -> pd.DataFrame:
-    columns = _resolve_column_config(events_columns, DEFAULT_EVENTS_COLUMNS)
-    usecols = [
-        columns["type"],
-        columns["vehicle"],
-        columns["vehicle_type"],
-        columns["departure_time"],
-        columns["links"],
-        columns["link_travel_time"],
-        columns["length"],
-    ]
+def read_events(events_path: str) -> pd.DataFrame:
     p = events_path.lower()
     compression = "gzip" if p.endswith(".gz") else None
-    events = pd.read_csv(events_path, usecols=usecols, compression=compression)
-    return events.rename(
-        columns={
-            columns["type"]: "type",
-            columns["vehicle"]: "vehicle",
-            columns["vehicle_type"]: "vehicleType",
-            columns["departure_time"]: "departureTime",
-            columns["links"]: "links",
-            columns["link_travel_time"]: "linkTravelTime",
-            columns["length"]: "length",
-        }
-    )
+    return pd.read_csv(events_path, usecols=DEFAULT_EVENTS_COLUMNS, compression=compression)
 
 
 def _build_path_traversal_rows(events: pd.DataFrame, link_lengths_m: Optional[Dict[int, float]] = None) -> pd.DataFrame:
@@ -383,8 +343,6 @@ def build_skims_emissions_from_events(
     network_path: Optional[str] = None,
     rates_df: Optional[pd.DataFrame] = None,
     iterations: int = 1,
-    events_columns: Optional[Dict[str, str]] = None,
-    network_columns: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
     """Return a skimsEmissions-like structure from BEAM events.
 
@@ -394,21 +352,15 @@ def build_skims_emissions_from_events(
     - If `rates_df` is None, emissions strings are empty and only activity
       metrics/observations are returned.
     """
-    events = read_events(events_path, events_columns=events_columns)
+    events = read_events(events_path)
     link_lengths_m: Optional[Dict[int, float]] = None
     if network_path:
-        network_cfg = _resolve_column_config(network_columns, DEFAULT_NETWORK_COLUMNS)
         p = network_path.lower()
         compression = "gzip" if p.endswith(".gz") else None
         net = pd.read_csv(
             network_path,
             compression=compression,
-            usecols=[network_cfg["link_id"], network_cfg["link_length"]],
-        ).rename(
-            columns={
-                network_cfg["link_id"]: "linkId",
-                network_cfg["link_length"]: "linkLength",
-            }
+            usecols=DEFAULT_BEAM_NETWORK_COLUMNS,
         )
         link_lengths_m = dict(zip(net["linkId"].astype(int), net["linkLength"].astype(float)))
 

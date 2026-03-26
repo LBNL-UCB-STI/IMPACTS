@@ -5,17 +5,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd
+
+from impacts.defaults import DEFAULT_DISPERSION_EMISSIONS_COLUMNS as DEFAULT_EMISSIONS_COLUMNS
 
 
 @dataclass
 class DispersionConfig:
     """Configuration for ISRM-based dispersion."""
 
-    isrm_url: str = "s3://inmap-model/isrm_v1.2.1.zarr/"
+    isrm_url: Optional[str] = None
     emissions_input_path: Optional[str] = None
     concentration_output_path: str = "src/impacts/tmp/grid_concentration.parquet"
     concentration_factor: float = 28766.639
@@ -24,23 +26,6 @@ class DispersionConfig:
 
 
 DEFAULT_DISPERSION_CONFIG = DispersionConfig()
-DEFAULT_EMISSIONS_COLUMNS = {
-    "grid_id": "GRID",
-    "rog": "tons_per_year_ROG",
-    "nox": "tons_per_year_NOx",
-    "nh3": "tons_per_year_NH3",
-    "sox": "tons_per_year_SOx",
-    "pm25": "tons_per_year_PM2_5",
-    "bcv1": "tons_per_year_BCV1",
-    "bcv3": "tons_per_year_BCV3",
-}
-
-def _first_existing(df: pd.DataFrame, candidates: Iterable[str]) -> Optional[str]:
-    for col in candidates:
-        if col in df.columns:
-            return col
-    return None
-
 
 def _read_table(path: str) -> pd.DataFrame:
     p = path.lower()
@@ -53,102 +38,28 @@ def _read_table(path: str) -> pd.DataFrame:
     raise ValueError(f"Unsupported table format: {path}. Use .csv, .csv.gz, or .parquet")
 
 
-def _get_column_or_zero(df: pd.DataFrame, ordered_names: Iterable[str]) -> pd.Series:
-    name = _first_existing(df, ordered_names)
-    if name is None:
-        return pd.Series(np.zeros(len(df), dtype=float), index=df.index)
-    return pd.to_numeric(df[name], errors="coerce").fillna(0.0).astype(float)
-
-
-def _resolve_emissions_columns(config: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    resolved = DEFAULT_EMISSIONS_COLUMNS.copy()
-    if config:
-        resolved.update({k: v for k, v in config.items() if v})
-    return resolved
-
-
-def prepare_grid_emissions(
-    emissions_df: pd.DataFrame,
-    emissions_columns: Optional[Dict[str, str]] = None,
-) -> pd.DataFrame:
+def prepare_grid_emissions(emissions_df: pd.DataFrame) -> pd.DataFrame:
     """Normalize emissions to ISRM input species and aggregate by grid."""
-    columns = _resolve_emissions_columns(emissions_columns)
-    grid_col = _first_existing(
-        emissions_df,
-        [columns["grid_id"], "GRID", "grid", "zone", "cell_id", "Location"],
-    )
-    if grid_col is None:
-        raise ValueError("No grid id column found. Expected GRID/grid/zone/cell_id/Location")
+    if "inmap_srm_cell_id" not in emissions_df.columns:
+        raise ValueError("No grid id column found. Expected inmap_srm_cell_id")
+
+    emission_cols = [c for c in DEFAULT_EMISSIONS_COLUMNS if c != "inmap_srm_cell_id"]
 
     df = emissions_df.copy()
-    df["GRID"] = pd.to_numeric(df[grid_col], errors="coerce")
+    df["GRID"] = pd.to_numeric(df["inmap_srm_cell_id"], errors="coerce")
     df = df[df["GRID"].notna()].copy()
     df["GRID"] = df["GRID"].astype(int)
 
-    # Prioritize already-converted tons/year columns, then allocated or raw emissions columns.
-    df["tons_per_year_ROG"] = _get_column_or_zero(
-        df,
-        [
-            columns["rog"],
-            "tons_per_year_ROG",
-            "tons_per_year_ROG_allocated",
-            "em_ROG_allocated",
-            "em_ROG",
-            "em_VOC_allocated",
-            "em_VOC",
-        ],
-    )
-    df["tons_per_year_NOx"] = _get_column_or_zero(
-        df,
-        [columns["nox"], "tons_per_year_NOx", "tons_per_year_NOx_allocated", "em_NOx_allocated", "em_NOx", "em_NOX_allocated", "em_NOX"],
-    )
-    df["tons_per_year_NH3"] = _get_column_or_zero(
-        df,
-        [columns["nh3"], "tons_per_year_NH3", "tons_per_year_NH3_allocated", "em_NH3_allocated", "em_NH3"],
-    )
-    df["tons_per_year_SOx"] = _get_column_or_zero(
-        df,
-        [columns["sox"], "tons_per_year_SOx", "tons_per_year_SOx_allocated", "em_SOx_allocated", "em_SOx", "em_SOX_allocated", "em_SOX"],
-    )
-    df["tons_per_year_PM2_5"] = _get_column_or_zero(
-        df,
-        [
-            columns["pm25"],
-            "tons_per_year_PM2_5",
-            "tons_per_year_PM2_5_allocated",
-            "em_PM2_5_allocated",
-            "em_PM2_5",
-            "em_PM25_allocated",
-            "em_PM25",
-        ],
-    )
-    df["tons_per_year_BCV1"] = _get_column_or_zero(
-        df,
-        [columns["bcv1"], "tons_per_year_BCV1", "tons_per_year_BCV1_allocated", "em_BCV1_allocated", "em_BCV1"],
-    )
-    df["tons_per_year_BCV3"] = _get_column_or_zero(
-        df,
-        [columns["bcv3"], "tons_per_year_BCV3", "tons_per_year_BCV3_allocated", "em_BCV3_allocated", "em_BCV3"],
-    )
+    for col in emission_cols:
+        if col not in df.columns:
+            df[col] = 0.0
+        else:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
-    return (
-        df.groupby("GRID", dropna=False)[
-            [
-                "tons_per_year_ROG",
-                "tons_per_year_NOx",
-                "tons_per_year_NH3",
-                "tons_per_year_SOx",
-                "tons_per_year_PM2_5",
-                "tons_per_year_BCV1",
-                "tons_per_year_BCV3",
-            ]
-        ]
-        .sum()
-        .reset_index()
-    )
+    return df.groupby("GRID", dropna=False)[emission_cols].sum().reset_index()
 
 
-def load_isrm_store(isrm_url: str = "s3://inmap-model/isrm_v1.2.1.zarr/"):
+def load_isrm_store(isrm_url: str):
     """Load ISRM zarr store from S3 or local path."""
     import zarr
 
@@ -178,10 +89,9 @@ def compute_isrm_concentrations(
     factor: float = 28766.639,
     include_bc: bool = False,
     include_health: bool = False,
-    emissions_columns: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
     """Compute concentration fields from grid emissions using ISRM."""
-    emis = prepare_grid_emissions(grid_emissions_df, emissions_columns=emissions_columns)
+    emis = prepare_grid_emissions(grid_emissions_df)
 
     if emis.empty:
         raise ValueError("No emissions rows found after GRID normalization.")
@@ -202,22 +112,15 @@ def compute_isrm_concentrations(
 
     total = soa + pno3 + pnh4 + pso4 + primary
 
-    bcv1 = np.zeros_like(total)
-    bcv3 = np.zeros_like(total)
+    bch = np.zeros_like(total)
     if include_bc:
-        bcv1 = _matrix_response(
+        bch = _matrix_response(
             sr,
             "PrimaryPM25",
             source_cells,
-            source_indexed["tons_per_year_BCV1"].to_numpy(),
+            source_indexed["tons_per_year_BCh"].to_numpy(),
         )
-        bcv3 = _matrix_response(
-            sr,
-            "PrimaryPM25",
-            source_cells,
-            source_indexed["tons_per_year_BCV3"].to_numpy(),
-        )
-        total = total + bcv1 + bcv3
+        total = total + bch
 
     n_cells = int(sr["TotalPop"].shape[0]) if "TotalPop" in sr else int(total.shape[0])
     results = pd.DataFrame(
@@ -233,8 +136,7 @@ def compute_isrm_concentrations(
     )
 
     if include_bc:
-        results["BCV1"] = factor * bcv1
-        results["BCV3"] = factor * bcv3
+        results["BCh"] = factor * bch
 
     if include_health and "TotalPop" in sr and "MortalityRate" in sr:
         total_pop = np.asarray(sr["TotalPop"][:])
@@ -262,13 +164,17 @@ def compute_isrm_concentrations(
 def run_dispersion_from_file(
     emissions_input_path: str,
     output_path: Optional[str] = None,
-    isrm_url: str = "s3://inmap-model/isrm_v1.2.1.zarr/",
+    isrm_url: Optional[str] = None,
     factor: float = 28766.639,
     include_bc: bool = False,
     include_health: bool = False,
-    emissions_columns: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
     """Read grid emissions and write ISRM concentration outputs."""
+    if not isrm_url:
+        raise ValueError(
+            "isrm_url must be configured. "
+            "Set dispersions.inmap.isrm_zarr (or isrm_zarr_directory / isrm_zarr_s3bucket) in runtime.yaml."
+        )
     emissions_df = _read_table(emissions_input_path)
     sr = load_isrm_store(isrm_url)
     concentrations = compute_isrm_concentrations(
@@ -277,7 +183,6 @@ def run_dispersion_from_file(
         factor=factor,
         include_bc=include_bc,
         include_health=include_health,
-        emissions_columns=emissions_columns,
     )
 
     if output_path:

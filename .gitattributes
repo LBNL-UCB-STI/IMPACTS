@@ -1,18 +1,8 @@
-examples/pilates/upstream/*.shp filter=lfs diff=lfs merge=lfs -text
-examples/pilates/upstream/*.dbf filter=lfs diff=lfs merge=lfs -text
-examples/pilates/upstream/*.shx filter=lfs diff=lfs merge=lfs -text
-examples/pilates/upstream/*.prj filter=lfs diff=lfs merge=lfs -text
-examples/pilates/upstream/*.sbn filter=lfs diff=lfs merge=lfs -text
-examples/pilates/upstream/*.sbx filter=lfs diff=lfs merge=lfs -text
-examples/
-[[:space:]][[:space:]]pilates/upstream/*.cpg filter=lfs diff=lfs merge=lfs -text
-examples/pilates/upstream/*.shp.xml filter=lfs diff=lfs merge=lfs -text
-examples/pilates/upstream/**/*.shp filter=lfs diff=lfs merge=lfs -text
-examples/pilates/upstream/**/*.dbf filter=lfs diff=lfs merge=lfs -text
-examples/pilates/upstream/**/*.shx filter=lfs diff=lfs merge=lfs -text
-examples/pilates/upstream/**/*.prj filter=lfs diff=lfs merge=lfs -text
-examples/pilates/upstream/**/
-[[:space:]][[:space:]]*.sbn filter=lfs diff=lfs merge=lfs -text
-examples/pilates/upstream/**/*.sbx filter=lfs diff=lfs merge=lfs -text
-examples/pilates/upstream/**/*.cpg filter=lfs diff=lfs merge=lfs -text
-examples/pilates/upstream/**/*.shp.xml filter=lfs diff=lfs merge=lfs -text
+examples/pilates/upstream/**.sbn filter=lfs diff=lfs merge=lfs -text
+examples/pilates/upstream/**.sbx filter=lfs diff=lfs merge=lfs -text
+examples/pilates/upstream/**.cpg filter=lfs diff=lfs merge=lfs -text
+examples/pilates/upstream/**.shp.xml filter=lfs diff=lfs merge=lfs -text
+examples/pilates/upstream/**.shp filter=lfs diff=lfs merge=lfs -text
+examples/pilates/upstream/**.dbf filter=lfs diff=lfs merge=lfs -text
+examples/pilates/upstream/**.shx filter=lfs diff=lfs merge=lfs -text
+examples/pilates/upstream/**.prj filter=lfs diff=lfs merge=lfs -text

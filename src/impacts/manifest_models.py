@@ -9,6 +9,9 @@ from typing import Dict
 from typing import List
 from typing import Optional
 
+from impacts.defaults import DEFAULT_ANNUALIZATION_DAYS
+from impacts.defaults import DEFAULT_CONCENTRATION_FACTOR
+
 
 def _required_string(value: Any, label: str) -> str:
     text = str(value or "").strip()
@@ -66,7 +69,6 @@ class PipelineConfig:
     inmap_grid_path: str
     inmap_grid_epsg: int
     mapping_columns: Dict[str, Any]
-    skims_columns: Dict[str, Any]
     isrm_url: Optional[str] = None
     aermod_grid_path: Optional[str] = None
     aermod_grid_epsg: Optional[int] = None
@@ -86,14 +88,13 @@ class PipelineConfig:
     concentration_factor: Optional[float] = None
     include_bc: bool = False
     include_health: bool = False
-    dispersion_emissions_columns: Dict[str, Any] = field(default_factory=dict)
     events_path: Optional[str] = None
     rates_dir: Optional[str] = None
     link_length_path: Optional[str] = None
     iterations: int = 0
     use_rates: bool = True
-    events_columns: Dict[str, Any] = field(default_factory=dict)
-    network_columns: Dict[str, Any] = field(default_factory=dict)
+    pollutants: List[str] = field(default_factory=list)
+    annualization_days: float = DEFAULT_ANNUALIZATION_DAYS
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PipelineConfig":
@@ -106,7 +107,6 @@ class PipelineConfig:
             inmap_grid_path=_required_string(payload.get("inmap_grid_path"), "pipeline.inmap_grid_path"),
             inmap_grid_epsg=int(_required_string(payload.get("inmap_grid_epsg"), "pipeline.inmap_grid_epsg")),
             mapping_columns=_required_dict(payload.get("mapping_columns"), "pipeline.mapping_columns"),
-            skims_columns=_required_dict(payload.get("skims_columns"), "pipeline.skims_columns"),
             isrm_url=_optional_string(payload.get("isrm_url")),
             aermod_grid_path=_optional_string(payload.get("aermod_grid_path")),
             aermod_grid_epsg=_optional_int(payload.get("aermod_grid_epsg")),
@@ -126,14 +126,13 @@ class PipelineConfig:
             concentration_factor=_optional_float(payload.get("concentration_factor")),
             include_bc=bool(payload.get("include_bc", False)),
             include_health=bool(payload.get("include_health", False)),
-            dispersion_emissions_columns=dict(payload.get("dispersion_emissions_columns", {}) or {}),
             events_path=_optional_string(payload.get("events_path")),
             rates_dir=_optional_string(payload.get("rates_dir")),
             link_length_path=_optional_string(payload.get("link_length_path")),
             iterations=int(payload.get("iterations", 0) or 0),
             use_rates=bool(payload.get("use_rates", True)),
-            events_columns=dict(payload.get("events_columns", {}) or {}),
-            network_columns=dict(payload.get("network_columns", {}) or {}),
+            pollutants=_coerce_string_list(payload.get("prepared_pollutants") or payload.get("pollutants")),
+            annualization_days=float(payload.get("annualization_days") or DEFAULT_ANNUALIZATION_DAYS),
         )
 
     def to_dict(self) -> Dict[str, Any]:

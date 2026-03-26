@@ -15,14 +15,6 @@ import geopandas as gpd
 import osm_chordify
 import pandas as pd
 
-try:
-    from .emissions_grid_mapping import (
-        map_skims_emissions_to_intersection as _map_skims_emissions_to_intersection_impl,
-    )
-except ImportError:
-    from impacts.emissions.emissions_grid_mapping import (
-        map_skims_emissions_to_intersection as _map_skims_emissions_to_intersection_impl,
-    )
 @dataclass
 class EmissionsMappingConfig:
     """Configuration for BEAM-OSM-GRID mapping workflow."""
@@ -205,6 +197,3 @@ def intersect_beam_osm_with_counties(
     return result
 
 
-def map_skims_emissions_to_intersection(*args, **kwargs):
-    """Map skims emissions to BEAM+OSM+GRID intersection."""
-    return _map_skims_emissions_to_intersection_impl(*args, **kwargs)

@@ -12,7 +12,8 @@ import numpy as np
 import pandas as pd
 
 
-DEFAULT_CHUNK_SIZE = 200_000
+from impacts.defaults import DEFAULT_COMPACT_WORKERS
+from impacts.defaults import DEFAULT_SAMPLING_CHUNK_SIZE as DEFAULT_CHUNK_SIZE
 EXPLICIT_SKIMS_POLLUTANTS = [
     "CH4",
     "CO",
@@ -38,7 +39,6 @@ COMPACT_SKIMS_COLUMNS = [
     "observations",
     "iterations",
 ]
-DEFAULT_COMPACT_WORKERS = 4
 TOTALS_SKIMS_KEY_COLUMNS = ["linkId", "vehicleTypeId", "process"]
 
 
