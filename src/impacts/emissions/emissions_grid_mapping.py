@@ -439,7 +439,10 @@ def distribute_to_intersection(
 
     map_grid_col = _resolve_mapping_grid_col(mapping_df, mapping_columns=mapping_columns)
     mapping = mapping_df.copy()
-    mapping[proportion_col] = mapping[proportion_col].fillna(0.0).astype(float)
+    # Keep voided rows (null proportion) — land cells with no road intersections
+    # will produce null allocated emissions after the right join, allowing them
+    # to be rendered separately (e.g. greyed out) in downstream visualizations.
+    mapping[proportion_col] = pd.to_numeric(mapping[proportion_col], errors="coerce")
     left_on, right_on = _resolve_join_columns(
         weighted_df,
         mapping,
@@ -448,7 +451,7 @@ def distribute_to_intersection(
 
     merged = weighted_df.merge(
         mapping,
-        how="inner",
+        how="right",
         left_on=left_on,
         right_on=right_on,
         suffixes=("_skims", "_map"),

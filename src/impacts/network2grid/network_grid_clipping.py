@@ -126,16 +126,12 @@ def intersect_beam_osm_with_grid(
     grid_epsg: int = 4326,
     output_epsg: int = 26910,
     beam_length_col: str = "linkLength",
-    road_buffer_filter_m: Optional[float] = None,
 ):
     """Intersect mapped BEAM+OSM links with grid cells.
 
     Produces per-cell segments and computes edge length within each GRID
-    cell via the intersection proportion.
-
-    road_buffer_filter_m controls the built-in osm-chordify prefilter:
-    pass None to disable it or a positive value (e.g. 100.0) to retain only
-    grid cells within that buffer distance of the road network.
+    cell via the intersection proportion. The grid is expected to be
+    pre-filtered to the study area before calling this function.
     """
     if isinstance(beam_osm_path, str):
         _validate_local_path(beam_osm_path, "BEAM+OSM mapped path")
@@ -149,7 +145,6 @@ def intersect_beam_osm_with_grid(
         zones=grid_cells_path,
         output_path=None,
         output_epsg=output_epsg,
-        road_buffer_filter_m=road_buffer_filter_m,
     )
     if "zone_link_length_m" in result.columns and "edge_length_in_cell_m" not in result.columns:
         result["edge_length_in_cell_m"] = result["zone_link_length_m"]

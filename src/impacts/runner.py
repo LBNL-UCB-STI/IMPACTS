@@ -31,6 +31,122 @@ def _table_path(parent: Path, stem: str) -> Path:
     return _ensure_parent(parent / f"{stem}{suffix}")
 
 
+def _bbox_subgrid(
+    grid_path: str,
+    grid_epsg: int,
+    network_gdf: gpd.GeoDataFrame,
+    output_path: Path,
+    output_epsg: int,
+) -> gpd.GeoDataFrame:
+    """Step 1: filter grid to network bounding box using zone-zone intersection."""
+    import osm_chordify
+    from shapely.geometry import box as shapely_box
+
+    network_epsg = network_gdf.crs.to_epsg()
+    minx, miny, maxx, maxy = network_gdf.total_bounds
+    bbox_gdf = gpd.GeoDataFrame(
+        geometry=[shapely_box(minx, miny, maxx, maxy)],
+        crs=network_gdf.crs,
+    )
+    subgrid = osm_chordify.intersect_zones_with_zones(
+        grid_path,
+        grid_epsg,
+        bbox_gdf,
+        network_epsg,
+        output_epsg=output_epsg,
+    )
+    # intersect_zones_with_zones prefixes zone_a columns with "zone_a_".
+    # Strip that prefix so the subgrid retains the original grid column names
+    # and downstream road-grid intersection doesn't produce double-prefixed columns.
+    subgrid = subgrid.rename(
+        columns={c: c[len("zone_a_"):] for c in subgrid.columns if c.startswith("zone_a_")}
+    )
+    subgrid.to_parquet(output_path, index=False)
+    return subgrid
+
+
+def _land_subgrid(
+    bbox_subgrid: gpd.GeoDataFrame,
+    land_mask: gpd.GeoDataFrame,
+    output_epsg: int,
+) -> gpd.GeoDataFrame:
+    """Step 3: filter bbox subgrid to land cells using zone-zone intersection."""
+    import osm_chordify
+
+    return osm_chordify.intersect_zones_with_zones(
+        bbox_subgrid,
+        output_epsg,
+        land_mask,
+        output_epsg,
+        output_epsg=output_epsg,
+    )
+
+
+def _fuse_with_land_subgrid(
+    intersection_gdf: gpd.GeoDataFrame,
+    land_subgrid: gpd.GeoDataFrame,
+    output_epsg: int,
+    proportion_col: str = "zone_edge_proportion",
+) -> gpd.GeoDataFrame:
+    """Step 4: fuse road-grid intersection with land subgrid.
+
+    - Non-voided rows (roads × cells) are kept as-is.
+    - Voided rows (cells with no roads) are filtered to only those overlapping
+      the land subgrid — land cells with no roads are kept with null link/emission
+      columns so they can be rendered separately (greyed out) in visualizations.
+    - Water and out-of-study-area voided cells are dropped.
+    """
+    import osm_chordify
+
+    non_voided = intersection_gdf[intersection_gdf[proportion_col].notna()]
+    voided = intersection_gdf[intersection_gdf[proportion_col].isna()].copy()
+
+    if voided.empty:
+        return intersection_gdf
+
+    voided = voided.reset_index(drop=True)
+    voided["vid"] = voided.index
+
+    land_overlap = osm_chordify.intersect_zones_with_zones(
+        voided,
+        output_epsg,
+        land_subgrid,
+        output_epsg,
+        output_epsg=output_epsg,
+    )
+
+    if land_overlap.empty:
+        return non_voided.reset_index(drop=True)
+
+    keep_vids = set(land_overlap["zone_a_vid"])
+    voided_on_land = voided[voided["vid"].isin(keep_vids)].drop(columns=["vid"])
+
+    return pd.concat([non_voided, voided_on_land], ignore_index=True)
+
+
+def _buffer_network_by_lanes(
+    network_gdf: gpd.GeoDataFrame,
+    output_path: Path,
+    lane_width_m: float = 4.0,
+    lanes_col: str = "numberOfLanes",
+) -> gpd.GeoDataFrame:
+    """Buffer each road link into a rectangular polygon corridor.
+
+    Half-width per side = (lanes × lane_width_m) / 2, with flat caps so the
+    result is rectangular rather than rounded.
+    """
+    buffered = network_gdf.copy()
+    lanes = pd.to_numeric(buffered[lanes_col], errors="coerce").fillna(1.0).clip(lower=1.0)
+    half_width = (lanes * lane_width_m) / 2.0
+    buffered.geometry = gpd.GeoSeries(
+        [geom.buffer(d, cap_style=2, join_style=2) for geom, d in zip(buffered.geometry, half_width)],
+        crs=buffered.crs,
+    )
+    buffered.to_parquet(output_path, index=False)
+    buffered.to_file(output_path.with_suffix(".gpkg"), driver="GPKG")
+    return buffered
+
+
 def _load_grid_geometries(grid_path: str) -> gpd.GeoDataFrame:
     path = Path(grid_path)
     if path.suffix.lower() == ".parquet":
@@ -57,7 +173,11 @@ def _resolve_grid_join_columns(
             if right_col in grid_gdf.columns:
                 return left_col, right_col
 
-    raise ValueError("Could not resolve a grid id join between allocated emissions and grid geometry.")
+    raise ValueError(
+        f"Could not resolve a grid id join between allocated emissions and grid geometry.\n"
+        f"  allocated_df columns: {list(allocated_df.columns)}\n"
+        f"  grid_gdf columns: {list(grid_gdf.columns)}"
+    )
 
 
 def _write_geoparquet_allocation(
@@ -103,11 +223,14 @@ def _build_mapping_from_staged_inputs(pipeline: PipelineConfig, raw_dir: Path) -
     county_mapping_path = raw_dir / "beam_osm_county_intersection.parquet"
     mapping_path = raw_dir / "beam_osm_inmap_grid_intersection.parquet"
     fine_mapping_path = raw_dir / "beam_osm_aermod_grid_intersection.parquet"
+
     osm_source = pipeline.osm_links_path or pipeline.osm_pbf_path
     if not osm_source:
         raise ValueError("Mapping build requires staged osm_links_path or osm_pbf_path.")
+
+    # Stage 1: Map BEAM network to OSM
     logger.info("Stage 1/5: mapping BEAM network to OSM using %s", osm_source)
-    map_beam_network_to_osm(
+    beam_osm_mapped = map_beam_network_to_osm(
         osm_path=osm_source,
         beam_network_path=pipeline.beam_network_path,
         output_path=str(beam_osm_path),
@@ -115,57 +238,154 @@ def _build_mapping_from_staged_inputs(pipeline: PipelineConfig, raw_dir: Path) -
         output_epsg=int(pipeline.output_epsg),
     )
     logger.info("Stage 1/5 complete: wrote %s", beam_osm_path)
+    beam_osm_mapped.to_file(beam_osm_path.with_suffix(".gpkg"), driver="GPKG")
 
-    county_input = str(beam_osm_path)
+    beam_osm_buffered_path = raw_dir / "beam_osm_buffered.parquet"
+    logger.info("Stage 1/5: buffering network links by lane width (4m/lane)")
+    beam_osm_buffered = _buffer_network_by_lanes(
+        network_gdf=beam_osm_mapped,
+        output_path=beam_osm_buffered_path,
+    )
+    logger.info("Stage 1/5: buffered network written to %s", beam_osm_buffered_path)
+
+    # Stage 2: Intersect with counties (optional)
     county_state_fips = pipeline.county_state_fips
     county_fips_codes = list(pipeline.county_fips_codes or [])
+    network_gdf = beam_osm_mapped
+    county_input = str(beam_osm_path)
+
     if county_state_fips and county_fips_codes:
         logger.info(
             "Stage 2/5: intersecting mapped BEAM/OSM network with counties state_fips=%s county_fips=%s",
             county_state_fips,
             county_fips_codes,
         )
-        intersect_beam_osm_with_counties(
+        county_mapped = intersect_beam_osm_with_counties(
             beam_osm_path=str(beam_osm_path),
             state_fips=str(county_state_fips),
             county_fips_codes=county_fips_codes,
             output_path=str(county_mapping_path),
-            beam_osm_epsg=int(pipeline.beam_osm_epsg),
+            beam_osm_epsg=int(pipeline.output_epsg),
             output_epsg=int(pipeline.output_epsg),
             area_name=str(pipeline.region or pipeline.county_area_name),
             boundary_year=int(pipeline.start_year or 2023),
         )
+        county_mapped.to_file(county_mapping_path.with_suffix(".gpkg"), driver="GPKG")
         county_input = str(county_mapping_path)
+        network_gdf = county_mapped
         logger.info("Stage 2/5 complete: wrote %s", county_mapping_path)
     else:
         logger.info("Stage 2/5 skipped: county FIPS settings not configured")
 
+    # Build land mask (if county FIPS configured)
+    land_mask = None
+    if county_state_fips and county_fips_codes:
+        import osm_chordify
+        logger.info("Building land mask from cartographic county boundaries")
+        land_mask = osm_chordify.build_area_mask_from_counties(
+            state_fips_code=str(county_state_fips),
+            county_fips_codes=[str(c) for c in county_fips_codes],
+            year=int(pipeline.start_year or 2023),
+            work_dir=str(raw_dir),
+            output_epsg=int(pipeline.output_epsg),
+            include_water=False,
+        )
+
+    # Stage 3: inMAP grid — 4-step intersection
     inmap_grid_path = pipeline.inmap_grid_path
     logger.info("Stage 3/5: intersecting mapped network with inmap_grid %s", inmap_grid_path)
-    intersect_beam_osm_with_grid(
-        beam_osm_path=county_input,
-        grid_cells_path=inmap_grid_path,
-        output_path=str(mapping_path),
-        beam_osm_epsg=int(pipeline.beam_osm_epsg),
+
+    # Step 1 — bbox subgrid: filter inMAP grid to network bounding box
+    inmap_bbox_subgrid_path = raw_dir / "inmap_grid_bbox_subgrid.parquet"
+    inmap_bbox_subgrid = _bbox_subgrid(
+        grid_path=inmap_grid_path,
         grid_epsg=int(pipeline.inmap_grid_epsg),
+        network_gdf=network_gdf,
+        output_path=inmap_bbox_subgrid_path,
+        output_epsg=int(pipeline.output_epsg),
+    )
+
+    # Step 2 — road-grid intersection: intersect roads with bbox subgrid
+    inmap_raw_intersection_path = raw_dir / "beam_osm_inmap_grid_intersection_raw.parquet"
+    inmap_intersection = intersect_beam_osm_with_grid(
+        beam_osm_path=county_input,
+        grid_cells_path=str(inmap_bbox_subgrid_path),
+        output_path=str(inmap_raw_intersection_path),
+        beam_osm_epsg=int(pipeline.output_epsg),
+        grid_epsg=int(pipeline.output_epsg),
         output_epsg=int(pipeline.output_epsg),
         beam_length_col=pipeline.beam_length_col,
     )
+
+    if land_mask is not None:
+        # Step 3 — land subgrid: filter bbox subgrid to land cells only
+        inmap_land_subgrid = _land_subgrid(
+            bbox_subgrid=inmap_bbox_subgrid,
+            land_mask=land_mask,
+            output_epsg=int(pipeline.output_epsg),
+        )
+        # Step 4 — fuse: keep road rows as-is, keep land-only voided cells, drop water/outside
+        inmap_mapped = _fuse_with_land_subgrid(
+            intersection_gdf=inmap_intersection,
+            land_subgrid=inmap_land_subgrid,
+            output_epsg=int(pipeline.output_epsg),
+        )
+    else:
+        inmap_mapped = inmap_intersection
+
+    inmap_mapped.to_parquet(mapping_path, index=False)
+    inmap_mapped.to_file(mapping_path.with_suffix(".gpkg"), driver="GPKG")
     logger.info("Stage 3/5 complete: wrote %s", mapping_path)
+
+    # Stage 4: AERMOD grid — buffered network polygon intersection (optional)
     aermod_grid_path = pipeline.aermod_grid_path
     if aermod_grid_path:
-        logger.info("Stage 4/6: intersecting inmap_grid-broken network with aermod_grid %s", aermod_grid_path)
-        intersect_beam_osm_with_grid(
-            beam_osm_path=str(mapping_path),
-            grid_cells_path=aermod_grid_path,
-            output_path=str(fine_mapping_path),
-            beam_osm_epsg=int(pipeline.output_epsg),
-            grid_epsg=int(pipeline.aermod_grid_epsg or pipeline.output_epsg),
+        import osm_chordify
+        logger.info("Stage 4/5: intersecting buffered network with aermod_grid %s", aermod_grid_path)
+
+        # Step 1 — bbox subgrid: filter aermod grid to buffered network extent
+        aermod_bbox_subgrid_path = raw_dir / "aermod_grid_bbox_subgrid.parquet"
+        _bbox_subgrid(
+            grid_path=aermod_grid_path,
+            grid_epsg=int(pipeline.aermod_grid_epsg),
+            network_gdf=beam_osm_buffered,
+            output_path=aermod_bbox_subgrid_path,
             output_epsg=int(pipeline.output_epsg),
-            beam_length_col=pipeline.beam_length_col,
-            road_buffer_filter_m=100.0,
         )
-        logger.info("Stage 4/6 complete: wrote %s", fine_mapping_path)
+
+        # Step 2 — intersect buffered network polygons (zone_a) with aermod subgrid (zone_b)
+        buffered_for_intersect = beam_osm_buffered.copy()
+        buffered_for_intersect["link_buffer_area"] = buffered_for_intersect.geometry.area
+
+        aermod_result = osm_chordify.intersect_zones_with_zones(
+            buffered_for_intersect,
+            int(pipeline.output_epsg),
+            aermod_bbox_subgrid_path,
+            int(pipeline.output_epsg),
+            output_epsg=int(pipeline.output_epsg),
+        )
+
+        # Rename: zone_a_* → edge_*, zone_b_* → zone_*
+        aermod_result = aermod_result.rename(columns={
+            col: "edge_" + col[len("zone_a_"):] if col.startswith("zone_a_") else
+                 "zone_" + col[len("zone_b_"):] if col.startswith("zone_b_") else col
+            for col in aermod_result.columns
+        })
+
+        # zone_edge_proportion = fraction of buffered corridor within each cell
+        aermod_result["zone_edge_proportion"] = (
+            aermod_result.geometry.area / aermod_result["edge_link_buffer_area"]
+        ).clip(0.0, 1.0)
+        aermod_result = aermod_result.drop(columns=["edge_link_buffer_area"])
+
+        if "edge_linkLength" in aermod_result.columns:
+            aermod_result["edge_link_length_m"] = pd.to_numeric(aermod_result["edge_linkLength"], errors="coerce")
+            aermod_result["zone_link_length_m"] = aermod_result["edge_link_length_m"] * aermod_result["zone_edge_proportion"]
+
+        aermod_result.to_parquet(fine_mapping_path, index=False)
+        aermod_result.to_file(fine_mapping_path.with_suffix(".gpkg"), driver="GPKG")
+        logger.info("Stage 4/5 complete: wrote %s", fine_mapping_path)
+
     return str(mapping_path)
 
 
