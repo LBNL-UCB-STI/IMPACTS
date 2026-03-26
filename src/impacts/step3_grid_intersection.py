@@ -16,13 +16,19 @@ from .manifest_models import PipelineConfig
 logger = logging.getLogger(__name__)
 
 
+def _read_vector(path: str) -> gpd.GeoDataFrame:
+    target = Path(path)
+    if target.suffix.lower() == ".parquet":
+        return gpd.read_parquet(target)
+    return gpd.read_file(target)
+
+
 def run(pipeline: PipelineConfig, raw_dir: Path, buffered_network: gpd.GeoDataFrame) -> str:
     """Intersect buffered network with AERMOD, inMAP, and county grids.
 
     Returns path to the labeled grid intersection parquet.
     """
     import osm_chordify
-    from osm_chordify.utils.data_collection import collect_geographic_boundaries
 
     grid_intersection_path = raw_dir / "beam_osm_aermod_inmap_county_intersection.parquet"
     epsg = int(pipeline.output_epsg)
@@ -50,15 +56,11 @@ def run(pipeline: PipelineConfig, raw_dir: Path, buffered_network: gpd.GeoDataFr
     logger.info("Step 3.2 complete: %d rows", len(B))
 
     # Step 3.3: B × county boundaries → labeled county_*
-    county_gdf = collect_geographic_boundaries(
-        state_fips_code=str(pipeline.county_state_fips),
-        county_fips_codes=[str(c) for c in (pipeline.county_fips_codes or [])],
-        year=int(pipeline.start_year or 2023),
-        area_name=str(pipeline.region or pipeline.county_area_name),
-        geo_level="county",
-        work_dir=str(raw_dir),
-        target_epsg=epsg,
-    )
+    if not pipeline.county_boundaries_path:
+        raise ValueError("Step 3 requires pipeline.county_boundaries_path from preprocess.")
+    county_gdf = _read_vector(pipeline.county_boundaries_path)
+    if county_gdf.crs is not None:
+        county_gdf = county_gdf.to_crs(epsg=epsg)
     logger.info("Step 3.3: intersecting with county boundaries")
     C_matched = osm_chordify.intersect_polygons_with_zones(
         B, epsg, county_gdf, output_epsg=epsg, zone_label="county",

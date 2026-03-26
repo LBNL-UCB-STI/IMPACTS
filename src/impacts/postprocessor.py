@@ -270,6 +270,7 @@ def postprocess_from_runtime_config(
     run_manifest = run_from_runtime_config(
         runtime_config_path=runtime_config_path,
         workspace=workspace_root,
+        run_dispersion=True,
     )
     return postprocess_from_run_manifest(
         run_manifest_path=run_manifest["run_manifest_path"],

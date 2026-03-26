@@ -80,6 +80,7 @@ class PipelineConfig:
     county_state_fips: Optional[str] = None
     county_fips_codes: List[str] = field(default_factory=list)
     county_area_name: str = "county"
+    county_boundaries_path: Optional[str] = None
     mapping_input_path: Optional[str] = None
     prepared_skims_input_path: Optional[str] = None
     skims_input_path: Optional[str] = None
@@ -118,6 +119,7 @@ class PipelineConfig:
             county_state_fips=_optional_string(payload.get("county_state_fips")),
             county_fips_codes=_coerce_string_list(payload.get("county_fips_codes")),
             county_area_name=_optional_string(payload.get("county_area_name")) or "county",
+            county_boundaries_path=_optional_string(payload.get("county_boundaries_path")),
             mapping_input_path=_optional_string(payload.get("mapping_input_path")),
             prepared_skims_input_path=_optional_string(payload.get("prepared_skims_input_path")),
             skims_input_path=_optional_string(payload.get("skims_input_path")),

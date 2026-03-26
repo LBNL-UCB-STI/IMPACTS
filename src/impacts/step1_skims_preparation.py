@@ -43,9 +43,21 @@ def run(pipeline: PipelineConfig, raw_dir: Path) -> Tuple[pd.DataFrame, Path]:
     from impacts.emissions.events_to_skims_emissions import write_skims_emissions
 
     skims_path = _table_path(raw_dir, "skims_emissions")
+    prepared_skims_path = Path(pipeline.prepared_skims_input_path) if pipeline.prepared_skims_input_path else None
+    staged_skims_path = Path(pipeline.skims_input_path) if pipeline.skims_input_path else None
 
-    # Step 1.1: build skims from events if not already present
-    if not skims_path.exists():
+    # Step 1.1: prefer preprocess-produced annualized skims when available.
+    using_prepared_skims = False
+    if prepared_skims_path and prepared_skims_path.exists():
+        skims_df = None
+        skims_path = prepared_skims_path
+        using_prepared_skims = True
+        logger.info("Step 1.1: using prepared staged skims from %s", skims_path)
+    elif staged_skims_path and staged_skims_path.exists():
+        skims_df = None
+        skims_path = staged_skims_path
+        logger.info("Step 1.1: using staged raw skims from %s", skims_path)
+    elif not skims_path.exists():
         if not pipeline.events_path:
             raise ValueError("Skims file not found and no events_path configured to build from.")
         logger.info("Step 1.1: building skims from events %s", pipeline.events_path)
@@ -69,7 +81,8 @@ def run(pipeline: PipelineConfig, raw_dir: Path) -> Tuple[pd.DataFrame, Path]:
     pollutants = list(pipeline.pollutants) if pipeline.pollutants else None
     if skims_df is None:
         logger.info("Step 1.2: loading skims from %s", skims_path)
-        skims_df = read_skims_emissions(str(skims_path), pollutants=pollutants)
+        load_pollutants = None if using_prepared_skims else pollutants
+        skims_df = read_skims_emissions(str(skims_path), pollutants=load_pollutants)
         logger.info("Step 1.2: loaded %d rows", len(skims_df))
     elif pollutants:
         dim_cols = [c for c in skims_df.columns if c in {"linkId", "vehicleTypeId", "process"}]

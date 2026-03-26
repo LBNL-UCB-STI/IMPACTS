@@ -138,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         run_manifest = run_from_input_manifest(
             input_manifest_path=preprocess_manifest["inputs_manifest_path"],
             output_dir=workspace / "output",
+            run_dispersion=True,
         )
         postprocess_from_run_manifest(
             run_manifest_path=run_manifest["run_manifest_path"],

@@ -34,6 +34,34 @@ def _load_grid_geometries(grid_path: str) -> gpd.GeoDataFrame:
     return gpd.read_file(path)
 
 
+def _read_table(path: str | Path) -> pd.DataFrame:
+    target = Path(path)
+    lower = target.name.lower()
+    if lower.endswith(".parquet"):
+        return pd.read_parquet(target)
+    if lower.endswith(".csv.gz"):
+        return pd.read_csv(target, compression="gzip")
+    if lower.endswith(".csv"):
+        return pd.read_csv(target)
+    raise ValueError(f"Unsupported table format: {target}")
+
+
+def _write_table(df: pd.DataFrame, path: str | Path) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lower = target.name.lower()
+    if lower.endswith(".parquet"):
+        df.to_parquet(target, index=False, engine="pyarrow", compression="snappy")
+        return
+    if lower.endswith(".csv.gz"):
+        df.to_csv(target, index=False, compression="gzip")
+        return
+    if lower.endswith(".csv"):
+        df.to_csv(target, index=False)
+        return
+    raise ValueError(f"Unsupported table format: {target}")
+
+
 def _save_grid_emissions(
     df: pd.DataFrame,
     left_col: str,
@@ -86,13 +114,13 @@ def run(
     emissions_corrected_path = _table_path(raw_dir, "emissions_corrected")
     if pipeline.activity_corrections_path:
         logger.info("Step 4.2: applying county corrections from %s", pipeline.activity_corrections_path)
-        allocated_df = pd.read_parquet(emissions_allocated_path)
+        allocated_df = _read_table(emissions_allocated_path)
         corrected_df = apply_county_corrections(
             allocated_df,
             corrections_path=pipeline.activity_corrections_path,
             correction_columns=pipeline.activity_corrections_columns or None,
         )
-        corrected_df.to_parquet(emissions_corrected_path, index=False, engine="pyarrow", compression="snappy")
+        _write_table(corrected_df, emissions_corrected_path)
         logger.info("Step 4.2 complete: %d rows → %s", len(corrected_df), emissions_corrected_path)
     else:
         emissions_corrected_path = emissions_allocated_path
@@ -100,7 +128,7 @@ def run(
 
     # Step 4.3: collapse to grid cells by vehicleType
     logger.info("Step 4.3: collapsing emissions to grid cells by vehicleType")
-    corrected_df = pd.read_parquet(emissions_corrected_path)
+    corrected_df = _read_table(emissions_corrected_path)
     emission_cols = [c for c in corrected_df.columns if c.startswith("tons_per_year_")]
 
     aermod_grid_emissions_path: Optional[str] = None

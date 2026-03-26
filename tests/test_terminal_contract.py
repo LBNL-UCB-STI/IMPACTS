@@ -693,6 +693,7 @@ def test_preprocess_accepts_native_runtime_config(tmp_path: Path):
 
     assert manifest["pipeline"]["county_state_fips"] == "06"
     assert manifest["pipeline"]["county_fips_codes"] == ["001", "013"]
+    assert Path(manifest["pipeline"]["county_boundaries_path"]).exists()
     assert manifest["pipeline"]["beam_osm_epsg"] == 7131
     assert manifest["pipeline"]["output_epsg"] == 7131
     assert manifest["pipeline"]["prepared_pollutants"] == ["PM2_5", "NOx"]

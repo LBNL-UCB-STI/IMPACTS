@@ -95,16 +95,23 @@ def _write_vector(gdf: gpd.GeoDataFrame, path: str) -> None:
         gdf.to_file(target)
 
 
-def _ensure_grid_cell_id(staged_path: str, cell_id_col: str, source_col: Optional[str] = None) -> str:
+def _ensure_grid_cell_id(
+    staged_path: str,
+    cell_id_col: str,
+    source_col: Optional[str] = None,
+) -> tuple[str, str]:
     """Ensure the staged grid file has a ``cell_id_col`` column.
 
     If ``source_col`` is given, it must exist in the file — raises otherwise.
     If ``source_col`` is not given, ``cell_id_col`` is created from row numbers.
-    The file is rewritten in place and ``cell_id_col`` is returned.
+    When the staged input is a shapefile and a rewrite is needed, the normalized
+    contract copy is written as parquet so full field names are preserved.
+
+    Returns ``(normalized_path, cell_id_col)``.
     """
     gdf = _read_vector(staged_path)
     if cell_id_col in gdf.columns:
-        return cell_id_col
+        return staged_path, cell_id_col
     if source_col:
         if source_col not in gdf.columns:
             raise ValueError(
@@ -114,8 +121,11 @@ def _ensure_grid_cell_id(staged_path: str, cell_id_col: str, source_col: Optiona
         gdf[cell_id_col] = gdf[source_col]
     else:
         gdf[cell_id_col] = range(len(gdf))
-    _write_vector(gdf, staged_path)
-    return cell_id_col
+    normalized_path = staged_path
+    if Path(staged_path).suffix.lower() != ".parquet":
+        normalized_path = str(Path(staged_path).with_suffix(".parquet"))
+    _write_vector(gdf, normalized_path)
+    return normalized_path, cell_id_col
 
 
 def _stage_local_input(
@@ -170,6 +180,38 @@ def _stage_optional_input(
 def _prepared_table_target(input_root: Path, stem: str) -> Path:
     suffix = ".parquet" if parquet_available() else ".csv.gz"
     return input_root / "skims" / f"{stem}{suffix}"
+
+
+def _stage_county_boundaries(
+    *,
+    manifest_inputs: Dict[str, Any],
+    input_root: Path,
+    state_fips: str,
+    county_fips_codes: list[str],
+    year: int,
+    area_name: str,
+    target_epsg: int,
+) -> str:
+    from osm_chordify.utils.data_collection import collect_geographic_boundaries
+
+    county_gdf = collect_geographic_boundaries(
+        state_fips_code=str(state_fips),
+        county_fips_codes=[str(code) for code in county_fips_codes],
+        year=int(year),
+        area_name=str(area_name),
+        geo_level="county",
+        work_dir=str(input_root / "county"),
+        target_epsg=int(target_epsg),
+    )
+    destination = input_root / "county" / "county_boundaries.gpkg"
+    _write_vector(county_gdf, str(destination))
+    manifest_inputs["county_boundaries"] = file_entry(
+        kind="local",
+        path=str(destination),
+        staged_path=str(destination),
+        optional=False,
+    )
+    return str(destination)
 
 
 def build_inputs_manifest(
@@ -325,8 +367,27 @@ def build_inputs_manifest(
             relative_target=f"aermod_grid/{Path(aermod_grid_source).name}",
             optional=True,
         )
-        resolved_aermod_grid_id = _ensure_grid_cell_id(staged_aermod_grid, "srv_cell_id", source_col=grid.aermod_grid_id)
-    resolved_inmap_grid_id = _ensure_grid_cell_id(staged_inmap_grid, "srm_cell_id", source_col=grid.inmap_grid_id)
+        staged_aermod_grid, resolved_aermod_grid_id = _ensure_grid_cell_id(
+            staged_aermod_grid,
+            "srv_cell_id",
+            source_col=grid.aermod_grid_id,
+        )
+        manifest_inputs["aermod_grid"]["staged_path"] = staged_aermod_grid
+    staged_inmap_grid, resolved_inmap_grid_id = _ensure_grid_cell_id(
+        staged_inmap_grid,
+        "srm_cell_id",
+        source_col=grid.inmap_grid_id,
+    )
+    manifest_inputs["inmap_grid"]["staged_path"] = staged_inmap_grid
+    staged_county_boundaries = _stage_county_boundaries(
+        manifest_inputs=manifest_inputs,
+        input_root=input_root,
+        state_fips=geography.fips.state,
+        county_fips_codes=list(geography.fips.counties),
+        year=int(runtime_config.shared_context.start_year or 2023),
+        area_name=runtime_config.shared_context.region or processing.county_area_name,
+        target_epsg=int(local_output_epsg),
+    )
 
     staged_isrm = _stage_optional_input(
         manifest_inputs=manifest_inputs,
@@ -410,6 +471,7 @@ def build_inputs_manifest(
             "county_state_fips": geography.fips.state,
             "county_fips_codes": list(geography.fips.counties),
             "county_area_name": runtime_config.shared_context.region or processing.county_area_name,
+            "county_boundaries_path": staged_county_boundaries,
             "concentration_factor": float(processing.dispersion.concentration_factor),
             "include_bc": bool(processing.dispersion.include_bc),
             "include_health": bool(processing.dispersion.include_health),
