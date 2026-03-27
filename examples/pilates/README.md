@@ -2,56 +2,32 @@
 
 This example simulates a PILATES integration locally.
 
-There are two config layers:
+This example now uses one user-managed settings file:
 
-1. `pilates_model_config.yaml`
-   - thin PILATES-facing `impacts` overlay
-   - keeps only `impacts`-specific settings that are not already present in the main PILATES settings
-   - uses a higher-level structure:
-     - `runtime_overrides.emissions`
-     - `runtime_overrides.dispersions`
-     - `runtime_overrides.outputs`
-2. `runtime.yaml`
-   - generated executable runtime config for `impacts`
-   - can be generated from the main PILATES settings plus `pilates_model_config.yaml`
-   - should not be treated as the source of truth for shared PILATES settings
+1. `settings.yaml`
+   - PILATES-style source of truth for the example
+   - includes shared run context plus `impacts.runtime_overrides`
+   - is the only config you edit for the example
 
-Important separation:
+During preprocess, `impacts` stages a resolved runtime contract under `workspace/staged/config/runtime.yaml` for inspection and execution. That staged file is generated and should not be edited.
 
-- standalone/example mode:
-  - `runtime.yaml` contains explicit file paths
-  - no BEAM output discovery is required
-  - you do not need to replicate a full `beam_output/.../ITERS/...` tree unless you want to
-- integrated/PILATES mode:
-  - the PILATES adapter derives concrete paths before execution
-  - BEAM artifact discovery happens there, not in preprocess/run/postprocess
-  - the adapter translates the higher-level overlay into the native `runtime.yaml` contract consumed by execution
-
-The intended no-redundancy path is:
-
-```bash
-python -m impacts derive_runtime_config_from_pilates \
-  --pilates-settings /path/to/pilates_settings.yaml \
-  --model-config examples/pilates/pilates_model_config.yaml \
-  --output examples/pilates/runtime.yaml
-```
-
-That command derives shared geography settings such as county FIPS and local CRS from the main PILATES settings, then applies the `impacts.runtime_overrides` section from `pilates_model_config.yaml`.
-
-In integrated mode it also derives BEAM-side inputs when PILATES provides the needed BEAM config, including:
-
-- `inputs.osm_pbf`
-- `inputs.beam_network`
-- `inputs.emissions_skims`
-
-The current overlay shape is:
+The current example settings shape is:
 
 ```yaml
+run:
+  region: sfbay
+  start_year: 2017
+
 impacts:
   runtime_overrides:
-    emissions:
+    inputs:
+      beam_network: upstream/network.csv.gz
+      emissions_skims: upstream/0.skimsEmissionsTotals_5pct_sample.csv.gz
+      osm_pbf: upstream/sfbay-cbg5500-weakConn-network.osm.pbf
+      activity_corrections: upstream/activity_corrections.csv
+      isrm_zarr: s3://inmap-model/isrm_v1.2.1.zarr/
+    processing:
       annualization_days: 330
-      activity_correction_factors_file: null
       pollutants:
         - NH3
         - NOx
@@ -59,32 +35,25 @@ impacts:
         - SOx
         - ROG
         - BCh
-    dispersions:
-      inmap:
-        isrm_zarr_directory: isrm_zarr_directory
-        isrm_zarr_s3bucket: s3://example/isrm.zarr
-        grid_path: upstream/isrm_polygon/isrm_polygon.shp
-        grid_epsg: 4326
-        grid_id: zone_isrm
-      aermod:
-        grid_path: null
-        grid_epsg: 4326
-        grid_id: null
+      grid:
+        inmap_grid_path: upstream/isrm_polygon/isrm_polygon.shp
+        inmap_grid_id: isrm
     outputs:
-      output_dir: ./impacts/output
+      output_dir: downstream
 ```
 
-The adapter maps that into the executable native runtime config fields in `runtime.yaml`.
+The builder maps that into the executable runtime contract staged under `workspace/staged/config/runtime.yaml`.
 
 For the example:
 
-1. upstream model outputs live under `upstream/`
-2. `runtime.yaml` is a native `impacts` runtime config with fully resolved inputs and processing settings
-3. `run_pilates_example.py` calls `preprocess` and `run`
-4. the example intentionally stops after emissions allocation
-5. outputs land in `workspace/`
+1. external handoff inputs live under `upstream/`
+2. internal working files live under `workspace/`
+3. published downstream-facing artifacts live under `downstream/`
+4. `settings.yaml` is the only checked-in settings file for the example
+5. `run_pilates_example.py` calls `preprocess` and `run`
+6. the example intentionally stops after emissions allocation
 
-The example uses the configured `inputs.isrm_zarr` directly. Point that runtime setting at a real local or remote Zarr store.
+The example uses the configured `inputs.isrm_zarr` directly. Point that setting at a real local or remote Zarr store.
 
 ## Run
 
@@ -97,10 +66,10 @@ python examples/pilates/run_pilates_example.py
 That produces:
 
 - `examples/pilates/workspace/inputs_manifest.yaml`
-- `examples/pilates/workspace/output/run_manifest.yaml`
-- `examples/pilates/workspace/output/raw/emissions_inmap_grid_allocated.parquet`
+- `examples/pilates/workspace/run_manifest.yaml`
+- `examples/pilates/workspace/outputs/emissions_inmap_grid_allocated.parquet`
   - or `emissions_inmap_grid_allocated.csv.gz` when parquet support is not installed
-- optionally `examples/pilates/workspace/output/raw/emissions_aermod_grid_allocated.parquet`
+- optionally `examples/pilates/workspace/outputs/emissions_aermod_grid_allocated.parquet`
   - when `processing.grid.aermod_grid_path` is configured
 
 ## Build Sample Inputs From Real BEAM Outputs
@@ -153,4 +122,4 @@ This mirrors the expected black-box terminal-model contract:
 - deterministic allocated-emissions artifact for pre-dispersion inspection
 - no implicit filesystem assumptions
 
-The example also includes a PILATES-facing config stub in `pilates_model_config.yaml` with an `impacts.runtime_overrides` section for paths and settings that are specific to the `impacts` model and should not be duplicated in the main PILATES settings.
+The example keeps all user-managed settings in `settings.yaml` and stages the generated runtime contract only inside `workspace/`.

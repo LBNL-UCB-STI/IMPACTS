@@ -12,7 +12,9 @@ import pandas as pd
 
 from .contract_utils import load_structured_file
 from .contract_utils import parquet_available
+from .contract_utils import resolve_path
 from .contract_utils import write_structured_file
+from .config.builders import build_runtime_config_from_runtime_yaml
 from .manifest_models import PostprocessManifest
 from .manifest_models import RunManifest
 
@@ -206,8 +208,7 @@ def postprocess_from_run_manifest(
         raise FileNotFoundError("Required raw output missing: grid_concentration")
 
     output_root = Path(output_dir).resolve()
-    canonical_dir = output_root / "canonical"
-    canonical_dir.mkdir(parents=True, exist_ok=True)
+    output_root.mkdir(parents=True, exist_ok=True)
 
     population_inputs = run_manifest.get("population_inputs", {}) or {}
     pipeline = run_manifest.get("pipeline", {}) or {}
@@ -220,7 +221,7 @@ def postprocess_from_run_manifest(
         persons_columns=population_inputs.get("persons_columns"),
         households_columns=population_inputs.get("households_columns"),
     )
-    canonical_path = canonical_dir / (
+    canonical_path = output_root / (
         "impacts_exposure_table.parquet" if parquet_available() else "impacts_exposure_table.csv.gz"
     )
     if canonical_path.suffix == ".parquet":
@@ -267,6 +268,10 @@ def postprocess_from_runtime_config(
     from impacts.runner import run_from_runtime_config
 
     workspace_root = Path(workspace).resolve()
+    runtime_config = build_runtime_config_from_runtime_yaml(runtime_config_path)
+    output_root = Path(
+        resolve_path(runtime_config.outputs.output_dir, runtime_config_path) or runtime_config.outputs.output_dir
+    ).resolve()
     run_manifest = run_from_runtime_config(
         runtime_config_path=runtime_config_path,
         workspace=workspace_root,
@@ -274,6 +279,6 @@ def postprocess_from_runtime_config(
     )
     return postprocess_from_run_manifest(
         run_manifest_path=run_manifest["run_manifest_path"],
-        output_dir=workspace_root / "output",
+        output_dir=output_root,
         manifest_path=manifest_path,
     )

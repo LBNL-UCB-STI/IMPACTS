@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import geopandas as gpd
+import numpy as np
 import osm_chordify
 import pandas as pd
 import pytest
@@ -36,6 +37,7 @@ from impacts.manifest_models import RunManifest
 from impacts.network2grid.network_grid_clipping import intersect_beam_osm_with_grid
 from impacts.runtime_config import ImpactsRuntimeConfig
 from impacts.step3_grid_intersection import _union_county_matches_with_unmatched
+from impacts.step5_inmap_dispersion import compute_isrm_concentrations
 
 def _write_csv(path: Path, rows):
     pd.DataFrame(rows).to_csv(path, index=False)
@@ -52,6 +54,25 @@ def _build_test_isrm_store(path: Path, n_cells: int = 4) -> Path:
     total_pop[:] = 100.0
     mortality = root.create_array("MortalityRate", shape=(n_cells,), dtype="f8")
     mortality[:] = 50.0
+    return path
+
+
+def _build_test_isrm_store_with_extra_health_cells(
+    path: Path,
+    *,
+    receptor_cells: int = 4,
+    health_cells: int = 6,
+) -> Path:
+    root = zarr.open(str(path), mode="w")
+    for key in ["SOA", "pNO3", "pNH4", "pSO4", "PrimaryPM25"]:
+        arr = root.create_array(key, shape=(1, receptor_cells, receptor_cells), dtype="f8")
+        arr[:] = 0.0
+        for idx in range(receptor_cells):
+            arr[0, idx, idx] = 1.0
+    total_pop = root.create_array("TotalPop", shape=(health_cells,), dtype="f8")
+    total_pop[:] = np.arange(1, health_cells + 1, dtype=float) * 100.0
+    mortality = root.create_array("MortalityRate", shape=(health_cells,), dtype="f8")
+    mortality[:] = np.arange(1, health_cells + 1, dtype=float) * 10.0
     return path
 
 
@@ -1896,6 +1917,30 @@ def test_postprocess_canonical_exposure_table_generation(tmp_path: Path):
     assert canonical.loc[0, "population_total"] == 2
     assert canonical.loc[1, "households_total"] == 1
     assert json.loads(canonical.loc[0, "population_mix"])["age_group_counts"]["child"] == 1
+
+
+def test_compute_isrm_concentrations_trims_health_vectors_to_receptor_dim(tmp_path: Path):
+    isrm_path = _build_test_isrm_store_with_extra_health_cells(tmp_path / "isrm_extra_health.zarr")
+    sr = zarr.open(str(isrm_path), mode="r")
+    emissions = pd.DataFrame(
+        [
+            {"inmap_srm_cell_id": 0, "tons_per_year_PM2_5": 1.0},
+            {"inmap_srm_cell_id": 1, "tons_per_year_PM2_5": 2.0},
+        ]
+    )
+
+    result = compute_isrm_concentrations(
+        grid_emissions_df=emissions,
+        sr=sr,
+        factor=1.0,
+        include_health=True,
+    )
+
+    assert len(result) == 4
+    assert list(result["GRID"]) == [0, 1, 2, 3]
+    assert list(result["PrimaryPM25"]) == pytest.approx([1.0, 2.0, 0.0, 0.0])
+    assert "deathsK" in result.columns
+    assert result["deathsK"].notna().all()
 
 
 def test_postprocess_accepts_configured_column_names(tmp_path: Path):

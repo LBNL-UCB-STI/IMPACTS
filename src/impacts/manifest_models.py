@@ -87,7 +87,6 @@ class PipelineConfig:
     activity_corrections_path: Optional[str] = None
     activity_corrections_columns: Dict[str, Any] = field(default_factory=dict)
     concentration_factor: Optional[float] = None
-    include_bc: bool = False
     include_health: bool = False
     events_path: Optional[str] = None
     rates_dir: Optional[str] = None
@@ -126,7 +125,6 @@ class PipelineConfig:
             activity_corrections_path=_optional_string(payload.get("activity_corrections_path")),
             activity_corrections_columns=dict(payload.get("activity_corrections_columns", {}) or {}),
             concentration_factor=_optional_float(payload.get("concentration_factor")),
-            include_bc=bool(payload.get("include_bc", False)),
             include_health=bool(payload.get("include_health", False)),
             events_path=_optional_string(payload.get("events_path")),
             rates_dir=_optional_string(payload.get("rates_dir")),

@@ -2,11 +2,10 @@
 #
 # `impacts` no longer executes from this file. The maintained runtime contract is:
 # - standalone: a native `runtime.yaml`
-# - integrated: derive `runtime.yaml` from PILATES settings plus a thin impacts overlay
+# - integrated: derive `runtime.yaml` from a PILATES-style settings file with `impacts.runtime_overrides`
 #
 # See:
-# - `examples/pilates/runtime.yaml`
-# - `examples/pilates/pilates_model_config.yaml`
-# - `python -m impacts derive_runtime_config_from_pilates --help`
+# - `examples/pilates/settings.yaml`
+# - `workspace/staged/config/runtime.yaml`
 #
 # This file remains only to avoid leaving an empty placeholder in the package.

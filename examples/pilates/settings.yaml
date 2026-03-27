@@ -1,0 +1,53 @@
+run:
+  region: sfbay
+  start_year: 2017
+  models:
+    impacts: impacts
+
+shared:
+  geography:
+    fips:
+      state: "06"
+      counties:
+        - "001"
+        - "013"
+        - "041"
+        - "055"
+        - "075"
+        - "081"
+        - "085"
+        - "095"
+        - "097"
+    local_crs: "EPSG:26910"
+
+impacts:
+  runtime_overrides:
+    inputs:
+      beam_network: upstream/network.csv.gz
+      emissions_skims: upstream/0.skimsEmissionsTotals_5pct_sample.csv.gz
+      osm_pbf: upstream/sfbay-cbg5500-weakConn-network.osm.pbf
+      activity_corrections: upstream/activity_corrections.csv
+      isrm_zarr: s3://inmap-model/isrm_v1.2.1.zarr/
+    processing:
+      annualization_days: 330
+      pollutants:
+        - NH3
+        - NOx
+        - PM2_5
+        - SOx
+        - ROG
+        - BCh
+      grid:
+        inmap_grid_path: upstream/isrm_polygon/isrm_polygon.shp
+        inmap_grid_epsg:
+        inmap_grid_id: isrm
+        aermod_grid_path:
+        aermod_grid_epsg:
+        aermod_grid_id:
+      mapping_columns:
+        grid_id: isrm
+      dispersion:
+        concentration_factor: 28766.639
+        include_health: false
+    outputs:
+      output_dir: downstream

@@ -140,6 +140,10 @@ def _crop_grid_to_bbox(
     target_path: str,
     target_epsg: int,
 ) -> str:
+    target = Path(target_path)
+    if target.exists():
+        logger.info("Preprocess: reusing cropped grid %s", target)
+        return str(target)
     started = time.perf_counter()
     gdf = _read_vector(staged_path)
     if gdf.crs is None:
@@ -169,6 +173,10 @@ def _generate_fishnet_from_bounds(
     target_epsg: int,
     cell_id_col: str = "srv_cell_id",
 ) -> tuple[str, str]:
+    target = Path(target_path)
+    if target.exists():
+        logger.info("Preprocess: reusing generated AERMOD fishnet %s", target)
+        return str(target), cell_id_col
     started = time.perf_counter()
     minx, miny, maxx, maxy = (float(v) for v in bounds)
     start_x = cell_size * int(minx // cell_size)
@@ -349,7 +357,7 @@ def build_inputs_manifest(
     outputs = runtime_config.outputs
 
     workspace_root = Path(staging_dir).resolve()
-    input_root = workspace_root / "input"
+    input_root = workspace_root / "staged"
     input_root.mkdir(parents=True, exist_ok=True)
 
     manifest_inputs: Dict[str, Any] = {}
@@ -568,7 +576,7 @@ def build_inputs_manifest(
         "maintained_execution_path": [
             "impacts.emissions.events_to_skims_emissions",
             "impacts.emissions.emissions_grid_mapping",
-            "impacts.dispersion.isrm_dispersion",
+            "impacts.step5_inmap_dispersion",
             "impacts.network2grid.network_grid_clipping",
         ],
         "inputs": manifest_inputs,
@@ -603,7 +611,6 @@ def build_inputs_manifest(
             "county_area_name": runtime_config.shared_context.region or processing.county_area_name,
             "county_boundaries_path": staged_county_boundaries,
             "concentration_factor": float(processing.dispersion.concentration_factor),
-            "include_bc": bool(processing.dispersion.include_bc),
             "include_health": bool(processing.dispersion.include_health),
             "mapping_columns": mapping_columns,
             "prepared_skims_grouped_path": str(prepared_grouped_skims_path),

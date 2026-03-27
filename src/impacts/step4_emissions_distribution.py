@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Dict
 from typing import Optional
@@ -168,6 +169,39 @@ def _step_label(step: str, zone_label: Optional[str] = None) -> str:
 
 def _write_intermediates() -> bool:
     return (os.getenv("IMPACTS_STEP4_WRITE_INTERMEDIATES", "") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _existing_output(path: Path) -> Optional[str]:
+    return str(path) if path.exists() else None
+
+
+def _reuse_existing_step4_outputs(raw_dir: Path) -> Optional[Dict[str, Optional[str]]]:
+    inmap_grid_emissions = _existing_output(raw_dir / "inmap_grid_emissions.parquet")
+    if not inmap_grid_emissions:
+        return None
+
+    outputs = {
+        "combined_mapping_grouped": _existing_output(raw_dir / "combined_mapping_grouped.parquet"),
+        "combined_emissions_allocated": _existing_output(raw_dir / "combined_emissions_allocated.parquet"),
+        "combined_emissions_corrected": _existing_output(_table_path(raw_dir, "combined_emissions_corrected")),
+        "aermod_mapping_grouped": _existing_output(raw_dir / "aermod_mapping_grouped.parquet"),
+        "aermod_emissions_allocated": _existing_output(raw_dir / "aermod_emissions_allocated.parquet"),
+        "aermod_emissions_corrected": _existing_output(_table_path(raw_dir, "aermod_emissions_corrected")),
+        "aermod_grid_emissions": _existing_output(raw_dir / "aermod_grid_emissions.parquet"),
+        "inmap_mapping_grouped": _existing_output(raw_dir / "inmap_mapping_grouped.parquet"),
+        "inmap_emissions_allocated": _existing_output(raw_dir / "inmap_emissions_allocated.parquet"),
+        "inmap_emissions_corrected": _existing_output(_table_path(raw_dir, "inmap_emissions_corrected")),
+        "inmap_grid_emissions": inmap_grid_emissions,
+        "emissions_allocated": _existing_output(raw_dir / "inmap_emissions_allocated.parquet"),
+        "emissions_corrected": inmap_grid_emissions,
+    }
+    logger.info(
+        "%s reusing existing emissions outputs; skipping Step 4 recomputation (inmap=%s, aermod=%s)",
+        _step_label("0"),
+        outputs["inmap_grid_emissions"],
+        outputs["aermod_grid_emissions"],
+    )
+    return outputs
 
 
 def _build_combined_grouped_table(
@@ -395,6 +429,10 @@ def run(
     intersection_path: str,
     intersection_df: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Optional[str]]:
+    reused = _reuse_existing_step4_outputs(raw_dir)
+    if reused is not None:
+        return reused
+
     combined_grouped_df, combined_grouped_path = _build_combined_grouped_table(
         intersection_path=intersection_path,
         raw_dir=raw_dir,

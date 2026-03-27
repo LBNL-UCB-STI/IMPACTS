@@ -1,1 +1,5 @@
 workspace/
+downstream/*
+!downstream/.gitkeep
+.DS_Store
+__pycache__/

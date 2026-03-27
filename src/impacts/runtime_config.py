@@ -307,8 +307,7 @@ class DispersionEmissionsColumns:
     nh3: str = "tons_per_year_NH3"
     sox: str = "tons_per_year_SOx"
     pm25: str = "tons_per_year_PM2_5"
-    bcv1: str = "tons_per_year_BCV1"
-    bcv3: str = "tons_per_year_BCV3"
+    bch: str = "tons_per_year_BCh"
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "DispersionEmissionsColumns":
@@ -319,15 +318,13 @@ class DispersionEmissionsColumns:
             nh3=_optional_string(payload.get("nh3")) or "tons_per_year_NH3",
             sox=_optional_string(payload.get("sox")) or "tons_per_year_SOx",
             pm25=_optional_string(payload.get("pm25")) or "tons_per_year_PM2_5",
-            bcv1=_optional_string(payload.get("bcv1")) or "tons_per_year_BCV1",
-            bcv3=_optional_string(payload.get("bcv3")) or "tons_per_year_BCV3",
+            bch=_optional_string(payload.get("bch")) or "tons_per_year_BCh",
         )
 
 
 @dataclass(frozen=True)
 class DispersionSettings:
     concentration_factor: float = 28766.639
-    include_bc: bool = False
     include_health: bool = False
     emissions_columns: DispersionEmissionsColumns = field(default_factory=DispersionEmissionsColumns)
 
@@ -335,7 +332,6 @@ class DispersionSettings:
     def from_dict(cls, payload: Dict[str, Any]) -> "DispersionSettings":
         return cls(
             concentration_factor=_optional_float(payload.get("concentration_factor")) or 28766.639,
-            include_bc=bool(payload.get("include_bc", False)),
             include_health=bool(payload.get("include_health", False)),
             emissions_columns=DispersionEmissionsColumns.from_dict(payload.get("emissions_columns", {}) or {}),
         )

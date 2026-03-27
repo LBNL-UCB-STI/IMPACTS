@@ -3,6 +3,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from impacts.config.builders import build_runtime_config_from_runtime_yaml
+from impacts.contract_utils import resolve_path
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -131,18 +134,22 @@ def main(argv: list[str] | None = None) -> int:
         from impacts.runner import run_from_input_manifest
 
         workspace = Path(args.workspace).resolve()
+        runtime_config = build_runtime_config_from_runtime_yaml(args.config)
+        downstream_output_root = Path(
+            resolve_path(runtime_config.outputs.output_dir, args.config) or runtime_config.outputs.output_dir
+        ).resolve()
         preprocess_manifest = preprocess_workflow(
             runtime_config_path=args.config,
             staging_dir=workspace,
         )
         run_manifest = run_from_input_manifest(
             input_manifest_path=preprocess_manifest["inputs_manifest_path"],
-            output_dir=workspace / "output",
+            output_dir=workspace,
             run_dispersion=True,
         )
         postprocess_from_run_manifest(
             run_manifest_path=run_manifest["run_manifest_path"],
-            output_dir=workspace / "output",
+            output_dir=downstream_output_root,
         )
         return 0
 
@@ -186,4 +193,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+
+
+
     main()

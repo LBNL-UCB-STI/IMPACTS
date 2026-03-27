@@ -53,8 +53,8 @@ Legacy or exploratory code under `src/impacts/tmp/` is not part of the public ex
 
 ```bash
 python -m impacts preprocess --config /path/runtime.yaml --staging-dir /path/workspace
-python -m impacts run --input-manifest /path/workspace/inputs_manifest.yaml --output-dir /path/workspace/output
-python -m impacts postprocess --run-manifest /path/workspace/output/run_manifest.yaml --output-dir /path/workspace/output
+python -m impacts run --input-manifest /path/workspace/inputs_manifest.yaml --output-dir /path/workspace
+python -m impacts postprocess --run-manifest /path/workspace/run_manifest.yaml --output-dir /path/downstream
 ```
 
 End-to-end:
@@ -67,8 +67,8 @@ python -m impacts pipeline --config /path/runtime.yaml --workspace /path/workspa
 
 The postprocessor publishes:
 
-- `output/canonical/impacts_exposure_table.parquet`
-  - falls back to `output/canonical/impacts_exposure_table.csv.gz` if parquet support is unavailable
+- `/path/downstream/impacts_exposure_table.parquet`
+  - falls back to `/path/downstream/impacts_exposure_table.csv.gz` if parquet support is unavailable
 
 Each row is one cell and includes:
 
@@ -114,10 +114,10 @@ Integrated runs are different:
 
 ### PILATES-facing config stub
 
-A concrete example config block for PILATES lives in [pilates_model_config.yaml](/Users/haitamlaarabi/Workspace/Models/inmap-aermod/impacts/examples/pilates/pilates_model_config.yaml). It includes:
+A concrete example PILATES-style settings file lives in [settings.yaml](/Users/haitamlaarabi/Workspace/Models/inmap-aermod/impacts/examples/pilates/settings.yaml). It includes:
 
-- a thin `impacts.runtime_overrides` section
-- only `impacts`-specific settings that are not already derivable from PILATES shared or BEAM config
+- one user-managed `impacts.runtime_overrides` section
+- staged runtime materialization into `workspace/staged/config/runtime.yaml` during preprocess
 
 ### Docker usage
 
@@ -131,8 +131,8 @@ Run with staged host inputs and outputs only:
 
 ```bash
 docker run --rm \
-  -v /path/workspace/input:/input \
-  -v /path/workspace/output:/output \
+  -v /path/workspace/staged:/input \
+  -v /path/workspace/outputs:/output \
   impacts run --input-manifest /input/inputs_manifest.yaml --output-dir /output
 ```
 
@@ -140,8 +140,9 @@ Then publish the canonical artifact:
 
 ```bash
 docker run --rm \
-  -v /path/workspace/output:/output \
-  impacts postprocess --run-manifest /output/run_manifest.yaml --output-dir /output
+  -v /path/workspace:/input \
+  -v /path/downstream:/output \
+  impacts postprocess --run-manifest /input/run_manifest.yaml --output-dir /output
 ```
 
 The container no longer depends on baked-in `/work/data` for the public execution path.
@@ -163,43 +164,3 @@ That example:
 - writes manifests under `examples/pilates/workspace`
 - publishes a canonical exposure table
 - uses the configured runtime inputs directly
-
-
-## Installation #WIP
-
-```bash
-# Clone the repository
-git clone <repository-url>
-cd impacts
-
-# Install dependencies with Poetry
-poetry install
-
-# Or activate the environment
-poetry shell
-```
-
-## Project Structure #WIP
-
-```
-isrm-wrapper/
-├── src/isrm_wrapper/    # Main package code
-├── data/
-│   ├── raw/            # Input BEAM emissions and InMAP outputs
-│   └── processed/      # Generated concentration outputs
-├── tests/              # Unit tests
-└── docs/               # Documentation
-```
-
-## Requirements #WIP
-
-- Python 3.8+
-- Dependencies managed via Poetry (see `pyproject.toml`)
-
-## Contributing #WIP
-
-See `CONTRIBUTING.rst` for guidelines.
-
-## License #WIP
-
-See `LICENSE.txt` for details.

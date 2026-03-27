@@ -1,19 +1,7 @@
-"""Dispersion and concentration modeling package."""
+"""Dispersion utilities retained outside the main pipeline path.
 
-from .isrm_dispersion import (
-    DEFAULT_DISPERSION_CONFIG,
-    DispersionConfig,
-    compute_isrm_concentrations,
-    load_isrm_store,
-    prepare_grid_emissions,
-    run_dispersion_from_file,
-)
+The active InMAP dispersion implementation lives in ``impacts.step5_inmap_dispersion``.
+This package currently contains only auxiliary utilities such as NOx-to-NO2 conversion.
+"""
 
-__all__ = [
-    "DEFAULT_DISPERSION_CONFIG",
-    "DispersionConfig",
-    "compute_isrm_concentrations",
-    "load_isrm_store",
-    "prepare_grid_emissions",
-    "run_dispersion_from_file",
-]
+__all__ = ["isrm_nox_to_no2"]

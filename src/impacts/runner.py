@@ -26,6 +26,11 @@ def _table_path(parent: Path, stem: str) -> Path:
     return path
 
 
+def _log_step_banner(step_num: int, name: str) -> None:
+    banner = f"========== ENTERING STEP {step_num}: {name.upper()} =========="
+    logger.info("\n%s", banner)
+
+
 def run_from_input_manifest(
     input_manifest_path: str | Path,
     output_dir: str | Path,
@@ -42,7 +47,7 @@ def run_from_input_manifest(
     population_inputs = manifest.get("population_inputs", {}) or {}
 
     output_root = Path(output_dir).resolve()
-    raw_dir = output_root / "raw"
+    raw_dir = output_root / "outputs"
     raw_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Loaded input manifest: %s", Path(input_manifest_path).resolve())
     logger.info("Output directory: %s", output_root)
@@ -52,16 +57,20 @@ def run_from_input_manifest(
     from .step3_grid_intersection import run as run_step3
     from .step4_emissions_distribution import run as run_step4
 
+    _log_step_banner(1, "skims preparation")
     skims_df, skims_path = run_step1(pipeline, raw_dir)
 
     mapping_input_path = pipeline.mapping_input_path
     mapping_input_df = None
     if not mapping_input_path:
+        _log_step_banner(2, "network osm mapping")
         buffered_network = run_step2(pipeline, raw_dir)
+        _log_step_banner(3, "grid intersection")
         mapping_input_path, mapping_input_df = run_step3(pipeline, raw_dir, buffered_network)
     else:
         logger.info("Using staged mapping input: %s", mapping_input_path)
 
+    _log_step_banner(4, "emissions distribution")
     logger.info("Using Step 4 implementation: combined")
     step4_outputs = run_step4(
         pipeline,
@@ -73,18 +82,19 @@ def run_from_input_manifest(
 
     concentration_path: Optional[Path] = None
     if run_dispersion:
-        from impacts.dispersion.isrm_dispersion import run_dispersion_from_file
+        from .step5_inmap_dispersion import run as run_step5
         concentration_path = _table_path(raw_dir, "grid_concentration")
-        logger.info("Dispersion: computing concentrations from allocated grid emissions")
-        run_dispersion_from_file(
+        _log_step_banner(5, "inmap dispersion")
+        logger.info("Using Step 5 implementation: inmap_dispersion")
+        run_step5(
+            pipeline=pipeline,
+            raw_dir=raw_dir,
             emissions_input_path=step4_outputs["emissions_corrected"],
             output_path=str(concentration_path),
-            isrm_url=pipeline.isrm_url,
-            factor=float(pipeline.concentration_factor or DEFAULT_CONCENTRATION_FACTOR),
-            include_bc=bool(pipeline.include_bc),
-            include_health=bool(pipeline.include_health),
         )
         logger.info("Dispersion complete: wrote %s", concentration_path)
+        _log_step_banner(6, "aermod dispersion")
+        logger.info("Step 6 placeholder: aermod_dispersion not run yet")
     else:
         logger.info("Dispersion skipped")
 
@@ -136,7 +146,7 @@ def run_from_runtime_config(
     )
     return run_from_input_manifest(
         input_manifest_path=preprocess_manifest["inputs_manifest_path"],
-        output_dir=workspace_root / "output",
+        output_dir=workspace_root,
         run_manifest_path=run_manifest_path,
         run_dispersion=run_dispersion,
     )

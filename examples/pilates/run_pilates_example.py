@@ -18,7 +18,7 @@ from impacts.postprocessor import _read_table
 from impacts.preprocessor import preprocess_workflow
 from impacts.runner import run_from_input_manifest
 
-DEFAULT_WORKFLOW = EXAMPLE_DIR / "runtime.yaml"
+DEFAULT_WORKFLOW = EXAMPLE_DIR / "settings.yaml"
 DEFAULT_WORKSPACE = EXAMPLE_DIR / "workspace"
 
 
@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.getLogger(__name__).info("Example workflow: run through emissions allocation")
     run_manifest = run_from_input_manifest(
         input_manifest_path=preprocess_manifest["inputs_manifest_path"],
-        output_dir=workspace / "output",
+        output_dir=workspace,
         run_dispersion=False,
     )
     inmap_allocation_path = Path(run_manifest["raw_outputs"]["emissions_inmap_grid_allocated"])
