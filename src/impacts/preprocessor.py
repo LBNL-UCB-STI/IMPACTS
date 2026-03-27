@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+import time
 from typing import Any
 from typing import Dict
 from typing import Optional
 
 import geopandas as gpd
+import numpy as np
+import pandas as pd
+import shapely
+from shapely.geometry import box
 from .config.builders import build_runtime_config_from_runtime_yaml
 from .contract_utils import copy_path
 from .contract_utils import file_entry
@@ -19,6 +25,7 @@ from .manifest_models import InputsManifest
 
 
 CONTRACT_VERSION = "1"
+logger = logging.getLogger(__name__)
 
 
 def _parse_epsg(value: Any) -> int:
@@ -93,6 +100,121 @@ def _write_vector(gdf: gpd.GeoDataFrame, path: str) -> None:
         gdf.to_parquet(target, index=False)
     else:
         gdf.to_file(target)
+
+
+def _read_network_bbox(path: str) -> tuple[float, float, float, float]:
+    started = time.perf_counter()
+    target = Path(path)
+    lower = target.name.lower()
+    if lower.endswith(".csv.gz"):
+        network = pd.read_csv(target, compression="gzip", usecols=[
+            "fromLocationX", "fromLocationY", "toLocationX", "toLocationY",
+        ])
+    elif lower.endswith(".csv"):
+        network = pd.read_csv(target, usecols=[
+            "fromLocationX", "fromLocationY", "toLocationX", "toLocationY",
+        ])
+    else:
+        gdf = _read_vector(path)
+        return tuple(float(v) for v in gdf.total_bounds)
+    x_min = min(network["fromLocationX"].min(), network["toLocationX"].min())
+    y_min = min(network["fromLocationY"].min(), network["toLocationY"].min())
+    x_max = max(network["fromLocationX"].max(), network["toLocationX"].max())
+    y_max = max(network["fromLocationY"].max(), network["toLocationY"].max())
+    logger.info(
+        "Preprocess: computed network bbox from %s in %.2fs → (%.2f, %.2f, %.2f, %.2f)",
+        target,
+        time.perf_counter() - started,
+        x_min,
+        y_min,
+        x_max,
+        y_max,
+    )
+    return float(x_min), float(y_min), float(x_max), float(y_max)
+
+
+def _crop_grid_to_bbox(
+    staged_path: str,
+    *,
+    bbox: tuple[float, float, float, float],
+    target_path: str,
+    target_epsg: int,
+) -> str:
+    started = time.perf_counter()
+    gdf = _read_vector(staged_path)
+    if gdf.crs is None:
+        raise ValueError(f"Grid is missing CRS: {staged_path}")
+    gdf = gdf.to_crs(epsg=target_epsg)
+    bbox_geom = box(*bbox)
+    cropped = gdf.loc[gdf.geometry.intersects(bbox_geom)].copy()
+    if cropped.empty:
+        raise ValueError(f"No grid cells intersect the network bbox for {staged_path}")
+    _write_vector(cropped, target_path)
+    logger.info(
+        "Preprocess: cropped %s to bbox in %.2fs → %d rows at %s",
+        staged_path,
+        time.perf_counter() - started,
+        len(cropped),
+        target_path,
+    )
+    return target_path
+
+
+def _generate_fishnet_from_bounds(
+    *,
+    bounds: tuple[float, float, float, float],
+    mask_gdf: gpd.GeoDataFrame,
+    cell_size: float,
+    target_path: str,
+    target_epsg: int,
+    cell_id_col: str = "srv_cell_id",
+) -> tuple[str, str]:
+    started = time.perf_counter()
+    minx, miny, maxx, maxy = (float(v) for v in bounds)
+    start_x = cell_size * int(minx // cell_size)
+    start_y = cell_size * int(miny // cell_size)
+    end_x = cell_size * int(-(-maxx // cell_size))
+    end_y = cell_size * int(-(-maxy // cell_size))
+
+    xs = np.arange(start_x, end_x, cell_size, dtype=float)
+    ys = np.arange(start_y, end_y, cell_size, dtype=float)
+    total_cells = int(len(xs) * len(ys))
+    logger.info(
+        "Preprocess: generating AERMOD fishnet candidates at %.0fm resolution over %d x %d cells (%d total)",
+        cell_size,
+        len(xs),
+        len(ys),
+        total_cells,
+    )
+
+    x_grid, y_grid = np.meshgrid(xs, ys)
+    x0 = x_grid.ravel()
+    y0 = y_grid.ravel()
+    geometries = shapely.box(x0, y0, x0 + cell_size, y0 + cell_size)
+
+    fishnet = gpd.GeoDataFrame(
+        {cell_id_col: np.arange(total_cells, dtype=int)},
+        geometry=geometries,
+        crs=f"EPSG:{int(target_epsg)}",
+    )
+    mask_union = mask_gdf.geometry.union_all() if hasattr(mask_gdf.geometry, "union_all") else mask_gdf.geometry.unary_union
+    filter_started = time.perf_counter()
+    keep_mask = fishnet.geometry.intersects(mask_union)
+    fishnet = fishnet.loc[keep_mask].reset_index(drop=True)
+    fishnet[cell_id_col] = np.arange(len(fishnet), dtype=int)
+    logger.info(
+        "Preprocess: filtered fishnet candidates to inMAP footprint in %.2fs → %d rows kept",
+        time.perf_counter() - filter_started,
+        len(fishnet),
+    )
+    _write_vector(fishnet, target_path)
+    logger.info(
+        "Preprocess: wrote generated AERMOD fishnet in %.2fs → %d rows at %s",
+        time.perf_counter() - started,
+        len(fishnet),
+        target_path,
+    )
+    return target_path, cell_id_col
 
 
 def _ensure_grid_cell_id(
@@ -356,29 +478,37 @@ def build_inputs_manifest(
         source_path=inmap_grid_source,
         relative_target=f"inmap_grid/{Path(inmap_grid_source).name}",
     )
-    staged_aermod_grid = None
-    resolved_aermod_grid_id = None
-    if aermod_grid_source:
-        staged_aermod_grid = _stage_local_input(
-            manifest_inputs=manifest_inputs,
-            input_root=input_root,
-            key="aermod_grid",
-            source_path=aermod_grid_source,
-            relative_target=f"aermod_grid/{Path(aermod_grid_source).name}",
-            optional=True,
-        )
-        staged_aermod_grid, resolved_aermod_grid_id = _ensure_grid_cell_id(
-            staged_aermod_grid,
-            "srv_cell_id",
-            source_col=grid.aermod_grid_id,
-        )
-        manifest_inputs["aermod_grid"]["staged_path"] = staged_aermod_grid
+    network_bbox = _read_network_bbox(staged_beam_network)
+    cropped_inmap_path = str((input_root / "inmap_grid" / "isrm_polygon_cropped.parquet").resolve())
+    staged_inmap_grid = _crop_grid_to_bbox(
+        staged_inmap_grid,
+        bbox=network_bbox,
+        target_path=cropped_inmap_path,
+        target_epsg=int(local_output_epsg),
+    )
     staged_inmap_grid, resolved_inmap_grid_id = _ensure_grid_cell_id(
         staged_inmap_grid,
         "srm_cell_id",
         source_col=grid.inmap_grid_id,
     )
     manifest_inputs["inmap_grid"]["staged_path"] = staged_inmap_grid
+    manifest_inputs["inmap_grid"]["path"] = inmap_grid_source
+
+    cropped_inmap = _read_vector(staged_inmap_grid)
+    staged_aermod_grid, resolved_aermod_grid_id = _generate_fishnet_from_bounds(
+        bounds=network_bbox,
+        mask_gdf=cropped_inmap,
+        cell_size=100.0,
+        target_path=str((input_root / "aermod_grid" / "aermod_100m_fishnet.parquet").resolve()),
+        target_epsg=int(local_output_epsg),
+        cell_id_col="srv_cell_id",
+    )
+    manifest_inputs["aermod_grid"] = file_entry(
+        kind="local",
+        path=aermod_grid_source or staged_aermod_grid,
+        staged_path=staged_aermod_grid,
+        optional=True,
+    )
     staged_county_boundaries = _stage_county_boundaries(
         manifest_inputs=manifest_inputs,
         input_root=input_root,
@@ -462,8 +592,8 @@ def build_inputs_manifest(
             "beam_osm_id_col": processing.beam_osm_id_col,
             "beam_length_col": processing.beam_length_col,
             "beam_osm_epsg": int(local_output_epsg),
-            "inmap_grid_epsg": int(inmap_grid_epsg),
-            "aermod_grid_epsg": int(aermod_grid_epsg),
+            "inmap_grid_epsg": int(local_output_epsg),
+            "aermod_grid_epsg": int(local_output_epsg),
             "aermod_grid_id": resolved_aermod_grid_id,
             "output_epsg": int(local_output_epsg),
             "region": runtime_config.shared_context.region,
@@ -517,6 +647,11 @@ def preprocess_workflow(
     staging_dir: str | Path,
     manifest_path: str | Path | None = None,
 ) -> Dict[str, Any]:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        force=False,
+    )
     manifest = build_inputs_manifest(runtime_config_path=runtime_config_path, staging_dir=staging_dir)
     output_manifest = Path(manifest_path) if manifest_path else Path(manifest["inputs_manifest_path"])
     manifest["inputs_manifest_path"] = str(output_manifest)

@@ -46,7 +46,7 @@ dispersions:
     grid_epsg:
     grid_id: isrm
   aermod:
-    grid_path: upstream/subgrid100M/fineMesh100m.shp
+    grid_path:
     grid_epsg:
     grid_id:
 

@@ -51,12 +51,13 @@ def read_skims_emissions(
         dimension columns (linkId, vehicleTypeId, process).
     """
     dim_cols = ["linkId", "vehicleTypeId", "process"]
-    cols = dim_cols + [c for c in (pollutants or []) if c not in dim_cols]
+    cols = None if pollutants is None else dim_cols + [c for c in pollutants if c not in dim_cols]
     p = path.lower()
     if p.endswith(".parquet"):
         import pyarrow.parquet as pq
-        available = set(pq.read_schema(path).names)
-        cols = [c for c in cols if c in available] or None
+        if cols is not None:
+            available = set(pq.read_schema(path).names)
+            cols = [c for c in cols if c in available] or None
         return pd.read_parquet(path, columns=cols)
     if p.endswith(".csv.gz"):
         return pd.read_csv(path, compression="gzip", usecols=cols if pollutants else None)

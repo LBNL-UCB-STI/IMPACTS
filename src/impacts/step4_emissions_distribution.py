@@ -121,6 +121,32 @@ def _intersection_zone_metric_cols(columns: list[str], zone_label: str) -> list[
     ]
 
 
+def _normalize_zone_columns(df: pd.DataFrame, zone_label: str, cell_col: str) -> pd.DataFrame:
+    rename_map: dict[str, str] = {}
+    prefixed_cell = f"edge_{cell_col}"
+    if prefixed_cell in df.columns:
+        if cell_col in df.columns:
+            df[cell_col] = df[prefixed_cell].combine_first(df[cell_col])
+        else:
+            rename_map[prefixed_cell] = cell_col
+    if "edge_linkId" in df.columns:
+        if "linkId" in df.columns:
+            df["linkId"] = df["edge_linkId"].combine_first(df["linkId"])
+        else:
+            rename_map["edge_linkId"] = "linkId"
+    zone_prefix = f"edge_{zone_label}_"
+    for col in df.columns:
+        if col.startswith(zone_prefix):
+            normalized = col.removeprefix("edge_")
+            if normalized in df.columns:
+                df[normalized] = df[col].combine_first(df[normalized])
+            else:
+                rename_map[col] = normalized
+    if rename_map:
+        df = df.rename(columns=rename_map)
+    return df
+
+
 def _load_intersection_subset(path: str, columns: list[str]) -> pd.DataFrame:
     target = Path(path)
     if target.suffix.lower() == ".parquet":
@@ -163,20 +189,37 @@ def _build_grouped_zone_table(
     import duckdb
 
     intersection_cols = _intersection_columns(intersection_path, intersection_df)
-    if cell_col not in intersection_cols:
+    normalized_cols = set(intersection_cols)
+    normalized_cols.update(
+        col.removeprefix("edge_")
+        for col in intersection_cols
+        if col == f"edge_{cell_col}" or col == "edge_linkId" or col.startswith(f"edge_{zone_label}_")
+    )
+    if cell_col not in normalized_cols:
         return None, None
-    county_col = _first_existing_col(pd.DataFrame(columns=intersection_cols), ["countyfp", "county_COUNTYFP", "zone_COUNTYFP", "COUNTYFP"])
-    metric_cols = _intersection_zone_metric_cols(intersection_cols, zone_label)
-    select_cols = ["linkId" if "linkId" in intersection_cols else (pipeline.mapping_columns or {}).get("link_id", "edge_linkId"), cell_col]
+    county_col = _first_existing_col(pd.DataFrame(columns=list(normalized_cols)), ["countyfp", "county_COUNTYFP", "zone_COUNTYFP", "COUNTYFP"])
+    metric_cols = _intersection_zone_metric_cols(list(normalized_cols), zone_label)
+    select_cols = ["linkId" if "linkId" in normalized_cols else (pipeline.mapping_columns or {}).get("link_id", "edge_linkId"), cell_col]
     if county_col:
         select_cols.append(county_col)
     select_cols.extend(metric_cols)
     select_cols = [col for i, col in enumerate(select_cols) if col and col not in select_cols[:i]]
+    source_select_cols: list[str] = []
+    for col in select_cols:
+        if col in intersection_cols:
+            source_select_cols.append(col)
+        if col == "linkId" and "edge_linkId" in intersection_cols:
+            source_select_cols.append("edge_linkId")
+        prefixed = f"edge_{col}"
+        if prefixed in intersection_cols:
+            source_select_cols.append(prefixed)
+    source_select_cols = [col for i, col in enumerate(source_select_cols) if col not in source_select_cols[:i]]
     intersection = _load_intersection_subset_or_df(
         path=intersection_path,
-        columns=select_cols,
+        columns=source_select_cols,
         intersection_df=intersection_df,
     )
+    intersection = _normalize_zone_columns(intersection, zone_label, cell_col)
 
     link_col = (pipeline.mapping_columns or {}).get("link_id", "edge_linkId")
     if link_col in intersection.columns and link_col != "linkId":
