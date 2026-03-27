@@ -1,8 +1,7 @@
 """Step 3 — Grid intersection.
 
 Intersect the mapped road network lines with the AERMOD grid, the inMAP
-grid, and county boundaries while preserving inMAP cells that have no
-road intersection.
+grid, and county boundaries while keeping only road-intersecting rows.
 """
 from __future__ import annotations
 
@@ -61,71 +60,23 @@ def _union_county_matches_with_unmatched(
                 fill = pd.NA
             unmatched[col] = pd.Series([fill] * len(unmatched), index=unmatched.index)
 
-    ordered_cols = [col for col in matched.columns if col != matched_source_col]
     matched_clean = matched.drop(columns=[matched_source_col], errors="ignore")
     unmatched_clean = unmatched.drop(columns=[_SOURCE_ROW_ID], errors="ignore")
+    ordered_cols = list(dict.fromkeys(list(matched_clean.columns) + list(unmatched_clean.columns)))
 
     for col in ordered_cols:
+        if col not in matched_clean.columns:
+            matched_clean[col] = pd.Series([pd.NA] * len(matched_clean), index=matched_clean.index)
         if col not in unmatched_clean.columns:
             unmatched_clean[col] = pd.Series([pd.NA] * len(unmatched_clean), index=unmatched_clean.index)
-    unmatched_clean = unmatched_clean[ordered_cols]
     matched_clean = matched_clean[ordered_cols]
+    unmatched_clean = unmatched_clean[ordered_cols]
 
     return gpd.GeoDataFrame(
         pd.concat([matched_clean, unmatched_clean], ignore_index=True),
         geometry="geometry",
         crs=matched.crs,
     )
-
-
-def _append_missing_inmap_cells(
-    *,
-    pipeline: PipelineConfig,
-    road_rows: gpd.GeoDataFrame,
-    epsg: int,
-) -> gpd.GeoDataFrame:
-    from osm_chordify.osm.intersect import spatial_left_join_with_zones
-
-    inmap_cells = _read_vector(pipeline.inmap_grid_path)
-    if inmap_cells.crs is not None:
-        inmap_cells = inmap_cells.to_crs(epsg=epsg)
-
-    if "inmap_srm_cell_id" in road_rows.columns:
-        hit_series = pd.to_numeric(road_rows["inmap_srm_cell_id"], errors="coerce")
-        hit_cells = set(hit_series.dropna().astype(int).tolist())
-    else:
-        hit_cells = set()
-    missing_cells = inmap_cells.loc[
-        ~pd.to_numeric(inmap_cells["srm_cell_id"], errors="coerce").isin(hit_cells)
-    ].copy()
-    if missing_cells.empty:
-        return road_rows
-
-    missing_cells = missing_cells.rename(columns={"srm_cell_id": "inmap_srm_cell_id"})
-    scaffold = gpd.GeoDataFrame(missing_cells.copy(), geometry="geometry", crs=missing_cells.crs)
-    scaffold = spatial_left_join_with_zones(
-        scaffold,
-        epsg,
-        pipeline.county_boundaries_path,
-        output_epsg=epsg,
-        zone_label="county",
-    )
-
-    for col in road_rows.columns:
-        if col not in scaffold.columns:
-            scaffold[col] = pd.Series([pd.NA] * len(scaffold), index=scaffold.index)
-    for col in scaffold.columns:
-        if col not in road_rows.columns:
-            road_rows[col] = pd.Series([pd.NA] * len(road_rows), index=road_rows.index)
-
-    scaffold = scaffold[road_rows.columns]
-    return gpd.GeoDataFrame(
-        pd.concat([road_rows, scaffold], ignore_index=True),
-        geometry="geometry",
-        crs=road_rows.crs,
-    )
-
-
 def run(
     pipeline: PipelineConfig,
     raw_dir: Path,
@@ -203,25 +154,13 @@ def run(
         time.perf_counter() - unmatched_started,
     )
 
-    logger.info("Step 3.5: appending inMAP cells with no road intersections")
-    empty_cells_started = time.perf_counter()
-    C = _append_missing_inmap_cells(
-        pipeline=pipeline,
-        road_rows=C,
-        epsg=epsg,
-    )
-    logger.info(
-        "Step 3.5 complete: appended empty AERMOD cells in %.2fs",
-        time.perf_counter() - empty_cells_started,
-    )
-
-    # Step 3.6: persist union of matched + unmatched rows
+    # Step 3.5: persist union of matched + unmatched rows
     persist_started = time.perf_counter()
-    logger.info("Step 3.6: writing county-labeled intersection outputs")
+    logger.info("Step 3.5: writing county-labeled intersection outputs")
     C.to_parquet(grid_intersection_path, index=False)
     C.to_file(grid_intersection_path.with_suffix(".gpkg"), driver="GPKG")
     logger.info(
-        "Step 3.6 complete: wrote outputs in %.2fs",
+        "Step 3.5 complete: wrote outputs in %.2fs",
         time.perf_counter() - persist_started,
     )
     logger.info("Step 3 complete: %d total rows → %s", len(C), grid_intersection_path)

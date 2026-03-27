@@ -2,27 +2,163 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Dict
 from typing import Optional
 
+import geopandas as gpd
 import pandas as pd
 import duckdb
+import pyarrow.parquet as pq
 
+from .contract_utils import parquet_available
 from impacts.emissions.emissions_grid_mapping import apply_county_corrections
 
 from .manifest_models import PipelineConfig
-from .step4_emissions_distribution import _first_existing_col
-from .step4_emissions_distribution import _intersection_columns
-from .step4_emissions_distribution import _intersection_zone_metric_cols
-from .step4_emissions_distribution import _load_intersection_subset_or_df
-from .step4_emissions_distribution import _normalize_zone_columns
-from .step4_emissions_distribution import _save_grid_emissions
-from .step4_emissions_distribution import _table_path
-from .step4_emissions_distribution import _write_table
 
 logger = logging.getLogger(__name__)
+_INTERSECTION_METRIC_SUFFIXES = (
+    "_proportion",
+    "_length_m",
+    "_surface_m2",
+)
+
+
+def _table_path(parent: Path, stem: str) -> Path:
+    suffix = ".parquet" if parquet_available() else ".csv.gz"
+    path = parent / f"{stem}{suffix}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _load_grid_geometries(grid_path: str) -> gpd.GeoDataFrame:
+    path = Path(grid_path)
+    if path.suffix.lower() == ".parquet":
+        return gpd.read_parquet(path)
+    return gpd.read_file(path)
+
+
+def _read_table(path: str | Path) -> pd.DataFrame:
+    target = Path(path)
+    lower = target.name.lower()
+    if lower.endswith(".parquet"):
+        return pd.read_parquet(target)
+    if lower.endswith(".csv.gz"):
+        return pd.read_csv(target, compression="gzip")
+    if lower.endswith(".csv"):
+        return pd.read_csv(target)
+    raise ValueError(f"Unsupported table format: {target}")
+
+
+def _write_table(df: pd.DataFrame, path: str | Path) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lower = target.name.lower()
+    if lower.endswith(".parquet"):
+        df.to_parquet(target, index=False, engine="pyarrow", compression="snappy")
+        return
+    if lower.endswith(".csv.gz"):
+        df.to_csv(target, index=False, compression="gzip")
+        return
+    if lower.endswith(".csv"):
+        df.to_csv(target, index=False)
+        return
+    raise ValueError(f"Unsupported table format: {target}")
+
+
+def _save_grid_emissions(
+    df: pd.DataFrame,
+    left_col: str,
+    right_col: str,
+    grid_path: str,
+    output_epsg: int,
+    output_stem: Path,
+) -> None:
+    grid_gdf = _load_grid_geometries(grid_path)
+    if grid_gdf.crs is not None:
+        grid_gdf = grid_gdf.to_crs(epsg=output_epsg)
+    joined = df.merge(
+        grid_gdf[[right_col, "geometry"]],
+        how="left",
+        left_on=left_col,
+        right_on=right_col,
+    )
+    if right_col != left_col:
+        joined = joined.drop(columns=[right_col])
+    geo = gpd.GeoDataFrame(joined, geometry="geometry", crs=grid_gdf.crs)
+    geo.to_parquet(Path(str(output_stem) + ".parquet"), index=False)
+    geo.to_file(Path(str(output_stem) + ".gpkg"), driver="GPKG")
+
+
+def _first_existing_col(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
+    for col in candidates:
+        if col in df.columns:
+            return col
+    return None
+
+
+def _intersection_zone_metric_cols(columns: list[str], zone_label: str) -> list[str]:
+    prefix = f"{zone_label}_"
+    return [
+        col for col in columns
+        if col.startswith(prefix) and any(tag in col for tag in _INTERSECTION_METRIC_SUFFIXES)
+    ]
+
+
+def _normalize_zone_columns(df: pd.DataFrame, zone_label: str, cell_col: str) -> pd.DataFrame:
+    rename_map: dict[str, str] = {}
+    prefixed_cell = f"edge_{cell_col}"
+    if prefixed_cell in df.columns:
+        # For road-intersection outputs, the edge-prefixed cell id is the
+        # authoritative "road hit" label. The plain cell id can come from
+        # carried zone-side metadata and should not be used to resurrect
+        # non-intersecting cells.
+        df[cell_col] = df[prefixed_cell]
+        df = df.drop(columns=[prefixed_cell])
+    if "edge_linkId" in df.columns:
+        if "linkId" in df.columns:
+            df["linkId"] = df["edge_linkId"].combine_first(df["linkId"])
+        else:
+            rename_map["edge_linkId"] = "linkId"
+    zone_prefix = f"edge_{zone_label}_"
+    for col in df.columns:
+        if col.startswith(zone_prefix):
+            normalized = col.removeprefix("edge_")
+            if normalized in df.columns:
+                df[normalized] = df[col].combine_first(df[normalized])
+            else:
+                rename_map[col] = normalized
+    if rename_map:
+        df = df.rename(columns=rename_map)
+    return df
+
+
+def _load_intersection_subset(path: str, columns: list[str]) -> pd.DataFrame:
+    target = Path(path)
+    if target.suffix.lower() == ".parquet":
+        return pd.read_parquet(target, columns=columns)
+    frame = _read_table(target)
+    return frame[columns].copy()
+
+
+def _load_intersection_subset_or_df(
+    *,
+    path: str,
+    columns: list[str],
+    intersection_df: Optional[pd.DataFrame],
+) -> pd.DataFrame:
+    if intersection_df is not None:
+        return intersection_df[columns].copy()
+    return _load_intersection_subset(path, columns)
+
+
+def _intersection_columns(path: str, intersection_df: Optional[pd.DataFrame]) -> list[str]:
+    if intersection_df is not None:
+        return list(intersection_df.columns)
+    target = Path(path)
+    if target.suffix.lower() == ".parquet":
+        return list(pq.read_schema(target).names)
+    return list(_read_table(target).columns)
 
 
 def _step_label(step: str, zone_label: Optional[str] = None) -> str:
@@ -61,6 +197,12 @@ def _build_combined_grouped_table(
         if col.startswith("edge_aermod_") or col.startswith("edge_inmap_")
     )
     source_cols = [col for col in intersection_cols if col in needed]
+    for plain_col, edge_col in (
+        ("aermod_srv_cell_id", "edge_aermod_srv_cell_id"),
+        ("inmap_srm_cell_id", "edge_inmap_srm_cell_id"),
+    ):
+        if edge_col in source_cols and plain_col in source_cols:
+            source_cols = [col for col in source_cols if col != plain_col]
     intersection = _load_intersection_subset_or_df(
         path=intersection_path,
         columns=source_cols,
@@ -374,6 +516,7 @@ def run(
         zone_label="inmap",
         cell_col="inmap_srm_cell_id",
     )
+    inmap_corrected_path = None
     inmap_grid_emissions_path = None
     if inmap_corrected_df is not None and not inmap_corrected_df.empty:
         corrected_path = _table_path(raw_dir, "inmap_emissions_corrected")
