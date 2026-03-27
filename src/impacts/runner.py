@@ -62,6 +62,7 @@ def run_from_input_manifest(
     else:
         logger.info("Using staged mapping input: %s", mapping_input_path)
 
+    logger.info("Using Step 4 implementation: combined")
     step4_outputs = run_step4(
         pipeline,
         raw_dir,
