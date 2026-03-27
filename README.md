@@ -24,4 +24,4 @@ python -m impacts pipeline --config /path/settings.yaml --workspace /path/worksp
 
 ## PILATES
 
-PILATES-specific workflow details, example layout, settings shape, and example commands are in [docs/pilates.md](/Users/haitamlaarabi/Workspace/Models/inmap-aermod/impacts/docs/pilates.md).
+PILATES-specific workflow details, example layout, settings shape, and example commands are in [docs/pilates.md](docs/pilates.md).
