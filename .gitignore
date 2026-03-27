@@ -1,60 +1,79 @@
-# Temporary and binary files
-*~
-*.py[cod]
-*.so
-*.cfg
-!.isort.cfg
-!setup.cfg
-*.orig
-*.log
-*.pot
-__pycache__/*
-.cache/*
-.*.swp
-*/.ipynb_checkpoints/*
+# OS and hidden junk
 .DS_Store
+**/.DS_Store
+._*
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
 
-# Project files
-.ropeproject
+# Editor and IDE state
+.idea/
+.vscode/
+.fleet/
+.history/
+.ropeproject/
 .project
 .pydevproject
-.settings
-.idea
-.vscode
+.settings/
 tags
+*~
+.*.swp
 
-# Package files
-*.egg
-*.eggs/
-.installed.cfg
-*.egg-info
-
-# Unittest and coverage
-htmlcov/*
+# Python bytecode and caches
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+.cache/
+**/.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.pyre/
+.nox/
+.tox/
+htmlcov/
 .coverage
 .coverage.*
-.tox
-junit*.xml
 coverage.xml
-.pytest_cache/
+junit*.xml
 
-# Build and docs folder/files
-build/*
-dist/*
-sdist/*
-docs/api/*
-docs/_rst/*
-docs/_build/*
-cover/*
+# Notebooks
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Build and packaging outputs
+build/
+dist/
+sdist/
+cover/
 MANIFEST
+pip-wheel-metadata/
+*.egg
+.eggs/
+*.egg-info/
+src/*.egg-info/
+.installed.cfg
 
-# Data directories (local/runtime artifacts)
+# Generated docs
+docs/_build/
+docs/api/
+docs/_rst/
+
+# Local runtime artifacts
 data/
 input/
 output/
+workspace/
+downstream/
 
-# Per-project virtualenvs
+# Virtual environments and local Python config
+.venv/
 .venv*/
+venv/
+env/
 .conda*/
 .python-version
 
@@ -62,3 +81,11 @@ output/
 .env
 .env.*
 !.env.example
+
+# Repo-specific files that must remain tracked
+!.gitattributes
+!.gitignore
+!AGENTS.md
+!NOAI
+!robots.txt
+!setup.cfg
