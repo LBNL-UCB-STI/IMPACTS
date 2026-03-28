@@ -28,10 +28,6 @@ impacts:
       emissions_skims: upstream/0.skimsEmissionsTotals_5pct_sample.csv.gz
       osm_pbf: upstream/sfbay-cbg5500-weakConn-network.osm.pbf
       activity_corrections: upstream/activity_corrections.csv
-    dispersions:
-      inmap:
-        isrm_zarr: ~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr
-        isrm_nox_to_no2_matrix: upstream/nox_to_no2_full_isrm_matrix.parquet
     processing:
       annualization_days: 330
       pollutants:
@@ -41,17 +37,15 @@ impacts:
         - SOx
         - ROG
         - BCh
-      grid:
-        inmap_grid_path: upstream/isrm_polygon/isrm_polygon.shp
-        inmap_grid_epsg:
-        inmap_grid_id: isrm
-        aermod_grid_path:
-        aermod_grid_epsg:
-        aermod_grid_id:
-      mapping_columns:
+      inmap:
+        isrm_zarr: ~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr
+        isrm_nox_to_no2_matrix: upstream/nox_to_no2_full_isrm_matrix.parquet
+        grid_path: upstream/isrm_polygon/isrm_polygon.shp
+        grid_epsg:
         grid_id: isrm
-      dispersion:
-        concentration_factor: 28766.639
-        include_health: false
+      aermod:
+        grid_path:
+        grid_epsg:
+        grid_id:
     outputs:
       output_dir: downstream

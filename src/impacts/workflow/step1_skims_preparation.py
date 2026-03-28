@@ -1,4 +1,4 @@
-"""Step 1 — Skims emissions preparation.
+"""Workflow skims emissions preparation.
 
 Build or load the skims-emissions table, filter to configured pollutants,
 and annualize from grams/day to tons/year.
@@ -12,8 +12,8 @@ from typing import Tuple
 
 import pandas as pd
 
-from .contract_utils import parquet_available
-from .manifest_models import PipelineConfig
+from ..contract_utils import parquet_available
+from ..manifest_models import PipelineConfig
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ def _table_path(parent: Path, stem: str) -> Path:
 def _load_rates(rates_dir: Optional[str]):
     if not rates_dir:
         return None
-    from impacts.emissions.events_to_skims_emissions import read_rates_directory
+    from impacts.utils.utils_events_to_skims_emissions import read_rates_directory
     return read_rates_directory(rates_dir)
 
 
@@ -37,10 +37,10 @@ def run(pipeline: PipelineConfig, raw_dir: Path) -> Tuple[pd.DataFrame, Path]:
 
     Returns (skims_df, skims_path).
     """
-    from impacts.emissions.emissions_grid_mapping import annualize_skims
-    from impacts.emissions.emissions_grid_mapping import read_skims_emissions
-    from impacts.emissions.events_to_skims_emissions import build_skims_emissions_from_events
-    from impacts.emissions.events_to_skims_emissions import write_skims_emissions
+    from impacts.utils.utils_emissions_grid_mapping import annualize_skims
+    from impacts.utils.utils_emissions_grid_mapping import read_skims_emissions
+    from impacts.utils.utils_events_to_skims_emissions import build_skims_emissions_from_events
+    from impacts.utils.utils_events_to_skims_emissions import write_skims_emissions
 
     skims_path = _table_path(raw_dir, "skims_emissions")
     prepared_skims_path = Path(pipeline.prepared_skims_input_path) if pipeline.prepared_skims_input_path else None

@@ -156,7 +156,7 @@ def resolve_path(path: Optional[str], config_path: str | Path | None = None) -> 
         return raw
     if is_remote_path(raw):
         return raw
-    resolved = Path(raw)
+    resolved = Path(raw).expanduser()
     if resolved.is_absolute():
         return str(resolved)
     if config_path is None:

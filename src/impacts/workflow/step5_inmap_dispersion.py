@@ -13,7 +13,7 @@ import pandas as pd
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
-from .defaults import DEFAULT_CONCENTRATION_FACTOR
+from .defaults import DEFAULT_TONS_PER_YEAR_TO_UG_PER_S
 from .defaults import DEFAULT_DISPERSION_EMISSIONS_COLUMNS as DEFAULT_EMISSIONS_COLUMNS
 from .manifest_models import PipelineConfig
 
@@ -385,7 +385,6 @@ def _assemble_concentration_results(
     *,
     sr,
     factor: float,
-    include_health: bool,
     arrays: dict[str, np.ndarray],
 ) -> pd.DataFrame:
     """Step 5.3: assemble concentration outputs on the receptor dimension."""
@@ -418,30 +417,6 @@ def _assemble_concentration_results(
     )
     if "NO2" in arrays:
         results["NO2"] = factor * arrays["NO2"]
-
-    if include_health and "TotalPop" in sr and "MortalityRate" in sr:
-        total_pop = _read_receptor_vector(sr, "TotalPop", receptor_dim)
-        mortality_rate = _read_receptor_vector(sr, "MortalityRate", receptor_dim)
-        results["deathsK"] = (
-            (np.exp(np.log(1.06) / 10.0 * results["TotalPM25"]) - 1.0)
-            * total_pop
-            * 1.096163
-            * mortality_rate
-            / 100000.0
-            * 0.960899254
-        )
-        results["deathsL"] = (
-            (np.exp(np.log(1.14) / 10.0 * results["TotalPM25"]) - 1.0)
-            * total_pop
-            * 1.096163
-            * mortality_rate
-            / 100000.0
-            * 0.960899254
-        )
-        _trace_array("3", "TotalPop.trimmed", total_pop)
-        _trace_array("3", "MortalityRate.trimmed", mortality_rate)
-        _trace_array("3", "deathsK", results["deathsK"].to_numpy())
-        _trace_array("3", "deathsL", results["deathsL"].to_numpy())
 
     _trace_frame("3", "concentrations", results, key_cols=["GRID"])
     return results
@@ -499,16 +474,14 @@ def compute_isrm_concentrations(
     grid_emissions_df: pd.DataFrame,
     sr,
     factor: float,
-    include_health: bool,
     request_no2: bool = True,
     isrm_nox_to_no2_matrix_path: Optional[str] = None,
 ) -> pd.DataFrame:
     logger.info(
-        "%s trace compute_start factor=%s bch_required=%s include_health=%s",
+        "%s trace compute_start factor=%s bch_required=%s",
         _step_label(5, "0"),
         factor,
         True,
-        include_health,
     )
     emis = _prepare_grid_emissions(grid_emissions_df)
     if emis.empty:
@@ -572,7 +545,6 @@ def compute_isrm_concentrations(
     return _assemble_concentration_results(
         sr=sr,
         factor=factor,
-        include_health=include_health,
         arrays=arrays,
     )
 
@@ -625,8 +597,7 @@ def run(
     concentrations = compute_isrm_concentrations(
         grid_emissions_df=emissions_df,
         sr=sr,
-        factor=float(pipeline.concentration_factor or DEFAULT_CONCENTRATION_FACTOR),
-        include_health=bool(pipeline.include_health),
+        factor=float(pipeline.concentration_factor or DEFAULT_TONS_PER_YEAR_TO_UG_PER_S),
         request_no2="NOx" in set(pipeline.pollutants),
         isrm_nox_to_no2_matrix_path=pipeline.isrm_nox_to_no2_matrix_path,
     )

@@ -9,7 +9,7 @@ from typing import Optional
 import geopandas as gpd
 import pandas as pd
 import duckdb
-from impacts.emissions.emissions_grid_mapping import apply_county_corrections
+from impacts.utils.utils_emissions_grid_mapping import apply_county_corrections
 
 from .manifest_models import PipelineConfig
 

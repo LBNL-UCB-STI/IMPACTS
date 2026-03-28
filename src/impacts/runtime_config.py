@@ -63,22 +63,25 @@ def _normalize_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if "shared" in payload and "shared_context" not in payload:
         payload = dict(payload)
         payload["shared_context"] = payload["shared"]
-    if "processing" in payload:
-        return payload
 
     emissions = payload.get("emissions", {}) or {}
     dispersions = payload.get("dispersions", {}) or {}
+    processing_payload = payload.get("processing", {}) or {}
     outputs = payload.get("outputs", {}) or {}
     inmap = dispersions.get("inmap", {}) or {}
     aermod = dispersions.get("aermod", {}) or {}
+    processing_inmap = processing_payload.get("inmap", {}) or {}
+    processing_aermod = processing_payload.get("aermod", {}) or {}
     inputs = dict(payload.get("inputs", {}) or {})
 
     if "activity_corrections" not in inputs and emissions.get("activity_correction_factors_file") is not None:
         inputs["activity_corrections"] = emissions.get("activity_correction_factors_file")
     isrm_directory = _optional_string(inmap.get("isrm_zarr_directory"))
     isrm_s3bucket = _optional_string(inmap.get("isrm_zarr_s3bucket"))
-    isrm_direct = _optional_string(inmap.get("isrm_zarr"))
-    isrm_nox_to_no2_matrix = _optional_string(inmap.get("isrm_nox_to_no2_matrix"))
+    isrm_direct = _optional_string(inmap.get("isrm_zarr")) or _optional_string(processing_inmap.get("isrm_zarr"))
+    isrm_nox_to_no2_matrix = _optional_string(inmap.get("isrm_nox_to_no2_matrix")) or _optional_string(
+        processing_inmap.get("isrm_nox_to_no2_matrix")
+    )
     if "isrm_zarr" not in inputs:
         if isrm_directory and Path(isrm_directory).exists():
             inputs["isrm_zarr"] = isrm_directory
@@ -87,21 +90,44 @@ def _normalize_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if "isrm_nox_to_no2_matrix" not in inputs:
         inputs["isrm_nox_to_no2_matrix"] = isrm_nox_to_no2_matrix
 
+    if "processing" in payload:
+        normalized = dict(payload)
+        normalized["inputs"] = inputs
+        processing = dict(normalized.get("processing", {}) or {})
+        inmap_processing = dict(processing_inmap)
+        aermod_processing = dict(processing_aermod)
+        if "grid" not in processing:
+            processing["grid"] = {
+                "inmap_grid_path": inmap_processing.get("grid_path"),
+                "inmap_grid_epsg": inmap_processing.get("grid_epsg"),
+                "inmap_grid_id": inmap_processing.get("grid_id"),
+                "aermod_grid_path": aermod_processing.get("grid_path"),
+                "aermod_grid_epsg": aermod_processing.get("grid_epsg"),
+                "aermod_grid_id": aermod_processing.get("grid_id"),
+            }
+        if "mapping_columns" not in processing:
+            processing["mapping_columns"] = {"grid_id": inmap_processing.get("grid_id")}
+        if "concentration_factor" not in processing:
+            legacy_dispersion = dict(processing.get("dispersion", {}) or {})
+            processing["concentration_factor"] = legacy_dispersion.get("concentration_factor")
+        normalized["processing"] = processing
+        return normalized
+
     normalized = dict(payload)
     normalized["inputs"] = inputs
     normalized["processing"] = {
         "annualization_days": emissions.get("annualization_days"),
+        "concentration_factor": None,
         "pollutants": emissions.get("pollutants"),
-        "grid": {
-            "inmap_grid_path": inmap.get("grid_path"),
-            "inmap_grid_epsg": inmap.get("grid_epsg"),
-            "inmap_grid_id": inmap.get("grid_id"),
-            "aermod_grid_path": aermod.get("grid_path"),
-            "aermod_grid_epsg": aermod.get("grid_epsg"),
-            "aermod_grid_id": aermod.get("grid_id"),
-        },
-        "mapping_columns": {
+        "inmap": {
+            "grid_path": inmap.get("grid_path"),
+            "grid_epsg": inmap.get("grid_epsg"),
             "grid_id": inmap.get("grid_id"),
+        },
+        "aermod": {
+            "grid_path": aermod.get("grid_path"),
+            "grid_epsg": aermod.get("grid_epsg"),
+            "grid_id": aermod.get("grid_id"),
         },
     }
     return normalized
@@ -328,16 +354,14 @@ class DispersionEmissionsColumns:
 
 
 @dataclass(frozen=True)
-class DispersionSettings:
+class ConcentrationSettings:
     concentration_factor: float = 28766.639
-    include_health: bool = False
     emissions_columns: DispersionEmissionsColumns = field(default_factory=DispersionEmissionsColumns)
 
     @classmethod
-    def from_dict(cls, payload: Dict[str, Any]) -> "DispersionSettings":
+    def from_dict(cls, payload: Dict[str, Any]) -> "ConcentrationSettings":
         return cls(
             concentration_factor=_optional_float(payload.get("concentration_factor")) or 28766.639,
-            include_health=bool(payload.get("include_health", False)),
             emissions_columns=DispersionEmissionsColumns.from_dict(payload.get("emissions_columns", {}) or {}),
         )
 
@@ -354,7 +378,7 @@ class ProcessingSettings:
     skims_columns: SkimsColumns = field(default_factory=SkimsColumns)
     mapping_columns: MappingColumns = field(default_factory=MappingColumns)
     activity_corrections_columns: ActivityCorrectionsColumns = field(default_factory=ActivityCorrectionsColumns)
-    dispersion: DispersionSettings = field(default_factory=DispersionSettings)
+    concentrations: ConcentrationSettings = field(default_factory=ConcentrationSettings)
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "ProcessingSettings":
@@ -377,7 +401,12 @@ class ProcessingSettings:
             activity_corrections_columns=ActivityCorrectionsColumns.from_dict(
                 payload.get("activity_corrections_columns", {}) or {}
             ),
-            dispersion=DispersionSettings.from_dict(payload.get("dispersion", {}) or {}),
+            concentrations=ConcentrationSettings.from_dict(
+                {
+                    **(payload.get("dispersion", {}) or {}),
+                    "concentration_factor": payload.get("concentration_factor", None),
+                }
+            ),
         )
 
 
@@ -419,18 +448,16 @@ class ImpactsRuntimeConfig:
                 "beam_network": payload["inputs"]["beam_network"],
                 "emissions_skims": payload["inputs"]["emissions_skims"],
                 "osm_pbf": payload["inputs"]["osm_pbf"],
+                "activity_corrections": payload["inputs"]["activity_corrections"],
                 "households_asim_out": payload["inputs"]["households_asim_out"],
                 "persons_asim_out": payload["inputs"]["persons_asim_out"],
             },
-            "emissions": {
+            "processing": {
                 "annualization_days": payload["processing"]["annualization_days"],
-                "activity_correction_factors_file": payload["inputs"]["activity_corrections"],
+                "concentration_factor": payload["processing"]["concentrations"]["concentration_factor"],
                 "pollutants": payload["processing"]["pollutants"],
-            },
-            "dispersions": {
                 "inmap": {
-                    "isrm_zarr_directory": payload["inputs"]["isrm_zarr"],
-                    "isrm_zarr_s3bucket": None,
+                    "isrm_zarr": payload["inputs"]["isrm_zarr"],
                     "isrm_nox_to_no2_matrix": payload["inputs"].get("isrm_nox_to_no2_matrix"),
                     "grid_path": payload["processing"]["grid"]["inmap_grid_path"],
                     "grid_epsg": payload["processing"]["grid"]["inmap_grid_epsg"],
@@ -439,6 +466,7 @@ class ImpactsRuntimeConfig:
                 "aermod": {
                     "grid_path": payload["processing"]["grid"]["aermod_grid_path"],
                     "grid_epsg": payload["processing"]["grid"]["aermod_grid_epsg"],
+                    "grid_id": payload["processing"]["grid"]["aermod_grid_id"],
                 },
             },
             "outputs": {

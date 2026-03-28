@@ -27,7 +27,7 @@ import time
 import gc
 
 try:
-    from impacts.network2grid.network_grid_clipping import (
+    from impacts.utils.utils_network_grid_clipping import (
         intersect_beam_osm_with_grid,
         load_mapping_config,
         map_beam_network_to_osm,
@@ -293,7 +293,7 @@ GRID_grid = gpd.read_file('grid_polygon/grid_polygon.shp')
 counties_shapefile = gpd.read_file('/Users/cpoliziani/Downloads/region_county_5910830457166027147/region_county.shp')
 
 # Optional BEAM-OSM-GRID mapping configuration.
-WORKFLOW_CONFIG_PATH = "src/impacts/settings.yaml"
+WORKFLOW_CONFIG_PATH = "examples/pilates/settings.yaml"
 MAPPING_CFG = load_mapping_config(WORKFLOW_CONFIG_PATH)
 
 EMFACT_VMT_filepath = 'Default_MTC_2018_Annual_vmt_20240313111517.csv'

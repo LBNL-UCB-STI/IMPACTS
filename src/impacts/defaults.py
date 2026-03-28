@@ -22,9 +22,8 @@ GRAMS_PER_TON: float = 1_000_000.0
 # Dispersion
 # ---------------------------------------------------------------------------
 
-DEFAULT_CONCENTRATION_FACTOR: float = 28766.639
-"""Scaling factor applied when converting ISRM source fractions to
-concentration units (μg/m³ per ton/year)."""
+DEFAULT_TONS_PER_YEAR_TO_UG_PER_S: float = 28766.639
+"""Unit conversion from tons/year emissions to micrograms/second emission rate."""
 
 DEFAULT_DISPERSION_EMISSIONS_COLUMNS: list = [
     "inmap_srm_cell_id",

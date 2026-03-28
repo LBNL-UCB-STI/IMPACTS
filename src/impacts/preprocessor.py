@@ -359,8 +359,8 @@ def build_inputs_manifest(
         optional=True,
     )
 
-    from impacts.emissions.emissions_grid_mapping import annualize_prepared_skims_for_grid_allocation
-    from impacts.emissions.emissions_grid_mapping import prepare_skims_for_grid_allocation
+    from impacts.utils.utils_emissions_grid_mapping import annualize_prepared_skims_for_grid_allocation
+    from impacts.utils.utils_emissions_grid_mapping import prepare_skims_for_grid_allocation
 
     prepared_grouped_skims_path = _prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
     prepare_skims_for_grid_allocation(
@@ -553,10 +553,10 @@ def build_inputs_manifest(
         "input_dir": str(input_root),
         "inputs_manifest_path": str(workspace_root / "inputs_manifest.yaml"),
         "maintained_execution_path": [
-            "impacts.emissions.events_to_skims_emissions",
-            "impacts.emissions.emissions_grid_mapping",
-            "impacts.step5_inmap_dispersion",
-            "impacts.network2grid.network_grid_clipping",
+            "impacts.utils.utils_events_to_skims_emissions",
+            "impacts.utils.utils_emissions_grid_mapping",
+            "impacts.workflow.step5_inmap_dispersion",
+            "impacts.utils.utils_network_grid_clipping",
         ],
         "inputs": manifest_inputs,
         "pipeline": {
@@ -590,8 +590,7 @@ def build_inputs_manifest(
             "county_fips_codes": list(geography.fips.counties),
             "county_area_name": runtime_config.shared_context.region or processing.county_area_name,
             "county_boundaries_path": staged_county_boundaries,
-            "concentration_factor": float(processing.dispersion.concentration_factor),
-            "include_health": bool(processing.dispersion.include_health),
+            "concentration_factor": float(processing.concentrations.concentration_factor),
             "mapping_columns": mapping_columns,
             "prepared_skims_grouped_path": str(prepared_grouped_skims_path),
             "prepared_skims_group_cols": list(processing.prepared_skims_group_cols),

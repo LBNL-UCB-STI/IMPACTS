@@ -19,7 +19,7 @@ def run(pipeline: PipelineConfig, raw_dir: Path) -> gpd.GeoDataFrame:
 
     Returns the mapped line network GeoDataFrame.
     """
-    from impacts.network2grid.network_grid_clipping import map_beam_network_to_osm
+    from impacts.utils.utils_network_grid_clipping import map_beam_network_to_osm
 
     osm_source = pipeline.osm_links_path or pipeline.osm_pbf_path
     if not osm_source:

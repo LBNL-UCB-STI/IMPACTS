@@ -44,10 +44,10 @@ def run_from_input_manifest(
     logger.info("Loaded input manifest: %s", Path(input_manifest_path).resolve())
     logger.info("Output directory: %s", output_root)
 
-    from .step1_skims_preparation import run as run_step1
-    from .step2_network_osm_mapping import run as run_step2
-    from .step3_grid_intersection import run as run_step3
-    from .step4_emissions_distribution import run as run_step4
+    from .workflow.step1_skims_preparation import run as run_step1
+    from .workflow.step2_network_osm_mapping import run as run_step2
+    from .workflow.step3_grid_intersection import run as run_step3
+    from .workflow.step4_emissions_distribution import run as run_step4
 
     _log_step_banner(1, "skims preparation")
     skims_df, skims_path = run_step1(pipeline, raw_dir)
@@ -74,7 +74,7 @@ def run_from_input_manifest(
 
     concentration_path: Optional[Path] = None
     if run_dispersion:
-        from .step5_inmap_dispersion import run as run_step5
+        from .workflow.step5_inmap_dispersion import run as run_step5
         _log_step_banner(5, "inmap concentrations")
         logger.info("Using Step 5 implementation: inmap_concentrations_and_export")
         _, _, concentration_path = run_step5(
