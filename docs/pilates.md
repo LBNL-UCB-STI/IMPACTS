@@ -39,7 +39,24 @@ That staged runtime file is generated and should not be edited directly.
 ```yaml
 run:
   region: sfbay
+  scenario: base
   start_year: 2017
+
+shared:
+  geography:
+    FIPS:
+      state: "06"
+      counties:
+        - "001"
+        - "013"
+        - "041"
+        - "055"
+        - "075"
+        - "081"
+        - "085"
+        - "095"
+        - "097"
+    local_crs: EPSG:26910
 
 impacts:
   runtime_overrides:

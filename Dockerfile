@@ -1,5 +1,7 @@
 FROM mambaorg/micromamba:1.5.1
 LABEL org.opencontainers.image.source="https://github.com/LBNL-UCB-STI/"
+LABEL org.opencontainers.image.title="impacts"
+LABEL org.opencontainers.image.description="IMPACTS workflow container"
 
 COPY --chown=$MAMBA_USER:$MAMBA_USER docker/env.yml /tmp/env.yml
 RUN micromamba install -y -n base -f /tmp/env.yml && \

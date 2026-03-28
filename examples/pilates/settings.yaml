@@ -1,12 +1,13 @@
 run:
   region: sfbay
+  scenario: base
   start_year: 2017
   models:
     impacts: impacts
 
 shared:
   geography:
-    fips:
+    FIPS:
       state: "06"
       counties:
         - "001"
@@ -18,7 +19,7 @@ shared:
         - "085"
         - "095"
         - "097"
-    local_crs: "EPSG:26910"
+    local_crs: EPSG:26910
 
 impacts:
   runtime_overrides:

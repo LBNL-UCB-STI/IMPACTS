@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Dict
 from typing import Optional
@@ -110,11 +109,12 @@ def _normalize_zone_columns(df: pd.DataFrame, zone_label: str, cell_col: str) ->
     rename_map: dict[str, str] = {}
     prefixed_cell = f"edge_{cell_col}"
     if prefixed_cell in df.columns:
-        # For road-intersection outputs, the edge-prefixed cell id is the
-        # authoritative "road hit" label. The plain cell id can come from
-        # carried zone-side metadata and should not be used to resurrect
-        # non-intersecting cells.
-        df[cell_col] = df[prefixed_cell]
+        # Prefer the edge-prefixed road-hit label when present, but do not
+        # erase a valid plain cell id with null edge-prefixed values.
+        if cell_col in df.columns:
+            df[cell_col] = df[prefixed_cell].combine_first(df[cell_col])
+        else:
+            df[cell_col] = df[prefixed_cell]
         df = df.drop(columns=[prefixed_cell])
     if "edge_linkId" in df.columns:
         if "linkId" in df.columns:
@@ -167,39 +167,24 @@ def _step_label(step: str, zone_label: Optional[str] = None) -> str:
     return f"Step 4.{step}{suffix}"
 
 
-def _write_intermediates() -> bool:
-    return (os.getenv("IMPACTS_STEP4_WRITE_INTERMEDIATES", "") or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _existing_output(path: Path) -> Optional[str]:
     return str(path) if path.exists() else None
 
 
 def _reuse_existing_step4_outputs(raw_dir: Path) -> Optional[Dict[str, Optional[str]]]:
-    inmap_grid_emissions = _existing_output(raw_dir / "inmap_grid_emissions.parquet")
-    if not inmap_grid_emissions:
+    beam_emissions_for_inmap = _existing_output(raw_dir / "beam_emissions_for_inmap.parquet")
+    if not beam_emissions_for_inmap:
         return None
 
     outputs = {
-        "combined_mapping_grouped": _existing_output(raw_dir / "combined_mapping_grouped.parquet"),
-        "combined_emissions_allocated": _existing_output(raw_dir / "combined_emissions_allocated.parquet"),
-        "combined_emissions_corrected": _existing_output(_table_path(raw_dir, "combined_emissions_corrected")),
-        "aermod_mapping_grouped": _existing_output(raw_dir / "aermod_mapping_grouped.parquet"),
-        "aermod_emissions_allocated": _existing_output(raw_dir / "aermod_emissions_allocated.parquet"),
-        "aermod_emissions_corrected": _existing_output(_table_path(raw_dir, "aermod_emissions_corrected")),
-        "aermod_grid_emissions": _existing_output(raw_dir / "aermod_grid_emissions.parquet"),
-        "inmap_mapping_grouped": _existing_output(raw_dir / "inmap_mapping_grouped.parquet"),
-        "inmap_emissions_allocated": _existing_output(raw_dir / "inmap_emissions_allocated.parquet"),
-        "inmap_emissions_corrected": _existing_output(_table_path(raw_dir, "inmap_emissions_corrected")),
-        "inmap_grid_emissions": inmap_grid_emissions,
-        "emissions_allocated": _existing_output(raw_dir / "inmap_emissions_allocated.parquet"),
-        "emissions_corrected": inmap_grid_emissions,
+        "beam_emissions_for_aermod": _existing_output(raw_dir / "beam_emissions_for_aermod.parquet"),
+        "beam_emissions_for_inmap": beam_emissions_for_inmap,
     }
     logger.info(
         "%s reusing existing emissions outputs; skipping Step 4 recomputation (inmap=%s, aermod=%s)",
         _step_label("0"),
-        outputs["inmap_grid_emissions"],
-        outputs["aermod_grid_emissions"],
+        outputs["beam_emissions_for_inmap"],
+        outputs["beam_emissions_for_aermod"],
     )
     return outputs
 
@@ -210,7 +195,7 @@ def _build_combined_grouped_table(
     raw_dir: Path,
     pipeline: PipelineConfig,
     intersection_df: Optional[pd.DataFrame],
-) -> tuple[Optional[pd.DataFrame], Optional[str]]:
+) -> tuple[Optional[pd.DataFrame], None]:
     intersection_cols = _intersection_columns(intersection_path, intersection_df)
     needed = {
         "linkId",
@@ -231,12 +216,6 @@ def _build_combined_grouped_table(
         if col.startswith("edge_aermod_") or col.startswith("edge_inmap_")
     )
     source_cols = [col for col in intersection_cols if col in needed]
-    for plain_col, edge_col in (
-        ("aermod_srv_cell_id", "edge_aermod_srv_cell_id"),
-        ("inmap_srm_cell_id", "edge_inmap_srm_cell_id"),
-    ):
-        if edge_col in source_cols and plain_col in source_cols:
-            source_cols = [col for col in source_cols if col != plain_col]
     intersection = _load_intersection_subset_or_df(
         path=intersection_path,
         columns=source_cols,
@@ -288,12 +267,7 @@ def _build_combined_grouped_table(
     if grouped.empty:
         return None, None
 
-    grouped_path = raw_dir / "combined_mapping_grouped.parquet"
-    if _write_intermediates():
-        grouped.to_parquet(grouped_path, index=False)
-        logger.info("%s combined grouped mapping rows=%d → %s", _step_label("1"), len(grouped), grouped_path)
-        return grouped, str(grouped_path)
-    logger.info("%s combined grouped mapping rows=%d", _step_label("1"), len(grouped))
+    logger.info("%s BEAM mapping across grids rows=%d", _step_label("1"), len(grouped))
     return grouped, None
 
 
@@ -302,7 +276,7 @@ def _build_combined_allocated_table(
     grouped_df: pd.DataFrame,
     skims_df: pd.DataFrame,
     raw_dir: Path,
-) -> tuple[Optional[pd.DataFrame], Optional[str]]:
+) -> tuple[Optional[pd.DataFrame], None]:
     if grouped_df is None or grouped_df.empty:
         return None, None
 
@@ -353,12 +327,7 @@ def _build_combined_allocated_table(
     if allocated.empty:
         return None, None
 
-    allocated_path = raw_dir / "combined_emissions_allocated.parquet"
-    if _write_intermediates():
-        allocated.to_parquet(allocated_path, index=False)
-        logger.info("%s combined allocated emissions rows=%d → %s", _step_label("2"), len(allocated), allocated_path)
-        return allocated, str(allocated_path)
-    logger.info("%s combined allocated emissions rows=%d", _step_label("2"), len(allocated))
+    logger.info("%s BEAM emissions allocated across grids rows=%d", _step_label("2"), len(allocated))
     return allocated, None
 
 
@@ -397,11 +366,10 @@ def _build_combined_corrected_table(
     allocated_df: pd.DataFrame,
     raw_dir: Path,
     pipeline: PipelineConfig,
-) -> tuple[Optional[pd.DataFrame], Optional[str]]:
+) -> tuple[Optional[pd.DataFrame], None]:
     if allocated_df is None or allocated_df.empty:
         return None, None
 
-    corrected_path = _table_path(raw_dir, "combined_emissions_corrected")
     if pipeline.activity_corrections_path:
         logger.info(
             "%s applying county corrections from %s",
@@ -416,9 +384,6 @@ def _build_combined_corrected_table(
     else:
         corrected = allocated_df
         logger.info("%s no corrections configured; using allocated totals as-is", _step_label("3"))
-    if _write_intermediates():
-        _write_table(corrected, corrected_path)
-        return corrected, str(corrected_path)
     return corrected, None
 
 
@@ -450,141 +415,75 @@ def run(
         pipeline=pipeline,
     )
 
-    aermod_grouped_path = None
-    aermod_allocated_path = None
-    aermod_corrected_path = None
-    aermod_grid_emissions_path = None
+    beam_emissions_for_aermod_path = None
     if pipeline.aermod_grid_path and combined_grouped_df is not None:
         aermod_grouped_df = _split_zone_allocated(
             combined_df=combined_grouped_df,
             zone_label="aermod",
             cell_col="aermod_srv_cell_id",
         )
-        if aermod_grouped_df is not None and not aermod_grouped_df.empty:
-            if _write_intermediates():
-                grouped_stem = raw_dir / "aermod_mapping_grouped"
-                _save_grid_emissions(
-                    aermod_grouped_df,
-                    left_col="aermod_srv_cell_id",
-                    right_col="srv_cell_id",
-                    grid_path=pipeline.aermod_grid_path,
-                    output_epsg=int(pipeline.output_epsg),
-                    output_stem=grouped_stem,
-                )
-                aermod_grouped_path = str(grouped_stem) + ".parquet"
 
         aermod_allocated_df = _split_zone_allocated(
             combined_df=combined_allocated_df,
             zone_label="aermod",
             cell_col="aermod_srv_cell_id",
         )
-        if aermod_allocated_df is not None and not aermod_allocated_df.empty:
-            if _write_intermediates():
-                allocated_stem = raw_dir / "aermod_emissions_allocated"
-                _save_grid_emissions(
-                    aermod_allocated_df,
-                    left_col="aermod_srv_cell_id",
-                    right_col="srv_cell_id",
-                    grid_path=pipeline.aermod_grid_path,
-                    output_epsg=int(pipeline.output_epsg),
-                    output_stem=allocated_stem,
-                )
-                aermod_allocated_path = str(allocated_stem) + ".parquet"
         aermod_corrected_df = _split_zone_allocated(
             combined_df=combined_corrected_df,
             zone_label="aermod",
             cell_col="aermod_srv_cell_id",
         )
         if aermod_corrected_df is not None and not aermod_corrected_df.empty:
-            corrected_path = _table_path(raw_dir, "aermod_emissions_corrected")
-            if _write_intermediates():
-                _write_table(aermod_corrected_df, corrected_path)
-                aermod_corrected_path = str(corrected_path)
-            corrected_stem = raw_dir / "aermod_grid_emissions"
+            beam_emissions_for_aermod_stem = raw_dir / "beam_emissions_for_aermod"
             _save_grid_emissions(
                 aermod_corrected_df,
                 left_col="aermod_srv_cell_id",
                 right_col="srv_cell_id",
                 grid_path=pipeline.aermod_grid_path,
                 output_epsg=int(pipeline.output_epsg),
-                output_stem=corrected_stem,
+                output_stem=beam_emissions_for_aermod_stem,
             )
-            aermod_grid_emissions_path = str(corrected_stem) + ".parquet"
-            logger.info("%s grid emissions → %s", _step_label("4", "aermod"), aermod_grid_emissions_path)
+            beam_emissions_for_aermod_path = str(beam_emissions_for_aermod_stem) + ".parquet"
+            logger.info(
+                "%s BEAM emissions for AERMOD → %s",
+                _step_label("4", "aermod"),
+                beam_emissions_for_aermod_path,
+            )
 
     inmap_grouped_df = _split_zone_allocated(
         combined_df=combined_grouped_df,
         zone_label="inmap",
         cell_col="inmap_srm_cell_id",
     )
-    inmap_grouped_path = None
-    if inmap_grouped_df is not None and not inmap_grouped_df.empty:
-        if _write_intermediates():
-            grouped_stem = raw_dir / "inmap_mapping_grouped"
-            _save_grid_emissions(
-                inmap_grouped_df,
-                left_col="inmap_srm_cell_id",
-                right_col="srm_cell_id",
-                grid_path=pipeline.inmap_grid_path,
-                output_epsg=int(pipeline.output_epsg),
-                output_stem=grouped_stem,
-            )
-            inmap_grouped_path = str(grouped_stem) + ".parquet"
-
     inmap_allocated_df = _split_zone_allocated(
         combined_df=combined_allocated_df,
         zone_label="inmap",
         cell_col="inmap_srm_cell_id",
     )
-    inmap_allocated_path = None
-    if inmap_allocated_df is not None and not inmap_allocated_df.empty:
-        if _write_intermediates():
-            allocated_stem = raw_dir / "inmap_emissions_allocated"
-            _save_grid_emissions(
-                inmap_allocated_df,
-                left_col="inmap_srm_cell_id",
-                right_col="srm_cell_id",
-                grid_path=pipeline.inmap_grid_path,
-                output_epsg=int(pipeline.output_epsg),
-                output_stem=allocated_stem,
-            )
-            inmap_allocated_path = str(allocated_stem) + ".parquet"
     inmap_corrected_df = _split_zone_allocated(
         combined_df=combined_corrected_df,
         zone_label="inmap",
         cell_col="inmap_srm_cell_id",
     )
-    inmap_corrected_path = None
-    inmap_grid_emissions_path = None
+    beam_emissions_for_inmap_path = None
     if inmap_corrected_df is not None and not inmap_corrected_df.empty:
-        corrected_path = _table_path(raw_dir, "inmap_emissions_corrected")
-        if _write_intermediates():
-            _write_table(inmap_corrected_df, corrected_path)
-            inmap_corrected_path = str(corrected_path)
-        corrected_stem = raw_dir / "inmap_grid_emissions"
+        beam_emissions_for_inmap_stem = raw_dir / "beam_emissions_for_inmap"
         _save_grid_emissions(
             inmap_corrected_df,
             left_col="inmap_srm_cell_id",
             right_col="srm_cell_id",
             grid_path=pipeline.inmap_grid_path,
             output_epsg=int(pipeline.output_epsg),
-            output_stem=corrected_stem,
+            output_stem=beam_emissions_for_inmap_stem,
         )
-        inmap_grid_emissions_path = str(corrected_stem) + ".parquet"
-        logger.info("%s grid emissions → %s", _step_label("5", "inmap"), inmap_grid_emissions_path)
+        beam_emissions_for_inmap_path = str(beam_emissions_for_inmap_stem) + ".parquet"
+        logger.info(
+            "%s BEAM emissions for InMAP → %s",
+            _step_label("5", "inmap"),
+            beam_emissions_for_inmap_path,
+        )
 
     return {
-        "combined_mapping_grouped": combined_grouped_path,
-        "combined_emissions_allocated": combined_allocated_path,
-        "combined_emissions_corrected": combined_corrected_path,
-        "aermod_mapping_grouped": aermod_grouped_path,
-        "aermod_emissions_allocated": aermod_allocated_path,
-        "aermod_emissions_corrected": aermod_corrected_path,
-        "aermod_grid_emissions": aermod_grid_emissions_path,
-        "inmap_mapping_grouped": inmap_grouped_path,
-        "inmap_emissions_allocated": inmap_allocated_path,
-        "inmap_emissions_corrected": inmap_corrected_path,
-        "inmap_grid_emissions": inmap_grid_emissions_path,
-        "emissions_allocated": inmap_allocated_path,
-        "emissions_corrected": inmap_grid_emissions_path,
+        "beam_emissions_for_aermod": beam_emissions_for_aermod_path,
+        "beam_emissions_for_inmap": beam_emissions_for_inmap_path,
     }

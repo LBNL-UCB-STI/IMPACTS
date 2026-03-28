@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 from typing import Optional
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -65,6 +66,13 @@ def _read_table(path: str) -> pd.DataFrame:
     if p.endswith(".csv.gz"):
         return pd.read_csv(path, compression="gzip")
     raise ValueError(f"Unsupported table format: {path}. Use .csv, .csv.gz, or .parquet")
+
+
+def _read_vector(path: str) -> gpd.GeoDataFrame:
+    target = Path(path)
+    if target.suffix.lower() == ".parquet":
+        return gpd.read_parquet(target)
+    return gpd.read_file(target)
 
 
 def _load_isrm_store(isrm_url: str):
@@ -266,29 +274,74 @@ def _assemble_concentration_results(
     return results
 
 
-def _write_concentration_outputs(concentrations: pd.DataFrame, output_path: str) -> Path:
-    """Step 5.4: write concentration outputs."""
+def _build_beam_inmap_concentrations_gdf(
+    *,
+    concentrations: pd.DataFrame,
+    inmap_grid_path: str,
+    grid_id_col: str,
+    included_grid_ids: np.ndarray,
+) -> gpd.GeoDataFrame:
+    logger.info(
+        "%s building BEAM InMAP concentrations GeoDataFrame from %s using grid_id_col=%s",
+        _step5_label("4"),
+        inmap_grid_path,
+        grid_id_col,
+    )
+    grid = _read_vector(inmap_grid_path)
+    if grid_id_col not in grid.columns:
+        raise ValueError(
+            f"{_step5_label('4')} grid id column '{grid_id_col}' not found in {inmap_grid_path}. "
+            f"Available columns: {list(grid.columns)}"
+        )
+    grid = grid.rename(columns={grid_id_col: "GRID"}).copy()
+    grid["GRID"] = pd.to_numeric(grid["GRID"], errors="raise").astype(int)
+    included_grid_ids = np.asarray(included_grid_ids, dtype=int)
+    included_grid_set = set(included_grid_ids.tolist())
+    grid = grid[grid["GRID"].isin(included_grid_set)].copy()
+    concentration_cols = [col for col in concentrations.columns if col != "GRID" and col not in grid.columns]
+    merged = grid.merge(concentrations[["GRID"] + concentration_cols], how="left", on="GRID")
+    for col in concentration_cols:
+        merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0.0)
+    logger.info(
+        "%s trace geometry_join grid_rows=%d included_grid_ids=%d concentration_rows=%d matched_rows=%d",
+        _step5_label("4"),
+        len(grid),
+        int(included_grid_ids.shape[0]),
+        len(concentrations),
+        len(merged),
+    )
+    if len(merged) != int(included_grid_ids.shape[0]):
+        raise ValueError(
+            f"{_step5_label('4')} expected {int(included_grid_ids.shape[0])} BEAM InMAP cells in the geospatial output "
+            f"but found {len(merged)} after filtering {inmap_grid_path}"
+        )
+    return gpd.GeoDataFrame(merged, geometry="geometry", crs=grid.crs)
+
+
+def _write_concentration_outputs(
+    beam_inmap_concentrations_gdf: gpd.GeoDataFrame,
+    output_path: str,
+) -> tuple[Path, Path]:
+    """Step 5.4: write BEAM InMAP concentrations as GeoParquet and GPKG."""
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    suffix = out.suffix.lower()
-    logger.info("%s writing concentration outputs to %s", _step5_label("4"), out)
+    if out.suffix.lower() != ".parquet":
+        raise ValueError("Output path must end with .parquet for Step 5 BEAM InMAP concentrations")
+    gpkg_path = out.with_suffix(".gpkg")
+    logger.info("%s writing BEAM InMAP concentrations GeoParquet to %s", _step5_label("4"), out)
     logger.info(
         "%s trace output_shape=%s suffix=%s columns=%s",
         _step5_label("4"),
-        concentrations.shape,
-        suffix,
-        list(concentrations.columns),
+        beam_inmap_concentrations_gdf.shape,
+        out.suffix.lower(),
+        list(beam_inmap_concentrations_gdf.columns),
     )
-    if suffix == ".parquet":
-        concentrations.to_parquet(out, index=False)
-    elif suffix == ".gz" and out.name.lower().endswith(".csv.gz"):
-        concentrations.to_csv(out, index=False, compression="gzip")
-    elif suffix == ".csv":
-        concentrations.to_csv(out, index=False)
-    else:
-        raise ValueError("Output path must end with .parquet, .csv, or .csv.gz")
+    beam_inmap_concentrations_gdf.to_parquet(out, index=False)
     logger.info("%s trace write_complete=%s", _step5_label("4"), out)
-    return out
+    logger.info("%s writing BEAM InMAP concentrations GPKG to %s", _step5_label("4"), gpkg_path)
+    beam_inmap_concentrations_gdf.to_file(gpkg_path, driver="GPKG")
+    logger.info("%s trace write_complete=%s", _step5_label("4"), gpkg_path)
+    return out, gpkg_path
 
 
 def compute_isrm_concentrations(
@@ -363,7 +416,7 @@ def run(
     emissions_input_path: str,
     output_path: str,
 ) -> pd.DataFrame:
-    """Run InMAP dispersion from corrected inMAP grid emissions."""
+    """Run InMAP dispersion from BEAM emissions allocated to the InMAP grid."""
     del raw_dir
 
     if not pipeline.isrm_url:
@@ -372,9 +425,22 @@ def run(
             "Set dispersions.inmap.isrm_zarr (or isrm_zarr_directory / isrm_zarr_s3bucket) in runtime.yaml."
         )
 
-    logger.info("%s loading corrected grid emissions from %s", _step5_label("0"), emissions_input_path)
+    logger.info("%s loading BEAM emissions for InMAP from %s", _step5_label("0"), emissions_input_path)
     emissions_df = _read_table(emissions_input_path)
     _trace_frame("0", "loaded_emissions", emissions_df, key_cols=["inmap_srm_cell_id"])
+    beam_inmap_grid_ids = (
+        pd.to_numeric(emissions_df["inmap_srm_cell_id"], errors="coerce")
+        .dropna()
+        .astype(int)
+        .sort_values()
+        .unique()
+    )
+    logger.info(
+        "%s trace beam_inmap_grid_ids count=%d sample=%s",
+        _step5_label("0"),
+        int(beam_inmap_grid_ids.shape[0]),
+        beam_inmap_grid_ids[:10].tolist(),
+    )
 
     logger.info("%s loading ISRM store from %s", _step5_label("0"), pipeline.isrm_url)
     sr = _load_isrm_store(pipeline.isrm_url)
@@ -392,5 +458,11 @@ def run(
         factor=float(pipeline.concentration_factor or DEFAULT_CONCENTRATION_FACTOR),
         include_health=bool(pipeline.include_health),
     )
-    _write_concentration_outputs(concentrations, output_path)
-    return concentrations
+    beam_inmap_concentrations_gdf = _build_beam_inmap_concentrations_gdf(
+        concentrations=concentrations,
+        inmap_grid_path=pipeline.inmap_grid_path,
+        grid_id_col=pipeline.mapping_columns.get("grid_id", "srm_cell_id"),
+        included_grid_ids=beam_inmap_grid_ids,
+    )
+    _write_concentration_outputs(beam_inmap_concentrations_gdf, output_path)
+    return beam_inmap_concentrations_gdf

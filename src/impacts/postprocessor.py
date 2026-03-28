@@ -203,9 +203,9 @@ def postprocess_from_run_manifest(
     run_manifest = RunManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
     logger.info("Postprocess: loaded run manifest %s", Path(run_manifest_path).resolve())
     raw_outputs = run_manifest.get("raw_outputs", {}) or {}
-    concentration_path = raw_outputs.get("grid_concentration")
+    concentration_path = raw_outputs.get("beam_inmap_concentrations")
     if not concentration_path or not Path(concentration_path).exists():
-        raise FileNotFoundError("Required raw output missing: grid_concentration")
+        raise FileNotFoundError("Required raw output missing: beam_inmap_concentrations")
 
     output_root = Path(output_dir).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -241,7 +241,7 @@ def postprocess_from_run_manifest(
             "columns": list(canonical.columns),
         },
         "validation": {
-            "grid_concentration_exists": True,
+            "beam_inmap_concentrations_exists": True,
             "population_inputs_present": bool(
                 population_inputs.get("persons_path") or population_inputs.get("households_path")
             ),

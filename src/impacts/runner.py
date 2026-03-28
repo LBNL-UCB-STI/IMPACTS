@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -83,13 +82,14 @@ def run_from_input_manifest(
     concentration_path: Optional[Path] = None
     if run_dispersion:
         from .step5_inmap_dispersion import run as run_step5
-        concentration_path = _table_path(raw_dir, "grid_concentration")
+        concentration_path = raw_dir / "beam_inmap_concentrations.parquet"
+        concentration_path.parent.mkdir(parents=True, exist_ok=True)
         _log_step_banner(5, "inmap dispersion")
         logger.info("Using Step 5 implementation: inmap_dispersion")
         run_step5(
             pipeline=pipeline,
             raw_dir=raw_dir,
-            emissions_input_path=step4_outputs["emissions_corrected"],
+            emissions_input_path=step4_outputs["beam_emissions_for_inmap"],
             output_path=str(concentration_path),
         )
         logger.info("Dispersion complete: wrote %s", concentration_path)
@@ -105,12 +105,15 @@ def run_from_input_manifest(
         "output_dir": str(output_root),
         "raw_output_dir": str(raw_dir),
         "command": " ".join(sys.argv),
-        "image": os.getenv("IMPACTS_IMAGE", "unknown"),
+        "image": "not_recorded",
         "raw_outputs": {
             "skims_emissions": str(skims_path),
             "grid_intersection": str(mapping_input_path),
             **step4_outputs,
-            "grid_concentration": str(concentration_path) if concentration_path else None,
+            "beam_inmap_concentrations": str(concentration_path) if concentration_path else None,
+            "beam_inmap_concentrations_gpkg": (
+                str(concentration_path.with_suffix(".gpkg")) if concentration_path else None
+            ),
         },
         "pipeline": pipeline.to_dict(),
         "population_inputs": population_inputs,
