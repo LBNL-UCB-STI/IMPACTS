@@ -11,7 +11,7 @@ import pandas as pd
 import duckdb
 from impacts.utils.utils_emissions_grid_mapping import apply_county_corrections
 
-from .manifest_models import PipelineConfig
+from ..manifest.schema import PipelineConfig
 
 logger = logging.getLogger(__name__)
 

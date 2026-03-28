@@ -11,16 +11,16 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
-from .config.builders import build_runtime_config_from_runtime_yaml
-from .contract_utils import copy_path
-from .contract_utils import file_entry
-from .contract_utils import is_remote_path
-from .contract_utils import parquet_available
-from .contract_utils import resolve_path
-from .contract_utils import write_structured_file
-from .defaults import DEFAULT_HOUSEHOLDS_COLUMNS
-from .defaults import DEFAULT_PERSONS_COLUMNS
-from .manifest_models import InputsManifest
+from .config.runtime_builder import build_runtime_config_from_runtime_yaml
+from .manifest.file_ops import copy_path
+from .manifest.file_ops import file_entry
+from .manifest.file_ops import is_remote_path
+from .manifest.file_ops import parquet_available
+from .manifest.file_ops import resolve_path
+from .manifest.file_ops import write_structured_file
+from .config.defaults import DEFAULT_HOUSEHOLDS_COLUMNS
+from .config.defaults import DEFAULT_PERSONS_COLUMNS
+from .manifest.schema import InputsManifest
 
 
 CONTRACT_VERSION = "1"

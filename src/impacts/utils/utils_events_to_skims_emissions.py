@@ -8,8 +8,8 @@ from typing import Dict, Iterable, List, Optional
 
 import pandas as pd
 
-from impacts.defaults import DEFAULT_BEAM_NETWORK_COLUMNS
-from impacts.defaults import DEFAULT_EVENTS_COLUMNS
+from impacts.config.defaults import DEFAULT_BEAM_NETWORK_COLUMNS
+from impacts.config.defaults import DEFAULT_EVENTS_COLUMNS
 
 REQUIRED_EVENT_COLS = [
     "type",

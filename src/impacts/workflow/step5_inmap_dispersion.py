@@ -13,9 +13,9 @@ import pandas as pd
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
-from .defaults import DEFAULT_TONS_PER_YEAR_TO_UG_PER_S
-from .defaults import DEFAULT_DISPERSION_EMISSIONS_COLUMNS as DEFAULT_EMISSIONS_COLUMNS
-from .manifest_models import PipelineConfig
+from ..config.defaults import DEFAULT_TONS_PER_YEAR_TO_UG_PER_S
+from ..config.defaults import DEFAULT_DISPERSION_EMISSIONS_COLUMNS as DEFAULT_EMISSIONS_COLUMNS
+from ..manifest.schema import PipelineConfig
 
 logger = logging.getLogger(__name__)
 

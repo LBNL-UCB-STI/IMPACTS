@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import shapely.wkb
 
-from .manifest_models import PipelineConfig
+from ..manifest.schema import PipelineConfig
 
 logger = logging.getLogger(__name__)
 _SOURCE_ROW_ID = "__source_row_id"

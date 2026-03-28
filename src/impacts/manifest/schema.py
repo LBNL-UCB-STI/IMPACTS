@@ -9,7 +9,7 @@ from typing import Dict
 from typing import List
 from typing import Optional
 
-from impacts.defaults import DEFAULT_ANNUALIZATION_DAYS
+from impacts.config.defaults import DEFAULT_ANNUALIZATION_DAYS
 
 
 def _required_string(value: Any, label: str) -> str:

@@ -12,8 +12,8 @@ from typing import Tuple
 
 import pandas as pd
 
-from ..contract_utils import parquet_available
-from ..manifest_models import PipelineConfig
+from ..manifest.file_ops import parquet_available
+from ..manifest.schema import PipelineConfig
 
 logger = logging.getLogger(__name__)
 

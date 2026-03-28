@@ -8,6 +8,9 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
+from impacts.config.runtime_builder import build_runtime_config_from_pilates
+from impacts.manifest.file_ops import write_structured_file
+
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     merged = deepcopy(base)
@@ -306,3 +309,19 @@ def build_runtime_payload_from_pilates(
     }
 
     return _deep_merge(derived, runtime_overrides)
+
+
+def derive_runtime_config_from_pilates(
+    *,
+    pilates_settings_path: str | Path,
+    impacts_model_config_path: str | Path,
+    output_path: str | Path | None = None,
+) -> Dict[str, Any]:
+    runtime_config = build_runtime_config_from_pilates(
+        pilates_settings=pilates_settings_path,
+        impacts_overlay=impacts_model_config_path,
+    )
+    payload = runtime_config.to_dict()
+    if output_path is not None:
+        write_structured_file(output_path, payload)
+    return payload

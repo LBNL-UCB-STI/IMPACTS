@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 
 import geopandas as gpd
-from .manifest_models import PipelineConfig
+from ..manifest.schema import PipelineConfig
 
 logger = logging.getLogger(__name__)
 

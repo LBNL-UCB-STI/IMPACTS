@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .manifest_models import PipelineConfig
+from ..manifest.schema import PipelineConfig
 
 logger = logging.getLogger(__name__)
 

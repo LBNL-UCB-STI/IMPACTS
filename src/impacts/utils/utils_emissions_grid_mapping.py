@@ -11,12 +11,12 @@ from typing import Dict, Iterable, List, Optional
 import numpy as np
 import pandas as pd
 
-from impacts.defaults import DEFAULT_ANNUALIZATION_DAYS
-from impacts.defaults import DEFAULT_CHUNK_SIZE
-from impacts.defaults import DEFAULT_COUNTY_CORRECTION_COLUMNS
-from impacts.defaults import DEFAULT_POLLUTANTS as DEFAULT_PREPARED_POLLUTANTS
-from impacts.defaults import DEFAULT_SKIMS_COLUMNS
-from impacts.defaults import GRAMS_PER_TON
+from impacts.config.defaults import DEFAULT_ANNUALIZATION_DAYS
+from impacts.config.defaults import DEFAULT_CHUNK_SIZE
+from impacts.config.defaults import DEFAULT_COUNTY_CORRECTION_COLUMNS
+from impacts.config.defaults import DEFAULT_POLLUTANTS as DEFAULT_PREPARED_POLLUTANTS
+from impacts.config.defaults import DEFAULT_SKIMS_COLUMNS
+from impacts.config.defaults import GRAMS_PER_TON
 
 
 

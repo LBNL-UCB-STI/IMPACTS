@@ -7,4 +7,5 @@ __all__ = [
     "utils_emissions_grid_mapping",
     "utils_events_to_skims_emissions",
     "utils_network_grid_clipping",
+    "utils_sampling",
 ]

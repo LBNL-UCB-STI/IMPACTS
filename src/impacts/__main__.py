@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from impacts.config.builders import build_runtime_config_from_runtime_yaml
-from impacts.contract_utils import resolve_path
+from impacts.config.runtime_builder import build_runtime_config_from_runtime_yaml
+from impacts.manifest.file_ops import resolve_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -169,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "derive_runtime_config_from_pilates":
-        from impacts.pilates_workflow import derive_runtime_config_from_pilates
+        from impacts.adapters.pilates import derive_runtime_config_from_pilates
 
         derive_runtime_config_from_pilates(
             pilates_settings_path=args.pilates_settings,
@@ -179,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "sample_events":
-        from impacts.sampling import sample_events_by_vehicle
+        from impacts.utils.utils_sampling import sample_events_by_vehicle
 
         sample_events_by_vehicle(
             input_path=args.input,
@@ -191,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "sample_skims":
-        from impacts.sampling import sample_skims_by_fraction
+        from impacts.utils.utils_sampling import sample_skims_by_fraction
 
         sample_skims_by_fraction(
             input_path=args.input,

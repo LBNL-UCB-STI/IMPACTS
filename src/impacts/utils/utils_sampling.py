@@ -12,8 +12,8 @@ import numpy as np
 import pandas as pd
 
 
-from impacts.defaults import DEFAULT_COMPACT_WORKERS
-from impacts.defaults import DEFAULT_SAMPLING_CHUNK_SIZE as DEFAULT_CHUNK_SIZE
+from impacts.config.defaults import DEFAULT_COMPACT_WORKERS
+from impacts.config.defaults import DEFAULT_SAMPLING_CHUNK_SIZE as DEFAULT_CHUNK_SIZE
 EXPLICIT_SKIMS_POLLUTANTS = [
     "CH4",
     "CO",
