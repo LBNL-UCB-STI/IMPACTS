@@ -67,6 +67,21 @@ def build_parser() -> argparse.ArgumentParser:
     sample_skims.add_argument("--compact-workers", type=int, default=4)
     sample_skims.add_argument("--population-sample", type=float, default=1.0)
 
+    rdata_to_parquet = subparsers.add_parser(
+        "rdata_to_parquet",
+        help="Convert one RData file into one or more parquet files.",
+    )
+    rdata_to_parquet.add_argument("--input", required=True)
+    rdata_to_parquet.add_argument("--output-dir", required=True)
+    rdata_to_parquet.add_argument("--prefix")
+
+    build_nox_to_no2 = subparsers.add_parser(
+        "build_nox_to_no2",
+        help="Run the one-off NOx-to-NO2 preprocessing utility.",
+    )
+    build_nox_to_no2.add_argument("--input-dir", required=True)
+    build_nox_to_no2.add_argument("--output-dir", required=True)
+
     return parser
 
 
@@ -185,6 +200,31 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             compact_workers=args.compact_workers,
             population_sample=args.population_sample,
+        )
+        return 0
+
+    if args.command == "rdata_to_parquet":
+        from impacts.utils.rdata_util import rdata_to_parquet
+
+        written = rdata_to_parquet(
+            input_path=args.input,
+            output_dir=args.output_dir,
+            prefix=args.prefix,
+        )
+        for path in written:
+            print(path)
+        return 0
+
+    if args.command == "build_nox_to_no2":
+        from impacts.utils.isrm_nox_to_no2 import main as build_nox_to_no2_main
+
+        build_nox_to_no2_main(
+            [
+                "--input-dir",
+                args.input_dir,
+                "--output-dir",
+                args.output_dir,
+            ]
         )
         return 0
 

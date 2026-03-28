@@ -9,26 +9,11 @@ from typing import Optional
 import geopandas as gpd
 import pandas as pd
 import duckdb
-import pyarrow.parquet as pq
-
-from .contract_utils import parquet_available
 from impacts.emissions.emissions_grid_mapping import apply_county_corrections
 
 from .manifest_models import PipelineConfig
 
 logger = logging.getLogger(__name__)
-_INTERSECTION_METRIC_SUFFIXES = (
-    "_proportion",
-    "_length_m",
-    "_surface_m2",
-)
-
-
-def _table_path(parent: Path, stem: str) -> Path:
-    suffix = ".parquet" if parquet_available() else ".csv.gz"
-    path = parent / f"{stem}{suffix}"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
 
 
 def _load_grid_geometries(grid_path: str) -> gpd.GeoDataFrame:
@@ -50,22 +35,6 @@ def _read_table(path: str | Path) -> pd.DataFrame:
     raise ValueError(f"Unsupported table format: {target}")
 
 
-def _write_table(df: pd.DataFrame, path: str | Path) -> None:
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    lower = target.name.lower()
-    if lower.endswith(".parquet"):
-        df.to_parquet(target, index=False, engine="pyarrow", compression="snappy")
-        return
-    if lower.endswith(".csv.gz"):
-        df.to_csv(target, index=False, compression="gzip")
-        return
-    if lower.endswith(".csv"):
-        df.to_csv(target, index=False)
-        return
-    raise ValueError(f"Unsupported table format: {target}")
-
-
 def _save_grid_emissions(
     df: pd.DataFrame,
     left_col: str,
@@ -77,6 +46,7 @@ def _save_grid_emissions(
     grid_gdf = _load_grid_geometries(grid_path)
     if grid_gdf.crs is not None:
         grid_gdf = grid_gdf.to_crs(epsg=output_epsg)
+    expected_grid_ids = set(pd.to_numeric(df[left_col], errors="coerce").dropna().astype(int).unique().tolist())
     joined = df.merge(
         grid_gdf[[right_col, "geometry"]],
         how="left",
@@ -86,58 +56,25 @@ def _save_grid_emissions(
     if right_col != left_col:
         joined = joined.drop(columns=[right_col])
     geo = gpd.GeoDataFrame(joined, geometry="geometry", crs=grid_gdf.crs)
+    actual_grid_ids = set(pd.to_numeric(geo[left_col], errors="coerce").dropna().astype(int).unique().tolist())
+    if actual_grid_ids != expected_grid_ids:
+        missing = sorted(expected_grid_ids - actual_grid_ids)[:10]
+        extra = sorted(actual_grid_ids - expected_grid_ids)[:10]
+        raise ValueError(
+            f"Step 4 grid export mismatch for {left_col}: expected {len(expected_grid_ids)} grid ids, "
+            f"got {len(actual_grid_ids)}. sample_missing={missing} sample_extra={extra}"
+        )
+    missing_geometry = int(geo.geometry.isna().sum())
+    if missing_geometry:
+        raise ValueError(
+            f"Step 4 grid export missing geometry for {missing_geometry} rows in {output_stem}"
+        )
     geo.to_parquet(Path(str(output_stem) + ".parquet"), index=False)
     geo.to_file(Path(str(output_stem) + ".gpkg"), driver="GPKG")
 
 
-def _first_existing_col(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
-    for col in candidates:
-        if col in df.columns:
-            return col
-    return None
-
-
-def _intersection_zone_metric_cols(columns: list[str], zone_label: str) -> list[str]:
-    prefix = f"{zone_label}_"
-    return [
-        col for col in columns
-        if col.startswith(prefix) and any(tag in col for tag in _INTERSECTION_METRIC_SUFFIXES)
-    ]
-
-
-def _normalize_zone_columns(df: pd.DataFrame, zone_label: str, cell_col: str) -> pd.DataFrame:
-    rename_map: dict[str, str] = {}
-    prefixed_cell = f"edge_{cell_col}"
-    if prefixed_cell in df.columns:
-        # Prefer the edge-prefixed road-hit label when present, but do not
-        # erase a valid plain cell id with null edge-prefixed values.
-        if cell_col in df.columns:
-            df[cell_col] = df[prefixed_cell].combine_first(df[cell_col])
-        else:
-            df[cell_col] = df[prefixed_cell]
-        df = df.drop(columns=[prefixed_cell])
-    if "edge_linkId" in df.columns:
-        if "linkId" in df.columns:
-            df["linkId"] = df["edge_linkId"].combine_first(df["linkId"])
-        else:
-            rename_map["edge_linkId"] = "linkId"
-    zone_prefix = f"edge_{zone_label}_"
-    for col in df.columns:
-        if col.startswith(zone_prefix):
-            normalized = col.removeprefix("edge_")
-            if normalized in df.columns:
-                df[normalized] = df[col].combine_first(df[normalized])
-            else:
-                rename_map[col] = normalized
-    if rename_map:
-        df = df.rename(columns=rename_map)
-    return df
-
-
 def _load_intersection_subset(path: str, columns: list[str]) -> pd.DataFrame:
     target = Path(path)
-    if target.suffix.lower() == ".parquet":
-        return pd.read_parquet(target, columns=columns)
     frame = _read_table(target)
     return frame[columns].copy()
 
@@ -151,16 +88,6 @@ def _load_intersection_subset_or_df(
     if intersection_df is not None:
         return intersection_df[columns].copy()
     return _load_intersection_subset(path, columns)
-
-
-def _intersection_columns(path: str, intersection_df: Optional[pd.DataFrame]) -> list[str]:
-    if intersection_df is not None:
-        return list(intersection_df.columns)
-    target = Path(path)
-    if target.suffix.lower() == ".parquet":
-        return list(pq.read_schema(target).names)
-    return list(_read_table(target).columns)
-
 
 def _step_label(step: str, zone_label: Optional[str] = None) -> str:
     suffix = f"[{zone_label}]" if zone_label else ""
@@ -192,65 +119,51 @@ def _reuse_existing_step4_outputs(raw_dir: Path) -> Optional[Dict[str, Optional[
 def _build_combined_grouped_table(
     *,
     intersection_path: str,
-    raw_dir: Path,
-    pipeline: PipelineConfig,
     intersection_df: Optional[pd.DataFrame],
-) -> tuple[Optional[pd.DataFrame], None]:
-    intersection_cols = _intersection_columns(intersection_path, intersection_df)
-    needed = {
+) -> Optional[pd.DataFrame]:
+    required_cols = {
         "linkId",
-        "edge_linkId",
         "countyfp",
-        "county_COUNTYFP",
-        "zone_COUNTYFP",
-        "COUNTYFP",
         "aermod_srv_cell_id",
-        "edge_aermod_srv_cell_id",
         "inmap_srm_cell_id",
-        "edge_inmap_srm_cell_id",
+        "aermod_zone_edge_proportion",
+        "aermod_edge_link_length_m",
+        "aermod_zone_link_length_m",
+        "inmap_zone_edge_proportion",
+        "inmap_edge_link_length_m",
+        "inmap_zone_link_length_m",
     }
-    needed.update(_intersection_zone_metric_cols(intersection_cols, "aermod"))
-    needed.update(_intersection_zone_metric_cols(intersection_cols, "inmap"))
-    needed.update(
-        col for col in intersection_cols
-        if col.startswith("edge_aermod_") or col.startswith("edge_inmap_")
-    )
-    source_cols = [col for col in intersection_cols if col in needed]
     intersection = _load_intersection_subset_or_df(
         path=intersection_path,
-        columns=source_cols,
+        columns=list(required_cols),
         intersection_df=intersection_df,
     )
-    intersection = _normalize_zone_columns(intersection, "aermod", "aermod_srv_cell_id")
-    intersection = _normalize_zone_columns(intersection, "inmap", "inmap_srm_cell_id")
+    missing = [col for col in required_cols if col not in intersection.columns]
+    if missing:
+        raise ValueError(
+            f"{_step_label('1')} requires canonical Step 3 columns. Missing: {missing}"
+        )
 
-    county_col = _first_existing_col(intersection, ["countyfp", "county_COUNTYFP", "zone_COUNTYFP", "COUNTYFP"])
-    if county_col and county_col != "countyfp":
-        intersection = intersection.rename(columns={county_col: "countyfp"})
-        county_col = "countyfp"
-
-    link_col = (pipeline.mapping_columns or {}).get("link_id", "edge_linkId")
-    if link_col in intersection.columns and link_col != "linkId":
-        intersection = intersection.rename(columns={link_col: "linkId"})
-    if "linkId" not in intersection.columns:
-        raise ValueError(f"{_step_label('1')} requires linkId in the combined mapping table.")
-
-    metric_cols = _intersection_zone_metric_cols(list(intersection.columns), "aermod") + _intersection_zone_metric_cols(list(intersection.columns), "inmap")
-    metric_cols = [col for i, col in enumerate(metric_cols) if col not in metric_cols[:i]]
+    metric_cols = [
+        "aermod_zone_edge_proportion",
+        "aermod_edge_link_length_m",
+        "aermod_zone_link_length_m",
+        "inmap_zone_edge_proportion",
+        "inmap_edge_link_length_m",
+        "inmap_zone_link_length_m",
+    ]
 
     con = duckdb.connect(database=":memory:")
     try:
         con.register("intersection_df", intersection)
         metric_select = ",\n                ".join([f"SUM(COALESCE(i.{col}, 0.0)) AS {col}" for col in metric_cols])
-        county_select = ", i.countyfp" if county_col == "countyfp" else ", NULL AS countyfp"
-        county_group = ", i.countyfp" if county_col == "countyfp" else ""
         grouped = con.execute(
             f"""
             SELECT
                 i.linkId,
                 i.aermod_srv_cell_id,
                 i.inmap_srm_cell_id
-                {county_select}
+                , i.countyfp
                 {"," if metric_select else ""} {metric_select}
             FROM intersection_df AS i
             WHERE i.aermod_srv_cell_id IS NOT NULL OR i.inmap_srm_cell_id IS NOT NULL
@@ -258,34 +171,33 @@ def _build_combined_grouped_table(
                 i.linkId,
                 i.aermod_srv_cell_id,
                 i.inmap_srm_cell_id
-                {county_group}
+                , i.countyfp
             """
         ).df()
     finally:
         con.close()
 
     if grouped.empty:
-        return None, None
+        return None
 
     logger.info("%s BEAM mapping across grids rows=%d", _step_label("1"), len(grouped))
-    return grouped, None
+    return grouped
 
 
 def _build_combined_allocated_table(
     *,
     grouped_df: pd.DataFrame,
     skims_df: pd.DataFrame,
-    raw_dir: Path,
-) -> tuple[Optional[pd.DataFrame], None]:
+) -> Optional[pd.DataFrame]:
     if grouped_df is None or grouped_df.empty:
-        return None, None
+        return None
 
     emission_cols = [
         c for c in skims_df.columns
         if c.startswith("tons_per_year_") and pd.api.types.is_numeric_dtype(skims_df[c])
     ]
-    aermod_prop = _first_existing_col(grouped_df, ["aermod_zone_piece_proportion", "aermod_zone_edge_proportion"])
-    inmap_prop = _first_existing_col(grouped_df, ["inmap_zone_piece_proportion", "inmap_zone_edge_proportion"])
+    aermod_prop = "aermod_zone_edge_proportion"
+    inmap_prop = "inmap_zone_edge_proportion"
 
     metric_cols = [
         col for col in grouped_df.columns
@@ -325,10 +237,10 @@ def _build_combined_allocated_table(
         con.close()
 
     if allocated.empty:
-        return None, None
+        return None
 
     logger.info("%s BEAM emissions allocated across grids rows=%d", _step_label("2"), len(allocated))
-    return allocated, None
+    return allocated
 
 
 def _split_zone_allocated(
@@ -364,11 +276,10 @@ def _split_zone_allocated(
 def _build_combined_corrected_table(
     *,
     allocated_df: pd.DataFrame,
-    raw_dir: Path,
     pipeline: PipelineConfig,
-) -> tuple[Optional[pd.DataFrame], None]:
+) -> Optional[pd.DataFrame]:
     if allocated_df is None or allocated_df.empty:
-        return None, None
+        return None
 
     if pipeline.activity_corrections_path:
         logger.info(
@@ -384,7 +295,7 @@ def _build_combined_corrected_table(
     else:
         corrected = allocated_df
         logger.info("%s no corrections configured; using allocated totals as-is", _step_label("3"))
-    return corrected, None
+    return corrected
 
 
 def run(
@@ -398,36 +309,21 @@ def run(
     if reused is not None:
         return reused
 
-    combined_grouped_df, combined_grouped_path = _build_combined_grouped_table(
+    combined_grouped_df = _build_combined_grouped_table(
         intersection_path=intersection_path,
-        raw_dir=raw_dir,
-        pipeline=pipeline,
         intersection_df=intersection_df,
     )
-    combined_allocated_df, combined_allocated_path = _build_combined_allocated_table(
+    combined_allocated_df = _build_combined_allocated_table(
         grouped_df=combined_grouped_df,
         skims_df=skims_df,
-        raw_dir=raw_dir,
     )
-    combined_corrected_df, combined_corrected_path = _build_combined_corrected_table(
+    combined_corrected_df = _build_combined_corrected_table(
         allocated_df=combined_allocated_df,
-        raw_dir=raw_dir,
         pipeline=pipeline,
     )
 
     beam_emissions_for_aermod_path = None
     if pipeline.aermod_grid_path and combined_grouped_df is not None:
-        aermod_grouped_df = _split_zone_allocated(
-            combined_df=combined_grouped_df,
-            zone_label="aermod",
-            cell_col="aermod_srv_cell_id",
-        )
-
-        aermod_allocated_df = _split_zone_allocated(
-            combined_df=combined_allocated_df,
-            zone_label="aermod",
-            cell_col="aermod_srv_cell_id",
-        )
         aermod_corrected_df = _split_zone_allocated(
             combined_df=combined_corrected_df,
             zone_label="aermod",
@@ -450,16 +346,6 @@ def run(
                 beam_emissions_for_aermod_path,
             )
 
-    inmap_grouped_df = _split_zone_allocated(
-        combined_df=combined_grouped_df,
-        zone_label="inmap",
-        cell_col="inmap_srm_cell_id",
-    )
-    inmap_allocated_df = _split_zone_allocated(
-        combined_df=combined_allocated_df,
-        zone_label="inmap",
-        cell_col="inmap_srm_cell_id",
-    )
     inmap_corrected_df = _split_zone_allocated(
         combined_df=combined_corrected_df,
         zone_label="inmap",

@@ -14,11 +14,72 @@ from typing import Tuple
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import shapely.wkb
 
 from .manifest_models import PipelineConfig
 
 logger = logging.getLogger(__name__)
 _SOURCE_ROW_ID = "__source_row_id"
+_CANONICAL_INTERSECTION_COLUMNS = [
+    "linkId",
+    "countyfp",
+    "aermod_srv_cell_id",
+    "inmap_srm_cell_id",
+    "aermod_zone_edge_proportion",
+    "aermod_edge_link_length_m",
+    "aermod_zone_link_length_m",
+    "inmap_zone_edge_proportion",
+    "inmap_edge_link_length_m",
+    "inmap_zone_link_length_m",
+    "geometry",
+]
+
+
+def trace_and_filter_void_zone_rows(
+    df: pd.DataFrame,
+    *,
+    zone_id_col: str,
+    proportion_col: str,
+    context: str,
+) -> pd.DataFrame:
+    if df.empty:
+        logger.info("%s trace zone_intersection empty_result=True", context)
+        return df
+    if zone_id_col not in df.columns or proportion_col not in df.columns:
+        if proportion_col in df.columns and zone_id_col not in df.columns:
+            logger.info(
+                "%s trace zone_intersection empty_result_without_zone_ids=True available_columns=%s",
+                context,
+                list(df.columns),
+            )
+            return df
+        raise ValueError(
+            f"{context} requires columns '{zone_id_col}' and '{proportion_col}'. "
+            f"Available columns: {list(df.columns)}"
+        )
+    zone_ids = pd.to_numeric(df[zone_id_col], errors="coerce")
+    proportions = pd.to_numeric(df[proportion_col], errors="coerce")
+    real_hit_mask = zone_ids.notna() & proportions.gt(0)
+    void_mask = zone_ids.notna() & ~real_hit_mask
+    hit_zone_ids = np.sort(zone_ids.loc[real_hit_mask].astype(int).unique())
+    void_zone_ids = np.sort(zone_ids.loc[void_mask].astype(int).unique())
+    logger.info(
+        "%s trace zone_intersection zone_id_col=%s real_hit_zones=%d void_zones=%d sample_void=%s",
+        context,
+        zone_id_col,
+        int(hit_zone_ids.shape[0]),
+        int(void_zone_ids.shape[0]),
+        void_zone_ids[:10].tolist(),
+    )
+    if not void_mask.any():
+        return df
+    filtered = df.loc[~void_mask].copy()
+    logger.info(
+        "%s removed %d bbox-only zone rows after exact-intersection screening",
+        context,
+        int(void_mask.sum()),
+    )
+    return filtered
 
 
 def _resolve_source_row_col(df: pd.DataFrame) -> str:
@@ -37,6 +98,69 @@ def _read_vector(path: str) -> gpd.GeoDataFrame:
     if target.suffix.lower() == ".parquet":
         return gpd.read_parquet(target)
     return gpd.read_file(target)
+
+
+def canonicalize_intersection_schema(df: pd.DataFrame) -> pd.DataFrame:
+    canonical = df.copy()
+
+    def _combine(target: str, candidates: tuple[str, ...]) -> None:
+        result = None
+        for col in candidates:
+            if col not in canonical.columns:
+                continue
+            series = canonical[col]
+            result = series if result is None else series.combine_first(result)
+        if result is not None:
+            canonical[target] = result
+
+    _combine("linkId", ("edge_linkId", "linkId"))
+    _combine("countyfp", ("countyfp", "county_COUNTYFP", "zone_COUNTYFP", "COUNTYFP"))
+    _combine("aermod_srv_cell_id", ("edge_aermod_srv_cell_id", "aermod_srv_cell_id"))
+    _combine("inmap_srm_cell_id", ("edge_inmap_srm_cell_id", "inmap_srm_cell_id"))
+    _combine(
+        "aermod_zone_edge_proportion",
+        ("edge_aermod_zone_edge_proportion", "aermod_zone_edge_proportion"),
+    )
+    _combine(
+        "aermod_edge_link_length_m",
+        ("edge_aermod_edge_link_length_m", "aermod_edge_link_length_m"),
+    )
+    _combine(
+        "aermod_zone_link_length_m",
+        ("edge_aermod_zone_link_length_m", "aermod_zone_link_length_m"),
+    )
+    _combine(
+        "inmap_zone_edge_proportion",
+        ("edge_inmap_zone_edge_proportion", "inmap_zone_edge_proportion"),
+    )
+    _combine(
+        "inmap_edge_link_length_m",
+        ("edge_inmap_edge_link_length_m", "inmap_edge_link_length_m"),
+    )
+    _combine(
+        "inmap_zone_link_length_m",
+        ("edge_inmap_zone_link_length_m", "inmap_zone_link_length_m"),
+    )
+
+    for col in ("linkId", "aermod_srv_cell_id", "inmap_srm_cell_id"):
+        if col in canonical.columns:
+            canonical[col] = pd.to_numeric(canonical[col], errors="coerce")
+    if "countyfp" in canonical.columns:
+        canonical["countyfp"] = canonical["countyfp"].astype("string")
+    if "geometry" in canonical.columns:
+        sample = canonical["geometry"].dropna().head(1)
+        if not sample.empty and isinstance(sample.iloc[0], (bytes, bytearray, memoryview)):
+            canonical["geometry"] = canonical["geometry"].map(
+                lambda value: shapely.wkb.loads(value) if isinstance(value, (bytes, bytearray, memoryview)) else value
+            )
+
+    ordered_cols = [col for col in _CANONICAL_INTERSECTION_COLUMNS if col in canonical.columns]
+    if "geometry" not in ordered_cols and "geometry" in canonical.columns:
+        ordered_cols.append("geometry")
+    canonical = canonical[ordered_cols].copy()
+    if "geometry" in canonical.columns:
+        return gpd.GeoDataFrame(canonical, geometry="geometry", crs=getattr(df, "crs", None))
+    return canonical
 
 
 def _union_county_matches_with_unmatched(
@@ -117,6 +241,12 @@ def run(
         prefilter_zones_to_network_bbox=True,
         zone_label="inmap",
     )
+    B = trace_and_filter_void_zone_rows(
+        B,
+        zone_id_col="inmap_srm_cell_id",
+        proportion_col="inmap_zone_edge_proportion",
+        context="Step 3.2",
+    )
     B = B.reset_index(drop=True).copy()
     B[_SOURCE_ROW_ID] = range(len(B))
     logger.info("Step 3.2 complete: %d rows", len(B))
@@ -154,15 +284,16 @@ def run(
         time.perf_counter() - unmatched_started,
     )
 
-    # Step 3.5: persist union of matched + unmatched rows
+    # Step 3.5: collapse to one canonical schema before persisting
     persist_started = time.perf_counter()
-    logger.info("Step 3.5: writing county-labeled intersection outputs")
-    C.to_parquet(grid_intersection_path, index=False)
-    C.to_file(grid_intersection_path.with_suffix(".gpkg"), driver="GPKG")
+    logger.info("Step 3.5: canonicalizing and writing intersection outputs")
+    C_canonical = canonicalize_intersection_schema(C)
+    C_canonical.to_parquet(grid_intersection_path, index=False)
+    C_canonical.to_file(grid_intersection_path.with_suffix(".gpkg"), driver="GPKG")
     logger.info(
         "Step 3.5 complete: wrote outputs in %.2fs",
         time.perf_counter() - persist_started,
     )
-    logger.info("Step 3 complete: %d total rows → %s", len(C), grid_intersection_path)
+    logger.info("Step 3 complete: %d total rows → %s", len(C_canonical), grid_intersection_path)
 
-    return str(grid_intersection_path), C
+    return str(grid_intersection_path), C_canonical

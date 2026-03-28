@@ -70,6 +70,7 @@ class PipelineConfig:
     inmap_grid_epsg: int
     mapping_columns: Dict[str, Any]
     isrm_url: Optional[str] = None
+    isrm_nox_to_no2_matrix_path: Optional[str] = None
     aermod_grid_path: Optional[str] = None
     aermod_grid_epsg: Optional[int] = None
     aermod_grid_id: Optional[str] = None
@@ -108,6 +109,7 @@ class PipelineConfig:
             inmap_grid_epsg=int(_required_string(payload.get("inmap_grid_epsg"), "pipeline.inmap_grid_epsg")),
             mapping_columns=_required_dict(payload.get("mapping_columns"), "pipeline.mapping_columns"),
             isrm_url=_optional_string(payload.get("isrm_url")),
+            isrm_nox_to_no2_matrix_path=_optional_string(payload.get("isrm_nox_to_no2_matrix_path")),
             aermod_grid_path=_optional_string(payload.get("aermod_grid_path")),
             aermod_grid_epsg=_optional_int(payload.get("aermod_grid_epsg")),
             aermod_grid_id=_optional_string(payload.get("aermod_grid_id")),

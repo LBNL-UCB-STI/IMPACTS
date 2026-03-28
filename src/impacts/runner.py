@@ -8,9 +8,7 @@ from typing import Dict
 from typing import Optional
 
 from .contract_utils import load_structured_file
-from .contract_utils import parquet_available
 from .contract_utils import write_structured_file
-from .defaults import DEFAULT_CONCENTRATION_FACTOR
 from .manifest_models import InputsManifest
 from .manifest_models import PipelineConfig
 from .manifest_models import RunManifest
@@ -18,16 +16,11 @@ from .manifest_models import RunManifest
 logger = logging.getLogger(__name__)
 
 
-def _table_path(parent: Path, stem: str) -> Path:
-    suffix = ".parquet" if parquet_available() else ".csv.gz"
-    path = parent / f"{stem}{suffix}"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def _log_step_banner(step_num: int, name: str) -> None:
     banner = f"========== ENTERING STEP {step_num}: {name.upper()} =========="
-    logger.info("\n%s", banner)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    logger.info("%s", banner)
 
 
 def run_from_input_manifest(
@@ -82,17 +75,14 @@ def run_from_input_manifest(
     concentration_path: Optional[Path] = None
     if run_dispersion:
         from .step5_inmap_dispersion import run as run_step5
-        concentration_path = raw_dir / "beam_inmap_concentrations.parquet"
-        concentration_path.parent.mkdir(parents=True, exist_ok=True)
-        _log_step_banner(5, "inmap dispersion")
-        logger.info("Using Step 5 implementation: inmap_dispersion")
-        run_step5(
+        _log_step_banner(5, "inmap concentrations")
+        logger.info("Using Step 5 implementation: inmap_concentrations_and_export")
+        _, _, concentration_path = run_step5(
             pipeline=pipeline,
             raw_dir=raw_dir,
             emissions_input_path=step4_outputs["beam_emissions_for_inmap"],
-            output_path=str(concentration_path),
         )
-        logger.info("Dispersion complete: wrote %s", concentration_path)
+        logger.info("InMAP concentrations complete: wrote %s", concentration_path)
         _log_step_banner(6, "aermod dispersion")
         logger.info("Step 6 placeholder: aermod_dispersion not run yet")
     else:

@@ -78,11 +78,14 @@ def _normalize_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     isrm_directory = _optional_string(inmap.get("isrm_zarr_directory"))
     isrm_s3bucket = _optional_string(inmap.get("isrm_zarr_s3bucket"))
     isrm_direct = _optional_string(inmap.get("isrm_zarr"))
+    isrm_nox_to_no2_matrix = _optional_string(inmap.get("isrm_nox_to_no2_matrix"))
     if "isrm_zarr" not in inputs:
         if isrm_directory and Path(isrm_directory).exists():
             inputs["isrm_zarr"] = isrm_directory
         else:
             inputs["isrm_zarr"] = isrm_direct or isrm_s3bucket or isrm_directory
+    if "isrm_nox_to_no2_matrix" not in inputs:
+        inputs["isrm_nox_to_no2_matrix"] = isrm_nox_to_no2_matrix
 
     normalized = dict(payload)
     normalized["inputs"] = inputs
@@ -201,6 +204,7 @@ class RuntimeInputs:
     osm_pbf: str
     activity_corrections: Optional[str] = None
     isrm_zarr: Optional[str] = None
+    isrm_nox_to_no2_matrix: Optional[str] = None
     osm_links: Optional[str] = None
     beam_mapdb: Optional[str] = None
     households_asim_out: Optional[str] = None
@@ -214,6 +218,7 @@ class RuntimeInputs:
             osm_pbf=_required_string(payload.get("osm_pbf"), "inputs.osm_pbf"),
             activity_corrections=_optional_string(payload.get("activity_corrections")),
             isrm_zarr=_optional_string(payload.get("isrm_zarr")),
+            isrm_nox_to_no2_matrix=_optional_string(payload.get("isrm_nox_to_no2_matrix")),
             osm_links=_optional_string(payload.get("osm_links")),
             beam_mapdb=_optional_string(payload.get("beam_mapdb")),
             households_asim_out=_optional_string(payload.get("households_asim_out")),
@@ -426,6 +431,7 @@ class ImpactsRuntimeConfig:
                 "inmap": {
                     "isrm_zarr_directory": payload["inputs"]["isrm_zarr"],
                     "isrm_zarr_s3bucket": None,
+                    "isrm_nox_to_no2_matrix": payload["inputs"].get("isrm_nox_to_no2_matrix"),
                     "grid_path": payload["processing"]["grid"]["inmap_grid_path"],
                     "grid_epsg": payload["processing"]["grid"]["inmap_grid_epsg"],
                     "grid_id": payload["processing"]["mapping_columns"]["grid_id"],

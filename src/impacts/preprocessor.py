@@ -11,7 +11,6 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
-from shapely.geometry import box
 from .config.builders import build_runtime_config_from_runtime_yaml
 from .contract_utils import copy_path
 from .contract_utils import file_entry
@@ -102,7 +101,7 @@ def _write_vector(gdf: gpd.GeoDataFrame, path: str) -> None:
         gdf.to_file(target)
 
 
-def _read_network_bbox(path: str) -> tuple[float, float, float, float]:
+def _read_network_bounds(path: str) -> tuple[float, float, float, float]:
     started = time.perf_counter()
     target = Path(path)
     lower = target.name.lower()
@@ -116,52 +115,27 @@ def _read_network_bbox(path: str) -> tuple[float, float, float, float]:
         ])
     else:
         gdf = _read_vector(path)
-        return tuple(float(v) for v in gdf.total_bounds)
+        bounds = tuple(float(v) for v in gdf.total_bounds)
+        logger.info(
+            "Preprocess: computed network bounds from %s in %.2fs → (%.2f, %.2f, %.2f, %.2f)",
+            target,
+            time.perf_counter() - started,
+            *bounds,
+        )
+        return bounds
+
     x_min = min(network["fromLocationX"].min(), network["toLocationX"].min())
     y_min = min(network["fromLocationY"].min(), network["toLocationY"].min())
     x_max = max(network["fromLocationX"].max(), network["toLocationX"].max())
     y_max = max(network["fromLocationY"].max(), network["toLocationY"].max())
+    bounds = (float(x_min), float(y_min), float(x_max), float(y_max))
     logger.info(
-        "Preprocess: computed network bbox from %s in %.2fs → (%.2f, %.2f, %.2f, %.2f)",
+        "Preprocess: computed network bounds from %s in %.2fs → (%.2f, %.2f, %.2f, %.2f)",
         target,
         time.perf_counter() - started,
-        x_min,
-        y_min,
-        x_max,
-        y_max,
+        *bounds,
     )
-    return float(x_min), float(y_min), float(x_max), float(y_max)
-
-
-def _crop_grid_to_bbox(
-    staged_path: str,
-    *,
-    bbox: tuple[float, float, float, float],
-    target_path: str,
-    target_epsg: int,
-) -> str:
-    target = Path(target_path)
-    if target.exists():
-        logger.info("Preprocess: reusing cropped grid %s", target)
-        return str(target)
-    started = time.perf_counter()
-    gdf = _read_vector(staged_path)
-    if gdf.crs is None:
-        raise ValueError(f"Grid is missing CRS: {staged_path}")
-    gdf = gdf.to_crs(epsg=target_epsg)
-    bbox_geom = box(*bbox)
-    cropped = gdf.loc[gdf.geometry.intersects(bbox_geom)].copy()
-    if cropped.empty:
-        raise ValueError(f"No grid cells intersect the network bbox for {staged_path}")
-    _write_vector(cropped, target_path)
-    logger.info(
-        "Preprocess: cropped %s to bbox in %.2fs → %d rows at %s",
-        staged_path,
-        time.perf_counter() - started,
-        len(cropped),
-        target_path,
-    )
-    return target_path
+    return bounds
 
 
 def _generate_fishnet_from_bounds(
@@ -205,13 +179,16 @@ def _generate_fishnet_from_bounds(
         geometry=geometries,
         crs=f"EPSG:{int(target_epsg)}",
     )
+    if mask_gdf.crs is None:
+        raise ValueError("AERMOD fishnet mask grid is missing CRS")
+    mask_gdf = mask_gdf.to_crs(epsg=target_epsg)
     mask_union = mask_gdf.geometry.union_all() if hasattr(mask_gdf.geometry, "union_all") else mask_gdf.geometry.unary_union
     filter_started = time.perf_counter()
     keep_mask = fishnet.geometry.intersects(mask_union)
     fishnet = fishnet.loc[keep_mask].reset_index(drop=True)
     fishnet[cell_id_col] = np.arange(len(fishnet), dtype=int)
     logger.info(
-        "Preprocess: filtered fishnet candidates to inMAP footprint in %.2fs → %d rows kept",
+        "Preprocess: filtered fishnet candidates to the staged InMAP footprint in %.2fs → %d rows kept",
         time.perf_counter() - filter_started,
         len(fishnet),
     )
@@ -486,26 +463,19 @@ def build_inputs_manifest(
         source_path=inmap_grid_source,
         relative_target=f"inmap_grid/{Path(inmap_grid_source).name}",
     )
-    network_bbox = _read_network_bbox(staged_beam_network)
-    cropped_inmap_path = str((input_root / "inmap_grid" / "isrm_polygon_cropped.parquet").resolve())
-    staged_inmap_grid = _crop_grid_to_bbox(
-        staged_inmap_grid,
-        bbox=network_bbox,
-        target_path=cropped_inmap_path,
-        target_epsg=int(local_output_epsg),
-    )
     staged_inmap_grid, resolved_inmap_grid_id = _ensure_grid_cell_id(
         staged_inmap_grid,
         "srm_cell_id",
         source_col=grid.inmap_grid_id,
     )
+    network_bounds = _read_network_bounds(staged_beam_network)
     manifest_inputs["inmap_grid"]["staged_path"] = staged_inmap_grid
     manifest_inputs["inmap_grid"]["path"] = inmap_grid_source
 
-    cropped_inmap = _read_vector(staged_inmap_grid)
+    staged_inmap = _read_vector(staged_inmap_grid)
     staged_aermod_grid, resolved_aermod_grid_id = _generate_fishnet_from_bounds(
-        bounds=network_bbox,
-        mask_gdf=cropped_inmap,
+        bounds=network_bounds,
+        mask_gdf=staged_inmap,
         cell_size=100.0,
         target_path=str((input_root / "aermod_grid" / "aermod_100m_fishnet.parquet").resolve()),
         target_epsg=int(local_output_epsg),
@@ -533,6 +503,15 @@ def build_inputs_manifest(
         key="isrm",
         source_path=resolve_path(inputs.isrm_zarr, config_path),
         relative_target="isrm",
+    )
+    staged_isrm_nox_to_no2_matrix = _stage_optional_input(
+        manifest_inputs=manifest_inputs,
+        input_root=input_root,
+        key="isrm_nox_to_no2_matrix",
+        source_path=_optional_local_path(resolve_path(inputs.isrm_nox_to_no2_matrix, config_path)),
+        relative_target=(
+            f"dispersion/{Path(inputs.isrm_nox_to_no2_matrix).name}" if inputs.isrm_nox_to_no2_matrix else None
+        ),
     )
     staged_persons = _stage_optional_input(
         manifest_inputs=manifest_inputs,
@@ -595,6 +574,7 @@ def build_inputs_manifest(
             "inmap_grid_path": staged_inmap_grid,
             "aermod_grid_path": staged_aermod_grid,
             "isrm_url": staged_isrm,
+            "isrm_nox_to_no2_matrix_path": staged_isrm_nox_to_no2_matrix,
             "iterations": 0,
             "use_rates": False,
             "beam_osm_id_col": processing.beam_osm_id_col,
