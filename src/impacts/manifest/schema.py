@@ -60,7 +60,6 @@ def _optional_float(value: Any) -> Optional[float]:
 
 @dataclass(frozen=True)
 class PipelineConfig:
-    beam_network_path: str
     beam_osm_id_col: str
     beam_length_col: str
     beam_osm_epsg: int
@@ -73,33 +72,23 @@ class PipelineConfig:
     aermod_grid_path: Optional[str] = None
     aermod_grid_epsg: Optional[int] = None
     aermod_grid_id: Optional[str] = None
-    osm_links_path: Optional[str] = None
-    osm_pbf_path: Optional[str] = None
     region: Optional[str] = None
     start_year: Optional[int] = None
     county_state_fips: Optional[str] = None
     county_fips_codes: List[str] = field(default_factory=list)
     county_area_name: str = "county"
-    county_boundaries_path: Optional[str] = None
-    mapping_input_path: Optional[str] = None
-    prepared_skims_input_path: Optional[str] = None
-    skims_input_path: Optional[str] = None
-    activity_corrections_path: Optional[str] = None
-    activity_corrections_columns: Dict[str, Any] = field(default_factory=dict)
+    activity_totals_file: Optional[str] = None
+    activity_totals_columns: Dict[str, Any] = field(default_factory=dict)
     concentration_factor: Optional[float] = None
-    events_path: Optional[str] = None
-    rates_dir: Optional[str] = None
-    link_length_path: Optional[str] = None
     iterations: int = 0
-    use_rates: bool = True
     pollutants: List[str] = field(default_factory=list)
     pollutants_map: Dict[str, str] = field(default_factory=dict)
     annualization_days: float = default_annualization_days
+    population_sample: float = 1.0
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PipelineConfig":
         return cls(
-            beam_network_path=_required_string(payload.get("beam_network_path"), "pipeline.beam_network_path"),
             beam_osm_id_col=_required_string(payload.get("beam_osm_id_col"), "pipeline.beam_osm_id_col"),
             beam_length_col=_required_string(payload.get("beam_length_col"), "pipeline.beam_length_col"),
             beam_osm_epsg=int(_required_string(payload.get("beam_osm_epsg"), "pipeline.beam_osm_epsg")),
@@ -112,28 +101,25 @@ class PipelineConfig:
             aermod_grid_path=_optional_string(payload.get("aermod_grid_path")),
             aermod_grid_epsg=_optional_int(payload.get("aermod_grid_epsg")),
             aermod_grid_id=_optional_string(payload.get("aermod_grid_id")),
-            osm_links_path=_optional_string(payload.get("osm_links_path")),
-            osm_pbf_path=_optional_string(payload.get("osm_pbf_path")),
             region=_optional_string(payload.get("region")),
             start_year=_optional_int(payload.get("start_year")),
             county_state_fips=_optional_string(payload.get("county_state_fips")),
             county_fips_codes=_coerce_string_list(payload.get("county_fips_codes")),
             county_area_name=_optional_string(payload.get("county_area_name")) or "county",
-            county_boundaries_path=_optional_string(payload.get("county_boundaries_path")),
-            mapping_input_path=_optional_string(payload.get("mapping_input_path")),
-            prepared_skims_input_path=_optional_string(payload.get("prepared_skims_input_path")),
-            skims_input_path=_optional_string(payload.get("skims_input_path")),
-            activity_corrections_path=_optional_string(payload.get("activity_corrections_path")),
-            activity_corrections_columns=dict(payload.get("activity_corrections_columns", {}) or {}),
+            activity_totals_file=_optional_string(
+                payload.get("activity_totals_file")
+                or payload.get("activity_totals_path")
+                or payload.get("county_activity_totals_target_path")
+            ),
+            activity_totals_columns=dict(
+                payload.get("activity_totals_columns") or payload.get("county_activity_totals_columns", {}) or {}
+            ),
             concentration_factor=_optional_float(payload.get("concentration_factor")),
-            events_path=_optional_string(payload.get("events_path")),
-            rates_dir=_optional_string(payload.get("rates_dir")),
-            link_length_path=_optional_string(payload.get("link_length_path")),
             iterations=int(payload.get("iterations", 0) or 0),
-            use_rates=bool(payload.get("use_rates", True)),
-            pollutants=_coerce_string_list(payload.get("pollutants") or payload.get("prepared_pollutants")),
+            pollutants=_coerce_string_list(payload.get("pollutants")),
             pollutants_map=dict(payload.get("pollutants_map", {}) or {}),
             annualization_days=float(payload.get("annualization_days") or default_annualization_days),
+            population_sample=float(payload.get("population_sample") or 1.0),
         )
 
     def to_dict(self) -> Dict[str, Any]:

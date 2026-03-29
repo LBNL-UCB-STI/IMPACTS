@@ -87,7 +87,5 @@ env/
 # Repo-specific files that must remain tracked
 !.gitattributes
 !.gitignore
-!AGENTS.md
 !NOAI
-!robots.txt
 !setup.cfg

@@ -812,7 +812,7 @@ def test_run_from_runtime_config_delegates_through_preprocess(monkeypatch, tmp_p
         }
         return {"run_manifest_path": str(tmp_path / "workspace" / "output" / "run_manifest.yaml")}
 
-    monkeypatch.setattr("impacts.preprocessor.preprocess_workflow", _fake_preprocess)
+    monkeypatch.setattr("impacts.preprocessor.workflow_preprocess", _fake_preprocess)
     monkeypatch.setattr("impacts.runner.run_from_input_manifest", _fake_run)
 
     result = run_from_runtime_config(

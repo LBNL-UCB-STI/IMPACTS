@@ -84,6 +84,33 @@ def build_parser() -> argparse.ArgumentParser:
     build_nox_to_no2.add_argument("--isrm-zarr")
     build_nox_to_no2.add_argument("--output-name")
 
+    aggregate_emfac_activity = subparsers.add_parser(
+        "aggregate_emfac_activity",
+        help="Aggregate EMFAC county-year totVMT and totTrips across one or more files.",
+    )
+    aggregate_emfac_activity.add_argument("--input", dest="inputs", action="append", required=True)
+    aggregate_emfac_activity.add_argument("--output", required=True)
+    aggregate_emfac_activity.add_argument("--county-col", default="countyfp")
+    aggregate_emfac_activity.add_argument("--year-col", default="year")
+    aggregate_emfac_activity.add_argument("--vmt-col", default="totVMT")
+    aggregate_emfac_activity.add_argument("--trips-col", default="totTrips")
+    aggregate_emfac_activity.add_argument("--year", dest="default_year", type=int)
+    aggregate_emfac_activity.add_argument(
+        "--county-fips",
+        dest="county_fips_filters",
+        nargs="+",
+        default=None,
+        help="Filter to one or more county FIPS codes.",
+    )
+    aggregate_emfac_activity.add_argument(
+        "--filter-year",
+        dest="year_filters",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Filter to one or more years.",
+    )
+
     return parser
 
 
@@ -181,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "sample_events":
-        from impacts.utils.sample_beam_output import sample_events_by_vehicle
+        from impacts.tools.beam.sample_beam_output import sample_events_by_vehicle
 
         sample_events_by_vehicle(
             input_path=args.input,
@@ -193,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "sample_skims":
-        from impacts.utils.sample_beam_output import sample_skims_by_fraction
+        from impacts.tools.beam.sample_beam_output import sample_skims_by_fraction
 
         sample_skims_by_fraction(
             input_path=args.input,
@@ -206,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "rdata_to_parquet":
-        from impacts.utils.rdata_conversion import rdata_to_parquet
+        from impacts.tools.inmap.rdata_conversion import rdata_to_parquet
 
         written = rdata_to_parquet(
             input_path=args.input,
@@ -218,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "build_nox_to_no2":
-        from impacts.utils.build_complete_nox_to_no2_matrix import main as build_nox_to_no2_main
+        from impacts.tools.inmap.build_complete_nox_to_no2_matrix import main as build_nox_to_no2_main
 
         build_nox_to_no2_main(
             [
@@ -229,6 +256,22 @@ def main(argv: list[str] | None = None) -> int:
                 *(["--isrm-zarr", args.isrm_zarr] if args.isrm_zarr else []),
                 *(["--output-name", args.output_name] if args.output_name else []),
             ]
+        )
+        return 0
+
+    if args.command == "aggregate_emfac_activity":
+        from impacts.tools.emfac.aggregate_emfac_activity import aggregate_emfac_activity
+
+        aggregate_emfac_activity(
+            input_paths=args.inputs,
+            output_path=args.output,
+            county_col=args.county_col,
+            year_col=args.year_col,
+            vmt_col=args.vmt_col,
+            trips_col=args.trips_col,
+            default_year=args.default_year,
+            county_fips_filters=args.county_fips_filters,
+            year_filters=args.year_filters,
         )
         return 0
 

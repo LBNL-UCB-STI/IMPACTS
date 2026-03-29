@@ -66,7 +66,7 @@ impacts:
     simulation_network_folder: upstream/
     osm_network_folder: upstream/
     emissions_rates_folder: upstream/
-    activity_corrections: upstream/activity_corrections.csv
+    activity_totals_file: upstream/Default_Statewide_2018_2025_2030_2040_2050_Annual_activity_totals.parquet
     annualization_days: 330
     pollutants:
       - NH3

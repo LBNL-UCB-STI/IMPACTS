@@ -115,11 +115,27 @@ def _normalize_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     processing_aermod = processing_payload.get("aermod", {}) or {}
     inputs = dict(payload.get("inputs", {}) or {})
 
-    if "activity_corrections" not in inputs:
-        inputs["activity_corrections"] = (
-            _optional_string(processing_emissions.get("activity_corrections"))
+    if "activity_totals_file" not in inputs:
+        inputs["activity_totals_file"] = (
+            _optional_string(processing_emissions.get("activity_totals_file"))
+            or _optional_string(emissions.get("activity_totals_file"))
+            or _optional_string(processing_emissions.get("county_activity_totals_target_file"))
+            or _optional_string(emissions.get("county_activity_totals_target_file"))
+            or _optional_string(processing_emissions.get("activity_totals_target_file"))
+            or _optional_string(emissions.get("activity_totals_target_file"))
+            or _optional_string(processing_emissions.get("activity_corrections"))
             or _optional_string(emissions.get("activity_corrections"))
             or _optional_string(emissions.get("activity_correction_factors_file"))
+        )
+    if "simulation_network_folder" not in inputs:
+        inputs["simulation_network_folder"] = (
+            _optional_string(processing_emissions.get("simulation_network_folder"))
+            or _optional_string(emissions.get("simulation_network_folder"))
+        )
+    if "osm_network_folder" not in inputs:
+        inputs["osm_network_folder"] = (
+            _optional_string(processing_emissions.get("osm_network_folder"))
+            or _optional_string(emissions.get("osm_network_folder"))
         )
     isrm_directory = _optional_string(inmap.get("isrm_zarr_directory"))
     isrm_s3bucket = _optional_string(inmap.get("isrm_zarr_s3bucket"))
@@ -149,6 +165,8 @@ def _normalize_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         aermod_processing = dict(dispersions_processing.get("aermod", {}) or processing_aermod)
         if "annualization_days" not in processing:
             processing["annualization_days"] = emissions_processing.get("annualization_days")
+        if "population_sample" not in processing:
+            processing["population_sample"] = emissions_processing.get("population_sample")
         if "pollutants" not in processing:
             processing["pollutants"] = emissions_processing.get("pollutants")
         if "pollutants_map" not in processing:
@@ -176,6 +194,7 @@ def _normalize_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     normalized["inputs"] = inputs
     normalized["processing"] = {
         "annualization_days": emissions.get("annualization_days"),
+        "population_sample": emissions.get("population_sample"),
         "concentration_factor": None,
         "pollutants": emissions.get("pollutants"),
         "pollutants_map": emissions.get("pollutants_map"),
@@ -286,30 +305,30 @@ class SharedContext:
 
 @dataclass(frozen=True)
 class RuntimeInputs:
-    beam_network: str
-    emissions_skims: str
-    osm_pbf: str
-    rates_dir: Optional[str] = None
-    activity_corrections: Optional[str] = None
+    simulation_network_folder: str
+    osm_network_folder: str
+    activity_totals_file: Optional[str] = None
     isrm_zarr: Optional[str] = None
     isrm_nox_to_no2_matrix_npz: Optional[str] = None
-    osm_links: Optional[str] = None
-    beam_mapdb: Optional[str] = None
     households_asim_out: Optional[str] = None
     persons_asim_out: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "RuntimeInputs":
         return cls(
-            beam_network=_required_string(payload.get("beam_network"), "inputs.beam_network"),
-            emissions_skims=_required_string(payload.get("emissions_skims"), "inputs.emissions_skims"),
-            osm_pbf=_required_string(payload.get("osm_pbf"), "inputs.osm_pbf"),
-            rates_dir=_optional_string(payload.get("rates_dir")),
-            activity_corrections=_optional_string(payload.get("activity_corrections")),
+            simulation_network_folder=_required_string(
+                payload.get("simulation_network_folder"),
+                "inputs.simulation_network_folder",
+            ),
+            osm_network_folder=_required_string(
+                payload.get("osm_network_folder"),
+                "inputs.osm_network_folder",
+            ),
+            activity_totals_file=_optional_string(
+                payload.get("activity_totals_file") or payload.get("county_activity_totals_target_file")
+            ),
             isrm_zarr=_optional_string(payload.get("isrm_zarr")),
             isrm_nox_to_no2_matrix_npz=_optional_string(payload.get("isrm_nox_to_no2_matrix_npz")),
-            osm_links=_optional_string(payload.get("osm_links")),
-            beam_mapdb=_optional_string(payload.get("beam_mapdb")),
             households_asim_out=_optional_string(payload.get("households_asim_out")),
             persons_asim_out=_optional_string(payload.get("persons_asim_out")),
         )
@@ -333,21 +352,6 @@ class GridProcessing:
             aermod_grid_epsg=_optional_int(payload.get("aermod_grid_epsg")),
             inmap_grid_id=_optional_string(payload.get("inmap_grid_id")),
             aermod_grid_id=_optional_string(payload.get("aermod_grid_id")),
-        )
-
-
-@dataclass(frozen=True)
-class ActivityCorrectionsColumns:
-    county_fips: str = "countyfp"
-    vmt_factor: str = "vmt_factor"
-    trips_factor: str = "trips_factor"
-
-    @classmethod
-    def from_dict(cls, payload: Dict[str, Any]) -> "ActivityCorrectionsColumns":
-        return cls(
-            county_fips=_optional_string(payload.get("county_fips")) or "countyfp",
-            vmt_factor=_optional_string(payload.get("vmt_factor")) or "vmt_factor",
-            trips_factor=_optional_string(payload.get("trips_factor")) or "trips_factor",
         )
 
 
@@ -435,13 +439,20 @@ class ProcessingSettings:
     pollutants_map: Dict[str, str]
     annualization_days: int
     grid: GridProcessing
+    population_sample: float = 1.0
     beam_osm_id_col: str = "attributeOrigId"
     beam_length_col: str = "linkLength"
     county_area_name: str = "county"
     prepared_skims_group_cols: List[str] = field(default_factory=lambda: ["linkId", "vehicleTypeId", "process"])
     skims_columns: SkimsColumns = field(default_factory=SkimsColumns)
     mapping_columns: MappingColumns = field(default_factory=MappingColumns)
-    activity_corrections_columns: ActivityCorrectionsColumns = field(default_factory=ActivityCorrectionsColumns)
+    activity_totals_columns: Dict[str, str] = field(
+        default_factory=lambda: {
+            "county_fips": "countyfp",
+            "tot_vmt": "totVMT",
+            "tot_trips": "totTrips",
+        }
+    )
     concentrations: ConcentrationSettings = field(default_factory=ConcentrationSettings)
 
     @classmethod
@@ -457,6 +468,7 @@ class ProcessingSettings:
             pollutants=configured_pollutants,
             pollutants_map=pollutants_map,
             annualization_days=_required_int(payload.get("annualization_days"), "processing.annualization_days"),
+            population_sample=float(payload.get("population_sample") or 1.0),
             grid=GridProcessing.from_dict(payload.get("grid", {}) or {}),
             beam_osm_id_col=_optional_string(payload.get("beam_osm_id_col")) or "attributeOrigId",
             beam_length_col=_optional_string(payload.get("beam_length_col")) or "linkLength",
@@ -467,9 +479,17 @@ class ProcessingSettings:
             ),
             skims_columns=SkimsColumns.from_dict(payload.get("skims_columns", {}) or {}),
             mapping_columns=MappingColumns.from_dict(payload.get("mapping_columns", {}) or {}),
-            activity_corrections_columns=ActivityCorrectionsColumns.from_dict(
-                payload.get("activity_corrections_columns", {}) or {}
-            ),
+            activity_totals_columns={
+                "county_fips": _optional_string(
+                    (payload.get("activity_totals_columns", {}) or payload.get("county_activity_totals_columns", {}) or {}).get("county_fips")
+                ) or "countyfp",
+                "tot_vmt": _optional_string(
+                    (payload.get("activity_totals_columns", {}) or payload.get("county_activity_totals_columns", {}) or {}).get("tot_vmt")
+                ) or "totVMT",
+                "tot_trips": _optional_string(
+                    (payload.get("activity_totals_columns", {}) or payload.get("county_activity_totals_columns", {}) or {}).get("tot_trips")
+                ) or "totTrips",
+            },
             concentrations=ConcentrationSettings.from_dict(
                 {
                     **(payload.get("dispersion", {}) or {}),
@@ -514,17 +534,17 @@ class ImpactsRuntimeConfig:
         return {
             "shared": payload["shared_context"],
             "inputs": {
-                "beam_network": payload["inputs"]["beam_network"],
-                "emissions_skims": payload["inputs"]["emissions_skims"],
-                "osm_pbf": payload["inputs"]["osm_pbf"],
-                "rates_dir": payload["inputs"].get("rates_dir"),
+                "simulation_network_folder": payload["inputs"]["simulation_network_folder"],
+                "osm_network_folder": payload["inputs"]["osm_network_folder"],
                 "households_asim_out": payload["inputs"]["households_asim_out"],
                 "persons_asim_out": payload["inputs"]["persons_asim_out"],
             },
             "processing": {
                 "emissions": {
                     "annualization_days": payload["processing"]["annualization_days"],
-                    "activity_corrections": payload["inputs"]["activity_corrections"],
+                    "population_sample": payload["processing"]["population_sample"],
+                    "activity_totals_file": payload["inputs"]["activity_totals_file"],
+                    "activity_totals_columns": payload["processing"]["activity_totals_columns"],
                     "pollutants": list(payload["processing"]["pollutants_map"].values()),
                     "pollutants_map": payload["processing"]["pollutants_map"],
                 },

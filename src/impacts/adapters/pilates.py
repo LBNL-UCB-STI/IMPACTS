@@ -185,20 +185,48 @@ def _find_latest_iters_dir(local_output_folder: str) -> Optional[Path]:
 
 
 def _find_latest_iteration_skims(iters_dir: Path) -> Optional[Path]:
+    patterns = [
+        ("*.skimsEmissionsTotals.csv.gz", r"/it\.(\d+)/(\d+)\.skimsEmissionsTotals\.csv\.gz$"),
+        ("*.skimsEmissions.csv.gz", r"/it\.(\d+)/(\d+)\.skimsEmissions\.csv\.gz$"),
+        ("*.skimsEmissions.parquet", r"/it\.(\d+)/(\d+)\.skimsEmissions\.parquet$"),
+    ]
     latest_iter = -1
     latest_skims: Optional[Path] = None
-    for candidate in iters_dir.glob("it.*/*.skimsEmissionsTotals.csv.gz"):
-        match = re.search(r"/it\.(\d+)/(\d+)\.skimsEmissionsTotals\.csv\.gz$", str(candidate))
-        if not match:
-            continue
-        dir_iter = int(match.group(1))
-        file_iter = int(match.group(2))
-        if dir_iter != file_iter:
-            continue
-        if dir_iter > latest_iter:
-            latest_iter = dir_iter
-            latest_skims = candidate
+    for glob_pattern, regex_pattern in patterns:
+        for candidate in iters_dir.glob(f"it.*/{glob_pattern}"):
+            match = re.search(regex_pattern, str(candidate))
+            if not match:
+                continue
+            dir_iter = int(match.group(1))
+            file_iter = int(match.group(2))
+            if dir_iter != file_iter:
+                continue
+            if dir_iter > latest_iter:
+                latest_iter = dir_iter
+                latest_skims = candidate
     return latest_skims
+
+
+def _find_latest_iteration_events(iters_dir: Path) -> Optional[Path]:
+    patterns = [
+        ("*.events.csv.gz", r"/it\.(\d+)/(\d+)\.events\.csv\.gz$"),
+        ("*.events.parquet", r"/it\.(\d+)/(\d+)\.events\.parquet$"),
+    ]
+    latest_iter = -1
+    latest_events: Optional[Path] = None
+    for glob_pattern, regex_pattern in patterns:
+        for candidate in iters_dir.glob(f"it.*/{glob_pattern}"):
+            match = re.search(regex_pattern, str(candidate))
+            if not match:
+                continue
+            dir_iter = int(match.group(1))
+            file_iter = int(match.group(2))
+            if dir_iter != file_iter:
+                continue
+            if dir_iter > latest_iter:
+                latest_iter = dir_iter
+                latest_events = candidate
+    return latest_events
 
 
 def _derive_beam_inputs(
@@ -235,62 +263,23 @@ def _derive_beam_inputs(
     emissions_rates_folder = _resolve_search_root(emissions_rates_folder, *search_roots)
 
     if simulation_network_folder:
-        beam_network = _find_preferred_file(
-            simulation_network_folder,
-            ["network.csv.gz", "network.parquet"],
-        )
-        if beam_network:
-            derived["beam_network"] = beam_network
-
-    if simulation_network_folder:
-        latest_iters_dir = _find_latest_iters_dir(simulation_network_folder)
-        if latest_iters_dir:
-            latest_skims = _find_latest_iteration_skims(latest_iters_dir)
-            if latest_skims:
-                derived["emissions_skims"] = str(latest_skims)
-        if "emissions_skims" not in derived:
-            fallback_skims = _find_first_matching(
-                simulation_network_folder,
-                "*.skimsEmissionsTotals*.csv.gz",
-            )
-            if fallback_skims:
-                derived["emissions_skims"] = fallback_skims
+        derived["simulation_network_folder"] = simulation_network_folder
+    elif local_output_folder:
+        derived["simulation_network_folder"] = _resolve_search_root(local_output_folder, *search_roots)
 
     if osm_network_folder:
-        osm_pbf = _find_first_matching(osm_network_folder, "*.osm.pbf")
-        if osm_pbf:
-            derived["osm_pbf"] = osm_pbf
-
-    if emissions_rates_folder:
-        derived["rates_dir"] = emissions_rates_folder
-
-    if simulation_network_folder and "beam_network" not in derived:
-        latest_iters_dir = _find_latest_iters_dir(simulation_network_folder)
-        if latest_iters_dir:
-            run_root = latest_iters_dir.parent
-            network_csv = run_root / "network.csv.gz"
-            if network_csv.exists():
-                derived["beam_network"] = str(network_csv)
-
-    if local_output_folder and "beam_network" not in derived:
-        latest_iters_dir = _find_latest_iters_dir(local_output_folder)
-        if latest_iters_dir:
-            run_root = latest_iters_dir.parent
-            derived["beam_network"] = str(run_root / "network.csv.gz")
-            latest_skims = _find_latest_iteration_skims(latest_iters_dir)
-            if latest_skims and "emissions_skims" not in derived:
-                derived["emissions_skims"] = str(latest_skims)
-        else:
-            derived["beam_network"] = _join_path(local_output_folder, "network.csv.gz")
-
-    if "osm_pbf" not in derived and local_input_folder and router_directory:
+        derived["osm_network_folder"] = osm_network_folder
+    elif local_input_folder and router_directory:
         router_path = PurePosixPath(router_directory)
         router_name = router_path.name
         if router_name.endswith(".osm.pbf"):
-            osm_pbf = PurePosixPath(local_input_folder) / router_path
+            osm_root = PurePosixPath(local_input_folder) / router_path.parent
         else:
-            osm_pbf = PurePosixPath(local_input_folder) / router_path / f"{router_name}.osm.pbf"
-        derived["osm_pbf"] = str(osm_pbf)
+            osm_root = PurePosixPath(local_input_folder) / router_path
+        derived["osm_network_folder"] = str(osm_root)
+
+    if emissions_rates_folder:
+        derived["emissions_rates_folder"] = emissions_rates_folder
 
     return derived
 
