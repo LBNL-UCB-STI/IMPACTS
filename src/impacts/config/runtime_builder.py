@@ -22,6 +22,9 @@ def _looks_like_pilates_payload(payload: Dict[str, Any]) -> bool:
 
 def build_runtime_config_from_runtime_yaml(path: str | Path) -> ImpactsRuntimeConfig:
     payload = load_structured_file(path)
+    if isinstance(payload, dict):
+        payload = dict(payload)
+        payload["__source_root__"] = str(Path(path).resolve().parent)
     if _looks_like_pilates_payload(payload) and not _looks_like_runtime_payload(payload):
         runtime_payload = build_runtime_payload_from_pilates(payload, payload)
         return ImpactsRuntimeConfig.from_dict(runtime_payload)
@@ -37,11 +40,17 @@ def build_runtime_config_from_pilates(
         if isinstance(pilates_settings, (str, Path))
         else dict(pilates_settings)
     )
+    if isinstance(pilates_settings, (str, Path)):
+        pilates_payload = dict(pilates_payload)
+        pilates_payload["__source_root__"] = str(Path(pilates_settings).resolve().parent)
     overlay_payload = (
         load_structured_file(impacts_overlay)
         if isinstance(impacts_overlay, (str, Path))
         else dict(impacts_overlay)
     )
+    if isinstance(impacts_overlay, (str, Path)):
+        overlay_payload = dict(overlay_payload)
+        overlay_payload["__source_root__"] = str(Path(impacts_overlay).resolve().parent)
     runtime_payload = build_runtime_payload_from_pilates(pilates_payload, overlay_payload)
     return ImpactsRuntimeConfig.from_dict(runtime_payload)
 

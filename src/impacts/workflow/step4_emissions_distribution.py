@@ -4,12 +4,19 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Dict
+from typing import List
 from typing import Optional
 
 import geopandas as gpd
 import pandas as pd
 import duckdb
-from impacts.utils.utils_emissions_grid_mapping import apply_county_corrections
+import numpy as np
+
+from ..config.defaults import annualization_days as default_annualization_days
+from ..config.defaults import chunk_size as default_chunk_size
+from ..config.defaults import county_correction_columns as default_county_correction_columns
+from ..config.defaults import pollutants as default_prepared_pollutants
+from ..config.defaults import grams_per_ton
 
 from ..manifest.schema import PipelineConfig
 
@@ -33,6 +40,279 @@ def _read_table(path: str | Path) -> pd.DataFrame:
     if lower.endswith(".csv"):
         return pd.read_csv(target)
     raise ValueError(f"Unsupported table format: {target}")
+
+
+def _first_existing(df: pd.DataFrame, candidates) -> Optional[str]:
+    for col in candidates:
+        if col in df.columns:
+            return col
+    return None
+
+
+def _resolve_column_config(config: Optional[Dict[str, str]], defaults: Dict[str, str]) -> Dict[str, str]:
+    resolved = defaults.copy()
+    if config:
+        resolved.update({k: v for k, v in config.items() if v})
+    return resolved
+
+
+def _normalize_county_fips(series: pd.Series) -> pd.Series:
+    return series.astype(str).str.extract(r"(\d+)")[0].fillna("").str.zfill(3)
+
+
+def read_skims_emissions(
+    path: str,
+    pollutants: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    dim_cols = ["linkId", "vehicleTypeId", "process"]
+    cols = None if pollutants is None else dim_cols + [c for c in pollutants if c not in dim_cols]
+    target = Path(path)
+    lower = target.name.lower()
+    if lower.endswith(".parquet"):
+        import pyarrow.parquet as pq
+
+        if cols is not None:
+            available = set(pq.read_schema(path).names)
+            cols = [c for c in cols if c in available] or None
+        return pd.read_parquet(target, columns=cols)
+    if lower.endswith(".csv.gz"):
+        return pd.read_csv(target, compression="gzip", usecols=cols if pollutants else None)
+    if lower.endswith(".csv"):
+        return pd.read_csv(target, usecols=cols if pollutants else None)
+    raise ValueError(f"Unsupported skims format: {target}. Use .csv, .csv.gz, or .parquet")
+
+
+def parse_emissions_string(emissions: str) -> Dict[str, float]:
+    if emissions is None or (isinstance(emissions, float) and pd.isna(emissions)):
+        return {}
+    txt = str(emissions).strip()
+    if not txt:
+        return {}
+    out: Dict[str, float] = {}
+    for part in txt.split(";"):
+        part = part.strip()
+        if not part or ":" not in part:
+            continue
+        key, value = part.split(":", 1)
+        try:
+            out[key.strip()] = float(value)
+        except ValueError:
+            continue
+    return out
+
+
+def expand_emissions_columns(df: pd.DataFrame, emissions_col: str = "emissions") -> pd.DataFrame:
+    parsed = df[emissions_col].apply(parse_emissions_string)
+    expanded_pollutants = sorted({key for values in parsed for key in values.keys()})
+    for pollutant in expanded_pollutants:
+        df[f"em_{pollutant}"] = parsed.apply(lambda values, p=pollutant: float(values.get(p, 0.0)))
+    return df
+
+
+def _totals_pollutant_columns(
+    df: pd.DataFrame,
+    required_pollutants: List[str],
+) -> Dict[str, str]:
+    resolved: Dict[str, str] = {}
+    for pollutant in required_pollutants:
+        for candidate in (pollutant, f"em_{pollutant}", f"tons_per_year_{pollutant}"):
+            if candidate in df.columns:
+                resolved[pollutant] = candidate
+                break
+    return resolved
+
+
+def prepare_skims_for_grid_allocation(
+    skims_path: str,
+    output_path: str,
+    *,
+    group_cols: Optional[List[str]] = None,
+    required_pollutants: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    df = read_skims_emissions(skims_path)
+    prepared_group_cols = group_cols or ["linkId", "vehicleTypeId", "process"]
+    missing_group_cols = [col for col in prepared_group_cols if col not in df.columns]
+    if missing_group_cols:
+        raise ValueError(f"Prepared skims missing required grouping columns: {missing_group_cols}")
+
+    required = required_pollutants or default_prepared_pollutants
+    if "emissions" in df.columns:
+        df = expand_emissions_columns(df, emissions_col="emissions")
+        observations_col = "observations"
+        if observations_col not in df.columns:
+            raise ValueError("Prepared skims require an observations column.")
+
+        source_pollutant_cols = [f"em_{pollutant}" for pollutant in required]
+        for col in source_pollutant_cols:
+            if col not in df.columns:
+                df[col] = 0.0
+
+        prepared = df[prepared_group_cols + [observations_col] + source_pollutant_cols].copy()
+        prepared[observations_col] = pd.to_numeric(prepared[observations_col], errors="coerce").fillna(0.0)
+        rename_map = {f"em_{pollutant}": pollutant for pollutant in required}
+        prepared = prepared.rename(columns=rename_map)
+        pollutant_cols = list(rename_map.values())
+        for col in pollutant_cols:
+            prepared[col] = pd.to_numeric(prepared[col], errors="coerce").fillna(0.0) * prepared[observations_col]
+        aggregated = prepared.groupby(prepared_group_cols, dropna=False)[pollutant_cols].sum().reset_index()
+    else:
+        totals_cols = _totals_pollutant_columns(df, required)
+        prepared = df[prepared_group_cols + list(totals_cols.values())].copy()
+        rename_map = {source: pollutant for pollutant, source in totals_cols.items()}
+        prepared = prepared.rename(columns=rename_map)
+        pollutant_cols = list(rename_map.values())
+        for pollutant in required:
+            if pollutant not in prepared.columns:
+                prepared[pollutant] = 0.0
+        pollutant_cols = list(required)
+        for col in pollutant_cols:
+            prepared[col] = pd.to_numeric(prepared[col], errors="coerce").fillna(0.0)
+        aggregated = prepared.groupby(prepared_group_cols, dropna=False)[pollutant_cols].sum().reset_index()
+
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.suffix.lower() == ".parquet":
+        aggregated.to_parquet(out, index=False)
+    elif out.name.lower().endswith(".csv.gz"):
+        aggregated.to_csv(out, index=False, compression="gzip")
+    else:
+        raise ValueError("Prepared skims output must be .parquet or .csv.gz")
+    return aggregated
+
+
+def annualize_prepared_skims_for_grid_allocation(
+    prepared_skims_path: str,
+    output_path: str,
+    *,
+    group_cols: Optional[List[str]] = None,
+    required_pollutants: Optional[List[str]] = None,
+    annualization_days: float = default_annualization_days,
+) -> pd.DataFrame:
+    if annualization_days <= 0:
+        raise ValueError(f"Annualization days must be positive, got {annualization_days}")
+
+    prepared = _read_table(prepared_skims_path)
+    prepared_group_cols = group_cols or ["linkId", "vehicleTypeId", "process"]
+    required = required_pollutants or default_prepared_pollutants
+    missing_group_cols = [col for col in prepared_group_cols if col not in prepared.columns]
+    if missing_group_cols:
+        raise ValueError(f"Annualized skims missing required grouping columns: {missing_group_cols}")
+
+    out = prepared[prepared_group_cols].copy()
+    for pollutant in required:
+        source_col = _first_existing(prepared, [pollutant, f"em_{pollutant}", f"tons_per_year_{pollutant}"])
+        values = (
+            pd.to_numeric(prepared[source_col], errors="coerce").fillna(0.0)
+            if source_col is not None
+            else pd.Series(np.zeros(len(prepared), dtype=float), index=prepared.index)
+        )
+        out[f"tons_per_year_{pollutant}"] = values * annualization_days / 1_000_000.0
+
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.suffix.lower() == ".parquet":
+        out.to_parquet(output, index=False)
+    elif output.name.lower().endswith(".csv.gz"):
+        out.to_csv(output, index=False, compression="gzip")
+    else:
+        raise ValueError("Annualized skims output must be .parquet or .csv.gz")
+    return out
+
+
+_COUNTY_FIPS_CANDIDATES = ["county_zone_COUNTYFP", "county_COUNTYFP", "zone_COUNTYFP", "COUNTYFP", "countyfp"]
+_VMT_PROCESSES = {"RUNEX", "PMBW", "PMTW", "PRDUST", "RUNLOSS"}
+_TRIP_PROCESSES = {"HOTSOAK", "DIURN", "STREX"}
+
+
+def apply_county_corrections(
+    allocated_df: pd.DataFrame,
+    corrections_path: str,
+    *,
+    correction_columns: Optional[Dict[str, str]] = None,
+) -> pd.DataFrame:
+    columns = _resolve_column_config(correction_columns, default_county_correction_columns)
+    corrections = _read_table(corrections_path)
+    fips_source_col = _first_existing(corrections, [columns["county_fips"]])
+    if fips_source_col is None:
+        raise ValueError(
+            f"County corrections file must include county FIPS column: {columns['county_fips']}."
+        )
+
+    county_col = _first_existing(allocated_df, _COUNTY_FIPS_CANDIDATES)
+    if county_col is None:
+        raise ValueError(
+            "Allocated DataFrame must include a county FIPS column. "
+            f"Expected one of: {_COUNTY_FIPS_CANDIDATES}."
+        )
+
+    vmt_col = _first_existing(corrections, [columns["vmt_factor"]])
+    trips_col = _first_existing(corrections, [columns["trips_factor"]])
+    factors = corrections.copy()
+    factors["_fips_norm"] = _normalize_county_fips(factors[fips_source_col])
+    factors["_corr_vmt"] = (
+        pd.to_numeric(factors[vmt_col], errors="coerce").fillna(1.0).replace(0.0, 1.0)
+        if vmt_col
+        else 1.0
+    )
+    factors["_corr_trips"] = (
+        pd.to_numeric(factors[trips_col], errors="coerce").fillna(1.0).replace(0.0, 1.0)
+        if trips_col
+        else 1.0
+    )
+    factors = factors[["_fips_norm", "_corr_vmt", "_corr_trips"]].drop_duplicates("_fips_norm")
+
+    result = allocated_df.copy()
+    result["_fips_norm"] = _normalize_county_fips(result[county_col])
+    result = result.merge(factors, how="left", on="_fips_norm")
+    result["_corr_vmt"] = result["_corr_vmt"].fillna(1.0)
+    result["_corr_trips"] = result["_corr_trips"].fillna(1.0)
+
+    process_upper = result.get("process", pd.Series("", index=result.index)).astype(str).str.upper()
+    factor_arr = np.ones(len(result), dtype=np.float32)
+    factor_arr = np.where(process_upper.isin(_VMT_PROCESSES), result["_corr_vmt"].to_numpy(dtype=np.float32), factor_arr)
+    factor_arr = np.where(process_upper.isin(_TRIP_PROCESSES), result["_corr_trips"].to_numpy(dtype=np.float32), factor_arr)
+
+    allocated_cols = [c for c in result.columns if c.endswith("_allocated")]
+    for col in allocated_cols:
+        result[col] = pd.to_numeric(result[col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32) * factor_arr
+
+    return result.drop(columns=["_fips_norm", "_corr_vmt", "_corr_trips"])
+
+
+_SKIMS_DIMENSION_COLS = {
+    "linkId",
+    "vehicleTypeId",
+    "process",
+    "hour",
+    "observations",
+    "iterations",
+    "travelTimeInSecond",
+    "parkingDurationInSecond",
+}
+
+
+def annualize_skims(
+    skims_df: pd.DataFrame,
+    pollutants: List[str],
+    annualization_days: float,
+) -> pd.DataFrame:
+    if annualization_days <= 0:
+        raise ValueError(f"annualization_days must be positive, got {annualization_days}")
+
+    dim_cols = [c for c in skims_df.columns if c in _SKIMS_DIMENSION_COLS]
+    out = skims_df[dim_cols].copy()
+    factor = annualization_days / grams_per_ton
+    for pollutant in pollutants:
+        source_col = _first_existing(skims_df, [pollutant, f"em_{pollutant}", f"tons_per_year_{pollutant}"])
+        if source_col is None:
+            out[f"tons_per_year_{pollutant}"] = 0.0
+            continue
+        values = pd.to_numeric(skims_df[source_col], errors="coerce").fillna(0.0)
+        if source_col.startswith("tons_per_year_"):
+            out[f"tons_per_year_{pollutant}"] = values
+        else:
+            out[f"tons_per_year_{pollutant}"] = values * factor
+    return out
 
 
 def _save_grid_emissions(

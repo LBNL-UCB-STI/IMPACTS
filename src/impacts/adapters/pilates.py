@@ -8,7 +8,6 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
-from impacts.config.runtime_builder import build_runtime_config_from_pilates
 from impacts.manifest.file_ops import write_structured_file
 
 
@@ -20,6 +19,16 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
         else:
             merged[key] = deepcopy(value)
     return merged
+
+
+def _deep_update_strings(value: Any, resolver) -> Any:
+    if isinstance(value, dict):
+        return {k: _deep_update_strings(v, resolver) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_deep_update_strings(item, resolver) for item in value]
+    if isinstance(value, str):
+        return resolver(value)
+    return value
 
 
 def _parse_epsg(value: Any) -> Optional[str]:
@@ -63,6 +72,96 @@ def _join_path(base_dir: str, filename: str) -> str:
     return str(PurePosixPath(base_dir) / filename)
 
 
+def _lookup_dotted(source: Dict[str, Any], dotted_key: str) -> Optional[str]:
+    current: Any = source
+    for part in dotted_key.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current.get(part)
+    if current is None:
+        return None
+    text = str(current).strip()
+    return text or None
+
+
+def _expand_impacts_placeholders(
+    impacts_section: Dict[str, Any],
+    pilates_settings: Dict[str, Any],
+) -> Dict[str, Any]:
+    expanded = deepcopy(impacts_section)
+
+    def _normalize_path_like(text: str) -> str:
+        if "://" in text:
+            prefix, rest = text.split("://", 1)
+            rest = re.sub(r"/{2,}", "/", rest)
+            return f"{prefix}://{rest}"
+        return re.sub(r"/{2,}", "/", text)
+
+    def resolve_text(text: str) -> str:
+        updated = text
+        matches = re.findall(r"\$\{([^}]+)\}", updated)
+        for key in matches:
+            replacement = _lookup_dotted(expanded, key) or _lookup_dotted(pilates_settings, key)
+            if replacement is not None:
+                updated = updated.replace(f"${{{key}}}", replacement)
+        matches = re.findall(r"\{([^}]+)\}", updated)
+        for key in matches:
+            replacement = _lookup_dotted(expanded, key) or _lookup_dotted(pilates_settings, key)
+            if replacement is not None:
+                updated = updated.replace(f"{{{key}}}", replacement)
+        return _normalize_path_like(updated)
+
+    for _ in range(5):
+        next_expanded = _deep_update_strings(expanded, resolve_text)
+        if next_expanded == expanded:
+            break
+        expanded = next_expanded
+    return expanded
+
+
+def _find_preferred_file(root: str, names: list[str]) -> Optional[str]:
+    path = Path(root)
+    if not path.exists():
+        return None
+    for name in names:
+        direct = path / name
+        if direct.exists():
+            return str(direct)
+    for name in names:
+        matches = sorted(path.rglob(name))
+        if matches:
+            return str(matches[0])
+    return None
+
+
+def _find_first_matching(root: str, pattern: str) -> Optional[str]:
+    path = Path(root)
+    if not path.exists():
+        return None
+    matches = sorted(path.glob(pattern))
+    if matches:
+        return str(matches[0])
+    recursive = sorted(path.rglob(pattern))
+    if recursive:
+        return str(recursive[0])
+    return None
+
+
+def _resolve_search_root(path_str: str, *source_roots: Optional[str]) -> str:
+    if not path_str:
+        return path_str
+    path = Path(path_str)
+    if path.is_absolute() and path.exists():
+        return str(path)
+    for source_root in source_roots:
+        if not source_root:
+            continue
+        candidate = Path(source_root) / path
+        if candidate.exists():
+            return str(candidate)
+    return path_str
+
+
 def _derive_output_settings(pilates_settings: Dict[str, Any]) -> Dict[str, Any]:
     run = pilates_settings.get("run", {}) or {}
     output_directory = str(run.get("output_directory") or "").strip()
@@ -102,8 +201,13 @@ def _find_latest_iteration_skims(iters_dir: Path) -> Optional[Path]:
     return latest_skims
 
 
-def _derive_beam_inputs(pilates_settings: Dict[str, Any]) -> Dict[str, Any]:
+def _derive_beam_inputs(
+    pilates_settings: Dict[str, Any],
+    impacts_section: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     beam = pilates_settings.get("beam", {}) or {}
+    impacts_section = impacts_section or {}
+    emissions = impacts_section.get("emissions", {}) or {}
     local_input_folder = str(
         beam.get("local_input_folder") or pilates_settings.get("beam_local_input_folder") or ""
     ).strip()
@@ -114,19 +218,72 @@ def _derive_beam_inputs(pilates_settings: Dict[str, Any]) -> Dict[str, Any]:
         beam.get("router_directory") or pilates_settings.get("beam_router_directory") or ""
     ).strip()
     derived: Dict[str, Any] = {}
+    search_roots = [
+        _lookup_dotted(impacts_section, "__source_root__"),
+        _lookup_dotted(pilates_settings, "__source_root__"),
+    ]
 
-    if local_output_folder:
+    simulation_network_folder = str(
+        emissions.get("simulation_network_folder") or local_output_folder or ""
+    ).strip()
+    osm_network_folder = str(
+        emissions.get("osm_network_folder") or impacts_section.get("local_input_folder") or ""
+    ).strip()
+    emissions_rates_folder = str(emissions.get("emissions_rates_folder") or "").strip()
+    simulation_network_folder = _resolve_search_root(simulation_network_folder, *search_roots)
+    osm_network_folder = _resolve_search_root(osm_network_folder, *search_roots)
+    emissions_rates_folder = _resolve_search_root(emissions_rates_folder, *search_roots)
+
+    if simulation_network_folder:
+        beam_network = _find_preferred_file(
+            simulation_network_folder,
+            ["network.csv.gz", "network.parquet"],
+        )
+        if beam_network:
+            derived["beam_network"] = beam_network
+
+    if simulation_network_folder:
+        latest_iters_dir = _find_latest_iters_dir(simulation_network_folder)
+        if latest_iters_dir:
+            latest_skims = _find_latest_iteration_skims(latest_iters_dir)
+            if latest_skims:
+                derived["emissions_skims"] = str(latest_skims)
+        if "emissions_skims" not in derived:
+            fallback_skims = _find_first_matching(
+                simulation_network_folder,
+                "*.skimsEmissionsTotals*.csv.gz",
+            )
+            if fallback_skims:
+                derived["emissions_skims"] = fallback_skims
+
+    if osm_network_folder:
+        osm_pbf = _find_first_matching(osm_network_folder, "*.osm.pbf")
+        if osm_pbf:
+            derived["osm_pbf"] = osm_pbf
+
+    if emissions_rates_folder:
+        derived["rates_dir"] = emissions_rates_folder
+
+    if simulation_network_folder and "beam_network" not in derived:
+        latest_iters_dir = _find_latest_iters_dir(simulation_network_folder)
+        if latest_iters_dir:
+            run_root = latest_iters_dir.parent
+            network_csv = run_root / "network.csv.gz"
+            if network_csv.exists():
+                derived["beam_network"] = str(network_csv)
+
+    if local_output_folder and "beam_network" not in derived:
         latest_iters_dir = _find_latest_iters_dir(local_output_folder)
         if latest_iters_dir:
             run_root = latest_iters_dir.parent
             derived["beam_network"] = str(run_root / "network.csv.gz")
             latest_skims = _find_latest_iteration_skims(latest_iters_dir)
-            if latest_skims:
+            if latest_skims and "emissions_skims" not in derived:
                 derived["emissions_skims"] = str(latest_skims)
         else:
             derived["beam_network"] = _join_path(local_output_folder, "network.csv.gz")
 
-    if local_input_folder and router_directory:
+    if "osm_pbf" not in derived and local_input_folder and router_directory:
         router_path = PurePosixPath(router_directory)
         router_name = router_path.name
         if router_name.endswith(".osm.pbf"):
@@ -198,48 +355,11 @@ def _derive_population_inputs(pilates_settings: Dict[str, Any]) -> Dict[str, Any
     return derived_inputs
 
 
-def _normalize_runtime_overrides(runtime_overrides: Dict[str, Any]) -> Dict[str, Any]:
-    if "processing" in runtime_overrides or "inputs" in runtime_overrides:
-        return runtime_overrides
-
-    emissions = runtime_overrides.get("emissions", {}) or {}
-    dispersions = runtime_overrides.get("dispersions", {}) or {}
-    outputs = runtime_overrides.get("outputs", {}) or {}
-    inmap = dispersions.get("inmap", {}) or {}
-    aermod = dispersions.get("aermod", {}) or {}
-
-    isrm_directory = str(inmap.get("isrm_zarr_directory") or "").strip()
-    isrm_s3bucket = str(inmap.get("isrm_zarr_s3bucket") or "").strip() or None
-    isrm_zarr = None
-    if isrm_directory and Path(isrm_directory).exists():
-        isrm_zarr = isrm_directory
-    else:
-        isrm_zarr = isrm_s3bucket
-
-    normalized = {
-        "emissions": {
-            "annualization_days": emissions.get("annualization_days"),
-            "activity_correction_factors_file": emissions.get("activity_correction_factors_file"),
-            "pollutants": emissions.get("pollutants"),
-        },
-        "dispersions": {
-            "inmap": {
-                "isrm_zarr": isrm_zarr,
-                "grid_path": inmap.get("grid_path"),
-                "grid_epsg": inmap.get("grid_epsg"),
-                "grid_id": inmap.get("grid_id"),
-            },
-            "aermod": {
-                "grid_path": aermod.get("grid_path"),
-                "grid_epsg": aermod.get("grid_epsg"),
-                "grid_id": aermod.get("grid_id"),
-            },
-        },
-        "outputs": {
-            "output_dir": outputs.get("output_dir"),
-        },
-    }
-    return normalized
+def _extract_impacts_overrides(impacts_section: Dict[str, Any]) -> Dict[str, Any]:
+    overrides = dict(impacts_section)
+    overrides.pop("local_input_folder", None)
+    overrides.pop("local_output_folder", None)
+    return overrides
 
 
 def build_runtime_payload_from_pilates(
@@ -248,6 +368,10 @@ def build_runtime_payload_from_pilates(
 ) -> Dict[str, Any]:
     run = pilates_settings.get("run", {}) or {}
     shared = pilates_settings.get("shared", {}) or {}
+    impacts_section = _expand_impacts_placeholders(
+        impacts_overlay.get("impacts", {}) or {},
+        pilates_settings,
+    )
     geography = shared.get("geography", {}) or {}
     legacy_geography = _legacy_geography(pilates_settings)
     if not geography:
@@ -257,13 +381,18 @@ def build_runtime_payload_from_pilates(
     alternative_zones = geography.get("alternative_zones", {}) or {}
     skims = shared.get("skims", {}) or {}
     derived_inputs = _derive_population_inputs(pilates_settings)
-    derived_inputs = _deep_merge(derived_inputs, _derive_beam_inputs(pilates_settings))
-    derived_outputs = _derive_output_settings(pilates_settings)
-
-    impacts_section = impacts_overlay.get("impacts", {}) or {}
-    runtime_overrides = _normalize_runtime_overrides(
-        impacts_section.get("runtime_overrides", {}) or {}
+    derived_inputs = _deep_merge(
+        derived_inputs,
+        _derive_beam_inputs(pilates_settings, impacts_section),
     )
+    impacts_output_dir = str(impacts_section.get("local_output_folder") or "").strip() or None
+    derived_outputs = (
+        {"output_dir": impacts_output_dir}
+        if impacts_output_dir
+        else _derive_output_settings(pilates_settings)
+    )
+
+    impacts_overrides = _extract_impacts_overrides(impacts_section)
 
     derived = {
         "shared": {
@@ -308,7 +437,7 @@ def build_runtime_payload_from_pilates(
         "outputs": derived_outputs,
     }
 
-    return _deep_merge(derived, runtime_overrides)
+    return _deep_merge(derived, impacts_overrides)
 
 
 def derive_runtime_config_from_pilates(
@@ -317,6 +446,8 @@ def derive_runtime_config_from_pilates(
     impacts_model_config_path: str | Path,
     output_path: str | Path | None = None,
 ) -> Dict[str, Any]:
+    from impacts.config.runtime_builder import build_runtime_config_from_pilates
+
     runtime_config = build_runtime_config_from_pilates(
         pilates_settings=pilates_settings_path,
         impacts_overlay=impacts_model_config_path,

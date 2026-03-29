@@ -21,6 +21,7 @@ python -m impacts pipeline --config /path/settings.yaml --workspace /path/worksp
 
 - The default ISRM location is `s3://inmap-model/isrm_v1.2.1.zarr/`.
 - Legacy or exploratory code under `src/impacts/tmp/` is not part of the maintained execution path.
+- A maintained PILATES overlay template lives at [pilates_settings.yaml](/Users/haitamlaarabi/Workspace/Models/inmap-aermod/impacts/src/impacts/adapters/pilates_settings.yaml).
 
 ## PILATES
 

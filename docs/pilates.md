@@ -25,8 +25,9 @@ Meaning:
 The example uses one user-managed settings file:
 
 - `examples/pilates/settings.yaml`
+- `src/impacts/adapters/pilates_settings.yaml` is the maintained starting template for the impacts overlay inside PILATES settings.
 
-That file is PILATES-style source of truth and includes shared run context plus `impacts.runtime_overrides`.
+That file is a thin impacts overlay that lives directly under `impacts`.
 
 During preprocess, `impacts` stages a resolved runtime contract under:
 
@@ -59,27 +60,32 @@ shared:
     local_crs: EPSG:26910
 
 impacts:
-  runtime_overrides:
-    inputs:
-      beam_network: upstream/network.csv.gz
-      emissions_skims: upstream/0.skimsEmissionsTotals_5pct_sample.csv.gz
-      osm_pbf: upstream/sfbay-cbg5500-weakConn-network.osm.pbf
-      activity_corrections: upstream/activity_corrections.csv
+  local_input_folder: upstream/
+  local_output_folder: downstream/
+  emissions:
+    simulation_network_folder: upstream/
+    osm_network_folder: upstream/
+    emissions_rates_folder: upstream/
+    activity_corrections: upstream/activity_corrections.csv
+    annualization_days: 330
+    pollutants:
+      - NH3
+      - NOx
+      - PM2_5
+      - SOx
+      - ROG
+      - BC
+  dispersions:
+    inmap:
       isrm_zarr: s3://inmap-model/isrm_v1.2.1.zarr/
-    processing:
-      annualization_days: 330
-      pollutants:
-        - NH3
-        - NOx
-        - PM2_5
-        - SOx
-        - ROG
-        - BCh
-      grid:
-        inmap_grid_path: upstream/isrm_polygon/isrm_polygon.shp
-        inmap_grid_id: isrm
-    outputs:
-      output_dir: downstream
+      isrm_nox_to_no2_matrix_npz: '{local_input_folder}/nox_to_no2_full_isrm_matrix.npz'
+      grid_path: '{local_input_folder}/isrm_polygon/isrm_polygon.shp'
+      grid_id: isrm
+      grid_epsg:
+    aermod:
+      grid_path:
+      grid_epsg:
+      grid_id:
 ```
 
 ## Running the example

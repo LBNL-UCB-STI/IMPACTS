@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 import sys
 import time
+from typing import Any
 from typing import Optional
 
 import geopandas as gpd
@@ -13,8 +14,9 @@ import pandas as pd
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
-from ..config.defaults import DEFAULT_TONS_PER_YEAR_TO_UG_PER_S
-from ..config.defaults import DEFAULT_DISPERSION_EMISSIONS_COLUMNS as DEFAULT_EMISSIONS_COLUMNS
+from ..config.defaults import concentrations
+from ..config.defaults import pollutants as default_pollutants
+from ..config.defaults import tons_per_year_to_ug_per_s
 from ..manifest.schema import PipelineConfig
 
 logger = logging.getLogger(__name__)
@@ -102,6 +104,43 @@ def _read_rdata(path: str) -> dict[str, object]:
     return pyreadr.read_r(path)
 
 
+def _read_sparse_transfer_matrix_npz(path: str) -> dict[str, np.ndarray | int]:
+    fields = ["source_ids", "receptor_ids", "values", "source_dim", "receptor_dim"]
+    progress = tqdm(
+        total=len(fields),
+        desc="Loading NOx->NO2 npz",
+        unit="field",
+        dynamic_ncols=True,
+        file=sys.stdout,
+        leave=True,
+    )
+    try:
+        with np.load(path) as data:
+            required = set(fields)
+            missing = required.difference(data.files)
+            if missing:
+                raise ValueError(f"Sparse NOx transfer matrix {path} is missing fields {sorted(missing)}")
+            source_ids = np.asarray(data["source_ids"], dtype=np.int64)
+            progress.update(1)
+            receptor_ids = np.asarray(data["receptor_ids"], dtype=np.int64)
+            progress.update(1)
+            values = np.asarray(data["values"], dtype=np.float64)
+            progress.update(1)
+            source_dim = int(np.asarray(data["source_dim"]).item())
+            progress.update(1)
+            receptor_dim = int(np.asarray(data["receptor_dim"]).item())
+            progress.update(1)
+    finally:
+        progress.close()
+    return {
+        "source_ids": source_ids,
+        "receptor_ids": receptor_ids,
+        "values": values,
+        "source_dim": source_dim,
+        "receptor_dim": receptor_dim,
+    }
+
+
 def _read_square_transfer_matrix(path: str) -> pd.DataFrame:
     lower = path.lower()
     if lower.endswith(".parquet"):
@@ -127,17 +166,82 @@ def _read_square_transfer_matrix(path: str) -> pd.DataFrame:
     return df.apply(pd.to_numeric, errors="coerce").fillna(0.0)
 
 
+def _canonical_pollutant_from_emissions_column(column_name: str) -> str:
+    pollutant = column_name.removeprefix("tons_per_year_")
+    if pollutant.endswith("_inmap_allocated"):
+        pollutant = pollutant.removesuffix("_inmap_allocated")
+    return pollutant
+
+
+def _expected_emissions_columns(pollutants_map: Optional[dict[str, str]] = None) -> list[str]:
+    canonical_pollutants = list((pollutants_map or {}).keys()) or list(default_pollutants)
+    ordered_pollutants = [pollutant for pollutant in default_pollutants if pollutant in canonical_pollutants]
+    return [f"tons_per_year_{pollutant}" for pollutant in ordered_pollutants]
+
+
+def _concentration_specs() -> dict[str, dict[str, str]]:
+    return {
+        "SOA": {
+            "output": "SOA",
+            "pollutant": "ROG",
+            "zarr": "SOA",
+            "emissions": "tons_per_year_ROG",
+        },
+        "pNO3": {
+            "output": "pNO3",
+            "pollutant": "NOx",
+            "zarr": "pNO3",
+            "emissions": "tons_per_year_NOx",
+        },
+        "pNH4": {
+            "output": "pNH4",
+            "pollutant": "NH3",
+            "zarr": "pNH4",
+            "emissions": "tons_per_year_NH3",
+        },
+        "pSO4": {
+            "output": "pSO4",
+            "pollutant": "SOx",
+            "zarr": "pSO4",
+            "emissions": "tons_per_year_SOx",
+        },
+        "PrimaryPM25": {
+            "output": "PrimaryPM25",
+            "pollutant": "PM2_5",
+            "zarr": "PrimaryPM25",
+            "emissions": "tons_per_year_PM2_5",
+        },
+        "BC": {
+            "output": "BC",
+            "pollutant": "BC",
+            "zarr": "PrimaryPM25",
+            "emissions": "tons_per_year_BC",
+        },
+        "NO2": {
+            "output": "NO2",
+            "pollutant": "NOx",
+            "zarr": "NO2",
+            "emissions": "tons_per_year_NOx",
+        },
+    }
+
+
 def _build_no2_transfer_matrix(
     *,
-    isrm_nox_to_no2_matrix_path: Optional[str],
-) -> Optional[pd.DataFrame]:
-    if isrm_nox_to_no2_matrix_path:
-        matrix = _read_square_transfer_matrix(isrm_nox_to_no2_matrix_path)
+    isrm_nox_to_no2_matrix_npz_path: Optional[str],
+) -> Optional[Any]:
+    if isrm_nox_to_no2_matrix_npz_path:
+        if isrm_nox_to_no2_matrix_npz_path.lower().endswith(".npz"):
+            matrix = _read_sparse_transfer_matrix_npz(isrm_nox_to_no2_matrix_npz_path)
+            shape = (matrix["source_dim"], matrix["receptor_dim"])
+        else:
+            matrix = _read_square_transfer_matrix(isrm_nox_to_no2_matrix_npz_path)
+            shape = matrix.shape
         logger.info(
             "%s loaded NOx->NO2 transfer matrix from %s shape=%s",
             _step_label(5, "2"),
-            isrm_nox_to_no2_matrix_path,
-            matrix.shape,
+            isrm_nox_to_no2_matrix_npz_path,
+            shape,
         )
         return matrix
 
@@ -146,7 +250,7 @@ def _build_no2_transfer_matrix(
 
 def _compute_custom_receptor_response(
     *,
-    transfer_matrix: pd.DataFrame,
+    transfer_matrix: Any,
     emissions_key: str,
     source_cells: np.ndarray,
     source_indexed: pd.DataFrame,
@@ -163,12 +267,34 @@ def _compute_custom_receptor_response(
         int(source_cells.size),
     )
     _trace_array("2", f"{result_key}.source_values", source_values)
-    aligned = transfer_matrix.reindex(index=source_cells, fill_value=0.0)
-    response_subset = aligned.to_numpy().T.dot(source_values)
     response = np.zeros(receptor_dim, dtype=float)
-    receptor_ids = np.asarray(aligned.columns, dtype=int)
-    valid = (receptor_ids >= 0) & (receptor_ids < receptor_dim)
-    response[receptor_ids[valid]] = response_subset[valid]
+
+    if isinstance(transfer_matrix, pd.DataFrame):
+        aligned = transfer_matrix.reindex(index=source_cells, fill_value=0.0)
+        response_subset = aligned.to_numpy().T.dot(source_values)
+        receptor_ids = np.asarray(aligned.columns, dtype=int)
+        valid = (receptor_ids >= 0) & (receptor_ids < receptor_dim)
+        response[receptor_ids[valid]] = response_subset[valid]
+    else:
+        triplet_sources = np.asarray(transfer_matrix["source_ids"], dtype=np.int64)
+        triplet_receptors = np.asarray(transfer_matrix["receptor_ids"], dtype=np.int64)
+        triplet_values = np.asarray(transfer_matrix["values"], dtype=np.float64)
+        source_positions = np.searchsorted(source_cells, triplet_sources)
+        in_bounds = (source_positions >= 0) & (source_positions < source_cells.size)
+        source_valid = np.zeros_like(in_bounds, dtype=bool)
+        if np.any(in_bounds):
+            bounded_positions = source_positions[in_bounds]
+            source_valid[in_bounds] = source_cells[bounded_positions] == triplet_sources[in_bounds]
+        receptor_valid = (triplet_receptors >= 0) & (triplet_receptors < receptor_dim)
+        valid = source_valid & receptor_valid
+        if np.any(valid):
+            weights = triplet_values[valid] * source_values[source_positions[valid]]
+            response = np.bincount(
+                triplet_receptors[valid],
+                weights=weights,
+                minlength=receptor_dim,
+            ).astype(float, copy=False)
+
     logger.info(
         "%s computed %s in %.2fs",
         _step_label(5, "2"),
@@ -179,21 +305,33 @@ def _compute_custom_receptor_response(
     return response
 
 
-def _prepare_grid_emissions(emissions_df: pd.DataFrame) -> pd.DataFrame:
+def _prepare_grid_emissions(
+    emissions_df: pd.DataFrame,
+    pollutants_map: Optional[dict[str, str]] = None,
+) -> tuple[pd.DataFrame, set[str]]:
     """Normalize emissions to ISRM input species and aggregate by grid."""
     _trace_frame("0", "raw_emissions", emissions_df, key_cols=["inmap_srm_cell_id"])
     if "inmap_srm_cell_id" not in emissions_df.columns:
         raise ValueError("No grid id column found. Expected inmap_srm_cell_id")
 
-    emission_cols = [c for c in DEFAULT_EMISSIONS_COLUMNS if c != "inmap_srm_cell_id"]
+    emission_cols = _expected_emissions_columns(pollutants_map)
     source_column_map: dict[str, str] = {}
+    resolved_pollutants_map = pollutants_map or {}
     for col in emission_cols:
-        if col in emissions_df.columns:
-            source_column_map[col] = col
-            continue
-        labeled = f"{col}_inmap_allocated"
-        if labeled in emissions_df.columns:
-            source_column_map[col] = labeled
+        canonical_pollutant = _canonical_pollutant_from_emissions_column(col)
+        source_pollutant = resolved_pollutants_map.get(canonical_pollutant, canonical_pollutant)
+        candidates = [col, f"{col}_inmap_allocated"]
+        if source_pollutant != canonical_pollutant:
+            candidates.extend(
+                [
+                    f"tons_per_year_{source_pollutant}",
+                    f"tons_per_year_{source_pollutant}_inmap_allocated",
+                ]
+            )
+        for candidate in candidates:
+            if candidate in emissions_df.columns:
+                source_column_map[col] = candidate
+                break
 
     df = emissions_df.copy()
     df["GRID"] = pd.to_numeric(df["inmap_srm_cell_id"], errors="coerce")
@@ -208,9 +346,15 @@ def _prepare_grid_emissions(emissions_df: pd.DataFrame) -> pd.DataFrame:
             df[col] = pd.to_numeric(df[source_col], errors="coerce").fillna(0.0)
 
     grouped = df.groupby("GRID", dropna=False)[emission_cols].sum().reset_index()
+    available_pollutants = {
+        _canonical_pollutant_from_emissions_column(col)
+        for col, source_col in source_column_map.items()
+        if source_col is not None
+    }
     logger.info("%s trace source_column_map=%s", _step_label(5, "0"), source_column_map)
     _trace_frame("0", "prepared_grid_emissions", grouped, key_cols=["GRID"])
-    return grouped
+    logger.info("%s trace available_source_pollutants=%s", _step_label(5, "0"), sorted(available_pollutants))
+    return grouped, available_pollutants
 
 
 def _matrix_response(sr, species_key: str, source_cells: np.ndarray, source_values: np.ndarray) -> np.ndarray:
@@ -286,7 +430,7 @@ def _compute_no2_response(
     source_cells: np.ndarray,
     source_indexed: pd.DataFrame,
     receptor_dim: int,
-    isrm_nox_to_no2_matrix_path: Optional[str],
+    isrm_nox_to_no2_matrix_npz_path: Optional[str],
 ) -> Optional[np.ndarray]:
     logger.info("%s resolving NO2 source from ISRM zarr or configured fallback matrix", _step_label(5, "1"))
     if "NO2" in sr:
@@ -300,7 +444,7 @@ def _compute_no2_response(
         )
 
     no2_transfer_matrix = _build_no2_transfer_matrix(
-        isrm_nox_to_no2_matrix_path=isrm_nox_to_no2_matrix_path,
+        isrm_nox_to_no2_matrix_npz_path=isrm_nox_to_no2_matrix_npz_path,
     )
     if no2_transfer_matrix is None:
         logger.info(
@@ -322,46 +466,9 @@ def _compute_no2_response(
 
 def _has_no2_fallback_matrix(
     *,
-    isrm_nox_to_no2_matrix_path: Optional[str],
+    isrm_nox_to_no2_matrix_npz_path: Optional[str],
 ) -> bool:
-    return bool(isrm_nox_to_no2_matrix_path)
-
-
-def _warn_missing_requested_concentrations(
-    *,
-    requested_pollutants: list[str],
-    sr,
-    isrm_nox_to_no2_matrix_path: Optional[str],
-) -> None:
-    species_requirements = {
-        "ROG": ["SOA"],
-        "NH3": ["pNH4"],
-        "SOx": ["pSO4"],
-        "PM2_5": ["PrimaryPM25"],
-        "BCh": ["PrimaryPM25"],
-        "NOx": ["pNO3"],
-    }
-    requested = [pollutant for pollutant in requested_pollutants if pollutant]
-    for pollutant in requested:
-        for species_key in species_requirements.get(pollutant, []):
-            if species_key not in sr:
-                logger.warning(
-                    "%s requested pollutant %s is missing required concentration source %s in ISRM zarr",
-                    _step_label(5, "1"),
-                    pollutant,
-                    species_key,
-                )
-
-        if pollutant == "NOx":
-            has_no2 = "NO2" in sr or _has_no2_fallback_matrix(
-                isrm_nox_to_no2_matrix_path=isrm_nox_to_no2_matrix_path,
-            )
-            if not has_no2:
-                logger.warning(
-                    "%s requested pollutant NOx has no NO2 concentration source: ISRM zarr has no NO2 and "
-                    "no isrm_nox_to_no2_matrix fallback was configured",
-                    _step_label(5, "1"),
-                )
+    return bool(isrm_nox_to_no2_matrix_npz_path)
 
 
 def _read_receptor_vector(sr, key: str, receptor_dim: int) -> np.ndarray:
@@ -403,20 +510,15 @@ def _assemble_concentration_results(
             f"{_step_label(5, '3')} produced mismatched receptor lengths: expected {receptor_dim}, got {bad}"
         )
 
-    results = pd.DataFrame(
-        {
-            "GRID": np.arange(receptor_dim, dtype=int),
-            "SOA": factor * arrays["SOA"],
-            "pNO3": factor * arrays["pNO3"],
-            "pNH4": factor * arrays["pNH4"],
-            "pSO4": factor * arrays["pSO4"],
-            "PrimaryPM25": factor * arrays["PrimaryPM25"],
-            "BCh": factor * arrays["BCh"],
-            "TotalPM25": factor * arrays["TotalPM25"],
-        }
-    )
-    if "NO2" in arrays:
-        results["NO2"] = factor * arrays["NO2"]
+    results = pd.DataFrame({"GRID": np.arange(receptor_dim, dtype=int)})
+    ordered_output_keys = [
+        _concentration_specs()[name]["output"]
+        for name in concentrations
+        if name in _concentration_specs()
+    ] + ["TotalPM25"]
+    for output_key in ordered_output_keys:
+        if output_key in arrays:
+            results[output_key] = factor * arrays[output_key]
 
     _trace_frame("3", "concentrations", results, key_cols=["GRID"])
     return results
@@ -474,16 +576,17 @@ def compute_isrm_concentrations(
     grid_emissions_df: pd.DataFrame,
     sr,
     factor: float,
-    request_no2: bool = True,
-    isrm_nox_to_no2_matrix_path: Optional[str] = None,
+    requested_pollutants: list[str],
+    isrm_nox_to_no2_matrix_npz_path: Optional[str] = None,
+    pollutants_map: Optional[dict[str, str]] = None,
 ) -> pd.DataFrame:
     logger.info(
-        "%s trace compute_start factor=%s bch_required=%s",
+        "%s trace compute_start factor=%s bc_required=%s",
         _step_label(5, "0"),
         factor,
         True,
     )
-    emis = _prepare_grid_emissions(grid_emissions_df)
+    emis, available_pollutants = _prepare_grid_emissions(grid_emissions_df, pollutants_map=pollutants_map)
     if emis.empty:
         raise ValueError("No emissions rows found after GRID normalization.")
 
@@ -492,55 +595,93 @@ def compute_isrm_concentrations(
         raise ValueError("No emissions source cells remain after ISRM source alignment.")
     receptor_dim = int(sr["SOA"].shape[2])
 
-    species_plan = [
-        ("SOA", "tons_per_year_ROG", "SOA"),
-        ("pNO3", "tons_per_year_NOx", "pNO3"),
-        ("pNH4", "tons_per_year_NH3", "pNH4"),
-        ("pSO4", "tons_per_year_SOx", "pSO4"),
-        ("PrimaryPM25", "tons_per_year_PM2_5", "PrimaryPM25"),
-    ]
+    requested_pollutant_set = set(requested_pollutants)
+    specs = _concentration_specs()
     arrays: dict[str, np.ndarray] = {}
+    concentration_plan: list[tuple[str, dict[str, str]]] = []
+    for concentration_name in concentrations:
+        spec = specs.get(concentration_name)
+        if spec is None:
+            logger.warning(
+                "%s concentration %s is listed in defaults.concentrations but has no computation spec",
+                _step_label(5, "1"),
+                concentration_name,
+            )
+            continue
+        concentration_output = spec["output"]
+        required_pollutant = spec["pollutant"]
+        if required_pollutant not in requested_pollutant_set:
+            continue
+        if required_pollutant not in available_pollutants:
+            logger.warning(
+                "%s requested pollutant %s is missing source emissions needed for concentration %s",
+                _step_label(5, "1"),
+                required_pollutant,
+                concentration_output,
+            )
+            continue
+        if concentration_output == "NO2":
+            has_no2 = "NO2" in sr or _has_no2_fallback_matrix(
+                isrm_nox_to_no2_matrix_npz_path=isrm_nox_to_no2_matrix_npz_path,
+            )
+            if not has_no2:
+                logger.warning(
+                    "%s requested pollutant NOx has no NO2 concentration source: ISRM zarr has no NO2 and "
+                    "no isrm_nox_to_no2_matrix_npz fallback was configured",
+                    _step_label(5, "1"),
+                )
+                continue
+        elif spec["zarr"] not in sr:
+            logger.warning(
+                "%s requested pollutant %s is missing required concentration source %s in ISRM zarr",
+                _step_label(5, "1"),
+                required_pollutant,
+                concentration_output,
+            )
+            continue
+        concentration_plan.append((concentration_name, spec))
+
     with logging_redirect_tqdm():
-        for species_key, emissions_key, result_key in tqdm(
-            species_plan,
+        for concentration_name, spec in tqdm(
+            concentration_plan,
             desc="Step 5.2 pollutant responses",
             unit="species",
             file=sys.stdout,
             dynamic_ncols=True,
             leave=True,
         ):
-            arrays[result_key] = _compute_species_response(
+            concentration_output = spec["output"]
+            if concentration_output == "NO2":
+                no2_response = _compute_no2_response(
+                    sr=sr,
+                    source_cells=source_cells,
+                    source_indexed=source_indexed,
+                    receptor_dim=receptor_dim,
+                    isrm_nox_to_no2_matrix_npz_path=isrm_nox_to_no2_matrix_npz_path,
+                )
+                if no2_response is not None:
+                    arrays["NO2"] = no2_response
+                continue
+
+            arrays[concentration_output] = _compute_species_response(
                 sr=sr,
-                species_key=species_key,
-                emissions_key=emissions_key,
+                species_key=spec["zarr"],
+                emissions_key=spec["emissions"],
                 source_cells=source_cells,
                 source_indexed=source_indexed,
             )
 
-    arrays["TotalPM25"] = (
-        arrays["SOA"] + arrays["pNO3"] + arrays["pNH4"] + arrays["pSO4"] + arrays["PrimaryPM25"]
-    )
-    _trace_array("2", "TotalPM25.pre_bc", arrays["TotalPM25"])
-    arrays["BCh"] = _compute_species_response(
-        sr=sr,
-        species_key="PrimaryPM25",
-        emissions_key="tons_per_year_BCh",
-        source_cells=source_cells,
-        source_indexed=source_indexed,
-    )
-    arrays["TotalPM25"] = arrays["TotalPM25"] + arrays["BCh"]
-    _trace_array("2", "TotalPM25.post_bc", arrays["TotalPM25"])
-
-    if request_no2:
-        no2_response = _compute_no2_response(
-            sr=sr,
-            source_cells=source_cells,
-            source_indexed=source_indexed,
-            receptor_dim=receptor_dim,
-            isrm_nox_to_no2_matrix_path=isrm_nox_to_no2_matrix_path,
+    total_pm_components = ["SOA", "pNO3", "pNH4", "pSO4", "PrimaryPM25", "BC"]
+    missing_total_pm_components = [component for component in total_pm_components if component not in arrays]
+    if missing_total_pm_components:
+        logger.warning(
+            "%s TotalPM25 was not calculated because required concentration components are missing: %s",
+            _step_label(5, "2"),
+            missing_total_pm_components,
         )
-        if no2_response is not None:
-            arrays["NO2"] = no2_response
+    else:
+        arrays["TotalPM25"] = sum(arrays[component] for component in total_pm_components)
+        _trace_array("2", "TotalPM25", arrays["TotalPM25"])
 
     return _assemble_concentration_results(
         sr=sr,
@@ -559,7 +700,7 @@ def run(
     if not pipeline.isrm_url:
         raise ValueError(
             "isrm_url must be configured. "
-            "Set dispersions.inmap.isrm_zarr (or isrm_zarr_directory / isrm_zarr_s3bucket) in runtime.yaml."
+            "Set impacts.dispersions.inmap.isrm_zarr in settings.yaml."
         )
 
     logger.info("%s loading BEAM emissions for InMAP from %s", _step_label(5, "0"), emissions_input_path)
@@ -588,18 +729,13 @@ def run(
         getattr(sr["TotalPop"], "shape", None) if "TotalPop" in sr else None,
         getattr(sr["MortalityRate"], "shape", None) if "MortalityRate" in sr else None,
     )
-    _warn_missing_requested_concentrations(
-        requested_pollutants=pipeline.pollutants,
-        sr=sr,
-        isrm_nox_to_no2_matrix_path=pipeline.isrm_nox_to_no2_matrix_path,
-    )
-
     concentrations = compute_isrm_concentrations(
         grid_emissions_df=emissions_df,
         sr=sr,
-        factor=float(pipeline.concentration_factor or DEFAULT_TONS_PER_YEAR_TO_UG_PER_S),
-        request_no2="NOx" in set(pipeline.pollutants),
-        isrm_nox_to_no2_matrix_path=pipeline.isrm_nox_to_no2_matrix_path,
+        factor=float(pipeline.concentration_factor or tons_per_year_to_ug_per_s),
+        requested_pollutants=pipeline.pollutants,
+        isrm_nox_to_no2_matrix_npz_path=pipeline.isrm_nox_to_no2_matrix_npz_path,
+        pollutants_map=pipeline.pollutants_map,
     )
     output_path = raw_dir / "beam_inmap_concentrations.parquet"
     beam_inmap_concentrations_gdf = _build_beam_inmap_concentrations_gdf(

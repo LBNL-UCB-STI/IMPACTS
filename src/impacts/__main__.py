@@ -77,10 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     build_nox_to_no2 = subparsers.add_parser(
         "build_nox_to_no2",
-        help="Run the one-off NOx-to-NO2 preprocessing utility.",
+        help="Build the workflow-ready full-domain NOx-to-NO2 matrix artifact.",
     )
     build_nox_to_no2.add_argument("--input-dir", required=True)
     build_nox_to_no2.add_argument("--output-dir", required=True)
+    build_nox_to_no2.add_argument("--isrm-zarr")
+    build_nox_to_no2.add_argument("--output-name")
 
     return parser
 
@@ -179,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "sample_events":
-        from impacts.utils.utils_sampling import sample_events_by_vehicle
+        from impacts.utils.sample_beam_output import sample_events_by_vehicle
 
         sample_events_by_vehicle(
             input_path=args.input,
@@ -191,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "sample_skims":
-        from impacts.utils.utils_sampling import sample_skims_by_fraction
+        from impacts.utils.sample_beam_output import sample_skims_by_fraction
 
         sample_skims_by_fraction(
             input_path=args.input,
@@ -204,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "rdata_to_parquet":
-        from impacts.utils.rdata_util import rdata_to_parquet
+        from impacts.utils.rdata_conversion import rdata_to_parquet
 
         written = rdata_to_parquet(
             input_path=args.input,
@@ -216,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "build_nox_to_no2":
-        from impacts.utils.isrm_nox_to_no2 import main as build_nox_to_no2_main
+        from impacts.utils.build_complete_nox_to_no2_matrix import main as build_nox_to_no2_main
 
         build_nox_to_no2_main(
             [
@@ -224,6 +226,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.input_dir,
                 "--output-dir",
                 args.output_dir,
+                *(["--isrm-zarr", args.isrm_zarr] if args.isrm_zarr else []),
+                *(["--output-name", args.output_name] if args.output_name else []),
             ]
         )
         return 0

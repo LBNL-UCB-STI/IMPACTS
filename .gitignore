@@ -50,6 +50,8 @@ dist/
 sdist/
 cover/
 MANIFEST
+!src/impacts/manifest/
+!src/impacts/manifest/*.py
 pip-wheel-metadata/
 *.egg
 .eggs/

@@ -8,9 +8,6 @@ from typing import Dict, Iterable, List, Optional
 
 import pandas as pd
 
-from impacts.config.defaults import DEFAULT_BEAM_NETWORK_COLUMNS
-from impacts.config.defaults import DEFAULT_EVENTS_COLUMNS
-
 REQUIRED_EVENT_COLS = [
     "type",
     "vehicle",
@@ -19,6 +16,12 @@ REQUIRED_EVENT_COLS = [
     "links",
     "linkTravelTime",
     "length",
+]
+
+BEAM_NETWORK_COLS = [
+    "linkId",
+    "linkLength",
+    "attributeOrigId",
 ]
 
 SKIMS_COLS = [
@@ -144,7 +147,7 @@ def _serialize_emissions(row: pd.Series, pollutant_cols: Iterable[str]) -> str:
 def read_events(events_path: str) -> pd.DataFrame:
     p = events_path.lower()
     compression = "gzip" if p.endswith(".gz") else None
-    return pd.read_csv(events_path, usecols=DEFAULT_EVENTS_COLUMNS, compression=compression)
+    return pd.read_csv(events_path, usecols=REQUIRED_EVENT_COLS, compression=compression)
 
 
 def _build_path_traversal_rows(events: pd.DataFrame, link_lengths_m: Optional[Dict[int, float]] = None) -> pd.DataFrame:
@@ -360,7 +363,7 @@ def build_skims_emissions_from_events(
         net = pd.read_csv(
             network_path,
             compression=compression,
-            usecols=DEFAULT_BEAM_NETWORK_COLUMNS,
+            usecols=BEAM_NETWORK_COLS,
         )
         link_lengths_m = dict(zip(net["linkId"].astype(int), net["linkLength"].astype(float)))
 

@@ -2,8 +2,6 @@ run:
   region: sfbay
   scenario: base
   start_year: 2017
-  models:
-    impacts: impacts
 
 shared:
   geography:
@@ -22,30 +20,31 @@ shared:
     local_crs: EPSG:26910
 
 impacts:
-  runtime_overrides:
-    inputs:
-      beam_network: upstream/network.csv.gz
-      emissions_skims: upstream/0.skimsEmissionsTotals_5pct_sample.csv.gz
-      osm_pbf: upstream/sfbay-cbg5500-weakConn-network.osm.pbf
-      activity_corrections: upstream/activity_corrections.csv
-    processing:
-      annualization_days: 330
-      pollutants:
-        - NH3
-        - NOx
-        - PM2_5
-        - SOx
-        - ROG
-        - BCh
-      inmap:
-        isrm_zarr: ~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr
-        isrm_nox_to_no2_matrix: upstream/nox_to_no2_full_isrm_matrix.parquet
-        grid_path: upstream/isrm_polygon/isrm_polygon.shp
-        grid_epsg:
-        grid_id: isrm
-      aermod:
-        grid_path:
-        grid_epsg:
-        grid_id:
-    outputs:
-      output_dir: downstream
+  local_input_folder: upstream/
+  local_output_folder: downstream/
+  emissions:
+    simulation_network_folder: upstream/
+    osm_network_folder: upstream/
+    emissions_rates_folder: upstream/
+    activity_corrections: upstream/activity_corrections.csv
+    annualization_days: 330
+    pollutants:
+      - NH3
+      - NOx
+      - PM2_5
+      - SOx
+      - ROG
+      - BC
+    pollutants_map:
+      BC: BCh
+  dispersions:
+    inmap:
+      isrm_zarr: ~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr
+      isrm_nox_to_no2_matrix_npz: {local_input_folder}/nox_to_no2_full_isrm_matrix.npz
+      grid_path: {local_input_folder}/isrm_polygon/isrm_polygon.shp
+      grid_id: isrm
+      grid_epsg:
+    aermod:
+      grid_path:
+      grid_epsg:
+      grid_id:

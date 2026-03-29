@@ -37,8 +37,8 @@ def run(pipeline: PipelineConfig, raw_dir: Path) -> Tuple[pd.DataFrame, Path]:
 
     Returns (skims_df, skims_path).
     """
-    from impacts.utils.utils_emissions_grid_mapping import annualize_skims
-    from impacts.utils.utils_emissions_grid_mapping import read_skims_emissions
+    from impacts.workflow.step4_emissions_distribution import annualize_skims
+    from impacts.workflow.step4_emissions_distribution import read_skims_emissions
     from impacts.utils.utils_events_to_skims_emissions import build_skims_emissions_from_events
     from impacts.utils.utils_events_to_skims_emissions import write_skims_emissions
 
@@ -78,7 +78,8 @@ def run(pipeline: PipelineConfig, raw_dir: Path) -> Tuple[pd.DataFrame, Path]:
         logger.info("Step 1.1: skims already available at %s", skims_path)
 
     # Step 1.2: load, filter to pollutants, annualize
-    pollutants = list(pipeline.pollutants) if pipeline.pollutants else None
+    source_pollutants = list(pipeline.pollutants_map.values()) if pipeline.pollutants_map else list(pipeline.pollutants)
+    pollutants = source_pollutants if source_pollutants else None
     if skims_df is None:
         logger.info("Step 1.2: loading skims from %s", skims_path)
         load_pollutants = None if using_prepared_skims else pollutants

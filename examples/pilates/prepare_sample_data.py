@@ -11,8 +11,8 @@ SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from impacts.sampling import sample_events_by_vehicle
-from impacts.sampling import sample_skims_by_fraction
+from impacts.utils.utils_sampling import sample_events_by_vehicle
+from impacts.utils.utils_sampling import sample_skims_by_fraction
 
 
 def build_parser() -> argparse.ArgumentParser:

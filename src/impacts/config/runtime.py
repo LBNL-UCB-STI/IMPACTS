@@ -9,6 +9,8 @@ from typing import Dict
 from typing import List
 from typing import Optional
 
+from .defaults import pollutants
+
 
 def _required_string(value: Any, label: str) -> str:
     text = str(value or "").strip()
@@ -59,6 +61,41 @@ def _coerce_string_list(value: Any) -> List[str]:
     return [str(value).strip()] if str(value).strip() else []
 
 
+def _coerce_string_map(value: Any) -> Dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    resolved: Dict[str, str] = {}
+    for key, mapped in value.items():
+        key_text = str(key).strip()
+        mapped_text = str(mapped).strip()
+        if key_text and mapped_text:
+            resolved[key_text] = mapped_text
+    return resolved
+
+
+def _build_pollutants_map(pollutants_value: Any, pollutants_map_value: Any) -> Dict[str, str]:
+    configured_pollutants = _coerce_string_list(pollutants_value) or list(pollutants)
+    if len(configured_pollutants) > len(pollutants):
+        raise ValueError(
+            "processing.pollutants cannot contain more entries than defaults.pollutants "
+            f"({len(pollutants)}): got {len(configured_pollutants)}"
+        )
+
+    mapping = {
+        canonical: configured
+        for canonical, configured in zip(pollutants, configured_pollutants)
+    }
+    explicit_map = _coerce_string_map(pollutants_map_value)
+    for canonical, configured in explicit_map.items():
+        if canonical not in pollutants:
+            raise ValueError(
+                f"processing.pollutants_map contains unsupported canonical pollutant '{canonical}'. "
+                f"Expected one of {pollutants}"
+            )
+        mapping[canonical] = configured
+    return mapping
+
+
 def _normalize_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if "shared" in payload and "shared_context" not in payload:
         payload = dict(payload)
@@ -67,35 +104,55 @@ def _normalize_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     emissions = payload.get("emissions", {}) or {}
     dispersions = payload.get("dispersions", {}) or {}
     processing_payload = payload.get("processing", {}) or {}
+    processing_emissions = processing_payload.get("emissions", {}) or {}
+    processing_dispersions = processing_payload.get("dispersions", {}) or {}
     outputs = payload.get("outputs", {}) or {}
     inmap = dispersions.get("inmap", {}) or {}
     aermod = dispersions.get("aermod", {}) or {}
+    processing_dispersion_inmap = processing_dispersions.get("inmap", {}) or {}
+    processing_dispersion_aermod = processing_dispersions.get("aermod", {}) or {}
     processing_inmap = processing_payload.get("inmap", {}) or {}
     processing_aermod = processing_payload.get("aermod", {}) or {}
     inputs = dict(payload.get("inputs", {}) or {})
 
-    if "activity_corrections" not in inputs and emissions.get("activity_correction_factors_file") is not None:
-        inputs["activity_corrections"] = emissions.get("activity_correction_factors_file")
+    if "activity_corrections" not in inputs:
+        inputs["activity_corrections"] = (
+            _optional_string(processing_emissions.get("activity_corrections"))
+            or _optional_string(emissions.get("activity_corrections"))
+            or _optional_string(emissions.get("activity_correction_factors_file"))
+        )
     isrm_directory = _optional_string(inmap.get("isrm_zarr_directory"))
     isrm_s3bucket = _optional_string(inmap.get("isrm_zarr_s3bucket"))
-    isrm_direct = _optional_string(inmap.get("isrm_zarr")) or _optional_string(processing_inmap.get("isrm_zarr"))
-    isrm_nox_to_no2_matrix = _optional_string(inmap.get("isrm_nox_to_no2_matrix")) or _optional_string(
-        processing_inmap.get("isrm_nox_to_no2_matrix")
+    isrm_direct = (
+        _optional_string(inmap.get("isrm_zarr"))
+        or _optional_string(processing_dispersion_inmap.get("isrm_zarr"))
+        or _optional_string(processing_inmap.get("isrm_zarr"))
     )
+    isrm_nox_to_no2_matrix_npz = _optional_string(inmap.get("isrm_nox_to_no2_matrix_npz")) or _optional_string(
+        processing_dispersion_inmap.get("isrm_nox_to_no2_matrix_npz")
+    ) or _optional_string(processing_inmap.get("isrm_nox_to_no2_matrix_npz"))
     if "isrm_zarr" not in inputs:
         if isrm_directory and Path(isrm_directory).exists():
             inputs["isrm_zarr"] = isrm_directory
         else:
             inputs["isrm_zarr"] = isrm_direct or isrm_s3bucket or isrm_directory
-    if "isrm_nox_to_no2_matrix" not in inputs:
-        inputs["isrm_nox_to_no2_matrix"] = isrm_nox_to_no2_matrix
+    if "isrm_nox_to_no2_matrix_npz" not in inputs:
+        inputs["isrm_nox_to_no2_matrix_npz"] = isrm_nox_to_no2_matrix_npz
 
     if "processing" in payload:
         normalized = dict(payload)
         normalized["inputs"] = inputs
         processing = dict(normalized.get("processing", {}) or {})
-        inmap_processing = dict(processing_inmap)
-        aermod_processing = dict(processing_aermod)
+        emissions_processing = dict(processing_emissions)
+        dispersions_processing = dict(processing_dispersions)
+        inmap_processing = dict(dispersions_processing.get("inmap", {}) or processing_inmap)
+        aermod_processing = dict(dispersions_processing.get("aermod", {}) or processing_aermod)
+        if "annualization_days" not in processing:
+            processing["annualization_days"] = emissions_processing.get("annualization_days")
+        if "pollutants" not in processing:
+            processing["pollutants"] = emissions_processing.get("pollutants")
+        if "pollutants_map" not in processing:
+            processing["pollutants_map"] = emissions_processing.get("pollutants_map")
         if "grid" not in processing:
             processing["grid"] = {
                 "inmap_grid_path": inmap_processing.get("grid_path"),
@@ -108,8 +165,10 @@ def _normalize_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         if "mapping_columns" not in processing:
             processing["mapping_columns"] = {"grid_id": inmap_processing.get("grid_id")}
         if "concentration_factor" not in processing:
-            legacy_dispersion = dict(processing.get("dispersion", {}) or {})
-            processing["concentration_factor"] = legacy_dispersion.get("concentration_factor")
+            processing["concentration_factor"] = (
+                _optional_float(dispersions_processing.get("concentration_factor"))
+                or _optional_float(processing.get("dispersion", {}).get("concentration_factor"))
+            )
         normalized["processing"] = processing
         return normalized
 
@@ -119,15 +178,17 @@ def _normalize_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "annualization_days": emissions.get("annualization_days"),
         "concentration_factor": None,
         "pollutants": emissions.get("pollutants"),
-        "inmap": {
-            "grid_path": inmap.get("grid_path"),
-            "grid_epsg": inmap.get("grid_epsg"),
-            "grid_id": inmap.get("grid_id"),
+        "pollutants_map": emissions.get("pollutants_map"),
+        "grid": {
+            "inmap_grid_path": inmap.get("grid_path"),
+            "inmap_grid_epsg": inmap.get("grid_epsg"),
+            "inmap_grid_id": inmap.get("grid_id"),
+            "aermod_grid_path": aermod.get("grid_path"),
+            "aermod_grid_epsg": aermod.get("grid_epsg"),
+            "aermod_grid_id": aermod.get("grid_id"),
         },
-        "aermod": {
-            "grid_path": aermod.get("grid_path"),
-            "grid_epsg": aermod.get("grid_epsg"),
-            "grid_id": aermod.get("grid_id"),
+        "mapping_columns": {
+            "grid_id": inmap.get("grid_id"),
         },
     }
     return normalized
@@ -228,9 +289,10 @@ class RuntimeInputs:
     beam_network: str
     emissions_skims: str
     osm_pbf: str
+    rates_dir: Optional[str] = None
     activity_corrections: Optional[str] = None
     isrm_zarr: Optional[str] = None
-    isrm_nox_to_no2_matrix: Optional[str] = None
+    isrm_nox_to_no2_matrix_npz: Optional[str] = None
     osm_links: Optional[str] = None
     beam_mapdb: Optional[str] = None
     households_asim_out: Optional[str] = None
@@ -242,9 +304,10 @@ class RuntimeInputs:
             beam_network=_required_string(payload.get("beam_network"), "inputs.beam_network"),
             emissions_skims=_required_string(payload.get("emissions_skims"), "inputs.emissions_skims"),
             osm_pbf=_required_string(payload.get("osm_pbf"), "inputs.osm_pbf"),
+            rates_dir=_optional_string(payload.get("rates_dir")),
             activity_corrections=_optional_string(payload.get("activity_corrections")),
             isrm_zarr=_optional_string(payload.get("isrm_zarr")),
-            isrm_nox_to_no2_matrix=_optional_string(payload.get("isrm_nox_to_no2_matrix")),
+            isrm_nox_to_no2_matrix_npz=_optional_string(payload.get("isrm_nox_to_no2_matrix_npz")),
             osm_links=_optional_string(payload.get("osm_links")),
             beam_mapdb=_optional_string(payload.get("beam_mapdb")),
             households_asim_out=_optional_string(payload.get("households_asim_out")),
@@ -338,7 +401,7 @@ class DispersionEmissionsColumns:
     nh3: str = "tons_per_year_NH3"
     sox: str = "tons_per_year_SOx"
     pm25: str = "tons_per_year_PM2_5"
-    bch: str = "tons_per_year_BCh"
+    bc: str = "tons_per_year_BC"
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "DispersionEmissionsColumns":
@@ -349,7 +412,7 @@ class DispersionEmissionsColumns:
             nh3=_optional_string(payload.get("nh3")) or "tons_per_year_NH3",
             sox=_optional_string(payload.get("sox")) or "tons_per_year_SOx",
             pm25=_optional_string(payload.get("pm25")) or "tons_per_year_PM2_5",
-            bch=_optional_string(payload.get("bch")) or "tons_per_year_BCh",
+            bc=_optional_string(payload.get("bc")) or "tons_per_year_BC",
         )
 
 
@@ -369,6 +432,7 @@ class ConcentrationSettings:
 @dataclass(frozen=True)
 class ProcessingSettings:
     pollutants: List[str]
+    pollutants_map: Dict[str, str]
     annualization_days: int
     grid: GridProcessing
     beam_osm_id_col: str = "attributeOrigId"
@@ -382,11 +446,16 @@ class ProcessingSettings:
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "ProcessingSettings":
-        pollutants = _coerce_string_list(payload.get("pollutants"))
-        if not pollutants:
+        pollutants_map = _build_pollutants_map(
+            payload.get("pollutants"),
+            payload.get("pollutants_map"),
+        )
+        configured_pollutants = [pollutant for pollutant in pollutants if pollutant in pollutants_map]
+        if not pollutants_map:
             raise ValueError("processing.pollutants must contain at least one pollutant")
         return cls(
-            pollutants=pollutants,
+            pollutants=configured_pollutants,
+            pollutants_map=pollutants_map,
             annualization_days=_required_int(payload.get("annualization_days"), "processing.annualization_days"),
             grid=GridProcessing.from_dict(payload.get("grid", {}) or {}),
             beam_osm_id_col=_optional_string(payload.get("beam_osm_id_col")) or "attributeOrigId",
@@ -448,25 +517,30 @@ class ImpactsRuntimeConfig:
                 "beam_network": payload["inputs"]["beam_network"],
                 "emissions_skims": payload["inputs"]["emissions_skims"],
                 "osm_pbf": payload["inputs"]["osm_pbf"],
-                "activity_corrections": payload["inputs"]["activity_corrections"],
+                "rates_dir": payload["inputs"].get("rates_dir"),
                 "households_asim_out": payload["inputs"]["households_asim_out"],
                 "persons_asim_out": payload["inputs"]["persons_asim_out"],
             },
             "processing": {
-                "annualization_days": payload["processing"]["annualization_days"],
-                "concentration_factor": payload["processing"]["concentrations"]["concentration_factor"],
-                "pollutants": payload["processing"]["pollutants"],
-                "inmap": {
-                    "isrm_zarr": payload["inputs"]["isrm_zarr"],
-                    "isrm_nox_to_no2_matrix": payload["inputs"].get("isrm_nox_to_no2_matrix"),
-                    "grid_path": payload["processing"]["grid"]["inmap_grid_path"],
-                    "grid_epsg": payload["processing"]["grid"]["inmap_grid_epsg"],
-                    "grid_id": payload["processing"]["mapping_columns"]["grid_id"],
+                "emissions": {
+                    "annualization_days": payload["processing"]["annualization_days"],
+                    "activity_corrections": payload["inputs"]["activity_corrections"],
+                    "pollutants": list(payload["processing"]["pollutants_map"].values()),
+                    "pollutants_map": payload["processing"]["pollutants_map"],
                 },
-                "aermod": {
-                    "grid_path": payload["processing"]["grid"]["aermod_grid_path"],
-                    "grid_epsg": payload["processing"]["grid"]["aermod_grid_epsg"],
-                    "grid_id": payload["processing"]["grid"]["aermod_grid_id"],
+                "dispersions": {
+                    "inmap": {
+                        "isrm_zarr": payload["inputs"]["isrm_zarr"],
+                        "isrm_nox_to_no2_matrix_npz": payload["inputs"].get("isrm_nox_to_no2_matrix_npz"),
+                        "grid_path": payload["processing"]["grid"]["inmap_grid_path"],
+                        "grid_epsg": payload["processing"]["grid"]["inmap_grid_epsg"],
+                        "grid_id": payload["processing"]["mapping_columns"]["grid_id"],
+                    },
+                    "aermod": {
+                        "grid_path": payload["processing"]["grid"]["aermod_grid_path"],
+                        "grid_epsg": payload["processing"]["grid"]["aermod_grid_epsg"],
+                        "grid_id": payload["processing"]["grid"]["aermod_grid_id"],
+                    },
                 },
             },
             "outputs": {

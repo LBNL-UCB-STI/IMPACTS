@@ -9,7 +9,7 @@ from typing import Dict
 from typing import List
 from typing import Optional
 
-from impacts.config.defaults import DEFAULT_ANNUALIZATION_DAYS
+from impacts.config.defaults import annualization_days as default_annualization_days
 
 
 def _required_string(value: Any, label: str) -> str:
@@ -69,7 +69,7 @@ class PipelineConfig:
     inmap_grid_epsg: int
     mapping_columns: Dict[str, Any]
     isrm_url: Optional[str] = None
-    isrm_nox_to_no2_matrix_path: Optional[str] = None
+    isrm_nox_to_no2_matrix_npz_path: Optional[str] = None
     aermod_grid_path: Optional[str] = None
     aermod_grid_epsg: Optional[int] = None
     aermod_grid_id: Optional[str] = None
@@ -93,7 +93,8 @@ class PipelineConfig:
     iterations: int = 0
     use_rates: bool = True
     pollutants: List[str] = field(default_factory=list)
-    annualization_days: float = DEFAULT_ANNUALIZATION_DAYS
+    pollutants_map: Dict[str, str] = field(default_factory=dict)
+    annualization_days: float = default_annualization_days
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PipelineConfig":
@@ -107,7 +108,7 @@ class PipelineConfig:
             inmap_grid_epsg=int(_required_string(payload.get("inmap_grid_epsg"), "pipeline.inmap_grid_epsg")),
             mapping_columns=_required_dict(payload.get("mapping_columns"), "pipeline.mapping_columns"),
             isrm_url=_optional_string(payload.get("isrm_url")),
-            isrm_nox_to_no2_matrix_path=_optional_string(payload.get("isrm_nox_to_no2_matrix_path")),
+            isrm_nox_to_no2_matrix_npz_path=_optional_string(payload.get("isrm_nox_to_no2_matrix_npz_path")),
             aermod_grid_path=_optional_string(payload.get("aermod_grid_path")),
             aermod_grid_epsg=_optional_int(payload.get("aermod_grid_epsg")),
             aermod_grid_id=_optional_string(payload.get("aermod_grid_id")),
@@ -130,8 +131,9 @@ class PipelineConfig:
             link_length_path=_optional_string(payload.get("link_length_path")),
             iterations=int(payload.get("iterations", 0) or 0),
             use_rates=bool(payload.get("use_rates", True)),
-            pollutants=_coerce_string_list(payload.get("prepared_pollutants") or payload.get("pollutants")),
-            annualization_days=float(payload.get("annualization_days") or DEFAULT_ANNUALIZATION_DAYS),
+            pollutants=_coerce_string_list(payload.get("pollutants") or payload.get("prepared_pollutants")),
+            pollutants_map=dict(payload.get("pollutants_map", {}) or {}),
+            annualization_days=float(payload.get("annualization_days") or default_annualization_days),
         )
 
     def to_dict(self) -> Dict[str, Any]:

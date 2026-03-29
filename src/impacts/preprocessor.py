@@ -11,20 +11,33 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
+from tqdm import tqdm
 from .config.runtime_builder import build_runtime_config_from_runtime_yaml
+from .config.defaults import chunk_size as default_chunk_size
 from .manifest.file_ops import copy_path
 from .manifest.file_ops import file_entry
 from .manifest.file_ops import is_remote_path
 from .manifest.file_ops import parquet_available
 from .manifest.file_ops import resolve_path
 from .manifest.file_ops import write_structured_file
-from .config.defaults import DEFAULT_HOUSEHOLDS_COLUMNS
-from .config.defaults import DEFAULT_PERSONS_COLUMNS
 from .manifest.schema import InputsManifest
 
 
 CONTRACT_VERSION = "1"
 logger = logging.getLogger(__name__)
+PERSONS_COLUMNS = [
+    "household_id",
+    "cell_id",
+    "age",
+    "sex",
+    "income",
+]
+HOUSEHOLDS_COLUMNS = [
+    "household_id",
+    "cell_id",
+    "income",
+    "income_category",
+]
 
 
 def _parse_epsg(value: Any) -> int:
@@ -184,7 +197,21 @@ def _generate_fishnet_from_bounds(
     mask_gdf = mask_gdf.to_crs(epsg=target_epsg)
     mask_union = mask_gdf.geometry.union_all() if hasattr(mask_gdf.geometry, "union_all") else mask_gdf.geometry.unary_union
     filter_started = time.perf_counter()
-    keep_mask = fishnet.geometry.intersects(mask_union)
+    keep_mask = np.zeros(len(fishnet), dtype=bool)
+    progress = tqdm(
+        total=len(fishnet),
+        desc="Filtering AERMOD fishnet",
+        unit="cell",
+        dynamic_ncols=True,
+        leave=True,
+    )
+    try:
+        for start in range(0, len(fishnet), default_chunk_size):
+            stop = min(start + default_chunk_size, len(fishnet))
+            keep_mask[start:stop] = fishnet.geometry.iloc[start:stop].intersects(mask_union).to_numpy()
+            progress.update(stop - start)
+    finally:
+        progress.close()
     fishnet = fishnet.loc[keep_mask].reset_index(drop=True)
     fishnet[cell_id_col] = np.arange(len(fishnet), dtype=int)
     logger.info(
@@ -359,22 +386,23 @@ def build_inputs_manifest(
         optional=True,
     )
 
-    from impacts.utils.utils_emissions_grid_mapping import annualize_prepared_skims_for_grid_allocation
-    from impacts.utils.utils_emissions_grid_mapping import prepare_skims_for_grid_allocation
+    from impacts.workflow.step4_emissions_distribution import annualize_prepared_skims_for_grid_allocation
+    from impacts.workflow.step4_emissions_distribution import prepare_skims_for_grid_allocation
 
     prepared_grouped_skims_path = _prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
+    source_pollutants = list(processing.pollutants_map.values())
     prepare_skims_for_grid_allocation(
         skims_path=staged_skims_input,
         output_path=str(prepared_grouped_skims_path),
         group_cols=list(processing.prepared_skims_group_cols),
-        required_pollutants=list(processing.pollutants),
+        required_pollutants=source_pollutants,
     )
     prepared_skims_path = _prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
     annualize_prepared_skims_for_grid_allocation(
         prepared_skims_path=str(prepared_grouped_skims_path),
         output_path=str(prepared_skims_path),
         group_cols=list(processing.prepared_skims_group_cols),
-        required_pollutants=list(processing.pollutants),
+        required_pollutants=source_pollutants,
         annualization_days=float(processing.annualization_days),
     )
     manifest_inputs["prepared_skims_grouped"] = file_entry(
@@ -400,6 +428,18 @@ def build_inputs_manifest(
             key="activity_corrections",
             source_path=activity_corrections_path,
             relative_target=f"activity/{Path(activity_corrections_path).name}",
+            optional=True,
+        )
+
+    rates_dir = resolve_path(inputs.rates_dir, config_path)
+    staged_rates_dir = None
+    if rates_dir and not is_remote_path(rates_dir):
+        staged_rates_dir = _stage_local_input(
+            manifest_inputs=manifest_inputs,
+            input_root=input_root,
+            key="rates_dir",
+            source_path=rates_dir,
+            relative_target=f"rates/{Path(rates_dir).name}",
             optional=True,
         )
 
@@ -504,13 +544,13 @@ def build_inputs_manifest(
         source_path=resolve_path(inputs.isrm_zarr, config_path),
         relative_target="isrm",
     )
-    staged_isrm_nox_to_no2_matrix = _stage_optional_input(
+    staged_isrm_nox_to_no2_matrix_npz = _stage_optional_input(
         manifest_inputs=manifest_inputs,
         input_root=input_root,
-        key="isrm_nox_to_no2_matrix",
-        source_path=_optional_local_path(resolve_path(inputs.isrm_nox_to_no2_matrix, config_path)),
+        key="isrm_nox_to_no2_matrix_npz",
+        source_path=_optional_local_path(resolve_path(inputs.isrm_nox_to_no2_matrix_npz, config_path)),
         relative_target=(
-            f"dispersion/{Path(inputs.isrm_nox_to_no2_matrix).name}" if inputs.isrm_nox_to_no2_matrix else None
+            f"dispersion/{Path(inputs.isrm_nox_to_no2_matrix_npz).name}" if inputs.isrm_nox_to_no2_matrix_npz else None
         ),
     )
     staged_persons = _stage_optional_input(
@@ -554,9 +594,9 @@ def build_inputs_manifest(
         "inputs_manifest_path": str(workspace_root / "inputs_manifest.yaml"),
         "maintained_execution_path": [
             "impacts.utils.utils_events_to_skims_emissions",
-            "impacts.utils.utils_emissions_grid_mapping",
+            "impacts.workflow.step4_emissions_distribution",
             "impacts.workflow.step5_inmap_dispersion",
-            "impacts.utils.utils_network_grid_clipping",
+            "impacts.workflow.step2_network_osm_mapping",
         ],
         "inputs": manifest_inputs,
         "pipeline": {
@@ -564,7 +604,7 @@ def build_inputs_manifest(
             "skims_input_path": staged_skims_input,
             "prepared_skims_input_path": staged_prepared_skims_input,
             "link_length_path": staged_link_lengths,
-            "rates_dir": None,
+            "rates_dir": staged_rates_dir,
             "mapping_input_path": None,
             "use_precomputed_mapping": False,
             "osm_links_path": staged_osm,
@@ -574,9 +614,9 @@ def build_inputs_manifest(
             "inmap_grid_path": staged_inmap_grid,
             "aermod_grid_path": staged_aermod_grid,
             "isrm_url": staged_isrm,
-            "isrm_nox_to_no2_matrix_path": staged_isrm_nox_to_no2_matrix,
+            "isrm_nox_to_no2_matrix_npz_path": staged_isrm_nox_to_no2_matrix_npz,
             "iterations": 0,
-            "use_rates": False,
+            "use_rates": bool(staged_rates_dir),
             "beam_osm_id_col": processing.beam_osm_id_col,
             "beam_length_col": processing.beam_length_col,
             "beam_osm_epsg": int(local_output_epsg),
@@ -594,7 +634,9 @@ def build_inputs_manifest(
             "mapping_columns": mapping_columns,
             "prepared_skims_grouped_path": str(prepared_grouped_skims_path),
             "prepared_skims_group_cols": list(processing.prepared_skims_group_cols),
-            "prepared_pollutants": list(processing.pollutants),
+            "pollutants": list(processing.pollutants),
+            "pollutants_map": dict(processing.pollutants_map),
+            "prepared_pollutants": source_pollutants,
             "activity_corrections_path": staged_activity_corrections,
             "activity_corrections_columns": processing.activity_corrections_columns.__dict__.copy(),
             "annualization_days": float(processing.annualization_days),
@@ -616,8 +658,8 @@ def build_inputs_manifest(
         "population_inputs": {
             "persons_path": staged_persons,
             "households_path": staged_households,
-            "persons_columns": list(DEFAULT_PERSONS_COLUMNS),
-            "households_columns": list(DEFAULT_HOUSEHOLDS_COLUMNS),
+            "persons_columns": list(PERSONS_COLUMNS),
+            "households_columns": list(HOUSEHOLDS_COLUMNS),
         },
         "notes": [
             "Only maintained modules are part of this contract.",

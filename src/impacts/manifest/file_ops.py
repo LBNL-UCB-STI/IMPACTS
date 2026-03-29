@@ -8,6 +8,8 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
+from tqdm import tqdm
+
 
 def _parse_scalar(raw: str):
     value = raw.strip()
@@ -183,6 +185,29 @@ def sha256_path(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def _copy_directory_with_progress(src: Path, dst: Path) -> None:
+    files = [path for path in src.rglob("*") if path.is_file()]
+    progress = tqdm(
+        total=len(files),
+        desc=f"Staging {src.name}",
+        unit="file",
+        dynamic_ncols=True,
+        leave=True,
+    )
+    try:
+        for child in src.rglob("*"):
+            relative = child.relative_to(src)
+            target = dst / relative
+            if child.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(child, target)
+            progress.update(1)
+    finally:
+        progress.close()
+
+
 def copy_path(source: str | Path, destination: str | Path) -> Path:
     src = Path(source)
     dst = Path(destination)
@@ -190,7 +215,7 @@ def copy_path(source: str | Path, destination: str | Path) -> Path:
     if src.is_dir():
         if dst.exists():
             shutil.rmtree(dst)
-        shutil.copytree(src, dst)
+        _copy_directory_with_progress(src, dst)
     elif src.suffix.lower() == ".shp":
         base = src.with_suffix("")
         dest_base = dst.with_suffix("")
