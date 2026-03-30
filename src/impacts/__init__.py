@@ -1,10 +1,5 @@
-import sys
-
-if sys.version_info[:2] >= (3, 8):
-    # TODO: Import directly (no need for conditional) when `python_requires = >= 3.8`
-    from importlib.metadata import PackageNotFoundError, version  # pragma: no cover
-else:
-    from importlib_metadata import PackageNotFoundError, version  # pragma: no cover
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version
 
 try:
     # Change here if project is renamed and does not equal the package name
@@ -16,16 +11,24 @@ finally:
     del version, PackageNotFoundError
 
 from .config.runtime import ImpactsRuntimeConfig
-from .config.runtime import OutputSettings
-from .config.runtime import ProcessingSettings
-from .config.runtime import RuntimeInputs
-from .config.runtime import SharedContext
+from .config.runtime import Dispersions
+from .config.runtime import Emissions
+from .config.runtime import Geography
+from .config.runtime import GeographyFips
+from .config.runtime import Impacts
+from .config.runtime import InmapDispersion
+from .config.runtime import Run
+from .config.runtime import Shared
 
 __all__ = [
     "__version__",
+    "Dispersions",
+    "Emissions",
+    "Geography",
+    "GeographyFips",
     "ImpactsRuntimeConfig",
-    "OutputSettings",
-    "ProcessingSettings",
-    "RuntimeInputs",
-    "SharedContext",
+    "Impacts",
+    "InmapDispersion",
+    "Run",
+    "Shared",
 ]

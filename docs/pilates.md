@@ -118,17 +118,17 @@ Events are sampled by vehicle id, so each selected vehicle keeps its full trace.
 
 ```bash
 python examples/pilates/prepare_sample_data.py events \
-  --input /path/to/0.events.csv.gz \
+  --input /path/to/0.events.parquet \
   --fraction 0.05
 ```
 
 ```bash
 python examples/pilates/prepare_sample_data.py skims \
-  --input /path/to/0.skimsEmissionsTotals.csv.gz \
+  --input /path/to/0.skimsEmissions.parquet \
   --fraction 0.05
 ```
 
 Outputs land in:
 
-- `examples/pilates/upstream/events_sample.csv.gz`
-- `examples/pilates/upstream/skimsEmissionsTotals_sample.csv.gz`
+- `examples/pilates/upstream/events_sample.parquet`
+- `examples/pilates/upstream/skimsEmissions_sample.parquet`

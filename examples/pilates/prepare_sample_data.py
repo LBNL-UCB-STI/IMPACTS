@@ -28,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     sample_events.add_argument("--vehicle-column", default="vehicle")
     sample_events.add_argument(
         "--output",
-        default=str(EXAMPLE_DIR / "upstream" / "events_sample.csv.gz"),
+        default=str(EXAMPLE_DIR / "upstream" / "events_sample.parquet"),
     )
 
     sample_skims = subparsers.add_parser("skims", help="Sample skims by row fraction.")
@@ -36,10 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     sample_skims.add_argument("--fraction", type=float, default=0.05)
     sample_skims.add_argument("--seed", type=int, default=42)
     sample_skims.add_argument("--compact-workers", type=int, default=4)
-    sample_skims.add_argument("--population-sample", type=float, default=1.0)
     sample_skims.add_argument(
         "--output",
-        default=str(EXAMPLE_DIR / "upstream" / "skimsEmissionsTotals_sample.csv.gz"),
+        default=str(EXAMPLE_DIR / "upstream" / "skimsEmissions_sample.parquet"),
     )
     return parser
 
@@ -75,11 +74,9 @@ def main(argv: list[str] | None = None) -> int:
             fraction=args.fraction,
             seed=args.seed,
             compact_workers=args.compact_workers,
-            population_sample=args.population_sample,
         )
         print(f"sampled skims: {output}")
         print(f"  rows kept: {skims_stats['kept_rows']} / {skims_stats['total_rows']}")
-        print(f"  expansion factor: {skims_stats['expansion_factor']}")
         return 0
 
     return 0

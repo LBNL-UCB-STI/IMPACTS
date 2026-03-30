@@ -15,22 +15,8 @@ from .manifest.schema import RunManifest
 
 logger = logging.getLogger(__name__)
 
-
-def _resolve_staged_file(input_root: Path, relative_dir: str, names: list[str]) -> Path:
-    base = input_root / relative_dir
-    for name in names:
-        candidate = base / name
-        if candidate.exists():
-            return candidate
-    for name in names:
-        matches = sorted(path for path in base.rglob(name) if path.is_file()) if base.exists() else []
-        if matches:
-            return matches[0]
-    raise FileNotFoundError(f"Could not find any of {names} under staged directory: {base}")
-
-
-def _log_step_banner(step_num: int, name: str) -> None:
-    banner = f"========== ENTERING STEP {step_num}: {name.upper()} =========="
+def _log_step_banner(label: str, name: str) -> None:
+    banner = f"========== ENTERING {label}: {name.upper()} =========="
     sys.stdout.write("\n")
     sys.stdout.flush()
     logger.info("%s", banner)
@@ -58,45 +44,38 @@ def run_from_input_manifest(
     logger.info("Loaded input manifest: %s", Path(input_manifest_path).resolve())
     logger.info("Output directory: %s", output_root)
 
-    from .workflow_runtime.step1_grid_intersection import run as run_step1
-    from .workflow_runtime.step2_emissions_distribution import run as run_step2
-
-    skims_path = _resolve_staged_file(
-        input_root,
-        "skims",
-        ["prepared_skims_for_grid_allocation.parquet", "prepared_skims_for_grid_allocation.csv.gz"],
-    )
-    skims_df = None
+    from .preprocessing.step3_integrate_grids import run as run_grid_intersection
+    from .runtime.step1_process_emissions import run as run_emissions_processing
+    from .runtime.prepare_emissions_from_skims import resolve_prepared_skims_path
 
     intersection_df = None
-    _log_step_banner(1, "grid intersection")
-    grid_intersection_path, intersection_df = run_step1(pipeline, raw_dir, input_root)
+    _log_step_banner("PREPROCESS STEP 3", "network mapping and grid intersection")
+    grid_intersection_path, intersection_df = run_grid_intersection(pipeline, raw_dir, input_root)
 
-    _log_step_banner(2, "emissions distribution")
-    logger.info("Using Step 2 implementation: combined")
-    from impacts.workflow_runtime.step2_emissions_distribution import _read_table
-    skims_df = _read_table(skims_path)
-    step2_outputs = run_step2(
+    _log_step_banner("STEP 1", "emissions processing")
+    logger.info("Using Step 1 implementation: emissions_processing")
+    emissions_outputs = run_emissions_processing(
         pipeline,
         raw_dir,
-        skims_df,
+        input_root,
         grid_intersection_path,
         intersection_df=intersection_df,
     )
+    prepared_skims_path = resolve_prepared_skims_path(input_root)
 
     concentration_path: Optional[Path] = None
     if run_dispersion:
-        from .workflow_runtime.step3_inmap_dispersion import run as run_step3
-        _log_step_banner(3, "inmap concentrations")
-        logger.info("Using Step 3 implementation: inmap_concentrations_and_export")
-        _, _, concentration_path = run_step3(
+        from .runtime.step2_compute_inmap_concentrations import run as run_inmap_dispersion
+        _log_step_banner("STEP 2", "inmap concentrations")
+        logger.info("Using Step 2 implementation: inmap_concentrations_and_export")
+        _, _, concentration_path = run_inmap_dispersion(
             pipeline=pipeline,
             raw_dir=raw_dir,
-            emissions_input_path=step2_outputs["beam_emissions_for_inmap"],
+            emissions_input_path=emissions_outputs["beam_emissions_for_inmap"],
         )
         logger.info("InMAP concentrations complete: wrote %s", concentration_path)
-        _log_step_banner(4, "aermod dispersion")
-        logger.info("Step 4 placeholder: aermod_dispersion not run yet")
+        _log_step_banner("STEP 3", "aermod concentrations")
+        logger.info("Step 3 placeholder: aermod concentrations not run yet")
     else:
         logger.info("Dispersion skipped")
 
@@ -109,9 +88,9 @@ def run_from_input_manifest(
         "command": " ".join(sys.argv),
         "image": "not_recorded",
         "raw_outputs": {
-            "skims_emissions": str(skims_path),
+            "skims_emissions": prepared_skims_path,
             "grid_intersection": str(grid_intersection_path),
-            **step2_outputs,
+            **emissions_outputs,
             "beam_inmap_concentrations": str(concentration_path) if concentration_path else None,
             "beam_inmap_concentrations_gpkg": (
                 str(concentration_path.with_suffix(".gpkg")) if concentration_path else None
@@ -125,7 +104,7 @@ def run_from_input_manifest(
         },
         "execution": {
             "dispersion_completed": run_dispersion,
-            "stopped_after": "dispersion" if run_dispersion else "emissions_distribution",
+            "stopped_after": "step2_compute_inmap_concentrations" if run_dispersion else "step1_process_emissions",
         },
     }
     output_manifest = Path(run_manifest_path) if run_manifest_path else output_root / "run_manifest.yaml"

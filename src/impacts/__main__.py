@@ -7,6 +7,16 @@ from impacts.config.runtime_builder import build_runtime_config_from_runtime_yam
 from impacts.manifest.file_ops import resolve_path
 
 
+def _print_pipeline_banner() -> None:
+    print()
+    print("========== IMPACTS PIPELINE ==========")
+    print(
+        "IMPACTS stages inputs, prepares spatial joins, allocates corrected transportation emissions, "
+        "computes air-quality concentrations, and publishes the final exposure artifact."
+    )
+    print()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m impacts",
@@ -65,7 +75,6 @@ def build_parser() -> argparse.ArgumentParser:
     sample_skims.add_argument("--fraction", type=float, required=True)
     sample_skims.add_argument("--seed", type=int, default=42)
     sample_skims.add_argument("--compact-workers", type=int, default=4)
-    sample_skims.add_argument("--population-sample", type=float, default=1.0)
 
     rdata_to_parquet = subparsers.add_parser(
         "rdata_to_parquet",
@@ -110,6 +119,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Filter to one or more years.",
     )
+
+    build_emfac_rates_store = subparsers.add_parser(
+        "build_emfac_rates_store",
+        help="Convert an EMFAC rates folder into partitioned Parquet and DuckDB outputs.",
+    )
+    build_emfac_rates_store.add_argument("--input-dir", required=True)
+    build_emfac_rates_store.add_argument("--output-dir", required=True)
+    build_emfac_rates_store.add_argument("--compression", default="zstd")
 
     return parser
 
@@ -177,10 +194,11 @@ def main(argv: list[str] | None = None) -> int:
         from impacts.preprocessor import preprocess_workflow
         from impacts.runner import run_from_input_manifest
 
+        _print_pipeline_banner()
         workspace = Path(args.workspace).resolve()
         runtime_config = build_runtime_config_from_runtime_yaml(args.config)
         downstream_output_root = Path(
-            resolve_path(runtime_config.outputs.output_dir, args.config) or runtime_config.outputs.output_dir
+            resolve_path(runtime_config.impacts.local_output_folder, args.config) or runtime_config.impacts.local_output_folder
         ).resolve()
         preprocess_manifest = preprocess_workflow(
             runtime_config_path=args.config,
@@ -228,7 +246,6 @@ def main(argv: list[str] | None = None) -> int:
             fraction=args.fraction,
             seed=args.seed,
             compact_workers=args.compact_workers,
-            population_sample=args.population_sample,
         )
         return 0
 
@@ -273,6 +290,21 @@ def main(argv: list[str] | None = None) -> int:
             county_fips_filters=args.county_fips_filters,
             year_filters=args.year_filters,
         )
+        return 0
+
+    if args.command == "build_emfac_rates_store":
+        from impacts.tools.emfac.build_emfac_rates_store import build_emfac_rates_store
+
+        result = build_emfac_rates_store(
+            input_dir=args.input_dir,
+            output_dir=args.output_dir,
+            compression=args.compression,
+        )
+        print(f"input_file_count={result['input_file_count']}")
+        print(f"parquet_file_count={result['parquet_file_count']}")
+        print(f"output_dir={result['output_dir']}")
+        print(f"parquet_root={result['parquet_root']}")
+        print(f"duckdb_path={result['duckdb_path']}")
         return 0
 
     parser.error(f"Unknown command: {args.command}")
