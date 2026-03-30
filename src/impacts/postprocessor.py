@@ -10,6 +10,9 @@ from typing import Optional
 
 import pandas as pd
 
+from .common import first_existing
+from .common import read_table
+from .common import resolve_column_config
 from .manifest.file_ops import load_structured_file
 from .manifest.file_ops import parquet_available
 from .manifest.file_ops import resolve_path
@@ -19,33 +22,6 @@ from .manifest.schema import PostprocessManifest
 from .manifest.schema import RunManifest
 
 logger = logging.getLogger(__name__)
-
-
-def _read_table(path: str) -> pd.DataFrame:
-    lower = path.lower()
-    if lower.endswith(".parquet"):
-        return pd.read_parquet(path)
-    if lower.endswith(".csv.gz"):
-        return pd.read_csv(path, compression="gzip")
-    if lower.endswith(".csv"):
-        return pd.read_csv(path)
-    raise ValueError(f"Unsupported table format: {path}")
-
-
-def _first_existing(columns: Iterable[str], candidates: Iterable[str]) -> Optional[str]:
-    as_set = set(columns)
-    for name in candidates:
-        if name in as_set:
-            return name
-    return None
-
-
-def _resolve_column_config(config: Optional[Dict[str, str]], defaults: Dict[str, str]) -> Dict[str, str]:
-    resolved = defaults.copy()
-    if config:
-        resolved.update({k: v for k, v in config.items() if v})
-    return resolved
-
 
 def _ordered_unique(items: Iterable[str]) -> list[str]:
     seen = set()
@@ -66,17 +42,17 @@ def _population_by_cell(
     if not persons_path and not households_path:
         return pd.DataFrame(columns=["cell_id", "population_total", "households_total", "population_mix"])
 
-    households = _read_table(households_path) if households_path else pd.DataFrame()
-    persons = _read_table(persons_path) if persons_path else pd.DataFrame()
-    persons_cfg = _resolve_column_config(persons_columns, {"household_id": "household_id", "cell_id": "cell_id", "age": "age", "sex": "sex", "income": "income"})
-    households_cfg = _resolve_column_config(households_columns, {"household_id": "household_id", "cell_id": "cell_id", "income": "income", "income_category": "income_category"})
+    households = read_table(households_path) if households_path else pd.DataFrame()
+    persons = read_table(persons_path) if persons_path else pd.DataFrame()
+    persons_cfg = resolve_column_config(persons_columns, {"household_id": "household_id", "cell_id": "cell_id", "age": "age", "sex": "sex", "income": "income"})
+    households_cfg = resolve_column_config(households_columns, {"household_id": "household_id", "cell_id": "cell_id", "income": "income", "income_category": "income_category"})
 
-    hh_id_col = _first_existing(households.columns, [households_cfg["household_id"], "household_id", "householdId", "hh_id"])
-    person_hh_col = _first_existing(persons.columns, [persons_cfg["household_id"], "household_id", "householdId", "hh_id"])
-    cell_col = _first_existing(households.columns, [households_cfg["cell_id"], "cell_id", "GRID", "grid", "zone", "home_cell_id", "TAZ"])
+    hh_id_col = first_existing(households, [households_cfg["household_id"], "household_id", "householdId", "hh_id"])
+    person_hh_col = first_existing(persons, [persons_cfg["household_id"], "household_id", "householdId", "hh_id"])
+    cell_col = first_existing(households, [households_cfg["cell_id"], "cell_id", "GRID", "grid", "zone", "home_cell_id", "TAZ"])
 
-    if cell_col is None and _first_existing(persons.columns, [persons_cfg["cell_id"], "cell_id", "GRID", "grid", "zone", "home_cell_id", "TAZ"]):
-        cell_col = _first_existing(persons.columns, [persons_cfg["cell_id"], "cell_id", "GRID", "grid", "zone", "home_cell_id", "TAZ"])
+    if cell_col is None and first_existing(persons, [persons_cfg["cell_id"], "cell_id", "GRID", "grid", "zone", "home_cell_id", "TAZ"]):
+        cell_col = first_existing(persons, [persons_cfg["cell_id"], "cell_id", "GRID", "grid", "zone", "home_cell_id", "TAZ"])
         persons = persons.rename(columns={cell_col: "cell_id"})
         cell_col = "cell_id"
 
@@ -130,7 +106,7 @@ def _population_by_cell(
         payload: Dict[str, Any] = {
             "population_total": int(len(frame)),
         }
-        age_col = _first_existing(frame.columns, [persons_cfg["age"], "age", "age_years"])
+        age_col = first_existing(frame, [persons_cfg["age"], "age", "age_years"])
         if age_col:
             age_bins = pd.cut(
                 pd.to_numeric(frame[age_col], errors="coerce"),
@@ -140,12 +116,12 @@ def _population_by_cell(
             payload["age_group_counts"] = {
                 str(k): int(v) for k, v in age_bins.value_counts(dropna=True).sort_index().items()
             }
-        income_col = _first_existing(frame.columns, [persons_cfg["income"], households_cfg["income"], households_cfg["income_category"], "income", "income_category"])
+        income_col = first_existing(frame, [persons_cfg["income"], households_cfg["income"], households_cfg["income_category"], "income", "income_category"])
         if income_col:
             payload["income_counts"] = {
                 str(k): int(v) for k, v in frame[income_col].fillna("unknown").value_counts().to_dict().items()
             }
-        sex_col = _first_existing(frame.columns, [persons_cfg["sex"], "sex", "gender"])
+        sex_col = first_existing(frame, [persons_cfg["sex"], "sex", "gender"])
         if sex_col:
             payload["sex_counts"] = {
                 str(k): int(v) for k, v in frame[sex_col].fillna("unknown").value_counts().to_dict().items()
@@ -173,9 +149,9 @@ def create_canonical_exposure_table(
     persons_columns: Optional[Dict[str, str]] = None,
     households_columns: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
-    concentration = _read_table(concentration_path).copy()
-    concentration_cfg = _resolve_column_config(concentration_columns, {"grid_id": "GRID"})
-    cell_col = _first_existing(concentration.columns, [concentration_cfg["grid_id"], "GRID", "cell_id", "grid", "zone", "Location"])
+    concentration = read_table(concentration_path).copy()
+    concentration_cfg = resolve_column_config(concentration_columns, {"grid_id": "GRID"})
+    cell_col = first_existing(concentration, [concentration_cfg["grid_id"], "GRID", "cell_id", "grid", "zone", "Location"])
     if cell_col is None:
         raise ValueError("Raw concentration output must contain a grid/cell identifier column.")
 
@@ -270,7 +246,7 @@ def postprocess_from_runtime_config(
     workspace_root = Path(workspace).resolve()
     runtime_config = build_runtime_config_from_runtime_yaml(runtime_config_path)
     output_root = Path(
-        resolve_path(runtime_config.outputs.output_dir, runtime_config_path) or runtime_config.outputs.output_dir
+        resolve_path(runtime_config.impacts.local_output_folder, runtime_config_path) or runtime_config.impacts.local_output_folder
     ).resolve()
     run_manifest = run_from_runtime_config(
         runtime_config_path=runtime_config_path,

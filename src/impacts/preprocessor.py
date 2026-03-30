@@ -5,18 +5,15 @@ from pathlib import Path
 from typing import Any
 from typing import Dict
 from .config.runtime_builder import build_runtime_config_from_runtime_yaml
-from .manifest.file_ops import file_entry
 from .manifest.file_ops import resolve_path
 from .manifest.file_ops import write_structured_file
 from .manifest.schema import InputsManifest
-from .workflow_preprocess.common import infer_vector_epsg
-from .workflow_preprocess.common import optional_local_path
-from .workflow_preprocess.common import parse_epsg
-from .workflow_preprocess.common import required_local_path
-from .workflow_preprocess.common import resolve_beam_network_local_path
-from .workflow_preprocess.common import resolve_emissions_skims_local_path
-from .workflow_preprocess.common import resolve_osm_pbf_local_path
-from .workflow_preprocess.common import stage_local_input
+from .common import infer_vector_epsg
+from .common import parse_epsg
+from .common import required_local_path
+from .common import resolve_beam_network_local_path
+from .common import resolve_osm_pbf_local_path
+from .common import stage_local_input
 
 
 CONTRACT_VERSION = "1"
@@ -36,17 +33,28 @@ HOUSEHOLDS_COLUMNS = [
 ]
 
 
+def _validate_configured_local_path(
+    path: str | None,
+    label: str,
+    *,
+    allow_remote: bool = False,
+) -> str | None:
+    if not path:
+        return None
+    if allow_remote and "://" in str(path):
+        return path
+    return required_local_path(path, label)
+
+
 def build_inputs_manifest(
     runtime_config_path: str | Path,
     staging_dir: str | Path,
 ) -> Dict[str, Any]:
     config_path = Path(runtime_config_path).resolve()
     runtime_config = build_runtime_config_from_runtime_yaml(config_path)
-    geography = runtime_config.shared_context.geography
-    inputs = runtime_config.inputs
-    processing = runtime_config.processing
-    grid = processing.grid
-    outputs = runtime_config.outputs
+    geography = runtime_config.shared.geography
+    emissions = runtime_config.impacts.emissions
+    inmap = runtime_config.impacts.dispersions.inmap
 
     workspace_root = Path(staging_dir).resolve()
     input_root = workspace_root / "staged"
@@ -60,90 +68,62 @@ def build_inputs_manifest(
         source_path=str(config_path),
         relative_target="config/runtime.yaml",
     )
-
-    from .workflow_preprocess.step1_prepare_skims import run as preprocess_step1
-    from .workflow_preprocess.step2_stage_network_mapping import run as preprocess_step2
-    from .workflow_preprocess.step3_stage_spatial_support import run as preprocess_step3
-    from .workflow_preprocess.step4_stage_optional_inputs import run as preprocess_step4
-
+    from .preprocessing.step1_stage_inputs import run as preprocess_step1
+    from .preprocessing.step2_prepare_grids import run as preprocess_step2
     simulation_network_folder = required_local_path(
-        resolve_path(inputs.simulation_network_folder, config_path),
-        "inputs.simulation_network_folder",
+        resolve_path(emissions.simulation_network_folder, config_path),
+        "impacts.emissions.simulation_network_folder",
     )
     beam_network_source = resolve_beam_network_local_path(simulation_network_folder)
-    skims_input_source = resolve_emissions_skims_local_path(simulation_network_folder)
+    _validate_configured_local_path(
+        resolve_path(emissions.emissions_rates_folder, config_path),
+        "impacts.emissions.emissions_rates_folder",
+    )
     osm_network_folder = required_local_path(
-        resolve_path(inputs.osm_network_folder, config_path),
-        "inputs.osm_network_folder",
+        resolve_path(emissions.osm_network_folder, config_path),
+        "impacts.emissions.osm_network_folder",
     )
     osm_source = resolve_osm_pbf_local_path(osm_network_folder)
     if not osm_source:
-        raise ValueError("inputs.osm_network_folder is configured but no local .osm.pbf file could be found under it.")
+        raise ValueError("impacts.emissions.osm_network_folder is configured but no local .osm.pbf file could be found under it.")
 
     inmap_grid_source = required_local_path(
-        resolve_path(grid.inmap_grid_path, config_path),
-        "processing.grid.inmap_grid_path",
+        resolve_path(inmap.grid_path, config_path),
+        "impacts.dispersions.inmap.grid_path",
     )
-    aermod_grid_source = optional_local_path(resolve_path(grid.aermod_grid_path, config_path))
     local_output_epsg = parse_epsg(geography.local_crs)
     inmap_grid_epsg = (
-        grid.inmap_grid_epsg
+        inmap.grid_epsg
         or infer_vector_epsg(inmap_grid_source)
-        or local_output_epsg
-    )
-    aermod_grid_epsg = (
-        grid.aermod_grid_epsg
-        or infer_vector_epsg(aermod_grid_source)
         or local_output_epsg
     )
 
     step1_outputs = preprocess_step1(
         manifest_inputs=manifest_inputs,
         input_root=input_root,
-        processing=processing,
-        skims_input_source=skims_input_source,
-        network_path=beam_network_source,
+        impacts=runtime_config.impacts,
+        config_path=config_path,
+        beam_network_source=beam_network_source,
+        osm_source=osm_source,
+        inmap_grid_source=inmap_grid_source,
     )
+    staged_osm = step1_outputs["staged_osm"]
+    staged_activity_totals = step1_outputs["staged_activity_totals"]
+    staged_isrm = step1_outputs["staged_isrm"]
+    staged_isrm_nox_to_no2_matrix_npz = step1_outputs["staged_isrm_nox_to_no2_matrix_npz"]
 
     step2_outputs = preprocess_step2(
         manifest_inputs=manifest_inputs,
         input_root=input_root,
-        processing=processing,
-        beam_network_source=beam_network_source,
-        osm_source=osm_source,
-        local_output_epsg=int(local_output_epsg),
-    )
-    staged_osm = step2_outputs["staged_osm"]
-
-    step3_outputs = preprocess_step3(
-        manifest_inputs=manifest_inputs,
-        input_root=input_root,
         runtime_config=runtime_config,
-        processing=processing,
-        grid=grid,
-        inmap_grid_source=inmap_grid_source,
-        aermod_grid_source=aermod_grid_source,
+        inmap=inmap,
         local_output_epsg=int(local_output_epsg),
     )
-    staged_inmap_grid = step3_outputs["staged_inmap_grid"]
-    staged_aermod_grid = step3_outputs["staged_aermod_grid"]
-    resolved_inmap_grid_id = step3_outputs["resolved_inmap_grid_id"]
-    resolved_aermod_grid_id = step3_outputs["resolved_aermod_grid_id"]
-
-    inputs_resolved = runtime_config.inputs
-    step4_outputs = preprocess_step4(
-        manifest_inputs=manifest_inputs,
-        input_root=input_root,
-        inputs=inputs_resolved,
-        config_path=config_path,
-    )
-    staged_activity_totals = step4_outputs["staged_activity_totals"]
-    staged_isrm = step4_outputs["staged_isrm"]
-    staged_isrm_nox_to_no2_matrix_npz = step4_outputs["staged_isrm_nox_to_no2_matrix_npz"]
-    staged_persons = step4_outputs["staged_persons"]
-    staged_households = step4_outputs["staged_households"]
-    mapping_columns = {k: v for k, v in processing.mapping_columns.__dict__.items() if v}
-    mapping_columns["grid_id"] = resolved_inmap_grid_id
+    staged_inmap_grid = step2_outputs["staged_inmap_grid"]
+    staged_aermod_grid = step2_outputs["staged_aermod_grid"]
+    resolved_inmap_grid_id = step2_outputs["resolved_inmap_grid_id"]
+    resolved_aermod_grid_id = step2_outputs["resolved_aermod_grid_id"]
+    mapping_columns = {**emissions.mapping_columns, "grid_id": resolved_inmap_grid_id}
 
     manifest: Dict[str, Any] = {
         "contract_version": CONTRACT_VERSION,
@@ -153,9 +133,9 @@ def build_inputs_manifest(
         "input_dir": str(input_root),
         "inputs_manifest_path": str(workspace_root / "inputs_manifest.yaml"),
         "maintained_execution_path": [
-            "impacts.workflow_runtime.step3_inmap_dispersion",
-            "impacts.workflow_runtime.step1_grid_intersection",
-            "impacts.workflow_runtime.step2_emissions_distribution",
+            "impacts.preprocessing.step3_integrate_grids",
+            "impacts.runtime.step1_process_emissions",
+            "impacts.runtime.step2_compute_inmap_concentrations",
         ],
         "inputs": manifest_inputs,
         "pipeline": {
@@ -164,27 +144,27 @@ def build_inputs_manifest(
             "isrm_url": staged_isrm,
             "isrm_nox_to_no2_matrix_npz_path": staged_isrm_nox_to_no2_matrix_npz,
             "iterations": 0,
-            "beam_osm_id_col": processing.beam_osm_id_col,
-            "beam_length_col": processing.beam_length_col,
+            "beam_osm_id_col": emissions.beam_osm_id_col,
+            "beam_length_col": emissions.beam_length_col,
             "beam_osm_epsg": int(local_output_epsg),
             "inmap_grid_epsg": int(local_output_epsg),
             "aermod_grid_epsg": int(local_output_epsg),
             "aermod_grid_id": resolved_aermod_grid_id,
             "output_epsg": int(local_output_epsg),
-            "region": runtime_config.shared_context.region,
-            "start_year": runtime_config.shared_context.start_year,
+            "simulation_network_folder": simulation_network_folder,
+            "region": runtime_config.run.region,
+            "start_year": runtime_config.run.start_year,
             "county_state_fips": geography.fips.state,
             "county_fips_codes": list(geography.fips.counties),
-            "county_area_name": runtime_config.shared_context.region or processing.county_area_name,
-            "concentration_factor": float(processing.concentrations.concentration_factor),
+            "concentration_factor": float(emissions.concentration_factor),
             "mapping_columns": mapping_columns,
-            "prepared_skims_group_cols": list(processing.prepared_skims_group_cols),
-            "pollutants": list(processing.pollutants),
-            "pollutants_map": dict(processing.pollutants_map),
+            "prepared_skims_group_cols": list(emissions.prepared_skims_group_cols),
+            "pollutants": list(emissions.pollutants),
+            "pollutants_map": dict(emissions.pollutants_map),
             "activity_totals_file": staged_activity_totals,
-            "activity_totals_columns": dict(processing.activity_totals_columns),
-            "annualization_days": float(processing.annualization_days),
-            "population_sample": float(processing.population_sample),
+            "activity_totals_columns": dict(emissions.activity_totals_columns),
+            "annualization_days": float(emissions.annualization_days),
+            "population_sample": float(emissions.population_sample),
         },
         "pilates_contract": {
             "stage": "terminal_postprocessing",
@@ -192,7 +172,7 @@ def build_inputs_manifest(
             "upstream_dependency_only": True,
             "publishes_final_artifact_only": True,
             "local_input_dir": str(input_root),
-            "local_output_dir": str(outputs.output_dir),
+            "local_output_dir": str(runtime_config.impacts.local_output_folder),
             "container_input_dir": "/input",
             "container_output_dir": "/output",
             "entrypoint": "python -m impacts run",
@@ -200,12 +180,7 @@ def build_inputs_manifest(
             "canonical_output_filenames": ["impacts_exposure_table.parquet", "impacts_exposure_table.csv.gz"],
             "manifest_filenames": ["inputs_manifest.yaml", "run_manifest.yaml", "postprocess_manifest.yaml"],
         },
-        "population_inputs": {
-            "persons_path": staged_persons,
-            "households_path": staged_households,
-            "persons_columns": list(PERSONS_COLUMNS),
-            "households_columns": list(HOUSEHOLDS_COLUMNS),
-        },
+        "population_inputs": {},
         "notes": [
             "Only maintained modules are part of this contract.",
             "ActivitySim population integration is currently best-effort and relies on staged population tables carrying usable cell ids.",

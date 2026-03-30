@@ -25,6 +25,12 @@ def _required_dict(value: Any, label: str) -> Dict[str, Any]:
     return value
 
 
+def _reject_unknown_keys(payload: Dict[str, Any], allowed: set[str], label: str) -> None:
+    unknown = sorted(set(payload.keys()) - allowed)
+    if unknown:
+        raise ValueError(f"Unsupported keys under {label}: {unknown}")
+
+
 def _coerce_string_list(value: Any) -> List[str]:
     if value is None:
         return []
@@ -58,6 +64,24 @@ def _optional_float(value: Any) -> Optional[float]:
         raise ValueError(f"Invalid float value: {value}") from exc
 
 
+def _required_int(value: Any, label: str) -> int:
+    if value is None:
+        raise ValueError(f"Missing required value: {label}")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid integer for {label}: {value}") from exc
+
+
+def _required_float(value: Any, label: str) -> float:
+    if value is None:
+        raise ValueError(f"Missing required value: {label}")
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid float for {label}: {value}") from exc
+
+
 @dataclass(frozen=True)
 class PipelineConfig:
     beam_osm_id_col: str
@@ -72,15 +96,16 @@ class PipelineConfig:
     aermod_grid_path: Optional[str] = None
     aermod_grid_epsg: Optional[int] = None
     aermod_grid_id: Optional[str] = None
+    simulation_network_folder: Optional[str] = None
     region: Optional[str] = None
     start_year: Optional[int] = None
     county_state_fips: Optional[str] = None
     county_fips_codes: List[str] = field(default_factory=list)
-    county_area_name: str = "county"
     activity_totals_file: Optional[str] = None
     activity_totals_columns: Dict[str, Any] = field(default_factory=dict)
     concentration_factor: Optional[float] = None
     iterations: int = 0
+    prepared_skims_group_cols: List[str] = field(default_factory=list)
     pollutants: List[str] = field(default_factory=list)
     pollutants_map: Dict[str, str] = field(default_factory=dict)
     annualization_days: float = default_annualization_days
@@ -88,6 +113,38 @@ class PipelineConfig:
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PipelineConfig":
+        _reject_unknown_keys(
+            payload,
+            {
+                "beam_osm_id_col",
+                "beam_length_col",
+                "beam_osm_epsg",
+                "output_epsg",
+                "inmap_grid_path",
+                "inmap_grid_epsg",
+                "mapping_columns",
+                "isrm_url",
+                "isrm_nox_to_no2_matrix_npz_path",
+                "aermod_grid_path",
+                "aermod_grid_epsg",
+                "aermod_grid_id",
+                "simulation_network_folder",
+                "region",
+                "start_year",
+                "county_state_fips",
+                "county_fips_codes",
+                "activity_totals_file",
+                "activity_totals_columns",
+                "concentration_factor",
+                "iterations",
+                "prepared_skims_group_cols",
+                "pollutants",
+                "pollutants_map",
+                "annualization_days",
+                "population_sample",
+            },
+            "pipeline",
+        )
         return cls(
             beam_osm_id_col=_required_string(payload.get("beam_osm_id_col"), "pipeline.beam_osm_id_col"),
             beam_length_col=_required_string(payload.get("beam_length_col"), "pipeline.beam_length_col"),
@@ -96,30 +153,31 @@ class PipelineConfig:
             inmap_grid_path=_required_string(payload.get("inmap_grid_path"), "pipeline.inmap_grid_path"),
             inmap_grid_epsg=int(_required_string(payload.get("inmap_grid_epsg"), "pipeline.inmap_grid_epsg")),
             mapping_columns=_required_dict(payload.get("mapping_columns"), "pipeline.mapping_columns"),
-            isrm_url=_optional_string(payload.get("isrm_url")),
-            isrm_nox_to_no2_matrix_npz_path=_optional_string(payload.get("isrm_nox_to_no2_matrix_npz_path")),
-            aermod_grid_path=_optional_string(payload.get("aermod_grid_path")),
-            aermod_grid_epsg=_optional_int(payload.get("aermod_grid_epsg")),
-            aermod_grid_id=_optional_string(payload.get("aermod_grid_id")),
-            region=_optional_string(payload.get("region")),
-            start_year=_optional_int(payload.get("start_year")),
-            county_state_fips=_optional_string(payload.get("county_state_fips")),
+            isrm_url=_required_string(payload.get("isrm_url"), "pipeline.isrm_url"),
+            isrm_nox_to_no2_matrix_npz_path=_required_string(
+                payload.get("isrm_nox_to_no2_matrix_npz_path"),
+                "pipeline.isrm_nox_to_no2_matrix_npz_path",
+            ),
+            aermod_grid_path=_required_string(payload.get("aermod_grid_path"), "pipeline.aermod_grid_path"),
+            aermod_grid_epsg=_required_int(payload.get("aermod_grid_epsg"), "pipeline.aermod_grid_epsg"),
+            aermod_grid_id=_required_string(payload.get("aermod_grid_id"), "pipeline.aermod_grid_id"),
+            simulation_network_folder=_required_string(
+                payload.get("simulation_network_folder"),
+                "pipeline.simulation_network_folder",
+            ),
+            region=_required_string(payload.get("region"), "pipeline.region"),
+            start_year=_required_int(payload.get("start_year"), "pipeline.start_year"),
+            county_state_fips=_required_string(payload.get("county_state_fips"), "pipeline.county_state_fips"),
             county_fips_codes=_coerce_string_list(payload.get("county_fips_codes")),
-            county_area_name=_optional_string(payload.get("county_area_name")) or "county",
-            activity_totals_file=_optional_string(
-                payload.get("activity_totals_file")
-                or payload.get("activity_totals_path")
-                or payload.get("county_activity_totals_target_path")
-            ),
-            activity_totals_columns=dict(
-                payload.get("activity_totals_columns") or payload.get("county_activity_totals_columns", {}) or {}
-            ),
-            concentration_factor=_optional_float(payload.get("concentration_factor")),
-            iterations=int(payload.get("iterations", 0) or 0),
+            activity_totals_file=_optional_string(payload.get("activity_totals_file")),
+            activity_totals_columns=_required_dict(payload.get("activity_totals_columns"), "pipeline.activity_totals_columns"),
+            concentration_factor=_required_float(payload.get("concentration_factor"), "pipeline.concentration_factor"),
+            iterations=_required_int(payload.get("iterations"), "pipeline.iterations"),
+            prepared_skims_group_cols=_coerce_string_list(payload.get("prepared_skims_group_cols")),
             pollutants=_coerce_string_list(payload.get("pollutants")),
-            pollutants_map=dict(payload.get("pollutants_map", {}) or {}),
-            annualization_days=float(payload.get("annualization_days") or default_annualization_days),
-            population_sample=float(payload.get("population_sample") or 1.0),
+            pollutants_map=_required_dict(payload.get("pollutants_map"), "pipeline.pollutants_map"),
+            annualization_days=_required_float(payload.get("annualization_days"), "pipeline.annualization_days"),
+            population_sample=_required_float(payload.get("population_sample"), "pipeline.population_sample"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -143,6 +201,24 @@ class InputsManifest:
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "InputsManifest":
+        _reject_unknown_keys(
+            payload,
+            {
+                "contract_version",
+                "model",
+                "runtime_config_source",
+                "staging_dir",
+                "input_dir",
+                "inputs_manifest_path",
+                "maintained_execution_path",
+                "inputs",
+                "pipeline",
+                "pilates_contract",
+                "population_inputs",
+                "notes",
+            },
+            "inputs manifest",
+        )
         pipeline = _required_dict(payload.get("pipeline"), "pipeline")
         PipelineConfig.from_dict(pipeline)
         return cls(
@@ -185,6 +261,25 @@ class RunManifest:
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "RunManifest":
+        _reject_unknown_keys(
+            payload,
+            {
+                "contract_version",
+                "model",
+                "input_manifest_path",
+                "output_dir",
+                "raw_output_dir",
+                "command",
+                "image",
+                "raw_outputs",
+                "pipeline",
+                "population_inputs",
+                "deterministic_contract",
+                "execution",
+                "run_manifest_path",
+            },
+            "run manifest",
+        )
         raw_outputs = _required_dict(payload.get("raw_outputs"), "raw_outputs")
         if "skims_emissions" not in raw_outputs:
             raise ValueError("Run manifest missing raw_outputs.skims_emissions")
@@ -224,6 +319,20 @@ class PostprocessManifest:
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PostprocessManifest":
+        _reject_unknown_keys(
+            payload,
+            {
+                "contract_version",
+                "model",
+                "run_manifest_path",
+                "output_dir",
+                "canonical_artifact",
+                "validation",
+                "notes",
+                "postprocess_manifest_path",
+            },
+            "postprocess manifest",
+        )
         canonical_artifact = _required_dict(payload.get("canonical_artifact"), "canonical_artifact")
         if "path" not in canonical_artifact:
             raise ValueError("Postprocess manifest missing canonical_artifact.path")

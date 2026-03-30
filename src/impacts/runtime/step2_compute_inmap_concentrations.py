@@ -14,6 +14,8 @@ import pandas as pd
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
+from ..common import log_step_banner
+from ..common import log_substep_banner
 from ..common import read_table
 from ..common import read_vector
 from ..config.defaults import concentrations
@@ -416,7 +418,7 @@ def _compute_no2_response(
     receptor_dim: int,
     isrm_nox_to_no2_matrix_npz_path: Optional[str],
 ) -> Optional[np.ndarray]:
-    logger.info("%s resolving NO2 source from ISRM zarr or configured fallback matrix", _step_label(2, "1"))
+    logger.info("%s resolving NO2 source from ISRM zarr or configured NOx->NO2 transfer matrix", _step_label(2, "1"))
     if "NO2" in sr:
         logger.info("%s using NO2 transfer matrix from ISRM zarr", _step_label(2, "1"))
         return _compute_species_response(
@@ -432,12 +434,12 @@ def _compute_no2_response(
     )
     if no2_transfer_matrix is None:
         logger.warning(
-            "%s NO2 skipped: ISRM zarr has no NO2 and no ISRM NOx->NO2 fallback matrix was configured",
+            "%s NO2 skipped: ISRM zarr has no NO2 and no configured ISRM NOx->NO2 transfer matrix was available",
             _step_label(2, "1"),
         )
         return None
 
-    logger.info("%s using configured ISRM NOx->NO2 fallback transfer matrix", _step_label(2, "1"))
+    logger.info("%s using configured ISRM NOx->NO2 transfer matrix", _step_label(2, "1"))
     return _compute_custom_receptor_response(
         transfer_matrix=no2_transfer_matrix,
         emissions_key="tons_per_year_NOx",
@@ -687,6 +689,8 @@ def run(
             "Set impacts.dispersions.inmap.isrm_zarr in settings.yaml."
         )
 
+    log_step_banner("Step 2", "Compute InMAP Concentrations", logger=logger)
+    log_substep_banner("2.0", "load emissions input", logger=logger)
     logger.info("%s loading BEAM emissions for InMAP from %s", _step_label(2, "0"), emissions_input_path)
     emissions_df = read_table(emissions_input_path)
     _trace_frame("0", "loaded_emissions", emissions_df, key_cols=["inmap_srm_cell_id"])
@@ -704,6 +708,7 @@ def run(
         beam_inmap_grid_ids[:10].tolist(),
     )
 
+    log_substep_banner("2.1", "load ISRM source data", logger=logger)
     logger.info("%s loading ISRM store from %s", _step_label(2, "0"), pipeline.isrm_url)
     sr = _load_isrm_store(pipeline.isrm_url)
     logger.info(
@@ -713,6 +718,7 @@ def run(
         getattr(sr["TotalPop"], "shape", None) if "TotalPop" in sr else None,
         getattr(sr["MortalityRate"], "shape", None) if "MortalityRate" in sr else None,
     )
+    log_substep_banner("2.2", "compute concentration responses", logger=logger)
     concentrations = compute_isrm_concentrations(
         grid_emissions_df=emissions_df,
         sr=sr,
@@ -722,11 +728,13 @@ def run(
         pollutants_map=pipeline.pollutants_map,
     )
     output_path = raw_dir / "beam_inmap_concentrations.parquet"
+    log_substep_banner("2.3", "build receptor geodataframe", logger=logger)
     beam_inmap_concentrations_gdf = _build_beam_inmap_concentrations_gdf(
         concentrations=concentrations,
         inmap_grid_path=pipeline.inmap_grid_path,
         grid_id_col=pipeline.mapping_columns.get("grid_id", "srm_cell_id"),
         included_grid_ids=beam_inmap_grid_ids,
     )
+    log_substep_banner("2.4", "write concentration outputs", logger=logger)
     _write_concentration_outputs(beam_inmap_concentrations_gdf, str(output_path))
     return beam_inmap_concentrations_gdf, beam_inmap_grid_ids, output_path

@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 
 from ..common import first_existing
+from ..common import log_step_banner
+from ..common import log_substep_banner
 from ..common import normalize_county_fips
 from ..common import read_table
 from ..common import read_vector
@@ -69,7 +71,7 @@ def _derive_county_correction_factors(
     *,
     correction_columns: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
-    columns = _resolve_column_config(correction_columns, _COUNTY_CORRECTION_COLUMNS)
+    columns = resolve_column_config(correction_columns, _COUNTY_CORRECTION_COLUMNS)
     corrections = read_table(corrections_path)
     fips_source_col = first_existing(corrections, [columns["county_fips"]])
     if fips_source_col is None:
@@ -297,13 +299,16 @@ def run(
     intersection_path: str,
     intersection_df: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Optional[str]]:
+    log_step_banner("Step 1", "Process Emissions", logger=logger)
     reused = _reuse_existing_outputs(raw_dir)
     if reused is not None:
         return reused
 
+    log_substep_banner("1.0", "prepare skims inputs", logger=logger)
     skims_df = load_or_prepare_skims_df(
         input_root=input_root,
         intersection_path=intersection_path,
+        simulation_network_folder=pipeline.simulation_network_folder,
         beam_length_col=pipeline.beam_length_col,
         prepared_skims_group_cols=list(pipeline.prepared_skims_group_cols),
         pollutants=list(pipeline.pollutants),
@@ -312,14 +317,17 @@ def run(
         population_sample=float(pipeline.population_sample),
     )
 
+    log_substep_banner("1.1", "group intersection by link and zone", logger=logger)
     combined_grouped_df = _build_combined_grouped_table(
         intersection_path=intersection_path,
         intersection_df=intersection_df,
     )
+    log_substep_banner("1.2", "allocate emissions to zones", logger=logger)
     combined_allocated_df = _build_combined_allocated_table(
         grouped_df=combined_grouped_df,
         skims_df=skims_df,
     )
+    log_substep_banner("1.3", "apply activity corrections", logger=logger)
     combined_corrected_df, beam_activity_totals, county_correction_factors = _build_combined_corrected_table(
         allocated_df=combined_allocated_df,
         pipeline=pipeline,
@@ -327,6 +335,7 @@ def run(
 
     beam_activity_totals_path = None
     beam_activity_correction_factors_path = None
+    log_substep_banner("1.4", "write activity correction artifacts", logger=logger)
     if beam_activity_totals is not None and not beam_activity_totals.empty:
         beam_activity_totals_path = str(raw_dir / "beam_activity_totals.parquet")
         beam_activity_totals.to_parquet(beam_activity_totals_path, index=False)
@@ -339,6 +348,7 @@ def run(
     beam_emissions_for_aermod_path = None
 
     if pipeline.aermod_grid_path and combined_grouped_df is not None:
+        log_substep_banner("1.5[aermod]", "write AERMOD emissions table", logger=logger)
         aermod_corrected_df = _split_zone_allocated(
             combined_df=combined_corrected_df,
             zone_label="aermod",
@@ -372,6 +382,7 @@ def run(
     )
     beam_emissions_for_inmap_path = None
     if inmap_corrected_df is not None and not inmap_corrected_df.empty:
+        log_substep_banner("1.6[inmap]", "write InMAP emissions table", logger=logger)
         inmap_emissions_df, _ = _split_zone_outputs(
             zone_df=inmap_corrected_df,
             zone_label="inmap",

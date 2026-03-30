@@ -19,6 +19,8 @@ from ..common import normalize_county_fips
 from ..common import prepare_skims_for_grid_allocation
 from ..common import prepared_table_target
 from ..common import read_table
+from ..common import resolve_emissions_skims_local_path
+from ..common import resolve_latest_events_local_path
 from ..common import stage_local_input
 from ..manifest.file_ops import file_entry
 
@@ -390,6 +392,7 @@ def load_or_prepare_skims_df(
     *,
     input_root: Path,
     intersection_path: str,
+    simulation_network_folder: Optional[str],
     beam_length_col: str,
     prepared_skims_group_cols: list[str],
     pollutants: list[str],
@@ -402,8 +405,29 @@ def load_or_prepare_skims_df(
         logger.info("Step 1: using staged prepared skims %s", prepared_path)
         return read_table(prepared_path)
 
-    skims_input_source = _resolve_staged_skims_input_path(input_root)
     network_path = _resolve_staged_network_path(input_root)
+    if simulation_network_folder:
+        try:
+            local_skims_path = resolve_emissions_skims_local_path(simulation_network_folder)
+            logger.info("Step 1: preparing skims from simulation_network_folder %s", local_skims_path)
+            return prepare_staged_skims_for_processing(
+                input_root=input_root,
+                skims_input_source=local_skims_path,
+                beam_length_col=beam_length_col,
+                prepared_skims_group_cols=prepared_skims_group_cols,
+                pollutants=pollutants,
+                pollutants_map=pollutants_map,
+                annualization_days=annualization_days,
+                population_sample=population_sample,
+                network_path=network_path,
+            )
+        except FileNotFoundError:
+            logger.info(
+                "Step 1: no skimsEmissions file found under simulation_network_folder %s; trying events",
+                simulation_network_folder,
+            )
+
+    skims_input_source = _resolve_staged_skims_input_path(input_root)
     if skims_input_source:
         logger.info("Step 1: preparing staged skims input %s", skims_input_source)
         return prepare_staged_skims_for_processing(
@@ -419,14 +443,41 @@ def load_or_prepare_skims_df(
         )
 
     from .prepare_emissions_from_events import build_staged_skims_from_events
+    from .prepare_emissions_from_events import build_staged_skims_from_local_events
 
-    events_skims_path = build_staged_skims_from_events(
-        input_root=input_root,
-        network_path=network_path,
-        intersection_path=intersection_path,
-    )
+    events_skims_path = None
+    if simulation_network_folder:
+        local_events_path = resolve_latest_events_local_path(simulation_network_folder)
+        if local_events_path:
+            staged = build_staged_skims_from_local_events(
+                input_root=input_root,
+                simulation_network_folder=simulation_network_folder,
+                network_path=network_path,
+                intersection_path=intersection_path,
+            )
+            if staged is not None:
+                _, events_skims_path, _ = staged
     if not events_skims_path:
-        raise FileNotFoundError("Could not find staged skims or staged events under input_root/skims or input_root/events.")
+        events_skims_path = build_staged_skims_from_events(
+            input_root=input_root,
+            network_path=network_path,
+            intersection_path=intersection_path,
+        )
+    if not events_skims_path:
+        raise FileNotFoundError(
+            "Could not find skims or events input. Looked first under "
+            f"simulation_network_folder {simulation_network_folder}"
+            + (
+                ""
+                if simulation_network_folder
+                else "the configured simulation network folder (not provided)"
+            )
+            + ", then under staged files "
+            f"{input_root / 'skims'} and {input_root / 'events'}"
+            + (
+                "."
+            )
+        )
 
     return prepare_staged_skims_for_processing(
         input_root=input_root,

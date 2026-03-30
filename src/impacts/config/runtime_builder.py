@@ -10,25 +10,19 @@ from impacts.manifest.file_ops import write_structured_file
 from impacts.config.runtime import ImpactsRuntimeConfig
 
 
-def _looks_like_runtime_payload(payload: Dict[str, Any]) -> bool:
-    return "processing" in payload or (
-        "shared" in payload and "inputs" in payload and ("emissions" in payload or "dispersions" in payload)
-    )
-
-
-def _looks_like_pilates_payload(payload: Dict[str, Any]) -> bool:
-    return "impacts" in payload and ("run" in payload or "shared" in payload)
-
-
 def build_runtime_config_from_runtime_yaml(path: str | Path) -> ImpactsRuntimeConfig:
     payload = load_structured_file(path)
     if isinstance(payload, dict):
         payload = dict(payload)
         payload["__source_root__"] = str(Path(path).resolve().parent)
-    if _looks_like_pilates_payload(payload) and not _looks_like_runtime_payload(payload):
-        runtime_payload = build_runtime_payload_from_pilates(payload, payload)
-        return ImpactsRuntimeConfig.from_dict(runtime_payload)
-    return ImpactsRuntimeConfig.from_dict(payload)
+    runtime_payload = build_runtime_payload_from_pilates(
+        payload,
+        {
+            "impacts": dict(payload.get("impacts", {}) or {}),
+            "__source_root__": payload.get("__source_root__"),
+        },
+    )
+    return ImpactsRuntimeConfig.from_dict(runtime_payload)
 
 
 def build_runtime_config_from_pilates(

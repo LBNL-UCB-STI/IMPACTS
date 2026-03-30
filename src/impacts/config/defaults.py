@@ -34,3 +34,12 @@ tons_per_year_to_ug_per_s: float = 28766.639
 
 chunk_size: int = 50_000
 """Default batch size used to chunk large workflow tables for processing and parallelization."""
+
+meters_per_mile: float = 1609.344
+"""Meters in one mile — used for distance unit conversion."""
+
+running_processes: list = ["RUNEX", "RUNLOSS", "PMBW", "PMTW", "PRDUST"]
+"""Emission processes associated with vehicle movement (per-link traversal)."""
+
+parked_processes: list = ["DIURN", "HOTSOAK", "STREX", "IDLEX"]
+"""Emission processes associated with vehicle parking/departure events."""

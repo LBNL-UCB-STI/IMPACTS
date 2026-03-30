@@ -22,7 +22,3 @@ impacts:
       grid_path: {local_input_folder}/vehicle-tech/dispersions/inmap/isrm_polygon/isrm_polygon.shp
       grid_id: isrm
       grid_epsg:
-    aermod:
-      grid_path:
-      grid_epsg:
-      grid_id:

@@ -1,3 +1,16 @@
+"""Shared maintained helpers for IMPACTS preprocess, runtime, and postprocess code.
+
+This module is intentionally limited to cross-cutting helpers that are reused by
+multiple maintained modules. It is organized by concern:
+
+1. Config and local-path validation
+2. Input discovery helpers
+3. Table/vector IO
+4. Preprocess staging and grid preparation
+5. Shared table-shaping helpers
+6. Skims preparation and annualization
+"""
+
 from __future__ import annotations
 
 import logging
@@ -14,18 +27,31 @@ import pandas as pd
 import shapely
 from tqdm import tqdm
 
-from ..config.defaults import annualization_days as default_annualization_days
-from ..config.defaults import chunk_size as default_chunk_size
-from ..config.defaults import grams_per_ton
-from ..config.defaults import meters_per_mile as _METERS_PER_MILE
-from ..config.defaults import pollutants as default_prepared_pollutants
-from ..manifest.file_ops import copy_path
-from ..manifest.file_ops import file_entry
-from ..manifest.file_ops import is_remote_path
-from ..manifest.file_ops import parquet_available
+from .config.defaults import annualization_days as default_annualization_days
+from .config.defaults import chunk_size as default_chunk_size
+from .config.defaults import grams_per_ton
+from .config.defaults import meters_per_mile as _METERS_PER_MILE
+from .config.defaults import pollutants as default_prepared_pollutants
+from .manifest.file_ops import copy_path
+from .manifest.file_ops import file_entry
+from .manifest.file_ops import is_remote_path
+from .manifest.file_ops import parquet_available
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Config and local-path validation
+# ---------------------------------------------------------------------------
+
+
+def log_step_banner(step_label: str, title: str, *, logger: logging.Logger) -> None:
+    logger.info("")
+    logger.info("========== %s: %s ==========", step_label.upper(), title.upper())
+
+
+def log_substep_banner(substep_label: str, title: str, *, logger: logging.Logger) -> None:
+    logger.info("----- %s %s -----", substep_label, title)
 
 def parse_epsg(value: Any) -> int:
     if value is None or (isinstance(value, str) and not value.strip()):
@@ -63,6 +89,10 @@ def optional_local_path(path: Optional[str]) -> Optional[str]:
         raise FileNotFoundError(f"Configured path not found: {path}")
     return str(resolved)
 
+
+# ---------------------------------------------------------------------------
+# Input discovery
+# ---------------------------------------------------------------------------
 
 def find_first_matching(root: str, pattern: str) -> Optional[str]:
     if not root or is_remote_path(root):
@@ -226,6 +256,10 @@ def infer_vector_epsg(path: Optional[str]) -> Optional[int]:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Table and vector IO
+# ---------------------------------------------------------------------------
+
 def read_vector(path: str) -> gpd.GeoDataFrame:
     target = Path(path)
     if target.suffix.lower() == ".parquet":
@@ -281,6 +315,10 @@ def read_network_bounds(path: str) -> tuple[float, float, float, float]:
     )
     return bounds
 
+
+# ---------------------------------------------------------------------------
+# Preprocess staging and grid preparation
+# ---------------------------------------------------------------------------
 
 def generate_fishnet_from_bounds(
     *,
@@ -438,6 +476,10 @@ def prepared_table_target(input_root: Path, stem: str) -> Path:
     return input_root / "skims" / f"{stem}{suffix}"
 
 
+# ---------------------------------------------------------------------------
+# Shared table-shaping helpers
+# ---------------------------------------------------------------------------
+
 def read_table(path: str | Path) -> pd.DataFrame:
     target = Path(path)
     lower = target.name.lower()
@@ -450,11 +492,27 @@ def read_table(path: str | Path) -> pd.DataFrame:
     raise ValueError(f"Unsupported table format: {target}")
 
 
-def _first_existing(df: pd.DataFrame, candidates) -> Optional[str]:
+def first_existing(df: pd.DataFrame, candidates) -> Optional[str]:
     for col in candidates:
         if col in df.columns:
             return col
     return None
+
+
+def normalize_county_fips(series: pd.Series) -> pd.Series:
+    extracted = series.astype("string").str.extract(r"(\d+)")[0]
+    normalized = extracted.where(extracted.isna(), extracted.str.zfill(3))
+    return normalized.astype("string")
+
+
+def resolve_column_config(
+    config: Optional[Dict[str, str]],
+    defaults: Dict[str, str],
+) -> Dict[str, str]:
+    resolved = defaults.copy()
+    if config:
+        resolved.update({k: v for k, v in config.items() if v})
+    return resolved
 
 
 def parse_emissions_string(emissions: str) -> Dict[str, float]:
@@ -474,14 +532,6 @@ def parse_emissions_string(emissions: str) -> Dict[str, float]:
         except ValueError:
             continue
     return out
-
-
-def expand_emissions_columns(df: pd.DataFrame, emissions_col: str = "emissions") -> pd.DataFrame:
-    parsed = df[emissions_col].apply(parse_emissions_string)
-    expanded_pollutants = sorted({key for values in parsed for key in values.keys()})
-    for pollutant in expanded_pollutants:
-        df[f"em_{pollutant}"] = parsed.apply(lambda values, p=pollutant: float(values.get(p, 0.0)))
-    return df
 
 
 def read_skims_emissions(
@@ -565,6 +615,10 @@ def _group_and_sum_numeric(
         grouped = grouped.merge(counts, on=group_cols, how="left")
     return grouped
 
+
+# ---------------------------------------------------------------------------
+# Skims preparation and annualization
+# ---------------------------------------------------------------------------
 
 def prepare_skims_for_grid_allocation(
     skims_path: str,
@@ -669,7 +723,7 @@ def annualize_prepared_skims_for_grid_allocation(
     out["totVMT"] = out["totTrips"] * prepared[beam_length_col] / _METERS_PER_MILE
     out = out.drop(columns=[col for col in [beam_length_col] if col in out.columns], errors="ignore")
     for pollutant in required:
-        source_col = _first_existing(prepared, [pollutant, f"em_{pollutant}", f"tons_per_year_{pollutant}"])
+        source_col = first_existing(prepared, [pollutant, f"em_{pollutant}", f"tons_per_year_{pollutant}"])
         values = (
             pd.to_numeric(prepared[source_col], errors="coerce").fillna(0.0)
             if source_col is not None
@@ -685,49 +739,6 @@ def annualize_prepared_skims_for_grid_allocation(
         out.to_csv(output, index=False, compression="gzip")
     else:
         raise ValueError("Annualized skims output must be .parquet or .csv.gz")
-    return out
-
-
-def annualize_skims(
-    skims_df: pd.DataFrame,
-    pollutants: list[str],
-    annualization_days: float,
-    *,
-    network_path: str,
-    beam_length_col: str,
-    population_sample: float = 1.0,
-) -> pd.DataFrame:
-    if annualization_days <= 0:
-        raise ValueError(f"annualization_days must be positive, got {annualization_days}")
-    if not 0 < population_sample <= 1:
-        raise ValueError(f"population_sample must be in the interval (0, 1], got {population_sample}")
-
-    dim_cols = [c for c in skims_df.columns if c in _SKIMS_DIMENSION_COLS]
-    out = skims_df[dim_cols].copy()
-    scale_factor = 1.0 / population_sample
-    factor = scale_factor * annualization_days / grams_per_ton
-    link_lengths = read_table(network_path)
-    if "linkId" not in link_lengths.columns or beam_length_col not in link_lengths.columns:
-        raise ValueError(
-            f"Link lengths table must include 'linkId' and '{beam_length_col}'."
-        )
-    link_lengths = link_lengths[["linkId", beam_length_col]].copy()
-    link_lengths[beam_length_col] = pd.to_numeric(link_lengths[beam_length_col], errors="coerce").fillna(0.0)
-    out = out.merge(link_lengths, how="left", on="linkId")
-    out[beam_length_col] = pd.to_numeric(out[beam_length_col], errors="coerce").fillna(0.0)
-    out["totTrips"] = pd.to_numeric(skims_df.get("observations", 0.0), errors="coerce").fillna(0.0) * scale_factor * annualization_days
-    out["totVMT"] = out["totTrips"] * out[beam_length_col] / _METERS_PER_MILE
-    out = out.drop(columns=[beam_length_col])
-    for pollutant in pollutants:
-        source_col = _first_existing(skims_df, [pollutant, f"em_{pollutant}", f"tons_per_year_{pollutant}"])
-        if source_col is None:
-            out[f"tons_per_year_{pollutant}"] = 0.0
-            continue
-        values = pd.to_numeric(skims_df[source_col], errors="coerce").fillna(0.0)
-        if source_col.startswith("tons_per_year_"):
-            out[f"tons_per_year_{pollutant}"] = values
-        else:
-            out[f"tons_per_year_{pollutant}"] = values * factor
     return out
 
 
