@@ -17,6 +17,7 @@ from tqdm import tqdm
 from ..config.defaults import annualization_days as default_annualization_days
 from ..config.defaults import chunk_size as default_chunk_size
 from ..config.defaults import grams_per_ton
+from ..config.defaults import meters_per_mile as _METERS_PER_MILE
 from ..config.defaults import pollutants as default_prepared_pollutants
 from ..manifest.file_ops import copy_path
 from ..manifest.file_ops import file_entry
@@ -24,7 +25,6 @@ from ..manifest.file_ops import is_remote_path
 from ..manifest.file_ops import parquet_available
 
 logger = logging.getLogger(__name__)
-_METERS_PER_MILE = 1609.344
 
 
 def parse_epsg(value: Any) -> int:
@@ -106,6 +106,28 @@ def find_latest_iters_dir(root: str) -> Optional[Path]:
     return max(candidates, key=lambda candidate: candidate.stat().st_mtime)
 
 
+def find_latest_iteration_events(iters_dir: Path) -> Optional[Path]:
+    patterns = [
+        ("*.events.parquet", r"/it\.(\d+)/(\d+)\.events\.parquet$"),
+        ("*.events.csv.gz",  r"/it\.(\d+)/(\d+)\.events\.csv\.gz$"),
+    ]
+    latest_iter = -1
+    latest_events: Optional[Path] = None
+    for glob_pattern, regex_pattern in patterns:
+        for candidate in iters_dir.glob(f"it.*/{glob_pattern}"):
+            match = re.search(regex_pattern, str(candidate))
+            if not match:
+                continue
+            dir_iter = int(match.group(1))
+            file_iter = int(match.group(2))
+            if dir_iter != file_iter:
+                continue
+            if dir_iter > latest_iter:
+                latest_iter = dir_iter
+                latest_events = candidate
+    return latest_events
+
+
 def find_latest_iteration_skims(iters_dir: Path) -> Optional[Path]:
     patterns = [
         ("*.skimsEmissionsTotals.csv.gz", r"/it\.(\d+)/(\d+)\.skimsEmissionsTotals\.csv\.gz$"),
@@ -155,6 +177,19 @@ def resolve_emissions_skims_local_path(root: str) -> str:
         if match:
             return match
     raise FileNotFoundError(f"No BEAM skims emissions file found under configured simulation network folder: {resolved}")
+
+
+def resolve_latest_events_local_path(root: str) -> Optional[str]:
+    """Return the latest events file under root, or None if not found."""
+    resolved = Path(root)
+    if not resolved.exists():
+        return None
+    latest_iters_dir = find_latest_iters_dir(str(resolved))
+    if latest_iters_dir:
+        latest_events = find_latest_iteration_events(latest_iters_dir)
+        if latest_events:
+            return str(latest_events)
+    return None
 
 
 def resolve_osm_pbf_local_path(path: Optional[str]) -> Optional[str]:
@@ -584,6 +619,7 @@ _SKIMS_DIMENSION_COLS = {
     "process",
     "totTrips",
     "totVMT",
+    "roadCategory",
 }
 
 
@@ -615,10 +651,15 @@ def annualize_prepared_skims_for_grid_allocation(
         raise ValueError(
             f"Link lengths table must include 'linkId' and '{beam_length_col}'."
         )
-    link_lengths = link_lengths[["linkId", beam_length_col]].copy()
+    network_cols = ["linkId", beam_length_col]
+    if "attributeOrigType" in link_lengths.columns:
+        network_cols.append("attributeOrigType")
+    link_lengths = link_lengths[network_cols].copy()
     link_lengths[beam_length_col] = pd.to_numeric(link_lengths[beam_length_col], errors="coerce").fillna(0.0)
     prepared = prepared.merge(link_lengths, how="left", on="linkId")
     prepared[beam_length_col] = pd.to_numeric(prepared[beam_length_col], errors="coerce").fillna(0.0)
+    if "attributeOrigType" in prepared.columns:
+        prepared = prepared.rename(columns={"attributeOrigType": "roadCategory"})
     scale_factor = 1.0 / population_sample
 
     retained_dim_cols = [col for col in prepared.columns if col in _SKIMS_DIMENSION_COLS and col not in prepared_group_cols]

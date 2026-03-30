@@ -1,8 +1,9 @@
 """Workflow step modules."""
 
 __all__ = [
-    "step1_grid_intersection",
-    "step2_emissions_distribution",
-    "step3_inmap_dispersion",
-    "step4_aermod_dispersion",
+    "prepare_emissions_from_events",
+    "prepare_emissions_from_skims",
+    "step1_process_emissions",
+    "step2_compute_inmap_concentrations",
+    "step3_compute_aermod_concentrations",
 ]

@@ -2,8 +2,7 @@
 
 __all__ = [
     "common",
-    "step1_prepare_skims",
-    "step2_stage_network_mapping",
-    "step3_stage_spatial_support",
-    "step4_stage_optional_inputs",
+    "step1_stage_inputs",
+    "step2_prepare_grids",
+    "step3_integrate_grids",
 ]
