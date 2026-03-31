@@ -100,17 +100,6 @@ def _normalize_countyfp(series: pd.Series) -> pd.Series:
     return series.astype(str).str.extract(r"(\d+)")[0].fillna("").str.zfill(3)
 
 
-def _county_name_to_fips(series: pd.Series) -> pd.Series:
-    cleaned = (
-        series.astype(str)
-        .str.strip()
-        .str.replace(r"\s*\(.*\)\s*$", "", regex=True)
-        .str.replace(r"\s+county$", "", regex=True)
-        .str.lower()
-    )
-    return cleaned.map(_CALIFORNIA_COUNTY_FIPS).fillna("")
-
-
 def _normalize_input_frame(
     frame: pd.DataFrame,
     *,
@@ -124,36 +113,23 @@ def _normalize_input_frame(
     normalized = frame.copy()
 
     if county_col not in normalized.columns:
-        if "sub_area" in normalized.columns:
-            normalized[county_col] = _county_name_to_fips(normalized["sub_area"])
-        else:
-            raise ValueError(f"Input {path} is missing '{county_col}' and has no supported county-name fallback column.")
-    else:
-        normalized[county_col] = _normalize_countyfp(normalized[county_col])
+        raise ValueError(f"Input {path} is missing required county column '{county_col}'.")
+    normalized[county_col] = _normalize_countyfp(normalized[county_col])
 
     if year_col not in normalized.columns:
-        if "calendar_year" in normalized.columns:
-            normalized[year_col] = normalized["calendar_year"]
-        elif default_year is not None:
+        if default_year is not None:
             normalized[year_col] = int(default_year)
         else:
-            raise ValueError(f"Input {path} is missing '{year_col}' and no default year was provided.")
+            raise ValueError(f"Input {path} is missing required year column '{year_col}'.")
 
     if vmt_col not in normalized.columns:
-        if "total_vmt" in normalized.columns:
-            normalized[vmt_col] = normalized["total_vmt"]
-        else:
-            normalized[vmt_col] = 0.0
+        raise ValueError(f"Input {path} is missing required VMT column '{vmt_col}'.")
 
     if trips_col not in normalized.columns:
-        if "trips" in normalized.columns:
-            normalized[trips_col] = normalized["trips"]
-        else:
-            normalized[trips_col] = 0.0
+        raise ValueError(f"Input {path} is missing required trips column '{trips_col}'.")
 
     if normalized[county_col].eq("").any():
-        sample = normalized.loc[normalized[county_col].eq(""), "sub_area"].drop_duplicates().head(10).tolist() if "sub_area" in normalized.columns else []
-        raise ValueError(f"Input {path} contains county values that could not be mapped to FIPS. sample={sample}")
+        raise ValueError(f"Input {path} contains invalid county values in '{county_col}'.")
 
     return normalized[[county_col, year_col, vmt_col, trips_col]].copy()
 

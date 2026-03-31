@@ -52,6 +52,28 @@ def _required_float(value: Any, label: str) -> float:
         raise ValueError(f"Invalid float for {label}: {value}") from exc
 
 
+def _optional_float(value: Any, default: Optional[float] = None) -> Optional[float]:
+    if value is None or str(value).strip() == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid float value: {value}") from exc
+
+
+def _required_bool(value: Any, label: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        raise ValueError(f"Missing required value: {label}")
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y"}:
+        return True
+    if text in {"false", "0", "no", "n"}:
+        return False
+    raise ValueError(f"Invalid boolean for {label}: {value}")
+
+
 def _coerce_string_list(value: Any) -> List[str]:
     if value is None:
         return []
@@ -160,9 +182,10 @@ class Run:
 
 @dataclass(frozen=True)
 class InmapDispersion:
-    isrm_zarr: str
-    isrm_nox_to_no2_matrix_npz: str
-    grid_path: str
+    enabled: bool
+    isrm_zarr: Optional[str] = None
+    isrm_nox_to_no2_matrix_npz: Optional[str] = None
+    grid_path: Optional[str] = None
     grid_id: Optional[str] = None
     grid_epsg: Optional[int] = None
 
@@ -170,30 +193,68 @@ class InmapDispersion:
     def from_dict(cls, payload: Dict[str, Any]) -> "InmapDispersion":
         _reject_unknown_keys(
             payload,
-            {"isrm_zarr", "isrm_nox_to_no2_matrix_npz", "grid_path", "grid_id", "grid_epsg"},
+            {"enabled", "isrm_zarr", "isrm_nox_to_no2_matrix_npz", "grid_path", "grid_id", "grid_epsg"},
             "impacts.dispersions.inmap",
         )
-        return cls(
-            isrm_zarr=_required_string(payload.get("isrm_zarr"), "impacts.dispersions.inmap.isrm_zarr"),
-            isrm_nox_to_no2_matrix_npz=_required_string(
-                payload.get("isrm_nox_to_no2_matrix_npz"),
-                "impacts.dispersions.inmap.isrm_nox_to_no2_matrix_npz",
-            ),
-            grid_path=_required_string(payload.get("grid_path"), "impacts.dispersions.inmap.grid_path"),
+        enabled = _required_bool(payload.get("enabled"), "impacts.dispersions.inmap.enabled")
+        result = cls(
+            enabled=enabled,
+            isrm_zarr=_optional_string(payload.get("isrm_zarr")),
+            isrm_nox_to_no2_matrix_npz=_optional_string(payload.get("isrm_nox_to_no2_matrix_npz")),
+            grid_path=_optional_string(payload.get("grid_path")),
             grid_id=_optional_string(payload.get("grid_id")),
             grid_epsg=_optional_int(payload.get("grid_epsg")),
         )
+        if result.enabled:
+            if not result.isrm_zarr:
+                raise ValueError("Missing required value: impacts.dispersions.inmap.isrm_zarr")
+            if not result.isrm_nox_to_no2_matrix_npz:
+                raise ValueError("Missing required value: impacts.dispersions.inmap.isrm_nox_to_no2_matrix_npz")
+            if not result.grid_path:
+                raise ValueError("Missing required value: impacts.dispersions.inmap.grid_path")
+        return result
+
+
+@dataclass(frozen=True)
+class AermodDispersion:
+    enabled: bool
+    grid_size_meters: Optional[float] = None
+    asrv_patterns_file: Optional[str] = None
+    asrv_patterns_epsg: Optional[int] = None
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "AermodDispersion":
+        _reject_unknown_keys(
+            payload,
+            {"enabled", "grid_size_meters", "asrv_patterns_file", "asrv_patterns_epsg"},
+            "impacts.dispersions.aermod",
+        )
+        enabled = _required_bool(payload.get("enabled"), "impacts.dispersions.aermod.enabled")
+        result = cls(
+            enabled=enabled,
+            grid_size_meters=_optional_float(payload.get("grid_size_meters")),
+            asrv_patterns_file=_optional_string(payload.get("asrv_patterns_file")),
+            asrv_patterns_epsg=_optional_int(payload.get("asrv_patterns_epsg")),
+        )
+        if result.enabled:
+            if result.grid_size_meters is None:
+                raise ValueError("Missing required value: impacts.dispersions.aermod.grid_size_meters")
+            if not result.asrv_patterns_file:
+                raise ValueError("Missing required value: impacts.dispersions.aermod.asrv_patterns_file")
+        return result
 
 
 @dataclass(frozen=True)
 class Dispersions:
     inmap: InmapDispersion
+    aermod: AermodDispersion
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Dispersions":
-        _reject_unknown_keys(payload, {"inmap"}, "impacts.dispersions")
+        _reject_unknown_keys(payload, {"inmap", "aermod"}, "impacts.dispersions")
         return cls(
             inmap=InmapDispersion.from_dict(dict(payload.get("inmap", {}) or {})),
+            aermod=AermodDispersion.from_dict(dict(payload.get("aermod", {}) or {})),
         )
 
 

@@ -82,17 +82,35 @@ def _required_float(value: Any, label: str) -> float:
         raise ValueError(f"Invalid float for {label}: {value}") from exc
 
 
+def _required_bool(value: Any, label: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        raise ValueError(f"Missing required value: {label}")
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y"}:
+        return True
+    if text in {"false", "0", "no", "n"}:
+        return False
+    raise ValueError(f"Invalid boolean for {label}: {value}")
+
+
 @dataclass(frozen=True)
 class PipelineConfig:
     beam_osm_id_col: str
     beam_length_col: str
     beam_osm_epsg: int
     output_epsg: int
-    inmap_grid_path: str
-    inmap_grid_epsg: int
     mapping_columns: Dict[str, Any]
+    inmap_enabled: bool
+    aermod_enabled: bool
+    grid_size_meters: Optional[float] = None
+    inmap_grid_path: Optional[str] = None
+    inmap_grid_epsg: Optional[int] = None
     isrm_url: Optional[str] = None
     isrm_nox_to_no2_matrix_npz_path: Optional[str] = None
+    asrv_patterns_file: Optional[str] = None
+    asrv_patterns_epsg: Optional[int] = None
     aermod_grid_path: Optional[str] = None
     aermod_grid_epsg: Optional[int] = None
     aermod_grid_id: Optional[str] = None
@@ -120,11 +138,16 @@ class PipelineConfig:
                 "beam_length_col",
                 "beam_osm_epsg",
                 "output_epsg",
+                "inmap_enabled",
+                "aermod_enabled",
                 "inmap_grid_path",
                 "inmap_grid_epsg",
                 "mapping_columns",
                 "isrm_url",
                 "isrm_nox_to_no2_matrix_npz_path",
+                "asrv_patterns_file",
+                "asrv_patterns_epsg",
+                "grid_size_meters",
                 "aermod_grid_path",
                 "aermod_grid_epsg",
                 "aermod_grid_id",
@@ -145,22 +168,24 @@ class PipelineConfig:
             },
             "pipeline",
         )
-        return cls(
+        result = cls(
             beam_osm_id_col=_required_string(payload.get("beam_osm_id_col"), "pipeline.beam_osm_id_col"),
             beam_length_col=_required_string(payload.get("beam_length_col"), "pipeline.beam_length_col"),
             beam_osm_epsg=int(_required_string(payload.get("beam_osm_epsg"), "pipeline.beam_osm_epsg")),
             output_epsg=int(_required_string(payload.get("output_epsg"), "pipeline.output_epsg")),
-            inmap_grid_path=_required_string(payload.get("inmap_grid_path"), "pipeline.inmap_grid_path"),
-            inmap_grid_epsg=int(_required_string(payload.get("inmap_grid_epsg"), "pipeline.inmap_grid_epsg")),
             mapping_columns=_required_dict(payload.get("mapping_columns"), "pipeline.mapping_columns"),
-            isrm_url=_required_string(payload.get("isrm_url"), "pipeline.isrm_url"),
-            isrm_nox_to_no2_matrix_npz_path=_required_string(
-                payload.get("isrm_nox_to_no2_matrix_npz_path"),
-                "pipeline.isrm_nox_to_no2_matrix_npz_path",
-            ),
-            aermod_grid_path=_required_string(payload.get("aermod_grid_path"), "pipeline.aermod_grid_path"),
-            aermod_grid_epsg=_required_int(payload.get("aermod_grid_epsg"), "pipeline.aermod_grid_epsg"),
-            aermod_grid_id=_required_string(payload.get("aermod_grid_id"), "pipeline.aermod_grid_id"),
+            inmap_enabled=_required_bool(payload.get("inmap_enabled"), "pipeline.inmap_enabled"),
+            aermod_enabled=_required_bool(payload.get("aermod_enabled"), "pipeline.aermod_enabled"),
+            grid_size_meters=_optional_float(payload.get("grid_size_meters")),
+            inmap_grid_path=_optional_string(payload.get("inmap_grid_path")),
+            inmap_grid_epsg=_optional_int(payload.get("inmap_grid_epsg")),
+            isrm_url=_optional_string(payload.get("isrm_url")),
+            isrm_nox_to_no2_matrix_npz_path=_optional_string(payload.get("isrm_nox_to_no2_matrix_npz_path")),
+            asrv_patterns_file=_optional_string(payload.get("asrv_patterns_file")),
+            asrv_patterns_epsg=_optional_int(payload.get("asrv_patterns_epsg")),
+            aermod_grid_path=_optional_string(payload.get("aermod_grid_path")),
+            aermod_grid_epsg=_optional_int(payload.get("aermod_grid_epsg")),
+            aermod_grid_id=_optional_string(payload.get("aermod_grid_id")),
             simulation_network_folder=_required_string(
                 payload.get("simulation_network_folder"),
                 "pipeline.simulation_network_folder",
@@ -179,6 +204,21 @@ class PipelineConfig:
             annualization_days=_required_float(payload.get("annualization_days"), "pipeline.annualization_days"),
             population_sample=_required_float(payload.get("population_sample"), "pipeline.population_sample"),
         )
+        if result.inmap_enabled:
+            if not result.inmap_grid_path:
+                raise ValueError("Missing required value: pipeline.inmap_grid_path")
+            if not result.isrm_url:
+                raise ValueError("Missing required value: pipeline.isrm_url")
+            if not result.isrm_nox_to_no2_matrix_npz_path:
+                raise ValueError("Missing required value: pipeline.isrm_nox_to_no2_matrix_npz_path")
+        if result.aermod_enabled:
+            if result.grid_size_meters is None:
+                raise ValueError("Missing required value: pipeline.grid_size_meters")
+            if not result.aermod_grid_path:
+                raise ValueError("Missing required value: pipeline.aermod_grid_path")
+            if not result.asrv_patterns_file:
+                raise ValueError("Missing required value: pipeline.asrv_patterns_file")
+        return result
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -249,10 +289,10 @@ class RunManifest:
     model: str
     input_manifest_path: str
     output_dir: str
-    raw_output_dir: str
+    outputs_dir: str
     command: str
     image: str
-    raw_outputs: Dict[str, Any]
+    outputs: Dict[str, Any]
     pipeline: Dict[str, Any]
     population_inputs: Dict[str, Any]
     deterministic_contract: Dict[str, Any]
@@ -268,10 +308,10 @@ class RunManifest:
                 "model",
                 "input_manifest_path",
                 "output_dir",
-                "raw_output_dir",
+                "outputs_dir",
                 "command",
                 "image",
-                "raw_outputs",
+                "outputs",
                 "pipeline",
                 "population_inputs",
                 "deterministic_contract",
@@ -280,18 +320,18 @@ class RunManifest:
             },
             "run manifest",
         )
-        raw_outputs = _required_dict(payload.get("raw_outputs"), "raw_outputs")
-        if "skims_emissions" not in raw_outputs:
-            raise ValueError("Run manifest missing raw_outputs.skims_emissions")
+        outputs = _required_dict(payload.get("outputs"), "outputs")
+        if "skims_emissions" not in outputs:
+            raise ValueError("Run manifest missing outputs.skims_emissions")
         return cls(
             contract_version=_required_string(payload.get("contract_version"), "contract_version"),
             model=_required_string(payload.get("model"), "model"),
             input_manifest_path=_required_string(payload.get("input_manifest_path"), "input_manifest_path"),
             output_dir=_required_string(payload.get("output_dir"), "output_dir"),
-            raw_output_dir=_required_string(payload.get("raw_output_dir"), "raw_output_dir"),
+            outputs_dir=_required_string(payload.get("outputs_dir"), "outputs_dir"),
             command=_required_string(payload.get("command"), "command"),
             image=_required_string(payload.get("image"), "image"),
-            raw_outputs=raw_outputs,
+            outputs=outputs,
             pipeline=_required_dict(payload.get("pipeline"), "pipeline"),
             population_inputs=_required_dict(payload.get("population_inputs"), "population_inputs"),
             deterministic_contract=_required_dict(payload.get("deterministic_contract"), "deterministic_contract"),

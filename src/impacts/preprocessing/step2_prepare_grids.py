@@ -30,32 +30,39 @@ def run(
     if start_year is None:
         raise ValueError("run.start_year is required for county boundary staging")
 
-    staged_inmap_grid = manifest_inputs["inmap_grid"]["staged_path"]
-    log_substep_banner("2.1", "ensure InMAP grid id", logger=logger)
-    staged_inmap_grid, resolved_inmap_grid_id = ensure_grid_cell_id(
-        staged_inmap_grid,
-        "srm_cell_id",
-        source_col=inmap.grid_id,
-    )
-    manifest_inputs["inmap_grid"]["staged_path"] = staged_inmap_grid
+    staged_inmap_grid = None
+    resolved_inmap_grid_id = None
+    if inmap.enabled:
+        staged_inmap_grid = manifest_inputs["inmap_grid"]["staged_path"]
+        log_substep_banner("2.1", "ensure InMAP grid id", logger=logger)
+        staged_inmap_grid, resolved_inmap_grid_id = ensure_grid_cell_id(
+            staged_inmap_grid,
+            "srm_cell_id",
+            source_col=inmap.grid_id,
+        )
+        manifest_inputs["inmap_grid"]["staged_path"] = staged_inmap_grid
 
-    log_substep_banner("2.2", "generate AERMOD grid", logger=logger)
-    network_bounds = read_network_bounds(manifest_inputs["network"]["staged_path"])
-    staged_inmap = read_vector(staged_inmap_grid)
-    staged_aermod_grid, resolved_aermod_grid_id = generate_fishnet_from_bounds(
-        bounds=network_bounds,
-        mask_gdf=staged_inmap,
-        cell_size=100.0,
-        target_path=str((input_root / "aermod_grid" / "aermod_100m_fishnet.parquet").resolve()),
-        target_epsg=int(local_output_epsg),
-        cell_id_col="srv_cell_id",
-    )
-    manifest_inputs["aermod_grid"] = file_entry(
-        kind="local",
-        path=staged_aermod_grid,
-        staged_path=staged_aermod_grid,
-        optional=False,
-    )
+    staged_aermod_grid = None
+    resolved_aermod_grid_id = None
+    if runtime_config.impacts.dispersions.aermod.enabled:
+        log_substep_banner("2.2", "generate AERMOD grid", logger=logger)
+        network_bounds = read_network_bounds(manifest_inputs["network"]["staged_path"])
+        staged_inmap = read_vector(staged_inmap_grid) if staged_inmap_grid else None
+        grid_size_meters = float(runtime_config.impacts.dispersions.aermod.grid_size_meters)
+        staged_aermod_grid, resolved_aermod_grid_id = generate_fishnet_from_bounds(
+            bounds=network_bounds,
+            mask_gdf=staged_inmap,
+            cell_size=grid_size_meters,
+            target_path=str((input_root / "aermod_grid" / f"aermod_{grid_size_meters:g}m_fishnet.parquet").resolve()),
+            target_epsg=int(local_output_epsg),
+            cell_id_col="srv_cell_id",
+        )
+        manifest_inputs["aermod_grid"] = file_entry(
+            kind="local",
+            path=staged_aermod_grid,
+            staged_path=staged_aermod_grid,
+            optional=False,
+        )
     geography = runtime_config.shared.geography
     log_substep_banner("2.3", "stage county boundaries", logger=logger)
     staged_county_boundaries = stage_county_boundaries(

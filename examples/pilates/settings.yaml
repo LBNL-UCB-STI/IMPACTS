@@ -38,8 +38,14 @@ impacts:
       BC: BCh
   dispersions:
     inmap:
+      enabled: true
       isrm_zarr: ~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr
       isrm_nox_to_no2_matrix_npz: {local_input_folder}/vehicle-tech/dispersions/inmap/nox_to_no2_full_isrm_matrix.npz
       grid_path: {local_input_folder}/vehicle-tech/dispersions/inmap/isrm_polygon/isrm_polygon.shp
       grid_id: isrm
       grid_epsg:
+    aermod:
+      enabled: true
+      grid_size_meters: 100.0
+      asrv_patterns_file: {local_input_folder}/vehicle-tech/dispersions/aermod/aermod_patterns_wgs84.parquet
+      asrv_patterns_epsg: 4326

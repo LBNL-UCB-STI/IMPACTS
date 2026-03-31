@@ -293,36 +293,24 @@ def _compute_custom_receptor_response(
 
 def _prepare_grid_emissions(
     emissions_df: pd.DataFrame,
+    source_id_col: str,
     pollutants_map: Optional[dict[str, str]] = None,
 ) -> tuple[pd.DataFrame, set[str]]:
     """Normalize emissions to ISRM input species and aggregate by grid."""
-    _trace_frame("0", "raw_emissions", emissions_df, key_cols=["inmap_srm_cell_id"])
-    if "inmap_srm_cell_id" not in emissions_df.columns:
-        raise ValueError("No grid id column found. Expected inmap_srm_cell_id")
+    _trace_frame("0", "raw_emissions", emissions_df, key_cols=[source_id_col])
+    if source_id_col not in emissions_df.columns:
+        raise ValueError(f"No grid id column found. Expected {source_id_col}")
 
     emission_cols = _expected_emissions_columns(pollutants_map)
     source_column_map: dict[str, str] = {}
-    resolved_pollutants_map = pollutants_map or {}
     for col in emission_cols:
-        canonical_pollutant = _canonical_pollutant_from_emissions_column(col)
-        source_pollutant = resolved_pollutants_map.get(canonical_pollutant, canonical_pollutant)
-        candidates = [col, f"{col}_inmap_allocated"]
-        if source_pollutant != canonical_pollutant:
-            candidates.extend(
-                [
-                    f"tons_per_year_{source_pollutant}",
-                    f"tons_per_year_{source_pollutant}_inmap_allocated",
-                ]
-            )
-        for candidate in candidates:
-            if candidate in emissions_df.columns:
-                source_column_map[col] = candidate
-                break
+        if col in emissions_df.columns:
+            source_column_map[col] = col
 
     df = emissions_df.copy()
-    df["GRID"] = pd.to_numeric(df["inmap_srm_cell_id"], errors="coerce")
-    df = df[df["GRID"].notna()].copy()
-    df["GRID"] = df["GRID"].astype(int)
+    df[source_id_col] = pd.to_numeric(df[source_id_col], errors="coerce")
+    df = df[df[source_id_col].notna()].copy()
+    df[source_id_col] = df[source_id_col].astype(int)
 
     for col in emission_cols:
         source_col = source_column_map.get(col)
@@ -331,14 +319,14 @@ def _prepare_grid_emissions(
         else:
             df[col] = pd.to_numeric(df[source_col], errors="coerce").fillna(0.0)
 
-    grouped = df.groupby("GRID", dropna=False)[emission_cols].sum().reset_index()
+    grouped = df.groupby(source_id_col, dropna=False)[emission_cols].sum().reset_index()
     available_pollutants = {
         _canonical_pollutant_from_emissions_column(col)
         for col, source_col in source_column_map.items()
         if source_col is not None
     }
     logger.info("%s trace source_column_map=%s", _step_label(2, "0"), source_column_map)
-    _trace_frame("0", "prepared_grid_emissions", grouped, key_cols=["GRID"])
+    _trace_frame("0", "prepared_grid_emissions", grouped, key_cols=[source_id_col])
     logger.info("%s trace available_source_pollutants=%s", _step_label(2, "0"), sorted(available_pollutants))
     return grouped, available_pollutants
 
@@ -351,15 +339,17 @@ def _matrix_response(sr, species_key: str, source_cells: np.ndarray, source_valu
 def _align_emissions_to_isrm_sources(
     emis: pd.DataFrame,
     sr,
+    source_id_col: str,
 ) -> tuple[np.ndarray, pd.DataFrame]:
     """Step 2.1: align emissions source cells to the ISRM source index."""
     source_dim = int(sr["SOA"].shape[1])
     receptor_dim = int(sr["SOA"].shape[2])
-    raw_source_cells = np.sort(emis["GRID"].unique().astype(int))
+    raw_source_cells = np.sort(emis[source_id_col].unique().astype(int))
     valid_mask = (raw_source_cells >= 0) & (raw_source_cells < source_dim)
     source_cells = raw_source_cells[valid_mask]
     dropped = int(raw_source_cells.size - source_cells.size)
-    source_indexed = emis.set_index("GRID").reindex(source_cells).fillna(0.0)
+    source_indexed = emis.set_index(source_id_col).reindex(source_cells).fillna(0.0)
+    source_indexed.index.name = source_id_col
     logger.info(
         "%s aligned emissions to ISRM sources: raw_source_cells=%d kept=%d dropped=%d source_dim=%d",
         _step_label(2, "1"),
@@ -375,7 +365,7 @@ def _align_emissions_to_isrm_sources(
         raw_source_cells[:10].tolist(),
         source_cells[:10].tolist(),
     )
-    _trace_frame("1", "source_indexed", source_indexed.reset_index(), key_cols=["GRID"])
+    _trace_frame("1", "source_indexed", source_indexed.reset_index(), key_cols=[source_id_col])
     for col in source_indexed.columns:
         _trace_array("1", f"source_vector[{col}]", source_indexed[col].to_numpy())
     return source_cells, source_indexed
@@ -479,6 +469,7 @@ def _assemble_concentration_results(
     sr,
     factor: float,
     arrays: dict[str, np.ndarray],
+    source_id_col: str,
 ) -> pd.DataFrame:
     """Step 2.3: assemble concentration outputs on the receptor dimension."""
     receptor_dim = int(sr["SOA"].shape[2])
@@ -496,7 +487,7 @@ def _assemble_concentration_results(
             f"{_step_label(2, '3')} produced mismatched receptor lengths: expected {receptor_dim}, got {bad}"
         )
 
-    results = pd.DataFrame({"GRID": np.arange(receptor_dim, dtype=int)})
+    results = pd.DataFrame({source_id_col: np.arange(receptor_dim, dtype=int)})
     ordered_output_keys = [
         _concentration_specs()[name]["output"]
         for name in concentrations
@@ -506,7 +497,7 @@ def _assemble_concentration_results(
         if output_key in arrays:
             results[output_key] = factor * arrays[output_key]
 
-    _trace_frame("3", "concentrations", results, key_cols=["GRID"])
+    _trace_frame("3", "concentrations", results, key_cols=[source_id_col])
     return results
 
 
@@ -515,7 +506,7 @@ def _build_beam_inmap_concentrations_gdf(
     concentrations: pd.DataFrame,
     inmap_grid_path: str,
     grid_id_col: str,
-    included_grid_ids: np.ndarray,
+    source_id_col: str,
 ) -> gpd.GeoDataFrame:
     logger.info(
         "%s building BEAM InMAP concentrations GeoDataFrame from %s using grid_id_col=%s",
@@ -529,13 +520,16 @@ def _build_beam_inmap_concentrations_gdf(
             f"{_step_label(2, '4')} grid id column '{grid_id_col}' not found in {inmap_grid_path}. "
             f"Available columns: {list(grid.columns)}"
         )
-    grid = grid.rename(columns={grid_id_col: "GRID"}).copy()
-    grid["GRID"] = pd.to_numeric(grid["GRID"], errors="raise").astype(int)
-    included_grid_ids = np.asarray(included_grid_ids, dtype=int)
-    included_grid_set = set(included_grid_ids.tolist())
-    grid = grid[grid["GRID"].isin(included_grid_set)].copy()
-    concentration_cols = [col for col in concentrations.columns if col != "GRID" and col not in grid.columns]
-    merged = grid.merge(concentrations[["GRID"] + concentration_cols], how="left", on="GRID")
+    grid = grid.copy()
+    grid[grid_id_col] = pd.to_numeric(grid[grid_id_col], errors="raise").astype(int)
+    concentration_cols = [col for col in concentrations.columns if col != source_id_col and col not in grid.columns]
+    merged = grid.merge(
+        concentrations[[source_id_col] + concentration_cols],
+        how="left",
+        left_on=grid_id_col,
+        right_on=source_id_col,
+    )
+    merged = merged.drop(columns=[source_id_col], errors="ignore")
     for col in concentration_cols:
         merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0.0)
     return gpd.GeoDataFrame(merged, geometry="geometry", crs=grid.crs)
@@ -563,6 +557,7 @@ def compute_isrm_concentrations(
     sr,
     factor: float,
     requested_pollutants: list[str],
+    source_id_col: str = "inmap_srm_cell_id",
     isrm_nox_to_no2_matrix_npz_path: Optional[str] = None,
     pollutants_map: Optional[dict[str, str]] = None,
 ) -> pd.DataFrame:
@@ -572,11 +567,15 @@ def compute_isrm_concentrations(
         factor,
         True,
     )
-    emis, available_pollutants = _prepare_grid_emissions(grid_emissions_df, pollutants_map=pollutants_map)
+    emis, available_pollutants = _prepare_grid_emissions(
+        grid_emissions_df,
+        source_id_col=source_id_col,
+        pollutants_map=pollutants_map,
+    )
     if emis.empty:
-        raise ValueError("No emissions rows found after GRID normalization.")
+        raise ValueError(f"No emissions rows found after {source_id_col} normalization.")
 
-    source_cells, source_indexed = _align_emissions_to_isrm_sources(emis, sr)
+    source_cells, source_indexed = _align_emissions_to_isrm_sources(emis, sr, source_id_col=source_id_col)
     if source_cells.size == 0:
         raise ValueError("No emissions source cells remain after ISRM source alignment.")
     receptor_dim = int(sr["SOA"].shape[2])
@@ -673,6 +672,7 @@ def compute_isrm_concentrations(
         sr=sr,
         factor=factor,
         arrays=arrays,
+        source_id_col=source_id_col,
     )
 
 
@@ -683,11 +683,15 @@ def run(
     emissions_input_path: str,
 ) -> tuple[gpd.GeoDataFrame, np.ndarray, Path]:
     """Step 2: compute and export receptor-side InMAP concentrations from BEAM InMAP emissions."""
+    if not pipeline.inmap_enabled:
+        raise ValueError("InMAP concentration step was called but pipeline.inmap_enabled is false.")
     if not pipeline.isrm_url:
         raise ValueError(
             "isrm_url must be configured. "
             "Set impacts.dispersions.inmap.isrm_zarr in settings.yaml."
         )
+    if "grid_id" not in pipeline.mapping_columns or not str(pipeline.mapping_columns["grid_id"]).strip():
+        raise ValueError("pipeline.mapping_columns.grid_id must be configured before running InMAP concentrations.")
 
     log_step_banner("Step 2", "Compute InMAP Concentrations", logger=logger)
     log_substep_banner("2.0", "load emissions input", logger=logger)
@@ -724,6 +728,7 @@ def run(
         sr=sr,
         factor=float(pipeline.concentration_factor or tons_per_year_to_ug_per_s),
         requested_pollutants=pipeline.pollutants,
+        source_id_col="inmap_srm_cell_id",
         isrm_nox_to_no2_matrix_npz_path=pipeline.isrm_nox_to_no2_matrix_npz_path,
         pollutants_map=pipeline.pollutants_map,
     )
@@ -732,8 +737,8 @@ def run(
     beam_inmap_concentrations_gdf = _build_beam_inmap_concentrations_gdf(
         concentrations=concentrations,
         inmap_grid_path=pipeline.inmap_grid_path,
-        grid_id_col=pipeline.mapping_columns.get("grid_id", "srm_cell_id"),
-        included_grid_ids=beam_inmap_grid_ids,
+        grid_id_col=str(pipeline.mapping_columns["grid_id"]),
+        source_id_col="inmap_srm_cell_id",
     )
     log_substep_banner("2.4", "write concentration outputs", logger=logger)
     _write_concentration_outputs(beam_inmap_concentrations_gdf, str(output_path))

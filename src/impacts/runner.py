@@ -39,8 +39,8 @@ def run_from_input_manifest(
     input_root = Path(manifest.get("input_dir", "")).resolve()
 
     output_root = Path(output_dir).resolve()
-    raw_dir = output_root / "outputs"
-    raw_dir.mkdir(parents=True, exist_ok=True)
+    outputs_dir = output_root / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Loaded input manifest: %s", Path(input_manifest_path).resolve())
     logger.info("Output directory: %s", output_root)
 
@@ -50,13 +50,13 @@ def run_from_input_manifest(
 
     intersection_df = None
     _log_step_banner("PREPROCESS STEP 3", "network mapping and grid intersection")
-    grid_intersection_path, intersection_df = run_grid_intersection(pipeline, raw_dir, input_root)
+    grid_intersection_path, intersection_df = run_grid_intersection(pipeline, outputs_dir, input_root)
 
     _log_step_banner("STEP 1", "emissions processing")
     logger.info("Using Step 1 implementation: emissions_processing")
     emissions_outputs = run_emissions_processing(
         pipeline,
-        raw_dir,
+        outputs_dir,
         input_root,
         grid_intersection_path,
         intersection_df=intersection_df,
@@ -64,18 +64,41 @@ def run_from_input_manifest(
     prepared_skims_path = resolve_prepared_skims_path(input_root)
 
     concentration_path: Optional[Path] = None
+    aermod_concentration_path: Optional[Path] = None
     if run_dispersion:
         from .runtime.step2_compute_inmap_concentrations import run as run_inmap_dispersion
-        _log_step_banner("STEP 2", "inmap concentrations")
-        logger.info("Using Step 2 implementation: inmap_concentrations_and_export")
-        _, _, concentration_path = run_inmap_dispersion(
-            pipeline=pipeline,
-            raw_dir=raw_dir,
-            emissions_input_path=emissions_outputs["beam_emissions_for_inmap"],
-        )
-        logger.info("InMAP concentrations complete: wrote %s", concentration_path)
-        _log_step_banner("STEP 3", "aermod concentrations")
-        logger.info("Step 3 placeholder: aermod concentrations not run yet")
+        from .runtime.step3_compute_aermod_concentrations import run as run_aermod_dispersion
+        if pipeline.inmap_enabled and emissions_outputs.get("beam_emissions_for_inmap"):
+            _log_step_banner("STEP 2", "inmap concentrations")
+            logger.info("Using Step 2 implementation: inmap_concentrations_and_export")
+            _, _, concentration_path = run_inmap_dispersion(
+                pipeline=pipeline,
+                raw_dir=outputs_dir,
+                emissions_input_path=emissions_outputs["beam_emissions_for_inmap"],
+            )
+            logger.info("InMAP concentrations complete: wrote %s", concentration_path)
+        else:
+            logger.info(
+                "InMAP concentrations skipped: inmap_enabled=%s beam_emissions_for_inmap=%s",
+                pipeline.inmap_enabled,
+                emissions_outputs.get("beam_emissions_for_inmap"),
+            )
+        if pipeline.aermod_enabled and pipeline.asrv_patterns_file and emissions_outputs.get("beam_emissions_for_aermod"):
+            _log_step_banner("STEP 3", "aermod concentrations")
+            logger.info("Using Step 3 implementation: aermod_concentrations_and_export")
+            _, _, aermod_concentration_path = run_aermod_dispersion(
+                pipeline=pipeline,
+                raw_dir=outputs_dir,
+                emissions_input_path=emissions_outputs["beam_emissions_for_aermod"],
+            )
+            logger.info("AERMOD concentrations complete: wrote %s", aermod_concentration_path)
+        else:
+            logger.info(
+                "AERMOD concentrations skipped: aermod_enabled=%s asrv_patterns_file=%s beam_emissions_for_aermod=%s",
+                pipeline.aermod_enabled,
+                pipeline.asrv_patterns_file,
+                emissions_outputs.get("beam_emissions_for_aermod"),
+            )
     else:
         logger.info("Dispersion skipped")
 
@@ -84,16 +107,20 @@ def run_from_input_manifest(
         "model": "impacts",
         "input_manifest_path": str(Path(input_manifest_path).resolve()),
         "output_dir": str(output_root),
-        "raw_output_dir": str(raw_dir),
+        "outputs_dir": str(outputs_dir),
         "command": " ".join(sys.argv),
         "image": "not_recorded",
-        "raw_outputs": {
+        "outputs": {
             "skims_emissions": prepared_skims_path,
             "grid_intersection": str(grid_intersection_path),
             **emissions_outputs,
             "beam_inmap_concentrations": str(concentration_path) if concentration_path else None,
             "beam_inmap_concentrations_gpkg": (
                 str(concentration_path.with_suffix(".gpkg")) if concentration_path else None
+            ),
+            "beam_aermod_concentrations": str(aermod_concentration_path) if aermod_concentration_path else None,
+            "beam_aermod_concentrations_gpkg": (
+                str(aermod_concentration_path.with_suffix(".gpkg")) if aermod_concentration_path else None
             ),
         },
         "pipeline": pipeline.to_dict(),
@@ -104,7 +131,15 @@ def run_from_input_manifest(
         },
         "execution": {
             "dispersion_completed": run_dispersion,
-            "stopped_after": "step2_compute_inmap_concentrations" if run_dispersion else "step1_process_emissions",
+            "stopped_after": (
+                "step3_compute_aermod_concentrations"
+                if aermod_concentration_path is not None
+                else (
+                    "step2_compute_inmap_concentrations"
+                    if concentration_path is not None
+                    else "step1_process_emissions"
+                )
+            ),
         },
     }
     output_manifest = Path(run_manifest_path) if run_manifest_path else output_root / "run_manifest.yaml"

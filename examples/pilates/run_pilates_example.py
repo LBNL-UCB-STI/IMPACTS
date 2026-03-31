@@ -33,7 +33,6 @@ def _print_artifact_preview(label: str, path: Path) -> None:
         for col in [
             "linkId",
             "vehicleTypeId",
-            "GRID",
             "cell_id",
             "zone_isrm",
             "zone_grid100",
@@ -88,13 +87,13 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=workspace,
         run_dispersion=False,
     )
-    inmap_allocation_path = Path(run_manifest["raw_outputs"]["emissions_inmap_grid_allocated"])
-    aermod_allocation_path = Path(run_manifest["raw_outputs"].get("emissions_aermod_grid_allocated") or "")
+    inmap_allocation_path = Path(run_manifest["outputs"]["emissions_inmap_grid_allocated"])
+    aermod_allocation_path = Path(run_manifest["outputs"].get("emissions_aermod_grid_allocated") or "")
     print(f"inputs manifest: {preprocess_manifest['inputs_manifest_path']}")
     print(f"run manifest: {run_manifest['run_manifest_path']}")
     print(f"stopped after: {run_manifest['execution']['stopped_after']}")
     _print_artifact_preview("inmap_grid allocation", inmap_allocation_path)
-    if run_manifest["raw_outputs"].get("emissions_aermod_grid_allocated"):
+    if run_manifest["outputs"].get("emissions_aermod_grid_allocated"):
         _print_artifact_preview("aermod_grid allocation", aermod_allocation_path)
     return 0
 

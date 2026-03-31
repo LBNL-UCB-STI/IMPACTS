@@ -111,11 +111,6 @@ def _prepare_rdata_inputs(input_dir: str) -> Path:
 def _load_cmaq_ratio_table(input_dir: str) -> pd.DataFrame:
     ratio_path = _prepare_rdata_inputs(input_dir)
     table = pd.read_parquet(ratio_path)
-    if "col" not in table.columns and "x" in table.columns:
-        table["col"] = table["x"]
-    if "row" not in table.columns and "y" in table.columns:
-        table["row"] = table["y"]
-
     required = {"col", "row", "value"}
     missing = required.difference(table.columns)
     if missing:
@@ -132,8 +127,6 @@ def _load_legacy_no2_ratio(input_dir: str) -> pd.DataFrame:
         raise FileNotFoundError(legacy_path)
 
     table = _read_rdata_frame(legacy_path, "no2ratio")
-    if "grid" not in table.columns and "isrm" in table.columns:
-        table["grid"] = table["isrm"]
     required = {"grid", "NO2_NOx_ratio"}
     missing = required.difference(table.columns)
     if missing:
@@ -294,8 +287,6 @@ def cmaq_ratio_to_grid(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR)
 
     grid = gpd.read_file(grid_path)
     pdat = _load_cmaq_ratio_table(input_dir).copy()
-    pdat["col"] = pdat["x"]
-    pdat["row"] = pdat["y"]
     coords = cr_xy(pdat["col"], pdat["row"])
     pdat[["x", "y"]] = coords
     mm = grid_polygons_from_centers(pdat[["x", "y", "value", "col", "row"]]).drop(columns=["value"])
@@ -310,10 +301,9 @@ def cmaq_ratio_to_grid(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR)
         .apply(lambda frame: (frame["value"] * frame["area"]).sum() / frame["area"].sum())
         .reset_index(name="value")
     )
-    grouped.rename(columns={"value": "NO2_NOx_ratio"}).to_parquet(
-        os.path.join(output_dir, REGIONAL_NO2_RATIO_NAME),
-        index=False,
-    )
+    grouped["NO2_NOx_ratio"] = grouped["value"]
+    grouped = grouped[["grid", "NO2_NOx_ratio"]]
+    grouped.to_parquet(os.path.join(output_dir, REGIONAL_NO2_RATIO_NAME), index=False)
 
 
 def nox_to_no2_grid(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR) -> None:

@@ -29,7 +29,7 @@ from tqdm import tqdm
 
 from .config.defaults import annualization_days as default_annualization_days
 from .config.defaults import chunk_size as default_chunk_size
-from .config.defaults import grams_per_ton
+from .config.defaults import grams_per_short_ton
 from .config.defaults import meters_per_mile as _METERS_PER_MILE
 from .config.defaults import pollutants as default_prepared_pollutants
 from .manifest.file_ops import copy_path
@@ -323,7 +323,7 @@ def read_network_bounds(path: str) -> tuple[float, float, float, float]:
 def generate_fishnet_from_bounds(
     *,
     bounds: tuple[float, float, float, float],
-    mask_gdf: gpd.GeoDataFrame,
+    mask_gdf: Optional[gpd.GeoDataFrame],
     cell_size: float,
     target_path: str,
     target_epsg: int,
@@ -361,33 +361,36 @@ def generate_fishnet_from_bounds(
         geometry=geometries,
         crs=f"EPSG:{int(target_epsg)}",
     )
-    if mask_gdf.crs is None:
-        raise ValueError("AERMOD fishnet mask grid is missing CRS")
-    mask_gdf = mask_gdf.to_crs(epsg=target_epsg)
-    mask_union = mask_gdf.geometry.union_all() if hasattr(mask_gdf.geometry, "union_all") else mask_gdf.geometry.unary_union
-    filter_started = time.perf_counter()
-    keep_mask = np.zeros(len(fishnet), dtype=bool)
-    progress = tqdm(
-        total=len(fishnet),
-        desc="Filtering AERMOD fishnet",
-        unit="cell",
-        dynamic_ncols=True,
-        leave=True,
-    )
-    try:
-        for start in range(0, len(fishnet), default_chunk_size):
-            stop = min(start + default_chunk_size, len(fishnet))
-            keep_mask[start:stop] = fishnet.geometry.iloc[start:stop].intersects(mask_union).to_numpy()
-            progress.update(stop - start)
-    finally:
-        progress.close()
-    fishnet = fishnet.loc[keep_mask].reset_index(drop=True)
-    fishnet[cell_id_col] = np.arange(len(fishnet), dtype=int)
-    logger.info(
-        "Preprocess: filtered fishnet candidates to the staged InMAP footprint in %.2fs → %d rows kept",
-        time.perf_counter() - filter_started,
-        len(fishnet),
-    )
+    if mask_gdf is not None:
+        if mask_gdf.crs is None:
+            raise ValueError("AERMOD fishnet mask grid is missing CRS")
+        mask_gdf = mask_gdf.to_crs(epsg=target_epsg)
+        mask_union = mask_gdf.geometry.union_all() if hasattr(mask_gdf.geometry, "union_all") else mask_gdf.geometry.unary_union
+        filter_started = time.perf_counter()
+        keep_mask = np.zeros(len(fishnet), dtype=bool)
+        progress = tqdm(
+            total=len(fishnet),
+            desc="Filtering AERMOD fishnet",
+            unit="cell",
+            dynamic_ncols=True,
+            leave=True,
+        )
+        try:
+            for start in range(0, len(fishnet), default_chunk_size):
+                stop = min(start + default_chunk_size, len(fishnet))
+                keep_mask[start:stop] = fishnet.geometry.iloc[start:stop].intersects(mask_union).to_numpy()
+                progress.update(stop - start)
+        finally:
+            progress.close()
+        fishnet = fishnet.loc[keep_mask].reset_index(drop=True)
+        fishnet[cell_id_col] = np.arange(len(fishnet), dtype=int)
+        logger.info(
+            "Preprocess: filtered fishnet candidates to the staged InMAP footprint in %.2fs → %d rows kept",
+            time.perf_counter() - filter_started,
+            len(fishnet),
+        )
+    else:
+        logger.info("Preprocess: no fishnet mask provided; keeping all %d candidate cells", len(fishnet))
     write_vector(fishnet, target_path)
     logger.info(
         "Preprocess: wrote generated AERMOD fishnet in %.2fs → %d rows at %s",
@@ -587,10 +590,8 @@ def _totals_pollutant_columns(
 ) -> Dict[str, str]:
     resolved: Dict[str, str] = {}
     for pollutant in required_pollutants:
-        for candidate in (pollutant, f"em_{pollutant}", f"tons_per_year_{pollutant}"):
-            if candidate in df.columns:
-                resolved[pollutant] = candidate
-                break
+        if pollutant in df.columns:
+            resolved[pollutant] = pollutant
     return resolved
 
 
@@ -723,13 +724,12 @@ def annualize_prepared_skims_for_grid_allocation(
     out["totVMT"] = out["totTrips"] * prepared[beam_length_col] / _METERS_PER_MILE
     out = out.drop(columns=[col for col in [beam_length_col] if col in out.columns], errors="ignore")
     for pollutant in required:
-        source_col = first_existing(prepared, [pollutant, f"em_{pollutant}", f"tons_per_year_{pollutant}"])
         values = (
-            pd.to_numeric(prepared[source_col], errors="coerce").fillna(0.0)
-            if source_col is not None
+            pd.to_numeric(prepared[pollutant], errors="coerce").fillna(0.0)
+            if pollutant in prepared.columns
             else pd.Series(np.zeros(len(prepared), dtype=float), index=prepared.index)
         )
-        out[f"tons_per_year_{pollutant}"] = values * scale_factor * annualization_days / grams_per_ton
+        out[f"tons_per_year_{pollutant}"] = values * scale_factor * annualization_days / grams_per_short_ton
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)

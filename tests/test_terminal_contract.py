@@ -22,11 +22,16 @@ def _pipeline_payload(tmp_path: Path) -> dict:
         "beam_length_col": "linkLength",
         "beam_osm_epsg": 26910,
         "output_epsg": 26910,
+        "inmap_enabled": True,
+        "aermod_enabled": True,
         "inmap_grid_path": str(tmp_path / "inmap_grid.parquet"),
         "inmap_grid_epsg": 26910,
         "mapping_columns": {"link_id": "linkId", "grid_id": "isrm"},
         "isrm_url": str(tmp_path / "isrm.zarr"),
         "isrm_nox_to_no2_matrix_npz_path": str(tmp_path / "matrix.npz"),
+        "grid_size_meters": 100.0,
+        "asrv_patterns_file": str(tmp_path / "asrv_patterns.parquet"),
+        "asrv_patterns_epsg": 4326,
         "aermod_grid_path": str(tmp_path / "aermod_grid.parquet"),
         "aermod_grid_epsg": 26910,
         "aermod_grid_id": "aermod_id",
@@ -59,6 +64,7 @@ def _inputs_manifest_payload(tmp_path: Path) -> dict:
             "impacts.preprocessing.step3_integrate_grids",
             "impacts.runtime.step1_process_emissions",
             "impacts.runtime.step2_compute_inmap_concentrations",
+            "impacts.runtime.step3_compute_aermod_concentrations",
         ],
         "inputs": {"runtime_config": {"path": str(tmp_path / "runtime.yaml")}},
         "pipeline": _pipeline_payload(tmp_path),
@@ -78,7 +84,9 @@ def test_example_settings_yaml_is_current_runtime_config():
     assert config.shared.geography.fips.state == "06"
     assert config.shared.geography.fips.counties[0] == "001"
     assert config.impacts.emissions.simulation_network_folder == "upstream/"
+    assert config.impacts.dispersions.inmap.enabled is True
     assert config.impacts.dispersions.inmap.grid_path.endswith("isrm_polygon/isrm_polygon.shp")
+    assert config.impacts.dispersions.aermod.enabled is True
 
 
 def test_build_runtime_config_from_pilates_template_uses_current_overlay_shape(tmp_path: Path):
@@ -114,7 +122,10 @@ def test_build_runtime_config_from_pilates_template_uses_current_overlay_shape(t
     assert config.shared.geography.local_crs == "EPSG:26910"
     assert config.impacts.local_input_folder == "pilates/beam/production/"
     assert config.impacts.emissions.osm_network_folder.endswith("r5/sfbay-cbg5500-weakConn-network")
-    assert config.impacts.dispersions.inmap.isrm_zarr == "s3://inmap-model/isrm_v1.2.1.zarr/"
+    assert config.impacts.dispersions.inmap.enabled is True
+    assert config.impacts.dispersions.inmap.isrm_zarr == "~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr"
+    assert config.impacts.dispersions.aermod.enabled is True
+    assert config.impacts.dispersions.aermod.grid_size_meters == 100.0
 
 
 def test_manifest_models_round_trip_current_shape(tmp_path: Path):
@@ -126,10 +137,10 @@ def test_manifest_models_round_trip_current_shape(tmp_path: Path):
             "model": "impacts",
             "input_manifest_path": inputs_manifest["inputs_manifest_path"],
             "output_dir": str(tmp_path / "workspace"),
-            "raw_output_dir": str(tmp_path / "workspace" / "outputs"),
+            "outputs_dir": str(tmp_path / "workspace" / "outputs"),
             "command": "python -m impacts run",
             "image": "unknown",
-            "raw_outputs": {"skims_emissions": str(tmp_path / "prepared.parquet")},
+            "outputs": {"skims_emissions": str(tmp_path / "prepared.parquet")},
             "pipeline": pipeline,
             "population_inputs": {},
             "deterministic_contract": {},
@@ -153,6 +164,38 @@ def test_manifest_models_round_trip_current_shape(tmp_path: Path):
     assert inputs_manifest["pipeline"]["region"] == "sfbay"
     assert run_manifest["execution"]["stopped_after"] == "step1_process_emissions"
     assert postprocess_manifest["canonical_artifact"]["path"].endswith(".parquet")
+
+
+def test_pipeline_manifest_allows_disabled_inmap_without_inmap_inputs(tmp_path: Path):
+    payload = _pipeline_payload(tmp_path)
+    payload["inmap_enabled"] = False
+    payload["inmap_grid_path"] = None
+    payload["inmap_grid_epsg"] = None
+    payload["isrm_url"] = None
+    payload["isrm_nox_to_no2_matrix_npz_path"] = None
+
+    config = PipelineConfig.from_dict(payload)
+
+    assert config.inmap_enabled is False
+    assert config.inmap_grid_path is None
+    assert config.isrm_url is None
+
+
+def test_pipeline_manifest_allows_disabled_aermod_without_aermod_inputs(tmp_path: Path):
+    payload = _pipeline_payload(tmp_path)
+    payload["aermod_enabled"] = False
+    payload["grid_size_meters"] = None
+    payload["aermod_grid_path"] = None
+    payload["aermod_grid_epsg"] = None
+    payload["aermod_grid_id"] = None
+    payload["asrv_patterns_file"] = None
+    payload["asrv_patterns_epsg"] = None
+
+    config = PipelineConfig.from_dict(payload)
+
+    assert config.aermod_enabled is False
+    assert config.aermod_grid_path is None
+    assert config.asrv_patterns_file is None
 
 
 def test_run_from_input_manifest_uses_current_step_name(monkeypatch, tmp_path: Path):

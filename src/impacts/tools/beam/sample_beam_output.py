@@ -359,8 +359,6 @@ def _compact_explicit_skims_parallel(df: pd.DataFrame, workers: int) -> pd.DataF
 
 
 def _compact_skims_if_needed(df: pd.DataFrame) -> pd.DataFrame:
-    if "emissionsProcess" in df.columns and "process" not in df.columns:
-        df = df.rename(columns={"emissionsProcess": "process"})
     if "emissions" in df.columns and "process" in df.columns:
         compact = df.copy()
         for col in COMPACT_SKIMS_COLUMNS:

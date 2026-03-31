@@ -15,8 +15,8 @@ emissions to annual tons.  Matches the EMFAC/CARB modelling convention."""
 pollutants: list = ["NH3", "NOx", "PM2_5", "SOx", "ROG", "BC"]
 """Pollutants processed by default when no explicit list is configured."""
 
-grams_per_ton: float = 1_000_000.0
-"""Grams in one metric ton — used for unit conversion."""
+grams_per_short_ton: float = 907_184.74
+"""Grams in one U.S. short ton. Maintained preprocess/runtime ton conversions use this basis."""
 
 # ---------------------------------------------------------------------------
 # Dispersion
@@ -25,8 +25,8 @@ grams_per_ton: float = 1_000_000.0
 concentrations: list = ["SOA", "pNO3", "pNH4", "pSO4", "PrimaryPM25", "BC", "NO2"]
 """Concentration fields computed directly from ISRM/zarr or the NOx->NO2 fallback."""
 
-tons_per_year_to_ug_per_s: float = 28766.639
-"""Unit conversion from tons/year emissions to micrograms/second emission rate."""
+tons_per_year_to_ug_per_s: float = grams_per_short_ton * 1_000_000.0 / (365.0 * 24.0 * 3600.0)
+"""Unit conversion from short tons/year emissions to micrograms/second emission rate."""
 
 # ---------------------------------------------------------------------------
 # Processing

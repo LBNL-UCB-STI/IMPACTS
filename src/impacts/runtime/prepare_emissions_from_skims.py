@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 
 from ..common import annualize_prepared_skims_for_grid_allocation
-from ..common import first_existing
 from ..common import normalize_county_fips
 from ..common import prepare_skims_for_grid_allocation
 from ..common import prepared_table_target

@@ -72,18 +72,6 @@ def _read_any_table(path: Path) -> pd.DataFrame:
     raise ValueError(f"Unsupported rates file: {path}")
 
 
-def _normalize_rates_columns(df: pd.DataFrame) -> pd.DataFrame:
-    return df.rename(
-        columns={
-            "emission_rate": "rate",
-            "emissions_rate": "rate",
-            "vehicleType": "vehicleTypeId",
-            "vehicle_type": "vehicleTypeId",
-            "emissionsProcess": "process",
-        }
-    )
-
-
 def read_rates_directory(
     rates_dir: str,
     default_rate_basis: str = "per_event",
@@ -106,15 +94,13 @@ def read_rates_directory(
 
     frames: List[pd.DataFrame] = []
     for f in files:
-        df = _normalize_rates_columns(_read_any_table(f))
-        if "vehicleTypeId" not in df.columns:
-            df["vehicleTypeId"] = f.stem.replace(".csv", "").replace("_rates", "")
+        df = _read_any_table(f)
         if "rate_basis" not in df.columns:
             df["rate_basis"] = default_rate_basis
         frames.append(df)
 
     rates = pd.concat(frames, ignore_index=True)
-    required = {"process", "pollutant", "rate", "rate_basis"}
+    required = {"vehicleTypeId", "process", "pollutant", "rate", "rate_basis"}
     missing = required.difference(rates.columns)
     if missing:
         raise ValueError(f"Rates files missing required columns: {sorted(missing)}")
@@ -147,6 +133,8 @@ def _serialize_emissions(row: pd.Series, pollutant_cols: Iterable[str]) -> str:
 def read_events(events_path: str) -> pd.DataFrame:
     p = events_path.lower()
     compression = "gzip" if p.endswith(".gz") else None
+    if p.endswith(".parquet"):
+        return pd.read_parquet(events_path, columns=REQUIRED_EVENT_COLS)
     return pd.read_csv(events_path, usecols=REQUIRED_EVENT_COLS, compression=compression)
 
 
@@ -311,7 +299,17 @@ def _apply_rates(obs_df: pd.DataFrame, rates_df: Optional[pd.DataFrame]) -> pd.D
         )
         .reset_index()
     )
-    pivot.columns = [f"em_{c}" if c not in pivot.columns[:7] and not str(c).startswith("em_") else c for c in pivot.columns]
+    protected_cols = {
+        "hour",
+        "linkId",
+        "vehicleTypeId",
+        "process",
+        "travelTimeInSecond",
+        "parkingDurationInSecond",
+        "observations",
+    }
+    rename_map = {col: f"em_{col}" for col in pivot.columns if col not in protected_cols}
+    pivot = pivot.rename(columns=rename_map)
     return pivot
 
 

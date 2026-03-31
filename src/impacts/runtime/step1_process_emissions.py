@@ -10,13 +10,11 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from ..common import first_existing
 from ..common import log_step_banner
 from ..common import log_substep_banner
 from ..common import normalize_county_fips
 from ..common import read_table
 from ..common import read_vector
-from ..common import resolve_column_config
 from ..manifest.schema import PipelineConfig
 from .prepare_emissions_from_skims import _build_beam_activity_totals
 from .prepare_emissions_from_skims import _build_combined_allocated_table
@@ -32,7 +30,6 @@ def _step_label(step: str, zone_label: Optional[str] = None) -> str:
     return f"Step 1.{step}{suffix}"
 
 
-_COUNTY_FIPS_CANDIDATES = ["county_zone_COUNTYFP", "county_COUNTYFP", "zone_COUNTYFP", "COUNTYFP", "countyfp"]
 _COUNTY_CORRECTION_COLUMNS = {
     "county_fips": "countyfp",
     "tot_vmt": "totVMT",
@@ -71,10 +68,12 @@ def _derive_county_correction_factors(
     *,
     correction_columns: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
-    columns = resolve_column_config(correction_columns, _COUNTY_CORRECTION_COLUMNS)
+    columns = dict(_COUNTY_CORRECTION_COLUMNS)
+    if correction_columns:
+        columns.update(correction_columns)
     corrections = read_table(corrections_path)
-    fips_source_col = first_existing(corrections, [columns["county_fips"]])
-    if fips_source_col is None:
+    fips_source_col = columns["county_fips"]
+    if fips_source_col not in corrections.columns:
         raise ValueError(
             f"County corrections file must include county FIPS column: {columns['county_fips']}."
         )
@@ -166,6 +165,11 @@ def _save_grid_emissions(
     output_stem: Path,
 ) -> None:
     grid_gdf = read_vector(grid_path)
+    if right_col not in grid_gdf.columns:
+        raise ValueError(
+            f"Step 1 grid export expected grid column '{right_col}' in {grid_path}. "
+            f"Available columns: {list(grid_gdf.columns)}"
+        )
     if grid_gdf.crs is not None:
         grid_gdf = grid_gdf.to_crs(epsg=output_epsg)
     expected_grid_ids = set(pd.to_numeric(df[left_col], errors="coerce").dropna().astype(int).unique().tolist())
@@ -256,11 +260,11 @@ def _build_combined_corrected_table(
     if allocated_df is None or allocated_df.empty:
         return None, None, None
 
-    county_col = first_existing(allocated_df, _COUNTY_FIPS_CANDIDATES)
-    if county_col is None:
+    county_col = "countyfp"
+    if county_col not in allocated_df.columns:
         raise ValueError(
             "Allocated DataFrame must include a county FIPS column. "
-            f"Expected one of: {_COUNTY_FIPS_CANDIDATES}."
+            f"Expected: {county_col}."
         )
 
     if pipeline.activity_totals_file:
@@ -348,6 +352,8 @@ def run(
     beam_emissions_for_aermod_path = None
 
     if pipeline.aermod_grid_path and combined_grouped_df is not None:
+        if not pipeline.aermod_grid_id:
+            raise ValueError("pipeline.aermod_grid_id must be configured before writing AERMOD emissions.")
         log_substep_banner("1.5[aermod]", "write AERMOD emissions table", logger=logger)
         aermod_corrected_df = _split_zone_allocated(
             combined_df=combined_corrected_df,
@@ -363,7 +369,7 @@ def run(
             _save_grid_emissions(
                 aermod_emissions_df,
                 left_col="aermod_srv_cell_id",
-                right_col="srv_cell_id",
+                right_col=str(pipeline.aermod_grid_id),
                 grid_path=pipeline.aermod_grid_path,
                 output_epsg=int(pipeline.output_epsg),
                 output_stem=beam_emissions_for_aermod_stem,
@@ -382,6 +388,8 @@ def run(
     )
     beam_emissions_for_inmap_path = None
     if inmap_corrected_df is not None and not inmap_corrected_df.empty:
+        if "grid_id" not in pipeline.mapping_columns or not str(pipeline.mapping_columns["grid_id"]).strip():
+            raise ValueError("pipeline.mapping_columns.grid_id must be configured before writing InMAP emissions.")
         log_substep_banner("1.6[inmap]", "write InMAP emissions table", logger=logger)
         inmap_emissions_df, _ = _split_zone_outputs(
             zone_df=inmap_corrected_df,
@@ -391,7 +399,7 @@ def run(
         _save_grid_emissions(
             inmap_emissions_df,
             left_col="inmap_srm_cell_id",
-            right_col="srm_cell_id",
+            right_col=str(pipeline.mapping_columns["grid_id"]),
             grid_path=pipeline.inmap_grid_path,
             output_epsg=int(pipeline.output_epsg),
             output_stem=beam_emissions_for_inmap_stem,

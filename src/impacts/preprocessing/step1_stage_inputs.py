@@ -24,12 +24,14 @@ def run(
     config_path: Path,
     beam_network_source: str,
     osm_source: str,
-    inmap_grid_source: str,
+    inmap_grid_source: str | None,
 ) -> dict[str, Any]:
     log_step_banner("Preprocess Step 1", "Stage Inputs", logger=logger)
     emissions = impacts.emissions
     inmap = impacts.dispersions.inmap
+    aermod = impacts.dispersions.aermod
     activity_totals_file = resolve_path(emissions.activity_totals_file, config_path)
+    asrv_patterns_file = resolve_path(aermod.asrv_patterns_file, config_path)
     log_substep_banner("1.1", "stage BEAM network", logger=logger)
     staged_network = stage_local_input(
         manifest_inputs=manifest_inputs,
@@ -46,14 +48,18 @@ def run(
         source_path=required_local_path(osm_source, "impacts.emissions.osm_network_folder"),
         relative_target=f"osm/{Path(osm_source).name}",
     )
-    log_substep_banner("1.3", "stage InMAP grid", logger=logger)
-    staged_inmap_grid = stage_local_input(
-        manifest_inputs=manifest_inputs,
-        input_root=input_root,
-        key="inmap_grid",
-        source_path=required_local_path(inmap_grid_source, "impacts.dispersions.inmap.grid_path"),
-        relative_target=f"inmap_grid/{Path(inmap_grid_source).name}",
-    )
+    staged_inmap_grid = None
+    if inmap.enabled:
+        log_substep_banner("1.3", "stage InMAP grid", logger=logger)
+        if not inmap_grid_source:
+            raise ValueError("impacts.dispersions.inmap.grid_path is required when InMAP is enabled")
+        staged_inmap_grid = stage_local_input(
+            manifest_inputs=manifest_inputs,
+            input_root=input_root,
+            key="inmap_grid",
+            source_path=required_local_path(inmap_grid_source, "impacts.dispersions.inmap.grid_path"),
+            relative_target=f"inmap_grid/{Path(inmap_grid_source).name}",
+        )
     log_substep_banner("1.4", "stage activity totals", logger=logger)
     staged_activity_totals = stage_optional_input(
         manifest_inputs=manifest_inputs,
@@ -67,25 +73,38 @@ def run(
         ),
     )
 
-    log_substep_banner("1.5", "stage ISRM store", logger=logger)
-    staged_isrm = stage_local_input(
-        manifest_inputs=manifest_inputs,
-        input_root=input_root,
-        key="isrm",
-        source_path=required_local_path(resolve_path(inmap.isrm_zarr, config_path), "impacts.dispersions.inmap.isrm_zarr"),
-        relative_target="isrm",
-    )
-    log_substep_banner("1.6", "stage NOx to NO2 matrix", logger=logger)
-    staged_isrm_nox_to_no2_matrix_npz = stage_local_input(
-        manifest_inputs=manifest_inputs,
-        input_root=input_root,
-        key="isrm_nox_to_no2_matrix_npz",
-        source_path=required_local_path(
-            resolve_path(inmap.isrm_nox_to_no2_matrix_npz, config_path),
-            "impacts.dispersions.inmap.isrm_nox_to_no2_matrix_npz",
-        ),
-        relative_target=f"dispersion/{Path(inmap.isrm_nox_to_no2_matrix_npz).name}",
-    )
+    staged_isrm = None
+    staged_isrm_nox_to_no2_matrix_npz = None
+    if inmap.enabled:
+        log_substep_banner("1.5", "stage ISRM store", logger=logger)
+        staged_isrm = stage_local_input(
+            manifest_inputs=manifest_inputs,
+            input_root=input_root,
+            key="isrm",
+            source_path=required_local_path(resolve_path(inmap.isrm_zarr, config_path), "impacts.dispersions.inmap.isrm_zarr"),
+            relative_target="isrm",
+        )
+        log_substep_banner("1.6", "stage NOx to NO2 matrix", logger=logger)
+        staged_isrm_nox_to_no2_matrix_npz = stage_local_input(
+            manifest_inputs=manifest_inputs,
+            input_root=input_root,
+            key="isrm_nox_to_no2_matrix_npz",
+            source_path=required_local_path(
+                resolve_path(inmap.isrm_nox_to_no2_matrix_npz, config_path),
+                "impacts.dispersions.inmap.isrm_nox_to_no2_matrix_npz",
+            ),
+            relative_target=f"dispersion/{Path(inmap.isrm_nox_to_no2_matrix_npz).name}",
+        )
+    staged_asrv_patterns_file = None
+    if aermod.enabled:
+        log_substep_banner("1.7", "stage AERMOD ASRV patterns", logger=logger)
+        staged_asrv_patterns_file = stage_local_input(
+            manifest_inputs=manifest_inputs,
+            input_root=input_root,
+            key="asrv_patterns_file",
+            source_path=required_local_path(optional_local_path(asrv_patterns_file), "impacts.dispersions.aermod.asrv_patterns_file"),
+            relative_target=f"dispersion/{Path(asrv_patterns_file).name}",
+        )
     logger.info("Preprocess Step 1 complete")
     return {
         "staged_network": staged_network,
@@ -94,4 +113,5 @@ def run(
         "staged_activity_totals": staged_activity_totals,
         "staged_isrm": staged_isrm,
         "staged_isrm_nox_to_no2_matrix_npz": staged_isrm_nox_to_no2_matrix_npz,
+        "staged_asrv_patterns_file": staged_asrv_patterns_file,
     }

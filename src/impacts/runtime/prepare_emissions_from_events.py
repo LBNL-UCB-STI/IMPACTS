@@ -39,7 +39,7 @@ from typing import Optional
 
 import pandas as pd
 
-from ..config.defaults import grams_per_ton
+from ..config.defaults import grams_per_short_ton
 from ..config.defaults import meters_per_mile
 from ..config.defaults import parked_processes
 from ..config.defaults import running_processes
@@ -325,7 +325,7 @@ def _calculate_emissions(
     ]
     rates_agg = rates.groupby(agg_cols, dropna=False)["rate"].mean().reset_index()
 
-    scale = annualization_days / population_sample / grams_per_ton
+    scale = annualization_days / population_sample / grams_per_short_ton
     is_parked = skims["process"].isin(set(parked_processes))
 
     result = skims.copy()

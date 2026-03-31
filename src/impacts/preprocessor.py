@@ -55,6 +55,7 @@ def build_inputs_manifest(
     geography = runtime_config.shared.geography
     emissions = runtime_config.impacts.emissions
     inmap = runtime_config.impacts.dispersions.inmap
+    aermod = runtime_config.impacts.dispersions.aermod
 
     workspace_root = Path(staging_dir).resolve()
     input_root = workspace_root / "staged"
@@ -87,16 +88,23 @@ def build_inputs_manifest(
     if not osm_source:
         raise ValueError("impacts.emissions.osm_network_folder is configured but no local .osm.pbf file could be found under it.")
 
-    inmap_grid_source = required_local_path(
-        resolve_path(inmap.grid_path, config_path),
-        "impacts.dispersions.inmap.grid_path",
-    )
     local_output_epsg = parse_epsg(geography.local_crs)
-    inmap_grid_epsg = (
-        inmap.grid_epsg
-        or infer_vector_epsg(inmap_grid_source)
-        or local_output_epsg
-    )
+    inmap_grid_source = None
+    inmap_grid_epsg = None
+    if inmap.enabled:
+        inmap_grid_source = required_local_path(
+            resolve_path(inmap.grid_path, config_path),
+            "impacts.dispersions.inmap.grid_path",
+        )
+        inmap_grid_epsg = (
+            infer_vector_epsg(inmap_grid_source)
+            or inmap.grid_epsg
+        )
+        if inmap_grid_epsg is None:
+            raise ValueError(
+                "Could not determine EPSG for impacts.dispersions.inmap.grid_path. "
+                "Set impacts.dispersions.inmap.grid_epsg explicitly or provide CRS metadata in the file."
+            )
 
     step1_outputs = preprocess_step1(
         manifest_inputs=manifest_inputs,
@@ -111,6 +119,7 @@ def build_inputs_manifest(
     staged_activity_totals = step1_outputs["staged_activity_totals"]
     staged_isrm = step1_outputs["staged_isrm"]
     staged_isrm_nox_to_no2_matrix_npz = step1_outputs["staged_isrm_nox_to_no2_matrix_npz"]
+    staged_asrv_patterns_file = step1_outputs["staged_asrv_patterns_file"]
 
     step2_outputs = preprocess_step2(
         manifest_inputs=manifest_inputs,
@@ -123,7 +132,29 @@ def build_inputs_manifest(
     staged_aermod_grid = step2_outputs["staged_aermod_grid"]
     resolved_inmap_grid_id = step2_outputs["resolved_inmap_grid_id"]
     resolved_aermod_grid_id = step2_outputs["resolved_aermod_grid_id"]
-    mapping_columns = {**emissions.mapping_columns, "grid_id": resolved_inmap_grid_id}
+    mapping_columns = dict(emissions.mapping_columns)
+    if resolved_inmap_grid_id:
+        mapping_columns["grid_id"] = resolved_inmap_grid_id
+    asrv_patterns_epsg = None
+    if aermod.enabled and staged_asrv_patterns_file:
+        asrv_patterns_epsg = (
+            infer_vector_epsg(staged_asrv_patterns_file)
+            or aermod.asrv_patterns_epsg
+        )
+    if aermod.enabled and staged_asrv_patterns_file and asrv_patterns_epsg is None:
+        raise ValueError(
+            "Could not determine EPSG for impacts.dispersions.aermod.asrv_patterns_file. "
+            "Set impacts.dispersions.aermod.asrv_patterns_epsg explicitly or provide CRS metadata in the file."
+        )
+
+    maintained_execution_path = [
+        "impacts.preprocessing.step3_integrate_grids",
+        "impacts.runtime.step1_process_emissions",
+    ]
+    if inmap.enabled:
+        maintained_execution_path.append("impacts.runtime.step2_compute_inmap_concentrations")
+    if aermod.enabled:
+        maintained_execution_path.append("impacts.runtime.step3_compute_aermod_concentrations")
 
     manifest: Dict[str, Any] = {
         "contract_version": CONTRACT_VERSION,
@@ -132,23 +163,24 @@ def build_inputs_manifest(
         "staging_dir": str(workspace_root),
         "input_dir": str(input_root),
         "inputs_manifest_path": str(workspace_root / "inputs_manifest.yaml"),
-        "maintained_execution_path": [
-            "impacts.preprocessing.step3_integrate_grids",
-            "impacts.runtime.step1_process_emissions",
-            "impacts.runtime.step2_compute_inmap_concentrations",
-        ],
+        "maintained_execution_path": maintained_execution_path,
         "inputs": manifest_inputs,
         "pipeline": {
+            "inmap_enabled": bool(inmap.enabled),
+            "aermod_enabled": bool(aermod.enabled),
             "inmap_grid_path": staged_inmap_grid,
             "aermod_grid_path": staged_aermod_grid,
             "isrm_url": staged_isrm,
             "isrm_nox_to_no2_matrix_npz_path": staged_isrm_nox_to_no2_matrix_npz,
+            "asrv_patterns_file": staged_asrv_patterns_file,
+            "asrv_patterns_epsg": int(asrv_patterns_epsg) if asrv_patterns_epsg is not None else None,
+            "grid_size_meters": float(aermod.grid_size_meters) if aermod.grid_size_meters is not None else None,
             "iterations": 0,
             "beam_osm_id_col": emissions.beam_osm_id_col,
             "beam_length_col": emissions.beam_length_col,
             "beam_osm_epsg": int(local_output_epsg),
-            "inmap_grid_epsg": int(local_output_epsg),
-            "aermod_grid_epsg": int(local_output_epsg),
+            "inmap_grid_epsg": int(inmap_grid_epsg) if inmap_grid_epsg is not None else None,
+            "aermod_grid_epsg": int(local_output_epsg) if staged_aermod_grid else None,
             "aermod_grid_id": resolved_aermod_grid_id,
             "output_epsg": int(local_output_epsg),
             "simulation_network_folder": simulation_network_folder,
