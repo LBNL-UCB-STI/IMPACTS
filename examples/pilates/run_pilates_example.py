@@ -14,7 +14,7 @@ SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from impacts.postprocessor import _read_table
+from impacts.common import read_table
 from impacts.preprocessor import preprocess_workflow
 from impacts.runner import run_from_input_manifest
 
@@ -27,7 +27,7 @@ def _print_artifact_preview(label: str, path: Path) -> None:
         print(f"{label}: not produced")
         return
 
-    table = _read_table(str(path))
+    table = read_table(str(path))
     preview_cols = [
         col
         for col in [
@@ -78,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
 
     logging.getLogger(__name__).info("Example workflow: preprocess")
     preprocess_manifest = preprocess_workflow(
-        runtime_config_path=workflow,
+        settings_path=workflow,
         staging_dir=workspace,
     )
     logging.getLogger(__name__).info("Example workflow: run through emissions allocation")

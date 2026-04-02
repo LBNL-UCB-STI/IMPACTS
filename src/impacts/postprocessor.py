@@ -6,7 +6,7 @@ from typing import Any
 from typing import Dict
 
 from .common import log_step_banner
-from .config.runtime_builder import build_runtime_config_from_runtime_yaml
+from .config.settings_builder import load_settings_from_yaml
 from .manifest.file_ops import load_structured_file
 from .manifest.file_ops import resolve_path
 from .manifest.file_ops import write_structured_file
@@ -56,20 +56,20 @@ def postprocess_from_run_manifest(
     return typed_manifest.to_dict()
 
 
-def postprocess_from_runtime_config(
-    runtime_config_path: str | Path,
+def postprocess_from_settings(
+    settings_path: str | Path,
     workspace: str | Path,
     manifest_path: str | Path | None = None,
 ) -> Dict[str, Any]:
-    from impacts.runner import run_from_runtime_config
+    from impacts.runner import run_from_settings
 
     workspace_root = Path(workspace).resolve()
-    runtime_config = build_runtime_config_from_runtime_yaml(runtime_config_path)
+    settings = load_settings_from_yaml(settings_path)
     output_root = Path(
-        resolve_path(runtime_config.impacts.local_output_folder, runtime_config_path) or runtime_config.impacts.local_output_folder
+        resolve_path(settings.impacts.local_output_folder, settings_path) or settings.impacts.local_output_folder
     ).resolve()
-    run_manifest = run_from_runtime_config(
-        runtime_config_path=runtime_config_path,
+    run_manifest = run_from_settings(
+        settings_path=settings_path,
         workspace=workspace_root,
         run_dispersion=True,
     )

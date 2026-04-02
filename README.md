@@ -7,7 +7,7 @@
 ```bash
 python -m impacts preprocess --config /path/settings.yaml --staging-dir /path/workspace
 python -m impacts run --input-manifest /path/workspace/inputs_manifest.yaml --output-dir /path/workspace
-python -m impacts postprocess --run-manifest /path/workspace/run_manifest.yaml --output-dir /path/downstream
+python -m impacts postprocess --run-manifest /path/workspace/run_manifest.yaml --output-dir /path/impacts
 python -m impacts pipeline --config /path/settings.yaml --workspace /path/workspace
 ```
 
@@ -15,7 +15,7 @@ python -m impacts pipeline --config /path/settings.yaml --workspace /path/worksp
 
 - internal working files: `/path/workspace/staged` and `/path/workspace/outputs`
 - run metadata: `/path/workspace/inputs_manifest.yaml` and `/path/workspace/run_manifest.yaml`
-- published artifact: `/path/downstream/impacts_exposure_table.parquet`
+- published artifact: `/path/impacts/impacts_exposure_table.parquet`
 
 ## Notes
 

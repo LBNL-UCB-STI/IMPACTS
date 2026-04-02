@@ -1,0 +1,77 @@
+# Fleet Configuration File
+#
+# This file is intentionally region-agnostic. Fill in the values below or use
+# `examples/sfbay_fleet/settings.yaml` as a starting point.
+
+# =============================================================================
+# RUN CONFIGURATION
+# Core run parameters
+# =============================================================================
+run:
+  region:
+  scenario:
+  output_directory:
+  output_run_name:
+
+# =============================================================================
+# SHARED CONFIGURATION
+# Geography and workspace paths shared by fleet processing steps
+# =============================================================================
+shared:
+  geography:
+    FIPS:
+      state:
+      counties: []
+    local_crs:
+  paths:
+    work_dir:
+
+# =============================================================================
+# IMPACTS CONFIGURATION
+# Fleet workflow settings, emissions sources, and filters
+# =============================================================================
+impacts:
+  local_input_folder:
+  local_output_folder:
+  emissions:
+    osm_network_folder:
+    emissions_rates_folder:
+    activity_totals_file:
+    annualization_days:
+    population_sample:
+    pollutants_map: {}
+    events_file:
+    emissions_skims_file:
+    link_stats_file:
+    rates:
+      filters:
+        season_month:
+        calendar_year:
+        temperature:
+        relative_humidity:
+        sub_area: []
+        include_nan:
+      emfac:
+        version:
+        emfac_rates_by_model_year_file:
+        emfac_vmt_by_model_year_file:
+        emfac_pop_by_model_year_file:
+      black_carbon:
+        version:
+        black_carbon_rates_file:
+      road_dust:
+        version:
+        rainy_days_file:
+        silt_loading_file:
+
+# =============================================================================
+# BEAM CONFIGURATION
+# BEAM input files used by fleet processing
+# =============================================================================
+beam:
+  carriers_file:
+  payloads_file:
+  tours_file:
+  ft_vehicle_types_file:
+  pax_vehicles_file:
+  pax_vehicle_types_file:

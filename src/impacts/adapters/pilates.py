@@ -110,7 +110,7 @@ def _validate_run_and_shared_sections(pilates_settings: Dict[str, Any]) -> None:
     _reject_unknown_keys(fips, {"state", "counties"}, "shared.geography.FIPS")
 
 
-def build_runtime_payload_from_pilates(
+def build_settings_payload_from_pilates(
     pilates_settings: Dict[str, Any],
     impacts_overlay: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -142,23 +142,24 @@ def build_runtime_payload_from_pilates(
                 "local_crs": _parse_epsg(geography.get("local_crs")),
             },
         },
+        "beam": dict(pilates_settings.get("beam", {}) or {}),
         "impacts": impacts_section,
     }
 
 
-def derive_runtime_config_from_pilates(
+def derive_settings_from_pilates(
     *,
     pilates_settings_path: str | Path,
     impacts_model_config_path: str | Path,
     output_path: str | Path | None = None,
 ) -> Dict[str, Any]:
-    from impacts.config.runtime_builder import build_runtime_config_from_pilates
+    from impacts.config.settings_builder import build_settings_from_pilates
 
-    runtime_config = build_runtime_config_from_pilates(
+    settings = build_settings_from_pilates(
         pilates_settings=pilates_settings_path,
         impacts_overlay=impacts_model_config_path,
     )
-    payload = runtime_config.to_dict()
+    payload = settings.to_dict()
     if output_path is not None:
         write_structured_file(output_path, payload)
     return payload

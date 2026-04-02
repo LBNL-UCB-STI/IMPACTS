@@ -99,7 +99,6 @@ def _required_bool(value: Any, label: str) -> bool:
 class PipelineConfig:
     beam_osm_id_col: str
     beam_length_col: str
-    beam_osm_epsg: int
     output_epsg: int
     mapping_columns: Dict[str, Any]
     inmap_enabled: bool
@@ -109,20 +108,19 @@ class PipelineConfig:
     inmap_grid_epsg: Optional[int] = None
     isrm_url: Optional[str] = None
     isrm_nox_to_no2_matrix_npz_path: Optional[str] = None
+    isrm_nox_to_no2_matrix_factor: Optional[float] = None
     asrv_patterns_file: Optional[str] = None
     asrv_patterns_epsg: Optional[int] = None
+    aermod_full_grid_path: Optional[str] = None
     aermod_grid_path: Optional[str] = None
     aermod_grid_epsg: Optional[int] = None
     aermod_grid_id: Optional[str] = None
-    simulation_network_folder: Optional[str] = None
     region: Optional[str] = None
     start_year: Optional[int] = None
     county_state_fips: Optional[str] = None
     county_fips_codes: List[str] = field(default_factory=list)
     activity_totals_file: Optional[str] = None
     activity_totals_columns: Dict[str, Any] = field(default_factory=dict)
-    concentration_factor: Optional[float] = None
-    iterations: int = 0
     prepared_skims_group_cols: List[str] = field(default_factory=list)
     pollutants: List[str] = field(default_factory=list)
     pollutants_map: Dict[str, str] = field(default_factory=dict)
@@ -136,7 +134,6 @@ class PipelineConfig:
             {
                 "beam_osm_id_col",
                 "beam_length_col",
-                "beam_osm_epsg",
                 "output_epsg",
                 "inmap_enabled",
                 "aermod_enabled",
@@ -145,21 +142,20 @@ class PipelineConfig:
                 "mapping_columns",
                 "isrm_url",
                 "isrm_nox_to_no2_matrix_npz_path",
+                "isrm_nox_to_no2_matrix_factor",
                 "asrv_patterns_file",
                 "asrv_patterns_epsg",
                 "grid_size_meters",
+                "aermod_full_grid_path",
                 "aermod_grid_path",
                 "aermod_grid_epsg",
                 "aermod_grid_id",
-                "simulation_network_folder",
                 "region",
                 "start_year",
                 "county_state_fips",
                 "county_fips_codes",
                 "activity_totals_file",
                 "activity_totals_columns",
-                "concentration_factor",
-                "iterations",
                 "prepared_skims_group_cols",
                 "pollutants",
                 "pollutants_map",
@@ -171,7 +167,6 @@ class PipelineConfig:
         result = cls(
             beam_osm_id_col=_required_string(payload.get("beam_osm_id_col"), "pipeline.beam_osm_id_col"),
             beam_length_col=_required_string(payload.get("beam_length_col"), "pipeline.beam_length_col"),
-            beam_osm_epsg=int(_required_string(payload.get("beam_osm_epsg"), "pipeline.beam_osm_epsg")),
             output_epsg=int(_required_string(payload.get("output_epsg"), "pipeline.output_epsg")),
             mapping_columns=_required_dict(payload.get("mapping_columns"), "pipeline.mapping_columns"),
             inmap_enabled=_required_bool(payload.get("inmap_enabled"), "pipeline.inmap_enabled"),
@@ -181,23 +176,19 @@ class PipelineConfig:
             inmap_grid_epsg=_optional_int(payload.get("inmap_grid_epsg")),
             isrm_url=_optional_string(payload.get("isrm_url")),
             isrm_nox_to_no2_matrix_npz_path=_optional_string(payload.get("isrm_nox_to_no2_matrix_npz_path")),
+            isrm_nox_to_no2_matrix_factor=_optional_float(payload.get("isrm_nox_to_no2_matrix_factor")),
             asrv_patterns_file=_optional_string(payload.get("asrv_patterns_file")),
             asrv_patterns_epsg=_optional_int(payload.get("asrv_patterns_epsg")),
+            aermod_full_grid_path=_optional_string(payload.get("aermod_full_grid_path")),
             aermod_grid_path=_optional_string(payload.get("aermod_grid_path")),
             aermod_grid_epsg=_optional_int(payload.get("aermod_grid_epsg")),
             aermod_grid_id=_optional_string(payload.get("aermod_grid_id")),
-            simulation_network_folder=_required_string(
-                payload.get("simulation_network_folder"),
-                "pipeline.simulation_network_folder",
-            ),
             region=_required_string(payload.get("region"), "pipeline.region"),
             start_year=_required_int(payload.get("start_year"), "pipeline.start_year"),
             county_state_fips=_required_string(payload.get("county_state_fips"), "pipeline.county_state_fips"),
             county_fips_codes=_coerce_string_list(payload.get("county_fips_codes")),
             activity_totals_file=_optional_string(payload.get("activity_totals_file")),
             activity_totals_columns=_required_dict(payload.get("activity_totals_columns"), "pipeline.activity_totals_columns"),
-            concentration_factor=_required_float(payload.get("concentration_factor"), "pipeline.concentration_factor"),
-            iterations=_required_int(payload.get("iterations"), "pipeline.iterations"),
             prepared_skims_group_cols=_coerce_string_list(payload.get("prepared_skims_group_cols")),
             pollutants=_coerce_string_list(payload.get("pollutants")),
             pollutants_map=_required_dict(payload.get("pollutants_map"), "pipeline.pollutants_map"),
@@ -211,9 +202,13 @@ class PipelineConfig:
                 raise ValueError("Missing required value: pipeline.isrm_url")
             if not result.isrm_nox_to_no2_matrix_npz_path:
                 raise ValueError("Missing required value: pipeline.isrm_nox_to_no2_matrix_npz_path")
+            if result.isrm_nox_to_no2_matrix_factor is None:
+                raise ValueError("Missing required value: pipeline.isrm_nox_to_no2_matrix_factor")
         if result.aermod_enabled:
             if result.grid_size_meters is None:
                 raise ValueError("Missing required value: pipeline.grid_size_meters")
+            if not result.aermod_full_grid_path:
+                raise ValueError("Missing required value: pipeline.aermod_full_grid_path")
             if not result.aermod_grid_path:
                 raise ValueError("Missing required value: pipeline.aermod_grid_path")
             if not result.asrv_patterns_file:
@@ -228,7 +223,7 @@ class PipelineConfig:
 class InputsManifest:
     contract_version: str
     model: str
-    runtime_config_source: str
+    settings_source: str
     staging_dir: str
     input_dir: str
     inputs_manifest_path: str
@@ -246,7 +241,7 @@ class InputsManifest:
             {
                 "contract_version",
                 "model",
-                "runtime_config_source",
+                "settings_source",
                 "staging_dir",
                 "input_dir",
                 "inputs_manifest_path",
@@ -264,7 +259,7 @@ class InputsManifest:
         return cls(
             contract_version=_required_string(payload.get("contract_version"), "contract_version"),
             model=_required_string(payload.get("model"), "model"),
-            runtime_config_source=_required_string(payload.get("runtime_config_source"), "runtime_config_source"),
+            settings_source=_required_string(payload.get("settings_source"), "settings_source"),
             staging_dir=_required_string(payload.get("staging_dir"), "staging_dir"),
             input_dir=_required_string(payload.get("input_dir"), "input_dir"),
             inputs_manifest_path=_required_string(payload.get("inputs_manifest_path"), "inputs_manifest_path"),

@@ -16,7 +16,7 @@ pollutants: list = ["NH3", "NOx", "PM2_5", "SOx", "ROG", "BC"]
 """Pollutants processed by default when no explicit list is configured."""
 
 grams_per_short_ton: float = 907_184.74
-"""Grams in one U.S. short ton. Maintained preprocess/runtime ton conversions use this basis."""
+"""Grams in one U.S. short ton. Maintained preprocess/settings-driven ton conversions use this basis."""
 
 # ---------------------------------------------------------------------------
 # Dispersion

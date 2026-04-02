@@ -1,0 +1,26 @@
+vehicleTypeId,seatingCapacity,standingRoomCapacity,lengthInMeter,primaryFuelType,primaryFuelConsumptionInJoulePerMeter,primaryFuelCapacityInJoule,primaryVehicleEnergyFile,secondaryFuelType,secondaryFuelConsumptionInJoulePerMeter,secondaryFuelCapacityInJoule,secondaryVehicleEnergyFile,automationLevel,maxVelocity,passengerCarUnit,rechargeLevel2RateLimitInWatts,rechargeLevel3RateLimitInWatts,vehicleCategory,sampleProbabilityWithinCategory,sampleProbabilityString,payloadCapacityInKg,vehicleUse,vehicleClass
+ft-ld1-Dsl,1,0,12,Diesel,6007.5651066449955,12000000000000000,,,,,,1,65,,,,Car,,,2000,Freight,Class 1&2A Vocational
+ft-ld1-Gas,1,0,12,Gasoline,7833.304016429045,12000000000000000,,,,,,1,65,,,,Car,,,2000,Freight,Class 1&2A Vocational
+ft-ld1-BE,1,0,12,Battery Electric,753725.1295562156,12000000000000000,,,,,,1,65,,,,Car,,,2000,Freight,Class 1&2A Vocational
+ft-ld1-H2FC,1,0,12,H2 Fuel Cell,753725.1295562156,12000000000000000,,,,,,1,65,,,,Car,,,2000,Freight,Class 1&2A Vocational
+ft-ld1-PHEV,1,0,12,PHEV,753725.1295562156,12000000000000000,,,,,,1,65,,,,Car,,,2000,Freight,Class 1&2A Vocational
+ft-ld3-Dsl,1,0,12,Diesel,6056.174503064524,12000000000000000,,,,,,1,65,,,,Car,,,5000,Freight,Class 2&B3 Vocational
+ft-ld3-Gas,1,0,12,Gasoline,8513.40544010803,12000000000000000,,,,,,1,65,,,,Car,,,5000,Freight,Class 2&B3 Vocational
+ft-ld3-BE,1,0,12,Battery Electric,3264.1510959084303,12000000000000000,,,,,,1,65,,,,Car,,,5000,Freight,Class 2&B3 Vocational
+ft-ld3-H2FC,1,0,12,H2 Fuel Cell,753725.1295562156,12000000000000000,,,,,,1,65,,,,Car,,,5000,Freight,Class 2&B3 Vocational
+ft-ld3-PHEV,1,0,12,PHEV,753725.1295562156,12000000000000000,,,,,,1,65,,,,Car,,,5000,Freight,Class 2&B3 Vocational
+ft-mdv-Dsl,1,0,12,Diesel,9595.796035186175,12000000000000000,,,,,,1,55,,,,Class456Vocational,,,15000,Freight,Class 4-6 Vocational
+ft-mdv-Gas,1,0,12,Gasoline,11404.611218108263,12000000000000000,,,,,,1,55,,,,Class456Vocational,,,15000,Freight,Class 4-6 Vocational
+ft-mdv-BE,1,0,12,Battery Electric,4587.112814357042,12000000000000000,,,,,,1,55,,,,Class456Vocational,,,15000,Freight,Class 4-6 Vocational
+ft-mdv-H2FC,1,0,12,H2 Fuel Cell,753725.1295562156,12000000000000000,,,,,,1,55,,,,Class456Vocational,,,15000,Freight,Class 4-6 Vocational
+ft-mdv-PHEV,1,0,12,PHEV,753725.1295562156,12000000000000000,,,,,,1,55,,,,Class456Vocational,,,15000,Freight,Class 4-6 Vocational
+ft-hdt-Dsl,1,0,12,Diesel,13817.086117829229,12000000000000000,,,,,,1,50,,,,Class78Tractor,,,55000,Freight,Class 7&8 Tractor
+ft-hdt-Gas,1,0,12,Gasoline,14274.230719805148,12000000000000000,,,,,,1,50,,,,Class78Tractor,,,55000,Freight,Class 7&8 Tractor
+ft-hdt-BE,1,0,12,Battery Electric,13547.749252849297,12000000000000000,,,,,,1,50,,,,Class78Tractor,,,55000,Freight,Class 7&8 Tractor
+ft-hdt-H2FC,1,0,12,H2 Fuel Cell,753725.1295562156,12000000000000000,,,,,,1,50,,,,Class78Tractor,,,55000,Freight,Class 7&8 Tractor
+ft-hdt-PHEV,1,0,12,PHEV,753725.1295562156,12000000000000000,,,,,,1,50,,,,Class78Tractor,,,55000,Freight,Class 7&8 Tractor
+ft-hdv-Dsl,1,0,12,Diesel,14026.761465378302,12000000000000000,,,,,,1,50,,,,Class78Vocational,,,40000,Freight,Class 7&8 Vocational
+ft-hdv-Gas,1,0,12,Gasoline,14196.940457556262,12000000000000000,,,,,,1,50,,,,Class78Vocational,,,40000,Freight,Class 7&8 Vocational
+ft-hdv-BE,1,0,12,Battery Electric,8593.377374942602,12000000000000000,,,,,,1,50,,,,Class78Vocational,,,40000,Freight,Class 7&8 Vocational
+ft-hdv-H2FC,1,0,12,H2 Fuel Cell,753725.1295562156,12000000000000000,,,,,,1,50,,,,Class78Vocational,,,40000,Freight,Class 7&8 Vocational
+ft-hdv-PHEV,1,0,12,PHEV,753725.1295562156,12000000000000000,,,,,,1,50,,,,Class78Vocational,,,40000,Freight,Class 7&8 Vocational

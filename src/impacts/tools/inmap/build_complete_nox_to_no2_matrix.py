@@ -120,35 +120,11 @@ def _load_cmaq_ratio_table(input_dir: str) -> pd.DataFrame:
         )
     return table
 
-
-def _load_legacy_no2_ratio(input_dir: str) -> pd.DataFrame:
-    legacy_path = Path(input_dir).resolve() / "sfb.no2ratio_isrmGRID.RData"
-    if not legacy_path.exists():
-        raise FileNotFoundError(legacy_path)
-
-    table = _read_rdata_frame(legacy_path, "no2ratio")
-    required = {"grid", "NO2_NOx_ratio"}
-    missing = required.difference(table.columns)
-    if missing:
-        raise ValueError(
-            f"Legacy NO2 ratio table {legacy_path} is missing required columns {sorted(missing)}; "
-            f"available columns: {list(table.columns)}"
-        )
-    table = table[["grid", "NO2_NOx_ratio"]].copy()
-    table["grid"] = pd.to_numeric(table["grid"], errors="coerce").astype("Int64")
-    table["NO2_NOx_ratio"] = pd.to_numeric(table["NO2_NOx_ratio"], errors="coerce")
-    return table.dropna(subset=["grid", "NO2_NOx_ratio"]).assign(grid=lambda df: df["grid"].astype(int))
-
-
 def _load_precomputed_no2_matrix(input_dir: str) -> pd.DataFrame | None:
     input_root = Path(input_dir).resolve()
     parquet_path = input_root / REGIONAL_NOX_TO_NO2_MATRIX_NAME
     if parquet_path.exists():
         return _normalize_square_matrix(pd.read_parquet(parquet_path))
-
-    legacy_rdata = input_root / "NOx_to_NO2_ISRM.RData"
-    if legacy_rdata.exists():
-        return _normalize_square_matrix(_read_rdata_frame(legacy_rdata, "res.dat"))
     return None
 
 
@@ -280,11 +256,6 @@ def generate_xwalk(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR, n_w
 
 def cmaq_ratio_to_grid(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR) -> None:
     grid_path = Path(input_dir).resolve() / "grid_polygon" / "grid_polygon.shp"
-    legacy_ratio_path = Path(input_dir).resolve() / "sfb.no2ratio_isrmGRID.RData"
-    if not grid_path.exists() and legacy_ratio_path.exists():
-        _load_legacy_no2_ratio(input_dir).to_parquet(os.path.join(output_dir, REGIONAL_NO2_RATIO_NAME), index=False)
-        return
-
     grid = gpd.read_file(grid_path)
     pdat = _load_cmaq_ratio_table(input_dir).copy()
     coords = cr_xy(pdat["col"], pdat["row"])

@@ -17,7 +17,7 @@ from impacts.tools.beam.sample_beam_output import sample_skims_by_fraction
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Sample large BEAM events or skims files into examples/pilates/upstream."
+        description="Sample large BEAM events or skims files into examples/pilates/beam."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -28,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     sample_events.add_argument("--vehicle-column", default="vehicle")
     sample_events.add_argument(
         "--output",
-        default=str(EXAMPLE_DIR / "upstream" / "events_sample.parquet"),
+        default=str(EXAMPLE_DIR / "beam" / "events_sample.parquet"),
     )
 
     sample_skims = subparsers.add_parser("skims", help="Sample skims by row fraction.")
@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     sample_skims.add_argument("--compact-workers", type=int, default=4)
     sample_skims.add_argument(
         "--output",
-        default=str(EXAMPLE_DIR / "upstream" / "skimsEmissions_sample.parquet"),
+        default=str(EXAMPLE_DIR / "beam" / "skimsEmissions_sample.parquet"),
     )
     return parser
 

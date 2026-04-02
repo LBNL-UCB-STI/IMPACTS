@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from impacts.config.runtime_builder import build_runtime_config_from_runtime_yaml
+from impacts.config.settings_builder import load_settings_from_yaml
 from impacts.manifest.file_ops import resolve_path
 
 
@@ -48,13 +48,13 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline = subparsers.add_parser("pipeline", help="Run preprocess, run, and postprocess end-to-end")
     pipeline.add_argument("--config", required=True)
     pipeline.add_argument("--workspace", required=True)
-    derive_runtime = subparsers.add_parser(
-        "derive_runtime_config_from_pilates",
-        help="Generate an impacts runtime config from main PILATES settings and a thin impacts overlay.",
+    derive_settings = subparsers.add_parser(
+        "derive_settings_from_pilates",
+        help="Generate an impacts settings file from main PILATES settings and a thin impacts overlay.",
     )
-    derive_runtime.add_argument("--pilates-settings", required=True)
-    derive_runtime.add_argument("--model-config", required=True)
-    derive_runtime.add_argument("--output", required=True)
+    derive_settings.add_argument("--pilates-settings", required=True)
+    derive_settings.add_argument("--model-config", required=True)
+    derive_settings.add_argument("--output", required=True)
 
     sample_events = subparsers.add_parser(
         "sample_events",
@@ -139,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         from impacts.preprocessor import preprocess_workflow
 
         preprocess_workflow(
-            runtime_config_path=args.config,
+            settings_path=args.config,
             staging_dir=args.staging_dir,
             manifest_path=args.manifest_path,
         )
@@ -147,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run":
         from impacts.runner import run_from_input_manifest
-        from impacts.runner import run_from_runtime_config
+        from impacts.runner import run_from_settings
 
         if args.input_manifest:
             if not args.output_dir:
@@ -160,8 +160,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if not args.workspace:
                 parser.error("--workspace is required with --config")
-            run_from_runtime_config(
-                runtime_config_path=args.config,
+            run_from_settings(
+                settings_path=args.config,
                 workspace=args.workspace,
                 run_manifest_path=args.run_manifest,
             )
@@ -169,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "postprocess":
         from impacts.postprocessor import postprocess_from_run_manifest
-        from impacts.postprocessor import postprocess_from_runtime_config
+        from impacts.postprocessor import postprocess_from_settings
 
         if args.run_manifest:
             if not args.output_dir:
@@ -182,8 +182,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if not args.workspace:
                 parser.error("--workspace is required with --config")
-            postprocess_from_runtime_config(
-                runtime_config_path=args.config,
+            postprocess_from_settings(
+                settings_path=args.config,
                 workspace=args.workspace,
                 manifest_path=args.postprocess_manifest,
             )
@@ -196,12 +196,12 @@ def main(argv: list[str] | None = None) -> int:
 
         _print_pipeline_banner()
         workspace = Path(args.workspace).resolve()
-        runtime_config = build_runtime_config_from_runtime_yaml(args.config)
+        settings = load_settings_from_yaml(args.config)
         downstream_output_root = Path(
-            resolve_path(runtime_config.impacts.local_output_folder, args.config) or runtime_config.impacts.local_output_folder
+            resolve_path(settings.impacts.local_output_folder, args.config) or settings.impacts.local_output_folder
         ).resolve()
         preprocess_manifest = preprocess_workflow(
-            runtime_config_path=args.config,
+            settings_path=args.config,
             staging_dir=workspace,
         )
         run_manifest = run_from_input_manifest(
@@ -215,10 +215,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    if args.command == "derive_runtime_config_from_pilates":
-        from impacts.adapters.pilates import derive_runtime_config_from_pilates
+    if args.command == "derive_settings_from_pilates":
+        from impacts.adapters.pilates import derive_settings_from_pilates
 
-        derive_runtime_config_from_pilates(
+        derive_settings_from_pilates(
             pilates_settings_path=args.pilates_settings,
             impacts_model_config_path=args.model_config,
             output_path=args.output,

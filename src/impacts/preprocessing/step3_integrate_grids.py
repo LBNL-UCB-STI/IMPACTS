@@ -16,15 +16,16 @@ import shapely.wkb
 from ..common import log_step_banner
 from ..common import log_substep_banner
 from ..common import read_vector
+from ..common import write_vector
 from ..manifest.schema import PipelineConfig
 
 logger = logging.getLogger(__name__)
-_SOURCE_ROW_ID = "__source_row_id"
+_SOURCE_ROW_ID = "source_row_id"
 _CANONICAL_INTERSECTION_COLUMNS = [
     "linkId",
     "countyfp",
-    "aermod_srv_cell_id",
-    "inmap_srm_cell_id",
+    "aermod_cell_id",
+    "inmap_cell_id",
     "county_zone_edge_proportion",
     "county_edge_link_length_m",
     "county_zone_link_length_m",
@@ -131,11 +132,12 @@ def trace_and_filter_void_zone_rows(
 
 
 def _resolve_source_row_col(df: pd.DataFrame) -> str:
-    edge_source_row_id = f"edge_{_SOURCE_ROW_ID}"
-    if edge_source_row_id in df.columns:
-        return edge_source_row_id
-    if _SOURCE_ROW_ID in df.columns:
-        return _SOURCE_ROW_ID
+    for candidate in (
+        _SOURCE_ROW_ID,
+        f"edge_{_SOURCE_ROW_ID}",
+    ):
+        if candidate in df.columns:
+            return candidate
     raise ValueError(f"Expected source row id column '{_SOURCE_ROW_ID}' in columns: {list(df.columns)}")
 
 
@@ -173,8 +175,15 @@ def _resolve_county_path(input_root: Path) -> str:
 
 
 def _resolve_staged_network_path(input_root: Path) -> str:
+    network_dir = input_root / "network"
+    if network_dir.exists():
+        return _resolve_staged_file(
+            network_dir,
+            ("network.parquet", "network.csv.gz", "network.csv"),
+            "network",
+        )
     return _resolve_staged_file(
-        input_root / "network",
+        input_root,
         ("network.parquet", "network.csv.gz", "network.csv"),
         "network",
     )
@@ -182,42 +191,73 @@ def _resolve_staged_network_path(input_root: Path) -> str:
 
 def _resolve_staged_osm_path(input_root: Path) -> str:
     osm_dir = input_root / "osm"
-    for name in ("network.osm.pbf", "sfbay-cbg5500-weakConn-network.osm.pbf"):
-        candidate = osm_dir / name
-        if candidate.exists():
-            return str(candidate)
-    matches = sorted(candidate for candidate in osm_dir.rglob("*.osm.pbf") if candidate.is_file())
-    if matches:
-        return str(matches[0])
+    search_roots = [osm_dir] if osm_dir.exists() else []
+    search_roots.append(input_root)
+    for root in search_roots:
+        for name in ("network.osm.pbf", "sfbay-cbg5500-weakConn-network.osm.pbf"):
+            candidate = root / name
+            if candidate.exists():
+                return str(candidate)
+        matches = sorted(candidate for candidate in root.rglob("*.osm.pbf") if candidate.is_file())
+        if matches:
+            return str(matches[0])
     raise FileNotFoundError(f"Step 3 could not find any staged .osm.pbf file under: {osm_dir}")
 
 
 def canonicalize_intersection_schema(df: pd.DataFrame) -> pd.DataFrame:
     canonical = df.copy()
-    rename_map = {
-        "edge_linkId": "linkId",
-        "county_COUNTYFP": "countyfp",
-        "edge_county_zone_edge_proportion": "county_zone_edge_proportion",
-        "edge_county_edge_link_length_m": "county_edge_link_length_m",
-        "edge_county_zone_link_length_m": "county_zone_link_length_m",
-        "edge_aermod_srv_cell_id": "aermod_srv_cell_id",
-        "edge_inmap_srm_cell_id": "inmap_srm_cell_id",
-        "edge_aermod_zone_edge_proportion": "aermod_zone_edge_proportion",
-        "edge_aermod_edge_link_length_m": "aermod_edge_link_length_m",
-        "edge_aermod_zone_link_length_m": "aermod_zone_link_length_m",
-        "edge_inmap_zone_edge_proportion": "inmap_zone_edge_proportion",
-        "edge_inmap_edge_link_length_m": "inmap_edge_link_length_m",
-        "edge_inmap_zone_link_length_m": "inmap_zone_link_length_m",
-    }
-    canonical = canonical.rename(columns={source: target for source, target in rename_map.items() if source in canonical.columns})
-    missing = [col for col in _CANONICAL_INTERSECTION_COLUMNS if col != "geometry" and col not in canonical.columns]
-    if missing:
-        raise ValueError(
-            "Intersection output is missing required canonical columns after normalization: "
-            f"{missing}. Available columns: {list(canonical.columns)}"
-        )
+    def _combine(target: str, candidates: tuple[str, ...]) -> None:
+        result = None
+        for col in candidates:
+            if col not in canonical.columns:
+                continue
+            series = canonical[col]
+            result = series if result is None else series.combine_first(result)
+        if result is not None:
+            canonical[target] = result
 
-    for col in ("linkId", "aermod_srv_cell_id", "inmap_srm_cell_id"):
+    _combine("linkId", ("edge_linkId", "linkId"))
+    _combine("countyfp", ("countyfp", "county_COUNTYFP", "zone_COUNTYFP", "COUNTYFP"))
+    _combine(
+        "county_zone_edge_proportion",
+        ("edge_county_zone_edge_proportion", "county_zone_edge_proportion"),
+    )
+    _combine(
+        "county_edge_link_length_m",
+        ("edge_county_edge_link_length_m", "county_edge_link_length_m"),
+    )
+    _combine(
+        "county_zone_link_length_m",
+        ("edge_county_zone_link_length_m", "county_zone_link_length_m"),
+    )
+    _combine("aermod_cell_id", ("edge_aermod_cell_id", "aermod_aermod_cell_id", "aermod_cell_id"))
+    _combine("inmap_cell_id", ("edge_inmap_cell_id", "edge_inmap_inmap_cell_id", "aermod_inmap_cell_id", "inmap_cell_id"))
+    _combine(
+        "aermod_zone_edge_proportion",
+        ("edge_aermod_zone_edge_proportion", "aermod_zone_edge_proportion"),
+    )
+    _combine(
+        "aermod_edge_link_length_m",
+        ("edge_aermod_edge_link_length_m", "aermod_edge_link_length_m"),
+    )
+    _combine(
+        "aermod_zone_link_length_m",
+        ("edge_aermod_zone_link_length_m", "aermod_zone_link_length_m"),
+    )
+    _combine(
+        "inmap_zone_edge_proportion",
+        ("edge_inmap_zone_edge_proportion", "inmap_zone_edge_proportion"),
+    )
+    _combine(
+        "inmap_edge_link_length_m",
+        ("edge_inmap_edge_link_length_m", "inmap_edge_link_length_m"),
+    )
+    _combine(
+        "inmap_zone_link_length_m",
+        ("edge_inmap_zone_link_length_m", "inmap_zone_link_length_m"),
+    )
+
+    for col in ("linkId", "aermod_cell_id", "inmap_cell_id"):
         if col in canonical.columns:
             canonical[col] = pd.to_numeric(canonical[col], errors="coerce")
     if "countyfp" in canonical.columns:
@@ -276,11 +316,50 @@ def _union_county_matches_with_unmatched(
         geometry="geometry",
         crs=matched.crs,
     )
+
+
+def _write_aermod_intersected_subset_grid(
+    *,
+    full_grid_path: str,
+    full_grid_id_col: str,
+    intersected_zone_rows: gpd.GeoDataFrame,
+    output_path: Path,
+) -> str:
+    canonical_rows = canonicalize_intersection_schema(intersected_zone_rows)
+    if "aermod_cell_id" not in canonical_rows.columns:
+        raise ValueError(
+            "AERMOD intersection output must include an AERMOD cell id column after canonicalization."
+        )
+    full_grid = read_vector(full_grid_path)
+    if full_grid_id_col not in full_grid.columns:
+        raise ValueError(
+            f"AERMOD full grid is missing '{full_grid_id_col}' in {full_grid_path}. "
+            f"Available columns: {list(full_grid.columns)}"
+        )
+    keep_ids = (
+        pd.to_numeric(canonical_rows["aermod_cell_id"], errors="coerce")
+        .dropna()
+        .astype(int)
+        .unique()
+    )
+    subset = full_grid[
+        pd.to_numeric(full_grid[full_grid_id_col], errors="coerce").isin(keep_ids)
+    ].copy()
+    write_vector(subset, str(output_path))
+    logger.info(
+        "Step 3.2 subset grid: wrote %d AERMOD cells carrying %s and inmap_cell_id → %s",
+        len(subset),
+        full_grid_id_col,
+        output_path,
+    )
+    return str(output_path)
+
+
 def run(
     pipeline: PipelineConfig,
     raw_dir: Path,
     input_root: Path,
-) -> Tuple[str, Optional[gpd.GeoDataFrame]]:
+) -> Tuple[str, Optional[gpd.GeoDataFrame], Optional[str]]:
     """Map staged BEAM network to OSM and intersect it with enabled dispersion grids and county boundaries."""
     from osm_chordify.osm.intersect import intersect_road_network_with_zones
 
@@ -288,7 +367,8 @@ def run(
     grid_intersection_path = raw_dir / "beam_osm_zone_county_intersection.parquet"
     if grid_intersection_path.exists():
         logger.info("Step 3: reusing existing grid intersection %s", grid_intersection_path)
-        return str(grid_intersection_path), None
+        aermod_subset_path = raw_dir / "aermod_network_intersected_grid.parquet"
+        return str(grid_intersection_path), None, str(aermod_subset_path) if aermod_subset_path.exists() else None
     mapped_network_path = str((input_root / "network" / "beam_osm_mapped.parquet").resolve())
     mapped_network_gpkg = str(Path(mapped_network_path).with_suffix(".gpkg"))
     log_substep_banner("3.1", "map BEAM network to OSM", logger=logger)
@@ -310,40 +390,48 @@ def run(
     mapped_network = _load_geodataframe(mapped_network_path)
     epsg = int(pipeline.output_epsg)
 
-    A = mapped_network
-    if pipeline.aermod_enabled:
-        log_substep_banner("3.2", "intersect with AERMOD grid", logger=logger)
-        logger.info("Step 3.2: intersecting line network with AERMOD grid %s", pipeline.aermod_grid_path)
-        A = intersect_road_network_with_zones(
-            mapped_network,
-            epsg,
-            pipeline.aermod_grid_path,
-            output_epsg=epsg,
-            prefilter_zones_to_network_bbox=True,
-            zone_label="aermod",
-        )
-        logger.info("Step 3.2 complete: %d rows", len(A))
-
-    B = A
+    network_with_zones = mapped_network
     if pipeline.inmap_enabled:
-        log_substep_banner("3.3", "intersect with InMAP grid", logger=logger)
-        logger.info("Step 3.3: intersecting with inMAP grid %s", pipeline.inmap_grid_path)
-        B = intersect_road_network_with_zones(
-            A,
+        log_substep_banner("3.2", "intersect with InMAP grid", logger=logger)
+        logger.info("Step 3.2: intersecting with inMAP grid %s", pipeline.inmap_grid_path)
+        network_with_zones = intersect_road_network_with_zones(
+            mapped_network,
             epsg,
             pipeline.inmap_grid_path,
             output_epsg=epsg,
             prefilter_zones_to_network_bbox=True,
             zone_label="inmap",
         )
-        B = trace_and_filter_void_zone_rows(
-            B,
-            zone_id_col="inmap_srm_cell_id",
+        network_with_zones = trace_and_filter_void_zone_rows(
+            network_with_zones,
+            zone_id_col="inmap_cell_id",
             proportion_col="inmap_zone_edge_proportion",
-            context="Step 3.3",
+            context="Step 3.2",
         )
-        logger.info("Step 3.3 complete: %d rows", len(B))
-    B = B.reset_index(drop=True).copy()
+        logger.info("Step 3.2 complete: %d rows", len(network_with_zones))
+
+    aermod_subset_grid_path: Optional[str] = None
+    if pipeline.aermod_enabled:
+        log_substep_banner("3.3", "intersect with AERMOD grid", logger=logger)
+        logger.info("Step 3.3: intersecting line network with AERMOD grid %s", pipeline.aermod_grid_path)
+        network_with_zones = intersect_road_network_with_zones(
+            network_with_zones,
+            epsg,
+            pipeline.aermod_grid_path,
+            output_epsg=epsg,
+            prefilter_zones_to_network_bbox=True,
+            zone_label="aermod",
+        )
+        if not pipeline.aermod_grid_id:
+            raise ValueError("pipeline.aermod_grid_id must be configured before deriving the AERMOD subset grid.")
+        aermod_subset_grid_path = _write_aermod_intersected_subset_grid(
+            full_grid_path=pipeline.aermod_grid_path,
+            full_grid_id_col=pipeline.aermod_grid_id,
+            intersected_zone_rows=network_with_zones,
+            output_path=raw_dir / "aermod_network_intersected_grid.parquet",
+        )
+        logger.info("Step 3.3 complete: %d rows", len(network_with_zones))
+    B = network_with_zones.reset_index(drop=True).copy()
     B[_SOURCE_ROW_ID] = range(len(B))
 
     log_substep_banner("3.4", "intersect with county boundaries", logger=logger)
@@ -390,4 +478,4 @@ def run(
     )
     logger.info("Step 3 complete: %d total rows → %s", len(C_canonical), grid_intersection_path)
 
-    return str(grid_intersection_path), C_canonical
+    return str(grid_intersection_path), C_canonical, aermod_subset_grid_path

@@ -10,15 +10,15 @@ except PackageNotFoundError:  # pragma: no cover
 finally:
     del version, PackageNotFoundError
 
-from .config.runtime import ImpactsRuntimeConfig
-from .config.runtime import Dispersions
-from .config.runtime import Emissions
-from .config.runtime import Geography
-from .config.runtime import GeographyFips
-from .config.runtime import Impacts
-from .config.runtime import InmapDispersion
-from .config.runtime import Run
-from .config.runtime import Shared
+from .config.settings import ImpactsSettings
+from .config.settings import Dispersions
+from .config.settings import Emissions
+from .config.settings import Geography
+from .config.settings import GeographyFips
+from .config.settings import Impacts
+from .config.settings import InmapDispersion
+from .config.settings import Run
+from .config.settings import Shared
 
 __all__ = [
     "__version__",
@@ -26,7 +26,7 @@ __all__ = [
     "Emissions",
     "Geography",
     "GeographyFips",
-    "ImpactsRuntimeConfig",
+    "ImpactsSettings",
     "Impacts",
     "InmapDispersion",
     "Run",

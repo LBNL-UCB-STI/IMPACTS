@@ -1,4 +1,4 @@
-"""Shared maintained helpers for IMPACTS preprocess, runtime, and postprocess code.
+"""Shared maintained helpers for IMPACTS preprocess, settings-driven workflow, and postprocess code.
 
 This module is intentionally limited to cross-cutting helpers that are reused by
 multiple maintained modules. It is organized by concern:
@@ -25,6 +25,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
+from shapely.geometry import LineString
 from tqdm import tqdm
 
 from .config.defaults import annualization_days as default_annualization_days
@@ -32,7 +33,8 @@ from .config.defaults import chunk_size as default_chunk_size
 from .config.defaults import grams_per_short_ton
 from .config.defaults import meters_per_mile as _METERS_PER_MILE
 from .config.defaults import pollutants as default_prepared_pollutants
-from .manifest.file_ops import copy_path
+from .consist_artifacts import log_input_reference
+from .consist_artifacts import resolve_logged_path
 from .manifest.file_ops import file_entry
 from .manifest.file_ops import is_remote_path
 from .manifest.file_ops import parquet_available
@@ -45,18 +47,31 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _normalized_stage_label(label: str, *, logger: logging.Logger, is_substep: bool = False) -> str:
+    text = str(label).strip()
+    upper = text.upper()
+    if upper.startswith("PREPROCESS STEP"):
+        return upper
+    if upper.startswith("STEP"):
+        return f"WORKFLOW {upper}"
+    if is_substep:
+        prefix = "PREPROCESS STEP" if ".preprocessing." in logger.name else "WORKFLOW STEP"
+        return f"{prefix} {text}"
+    return text.upper()
+
+
 def log_step_banner(step_label: str, title: str, *, logger: logging.Logger) -> None:
     logger.info("")
-    logger.info("========== %s: %s ==========", step_label.upper(), title.upper())
+    logger.info("========== %s: %s ==========", _normalized_stage_label(step_label, logger=logger), title.upper())
 
 
 def log_substep_banner(substep_label: str, title: str, *, logger: logging.Logger) -> None:
-    logger.info("----- %s %s -----", substep_label, title)
+    logger.info("----- %s: %s -----", _normalized_stage_label(substep_label, logger=logger, is_substep=True), title)
 
 def parse_epsg(value: Any) -> int:
     if value is None or (isinstance(value, str) and not value.strip()):
         raise ValueError(
-            "geography.local_crs (output EPSG) must be set in the runtime config. "
+            "geography.local_crs (output EPSG) must be set in the settings file. "
             "Example: local_crs: 26910"
         )
     if isinstance(value, int):
@@ -182,7 +197,7 @@ def find_latest_iteration_skims(iters_dir: Path) -> Optional[Path]:
 
 
 def resolve_beam_network_local_path(root: str) -> str:
-    resolved = required_local_path(root, "impacts.emissions.simulation_network_folder")
+    resolved = required_local_path(root, "BEAM output root")
     network_path = find_preferred_file(resolved, ["network.csv.gz", "network.parquet"])
     if network_path:
         return network_path
@@ -192,11 +207,11 @@ def resolve_beam_network_local_path(root: str) -> str:
         for candidate in [run_root / "network.csv.gz", run_root / "network.parquet"]:
             if candidate.exists():
                 return str(candidate)
-    raise FileNotFoundError(f"No BEAM network file found under configured simulation network folder: {resolved}")
+    raise FileNotFoundError(f"No BEAM network file found under configured BEAM output root: {resolved}")
 
 
 def resolve_emissions_skims_local_path(root: str) -> str:
-    resolved = required_local_path(root, "impacts.emissions.simulation_network_folder")
+    resolved = required_local_path(root, "BEAM output root")
     latest_iters_dir = find_latest_iters_dir(resolved)
     if latest_iters_dir:
         latest_skims = find_latest_iteration_skims(latest_iters_dir)
@@ -206,7 +221,7 @@ def resolve_emissions_skims_local_path(root: str) -> str:
         match = find_first_matching(resolved, pattern)
         if match:
             return match
-    raise FileNotFoundError(f"No BEAM skims emissions file found under configured simulation network folder: {resolved}")
+    raise FileNotFoundError(f"No BEAM skims emissions file found under configured BEAM output root: {resolved}")
 
 
 def resolve_latest_events_local_path(root: str) -> Optional[str]:
@@ -276,44 +291,45 @@ def write_vector(gdf: gpd.GeoDataFrame, path: str) -> None:
         gdf.to_file(target)
 
 
-def read_network_bounds(path: str) -> tuple[float, float, float, float]:
-    started = time.perf_counter()
+def read_network_lines(path: str, *, target_epsg: Optional[int] = None) -> gpd.GeoDataFrame:
     target = Path(path)
     lower = target.name.lower()
+    line_cols = ["fromLocationX", "fromLocationY", "toLocationX", "toLocationY"]
     if lower.endswith(".csv.gz"):
-        network = pd.read_csv(
-            target,
-            compression="gzip",
-            usecols=["fromLocationX", "fromLocationY", "toLocationX", "toLocationY"],
-        )
+        network = pd.read_csv(target, compression="gzip", usecols=line_cols)
+        geometry = [
+            LineString([(fx, fy), (tx, ty)])
+            for fx, fy, tx, ty in zip(
+                pd.to_numeric(network["fromLocationX"], errors="coerce"),
+                pd.to_numeric(network["fromLocationY"], errors="coerce"),
+                pd.to_numeric(network["toLocationX"], errors="coerce"),
+                pd.to_numeric(network["toLocationY"], errors="coerce"),
+            )
+        ]
+        gdf = gpd.GeoDataFrame(network, geometry=geometry, crs=f"EPSG:{int(target_epsg)}" if target_epsg else None)
     elif lower.endswith(".csv"):
-        network = pd.read_csv(
-            target,
-            usecols=["fromLocationX", "fromLocationY", "toLocationX", "toLocationY"],
-        )
+        network = pd.read_csv(target, usecols=line_cols)
+        geometry = [
+            LineString([(fx, fy), (tx, ty)])
+            for fx, fy, tx, ty in zip(
+                pd.to_numeric(network["fromLocationX"], errors="coerce"),
+                pd.to_numeric(network["fromLocationY"], errors="coerce"),
+                pd.to_numeric(network["toLocationX"], errors="coerce"),
+                pd.to_numeric(network["toLocationY"], errors="coerce"),
+            )
+        ]
+        gdf = gpd.GeoDataFrame(network, geometry=geometry, crs=f"EPSG:{int(target_epsg)}" if target_epsg else None)
     else:
         gdf = read_vector(path)
-        bounds = tuple(float(v) for v in gdf.total_bounds)
-        logger.info(
-            "Preprocess: computed network bounds from %s in %.2fs → (%.2f, %.2f, %.2f, %.2f)",
-            target,
-            time.perf_counter() - started,
-            *bounds,
-        )
-        return bounds
+        if target_epsg is not None and gdf.crs is not None:
+            gdf = gdf.to_crs(epsg=int(target_epsg))
+        return gdf
 
-    x_min = min(network["fromLocationX"].min(), network["toLocationX"].min())
-    y_min = min(network["fromLocationY"].min(), network["toLocationY"].min())
-    x_max = max(network["fromLocationX"].max(), network["toLocationX"].max())
-    y_max = max(network["fromLocationY"].max(), network["toLocationY"].max())
-    bounds = (float(x_min), float(y_min), float(x_max), float(y_max))
-    logger.info(
-        "Preprocess: computed network bounds from %s in %.2fs → (%.2f, %.2f, %.2f, %.2f)",
-        target,
-        time.perf_counter() - started,
-        *bounds,
-    )
-    return bounds
+    if gdf.crs is None:
+        raise ValueError(f"Could not determine CRS for network lines from {path}")
+    if target_epsg is not None:
+        gdf = gdf.to_crs(epsg=int(target_epsg))
+    return gdf.loc[gdf.geometry.notna()].copy()
 
 
 # ---------------------------------------------------------------------------
@@ -323,16 +339,15 @@ def read_network_bounds(path: str) -> tuple[float, float, float, float]:
 def generate_fishnet_from_bounds(
     *,
     bounds: tuple[float, float, float, float],
-    mask_gdf: Optional[gpd.GeoDataFrame],
+    mask_gdf: gpd.GeoDataFrame,
     cell_size: float,
     target_path: str,
     target_epsg: int,
-    cell_id_col: str = "srv_cell_id",
+    cell_id_col: str,
 ) -> tuple[str, str]:
     target = Path(target_path)
     if target.exists():
-        logger.info("Preprocess: reusing generated AERMOD fishnet %s", target)
-        return str(target), cell_id_col
+        target.unlink()
     started = time.perf_counter()
     minx, miny, maxx, maxy = (float(v) for v in bounds)
     start_x = cell_size * int(minx // cell_size)
@@ -361,36 +376,31 @@ def generate_fishnet_from_bounds(
         geometry=geometries,
         crs=f"EPSG:{int(target_epsg)}",
     )
-    if mask_gdf is not None:
-        if mask_gdf.crs is None:
-            raise ValueError("AERMOD fishnet mask grid is missing CRS")
-        mask_gdf = mask_gdf.to_crs(epsg=target_epsg)
-        mask_union = mask_gdf.geometry.union_all() if hasattr(mask_gdf.geometry, "union_all") else mask_gdf.geometry.unary_union
-        filter_started = time.perf_counter()
-        keep_mask = np.zeros(len(fishnet), dtype=bool)
-        progress = tqdm(
-            total=len(fishnet),
-            desc="Filtering AERMOD fishnet",
-            unit="cell",
-            dynamic_ncols=True,
-            leave=True,
-        )
-        try:
-            for start in range(0, len(fishnet), default_chunk_size):
-                stop = min(start + default_chunk_size, len(fishnet))
-                keep_mask[start:stop] = fishnet.geometry.iloc[start:stop].intersects(mask_union).to_numpy()
-                progress.update(stop - start)
-        finally:
-            progress.close()
-        fishnet = fishnet.loc[keep_mask].reset_index(drop=True)
-        fishnet[cell_id_col] = np.arange(len(fishnet), dtype=int)
-        logger.info(
-            "Preprocess: filtered fishnet candidates to the staged InMAP footprint in %.2fs → %d rows kept",
-            time.perf_counter() - filter_started,
-            len(fishnet),
-        )
-    else:
-        logger.info("Preprocess: no fishnet mask provided; keeping all %d candidate cells", len(fishnet))
+
+    mask_gdf = mask_gdf.to_crs(epsg=target_epsg)
+    mask_union = mask_gdf.geometry.union_all() if hasattr(mask_gdf.geometry, "union_all") else mask_gdf.geometry.unary_union
+    filter_started = time.perf_counter()
+    keep_mask = np.zeros(len(fishnet), dtype=bool)
+    progress = tqdm(
+        total=len(fishnet),
+        desc="Filtering AERMOD fishnet",
+        unit="cell",
+        dynamic_ncols=True,
+        leave=True,
+    )
+    try:
+        for start in range(0, len(fishnet), default_chunk_size):
+            stop = min(start + default_chunk_size, len(fishnet))
+            keep_mask[start:stop] = fishnet.geometry.iloc[start:stop].intersects(mask_union).to_numpy()
+            progress.update(stop - start)
+    finally:
+        progress.close()
+    fishnet = fishnet.loc[keep_mask].copy()
+    logger.info(
+        "Preprocess: filtered fishnet candidates to the staged InMAP footprint in %.2fs → %d rows kept",
+        time.perf_counter() - filter_started,
+        len(fishnet),
+    )
     write_vector(fishnet, target_path)
     logger.info(
         "Preprocess: wrote generated AERMOD fishnet in %.2fs → %d rows at %s",
@@ -401,10 +411,185 @@ def generate_fishnet_from_bounds(
     return target_path, cell_id_col
 
 
+def constrain_grid_to_network(
+    *,
+    grid_path: str,
+    network_path: str,
+    grid_id_col: str,
+    target_epsg: int,
+    output_path: str,
+) -> str:
+    started = time.perf_counter()
+    target = Path(output_path)
+    if target.exists():
+        logger.info("Preprocess: reusing network-constrained grid %s", target)
+        return str(target)
+
+    grid = read_vector(grid_path)
+    if grid.crs is None:
+        raise ValueError(f"Grid constraint input is missing CRS: {grid_path}")
+    grid = grid.to_crs(epsg=int(target_epsg))
+    if grid_id_col not in grid.columns:
+        raise ValueError(
+            f"Expected grid id column '{grid_id_col}' in {grid_path}. Available columns: {list(grid.columns)}"
+        )
+
+    network = read_network_lines(network_path, target_epsg=int(target_epsg))
+    if network.crs is None:
+        raise ValueError(f"Network constraint input is missing CRS: {network_path}")
+
+    joined = gpd.sjoin(
+        grid[[grid_id_col, "geometry"]],
+        network[["geometry"]],
+        how="inner",
+        predicate="intersects",
+    )
+    keep_ids = (
+        pd.to_numeric(joined[grid_id_col], errors="coerce")
+        .dropna()
+        .astype(int)
+        .unique()
+    )
+    constrained = grid[pd.to_numeric(grid[grid_id_col], errors="coerce").isin(keep_ids)].copy()
+    write_vector(constrained, str(target))
+    logger.info(
+        "Preprocess: constrained %s to %d network-intersecting cells in %.2fs → %s",
+        grid_id_col,
+        len(constrained),
+        time.perf_counter() - started,
+        target,
+    )
+    return str(target)
+
+
+def assign_grid_cells_to_zones(
+    *,
+    grid_path: str,
+    zone_path: str,
+    zone_id_col: str,
+    output_col: str,
+    target_epsg: int,
+) -> str:
+    grid = read_vector(grid_path)
+    zones = read_vector(zone_path)
+    if zone_id_col not in zones.columns:
+        raise ValueError(
+            f"Zone mapping expected column '{zone_id_col}' in {zone_path}. "
+            f"Available columns: {list(zones.columns)}"
+        )
+    if grid.crs is None:
+        raise ValueError(f"Grid mapping input is missing CRS: {grid_path}")
+    if zones.crs is None:
+        raise ValueError(f"Zone mapping input is missing CRS: {zone_path}")
+    grid = grid.to_crs(epsg=target_epsg)
+    zones = zones.to_crs(epsg=target_epsg)
+
+    grid_index_col = grid.index.name or "grid_index"
+    zone_lookup = zones[[zone_id_col, "geometry"]].copy()
+    zone_lookup = zone_lookup.rename(columns={"geometry": "_zone_geometry"})
+
+    representative_points = gpd.GeoDataFrame(
+        {grid_index_col: grid.index.to_numpy(dtype=int)},
+        geometry=grid.geometry.representative_point(),
+        crs=grid.crs,
+    )
+    joined = gpd.sjoin(
+        representative_points,
+        zones[[zone_id_col, "geometry"]],
+        how="left",
+        predicate="within",
+    )
+    duplicate_matches = joined.duplicated(subset=[grid_index_col], keep=False)
+    unique_point_matches = joined.loc[~duplicate_matches, [grid_index_col, zone_id_col]].copy()
+    mapped = unique_point_matches.rename(columns={zone_id_col: output_col})
+    mapped[output_col] = pd.to_numeric(mapped[output_col], errors="coerce")
+    unresolved_ids = set()
+    unresolved_ids.update(
+        mapped.loc[mapped[output_col].isna(), grid_index_col].astype(int).tolist()
+    )
+    if duplicate_matches.any():
+        unresolved_ids.update(joined.loc[duplicate_matches, grid_index_col].astype(int).tolist())
+
+    if unresolved_ids:
+        overlap_grid = (
+            grid.loc[grid.index.isin(sorted(unresolved_ids)), ["geometry"]]
+            .reset_index()
+            .rename(columns={grid.index.name or "index": grid_index_col})
+        )
+        overlap_candidates = gpd.sjoin(
+            overlap_grid,
+            zones[[zone_id_col, "geometry"]],
+            how="left",
+            predicate="intersects",
+        )
+        if not overlap_candidates.empty:
+            overlap_candidates = overlap_candidates.merge(
+                zone_lookup.reset_index().rename(columns={"index": "zone_index"}),
+                how="left",
+                left_on="index_right",
+                right_on="zone_index",
+            )
+            overlap_zone_col = zone_id_col
+            if overlap_zone_col not in overlap_candidates.columns:
+                for candidate in (f"{zone_id_col}_x", f"{zone_id_col}_y"):
+                    if candidate in overlap_candidates.columns:
+                        overlap_zone_col = candidate
+                        break
+            overlap_candidates["_overlap_area"] = overlap_candidates.geometry.intersection(
+                overlap_candidates["_zone_geometry"]
+            ).area
+            overlap_candidates[overlap_zone_col] = pd.to_numeric(overlap_candidates[overlap_zone_col], errors="coerce")
+            overlap_candidates = overlap_candidates.sort_values(
+                [grid_index_col, "_overlap_area", overlap_zone_col],
+                ascending=[True, False, True],
+            )
+            best_overlap = (
+                overlap_candidates.loc[
+                    overlap_candidates[overlap_zone_col].notna() & overlap_candidates["_overlap_area"].gt(0),
+                    [grid_index_col, overlap_zone_col],
+                ]
+                .drop_duplicates(subset=[grid_index_col], keep="first")
+                .rename(columns={overlap_zone_col: output_col})
+            )
+            if not best_overlap.empty:
+                best_overlap[output_col] = pd.to_numeric(best_overlap[output_col], errors="coerce")
+                mapped = mapped.loc[~mapped[grid_index_col].isin(best_overlap[grid_index_col])].copy()
+                mapped = pd.concat([mapped, best_overlap], ignore_index=True)
+    unresolved_duplicates = mapped.duplicated(subset=[grid_index_col], keep=False)
+    if unresolved_duplicates.any():
+        sample = (
+            mapped.loc[unresolved_duplicates, [grid_index_col, output_col]]
+            .head(10)
+            .to_dict(orient="records")
+        )
+        raise ValueError(
+            f"Grid-to-zone mapping still produced multiple {output_col} matches for some cells after overlap resolution. "
+            f"sample={sample}"
+        )
+    unmatched = mapped[output_col].isna()
+    if unmatched.any():
+        logger.info(
+            "Preprocess: dropping %d generated AERMOD cells that do not map to a corresponding InMAP cell",
+            int(unmatched.sum()),
+        )
+        mapped = mapped.loc[~unmatched].copy()
+    mapped[output_col] = mapped[output_col].astype(int)
+    grid = grid.merge(mapped, how="inner", left_index=True, right_on=grid_index_col).drop(columns=[grid_index_col])
+    write_vector(grid, grid_path)
+    logger.info(
+        "Preprocess: assigned %s to %d generated AERMOD cells → %s",
+        output_col,
+        len(grid),
+        grid_path,
+    )
+    return grid_path
+
+
 def ensure_grid_cell_id(
     staged_path: str,
     cell_id_col: str,
     source_col: Optional[str] = None,
+    output_path: Optional[str] = None,
 ) -> tuple[str, str]:
     gdf = read_vector(staged_path)
     if cell_id_col in gdf.columns:
@@ -418,14 +603,14 @@ def ensure_grid_cell_id(
         gdf[cell_id_col] = gdf[source_col]
     else:
         gdf[cell_id_col] = range(len(gdf))
-    normalized_path = staged_path
-    if Path(staged_path).suffix.lower() != ".parquet":
-        normalized_path = str(Path(staged_path).with_suffix(".parquet"))
+    normalized_path = output_path or staged_path
+    if Path(normalized_path).suffix.lower() != ".parquet":
+        normalized_path = str(Path(normalized_path).with_suffix(".parquet"))
     write_vector(gdf, normalized_path)
     return normalized_path, cell_id_col
 
 
-def stage_local_input(
+def register_local_input(
     *,
     manifest_inputs: Dict[str, Any],
     input_root: Path,
@@ -434,18 +619,50 @@ def stage_local_input(
     relative_target: str,
     optional: bool = False,
 ) -> str:
-    destination = input_root / relative_target
-    staged = copy_path(source_path, destination)
+    source = str(Path(source_path).resolve())
     manifest_inputs[key] = file_entry(
         kind="local",
-        path=source_path,
-        staged_path=staged,
+        path=source,
+        staged_path=source,
         optional=optional,
     )
-    return str(staged)
+    return source
 
 
-def stage_optional_input(
+def register_managed_input(
+    *,
+    manifest_inputs: Dict[str, Any],
+    input_root: Path,
+    key: str,
+    source_path: str,
+    relative_target: str,
+    artifact_key: Optional[str] = None,
+    optional: bool = False,
+    prefer_reference: bool = False,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> str:
+    if prefer_reference:
+        logged_entry = log_input_reference(
+            key=key,
+            source_path=source_path,
+            artifact_key=artifact_key,
+            optional=optional,
+            metadata=metadata,
+        )
+        if logged_entry is not None:
+            manifest_inputs[key] = logged_entry
+            return resolve_logged_path(logged_entry)
+    return register_local_input(
+        manifest_inputs=manifest_inputs,
+        input_root=input_root,
+        key=key,
+        source_path=source_path,
+        relative_target=relative_target,
+        optional=optional,
+    )
+
+
+def register_optional_input(
     *,
     manifest_inputs: Dict[str, Any],
     input_root: Path,
@@ -464,7 +681,7 @@ def stage_optional_input(
             "exists": True,
         }
         return source_path
-    return stage_local_input(
+    return register_local_input(
         manifest_inputs=manifest_inputs,
         input_root=input_root,
         key=key,
@@ -472,6 +689,13 @@ def stage_optional_input(
         relative_target=relative_target,
         optional=True,
     )
+
+
+def resolve_manifest_input_path(entry: Dict[str, Any], *, label: str) -> str:
+    try:
+        return resolve_logged_path(entry)
+    except Exception as exc:
+        raise ValueError(f"Could not resolve input path for {label}") from exc
 
 
 def prepared_table_target(input_root: Path, stem: str) -> Path:
