@@ -155,7 +155,7 @@ def load_mapping_config() -> dict:
         },
         "atlas": {
             "enable_atlas_emfac_crosswalk": True,
-            "emfac": "atlas/atlas-emfac-xwalk.csv",
+            "emfac": "atlas/atlas_emfac_xwalk.csv",
             "alternatives": alternatives.get("atlas", {}),
         },
         "fuel": {
@@ -224,10 +224,6 @@ def load_workflow(config_path: str | Path | None = None) -> dict:
         "run": {
             "output_dir": f"{output_directory}/{output_run_name}",
             "emissions_dir": f"{output_directory}/{output_run_name}",
-            "events_file": emissions_settings["events_file"],
-            "emissions_skims_file": emissions_settings["emissions_skims_file"],
-            "link_stats_file": emissions_settings["link_stats_file"],
-            "sample_portion": emissions_settings["population_sample"],
         },
         "rates": emissions_settings["rates"],
         "beam": raw["beam"],

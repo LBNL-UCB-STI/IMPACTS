@@ -1,11 +1,10 @@
-"""Fleet Step 5: orchestrate EMFAC fleet preparation and BEAM file generation.
+"""Fleet Step 5: write mapped fleet outputs and per-EMFAC rate files.
 
 Substeps:
-5.1 Configure the hard-coded run inputs used by this prototype workflow.
-5.2 Build EMFAC-format fleet, population, VMT, and emissions-rate tables.
-5.3 Build EMFAC-backed freight and passenger vehicle-type outputs.
-5.4 Write per-EMFAC emissions-rate files and attach them to vehicle types.
-5.5 Persist the generated fleet artifacts and run configuration.
+5.1 Resolve output file locations for mapped fleet artifacts.
+5.2 Prepare the emissions-rate output directory.
+5.3 Write per-EMFAC emissions-rate files and attach them to vehicle types.
+5.4 Persist mapped carriers, passenger vehicles, and vehicle-type tables.
 """
 
 import json
@@ -28,66 +27,7 @@ sys.path.insert(0, parent_dir)
 
 # Now use absolute import
 from impacts.fleet.config import BeamClasses
-from python.utils.files_utils import sanitize_name
-
 pd.set_option('display.max_columns', 20)
-
-
-# Step 5.1: shared ID helpers
-
-
-def create_emfac_id(row):
-    model_year_group_st = sanitize_name(row['model_year_group']).replace("_","")
-    vehicle_class_st = sanitize_name(row['vehicle_class']).replace("_","")
-    fuel_st = sanitize_name(row['fuel']).replace("_","")
-    return f"{model_year_group_st}{vehicle_class_st}{fuel_st}"
-
-
-def categorize_model_year(year, bin_years=None):
-    """
-    Categorize a model year into bins based on a list of cutoff years.
-
-    Parameters:
-    -----------
-    year : int or float
-        The model year to categorize
-    bin_years : list, optional
-        A sorted list of cutoff years. Default is [1993, 2006, 2018]
-        Each year in the input will be categorized to the nearest bin year
-        that is greater than or equal to it.
-
-    Returns:
-    --------
-    str
-        The bin year as a string
-
-    Example:
-    --------
-    >>> categorize_model_year(2000, [1993, 2006, 2018])
-    '2006'
-    >>> categorize_model_year(2010, [1993, 2006, 2018])
-    '2018'
-    >>> categorize_model_year(1990, [1993, 2006, 2018])
-    '1993'
-    """
-    # Default bin years if none provided
-    if bin_years is None:
-        bin_years = [1993, 2006, 2018]
-
-    # Ensure bin_years is sorted
-    bin_years = sorted(bin_years)
-
-    # Handle years before the first bin
-    if year <= bin_years[0]:
-        return str(bin_years[0])
-
-    # Find the appropriate bin
-    for i in range(len(bin_years) - 1):
-        if year <= bin_years[i + 1]:
-            return str(bin_years[i + 1])
-
-    # If year is greater than all bins, return the last bin
-    return str(bin_years[-1])
 
 
 def _resolve_output_paths(scenario, work_dir, config):

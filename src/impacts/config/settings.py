@@ -362,7 +362,6 @@ class Emissions:
 
 @dataclass(frozen=True)
 class Impacts:
-    override_files: bool
     local_input_folder: str
     local_output_folder: str
     emissions: Emissions
@@ -373,11 +372,10 @@ class Impacts:
     def from_dict(cls, payload: Dict[str, Any]) -> "Impacts":
         _reject_unknown_keys(
             payload,
-            {"override_files", "local_input_folder", "local_output_folder", "emissions", "dispersions", "exposure"},
+            {"local_input_folder", "local_output_folder", "emissions", "dispersions", "exposure"},
             "impacts",
         )
         return cls(
-            override_files=_required_bool(payload.get("override_files"), "impacts.override_files"),
             local_input_folder=_required_string(payload.get("local_input_folder"), "impacts.local_input_folder"),
             local_output_folder=_required_string(payload.get("local_output_folder"), "impacts.local_output_folder"),
             emissions=Emissions.from_dict(dict(payload.get("emissions", {}) or {})),
@@ -444,7 +442,6 @@ class ImpactsSettings:
                 "local_output_folder": self.beam.local_output_folder,
             },
             "impacts": {
-                "override_files": self.impacts.override_files,
                 "local_input_folder": self.impacts.local_input_folder,
                 "local_output_folder": self.impacts.local_output_folder,
                 "emissions": {

@@ -1,5 +1,4 @@
 impacts:
-  override_files: false
   local_input_folder: impacts/input/
   local_output_folder: impacts/impacts_output/
   emissions:

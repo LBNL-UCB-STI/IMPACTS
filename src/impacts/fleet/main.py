@@ -31,10 +31,10 @@ def run_all_steps(config_path: str | Path | None = None) -> None:
     workflow = _configure_run(config_path)
     _print_run_banner(workflow)
     workflow = run_step1(workflow)
-    workflow = run_step2(workflow)
-    workflow = run_step3(workflow)
-    workflow = run_step4(workflow)
-    run_step5(workflow)
+    # workflow = run_step2(workflow)
+    # workflow = run_step3(workflow)
+    # workflow = run_step4(workflow)
+    # run_step5(workflow)
     print("  DONE")
 
 

@@ -1,8 +1,6 @@
 run:
   region: sfbay
   scenario: 2018-Baseline
-  output_directory: emissions
-  output_run_name: "20240123"
 
 shared:
   geography:
@@ -19,8 +17,6 @@ shared:
         - "095"
         - "097"
     local_crs: EPSG:26910
-  paths:
-    work_dir: ~/Workspace/Simulation/sfbay
 
 impacts:
   local_input_folder: impacts/input/
@@ -38,18 +34,7 @@ impacts:
       SOx: SOx
       ROG: ROG
       BC: BCh
-    events_file: beam-runs/20240123/2018-Baseline/0.events.csv.gz
-    emissions_skims_file: beam-runs/20240123/2018-Baseline/0.events.csv.gz
-    link_stats_file: beam-runs/20240123/2018-Baseline/0.linkstats.csv.gz
     rates:
-      filters:
-        season_month: Annual
-        calendar_year: 2018
-        temperature: 60.0
-        relative_humidity: 40.0
-        sub_area:
-          - SF
-        include_nan: true
       emfac:
         version: EMFAC2021
         emfac_rates_by_model_year_file: emissions/rates/emfac/imputed_MTC_emission_rate_agg_NH3_added_2018_2025_2030_2040_2050.csv

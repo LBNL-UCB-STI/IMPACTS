@@ -9,115 +9,28 @@ Supported source types:
 """
 
 import argparse
+import csv
 import re
 import sys
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 
 
-INVENTORY_HEADER_PREFIX = 'Region,"Calendar Year","Vehicle Category","Model Year",Speed,Fuel'
-PROJECT_ANALYSIS_HEADER_PREFIX = "calendar_year,season_month,sub_area,vehicle_class,fuel,model_year,temperature,relative_humidity,process,speed_time,pollutant,emission_rate"
-POPULATION_INVENTORY_HEADER_PREFIX = "calendar_year,sub_area,vehicle_class,fuel,model_year,population"
-TRIPS_INVENTORY_HEADER_PREFIX = "calendar_year,sub_area,vehicle_class,fuel,model_year,trips"
-INVENTORY_COLUMN_RENAME_MAP = {
-    "Region": "region",
-    "Calendar Year": "calendar_year",
-    "Vehicle Category": "vehicle_category",
-    "Model Year": "model_year",
-    "Speed": "speed",
-    "Fuel": "fuel",
-    "Total VMT": "total_vmt",
-    "CVMT": "cvmt",
-    "EVMT": "evmt",
-    "NOx_RUNEX": "nox_runex",
-    "PM2.5_RUNEX": "pm25_runex",
-    "PM10_RUNEX": "pm10_runex",
-    "CO2_RUNEX": "co2_runex",
-    "CH4_RUNEX": "ch4_runex",
-    "N2O_RUNEX": "n2o_runex",
-    "ROG_RUNEX": "rog_runex",
-    "TOG_RUNEX": "tog_runex",
-    "CO_RUNEX": "co_runex",
-    "SOx_RUNEX": "sox_runex",
-    "NH3_RUNEX": "nh3_runex",
-    "PM10_PMBW": "pm10_pmbw",
-    "PM2.5_PMBW": "pm25_pmbw",
-    "Fuel Consumption": "fuel_consumption",
-    "Energy Consumption": "energy_consumption",
+SOURCE_TYPES = (
+    "emissions-inventory",
+    "project-analysis",
+    "population-inventory",
+    "trips-inventory",
+)
+SUB_AREA_BASE_COLUMNS = ["calendar_year", "sub_area", "vehicle_class", "fuel", "model_year"]
+EMISSIONS_INVENTORY_FUEL_MAP = {
+    "Gasoline": "Gas",
+    "Diesel": "Dsl",
+    "Electricity": "Elec",
+    "Natural Gas": "NG",
+    "Plug-in Hybrid": "Phe",
 }
-PROJECT_ANALYSIS_COLUMN_RENAME_MAP = {
-    "calendar_year": "calendar_year",
-    "season_month": "season_month",
-    "sub_area": "sub_area",
-    "vehicle_class": "vehicle_class",
-    "fuel": "fuel",
-    "model_year": "model_year",
-    "temperature": "temperature",
-    "relative_humidity": "relative_humidity",
-    "process": "process",
-    "speed_time": "speed_time",
-    "pollutant": "pollutant",
-    "emission_rate": "emission_rate",
-}
-POPULATION_INVENTORY_COLUMN_RENAME_MAP = {
-    "calendar_year": "calendar_year",
-    "sub_area": "sub_area",
-    "vehicle_class": "vehicle_class",
-    "fuel": "fuel",
-    "model_year": "model_year",
-    "population": "population",
-}
-TRIPS_INVENTORY_COLUMN_RENAME_MAP = {
-    "calendar_year": "calendar_year",
-    "sub_area": "sub_area",
-    "vehicle_class": "vehicle_class",
-    "fuel": "fuel",
-    "model_year": "model_year",
-    "trips": "trips",
-}
-INVENTORY_NUMERIC_COLUMNS = [
-    "Calendar Year",
-    "Model Year",
-    "Speed",
-    "Total VMT",
-    "CVMT",
-    "EVMT",
-    "NOx_RUNEX",
-    "PM2.5_RUNEX",
-    "PM10_RUNEX",
-    "CO2_RUNEX",
-    "CH4_RUNEX",
-    "N2O_RUNEX",
-    "ROG_RUNEX",
-    "TOG_RUNEX",
-    "CO_RUNEX",
-    "SOx_RUNEX",
-    "NH3_RUNEX",
-    "PM10_PMBW",
-    "PM2.5_PMBW",
-    "Fuel Consumption",
-    "Energy Consumption",
-]
-PROJECT_ANALYSIS_NUMERIC_COLUMNS = [
-    "calendar_year",
-    "model_year",
-    "temperature",
-    "relative_humidity",
-    "speed_time",
-    "emission_rate",
-]
-POPULATION_INVENTORY_NUMERIC_COLUMNS = [
-    "calendar_year",
-    "model_year",
-    "population",
-]
-TRIPS_INVENTORY_NUMERIC_COLUMNS = [
-    "calendar_year",
-    "model_year",
-    "trips",
-]
 
 
 def _iter_input_csvs(path: str | Path) -> list[Path]:
@@ -134,22 +47,56 @@ def _iter_input_csvs(path: str | Path) -> list[Path]:
     return files
 
 
-def _detect_skiprows(path: Path, source_type: str) -> int:
+def _required_columns(source_type: str) -> list[str]:
     if source_type == "emissions-inventory":
-        header_prefix = INVENTORY_HEADER_PREFIX
-    elif source_type == "project-analysis":
-        header_prefix = PROJECT_ANALYSIS_HEADER_PREFIX
-    elif source_type == "population-inventory":
-        header_prefix = POPULATION_INVENTORY_HEADER_PREFIX
-    elif source_type == "trips-inventory":
-        header_prefix = TRIPS_INVENTORY_HEADER_PREFIX
-    else:
-        raise ValueError(f"Unsupported source type: {source_type}")
-    with path.open() as handle:
-        for index, line in enumerate(handle):
-            if line.strip().startswith(header_prefix):
+        return ["region", "calendar_year", "vehicle_category", "model_year", "speed", "fuel"]
+    if source_type == "project-analysis":
+        return SUB_AREA_BASE_COLUMNS + [
+            "season_month",
+            "temperature",
+            "relative_humidity",
+            "process",
+            "speed_time",
+            "pollutant",
+            "emission_rate",
+        ]
+    if source_type == "population-inventory":
+        return SUB_AREA_BASE_COLUMNS + ["population"]
+    if source_type == "trips-inventory":
+        return SUB_AREA_BASE_COLUMNS + ["trips"]
+    raise ValueError(f"Unsupported source type: {source_type}")
+
+
+def _string_columns(source_type: str) -> set[str]:
+    if source_type == "emissions-inventory":
+        return {"region", "vehicle_category", "fuel"}
+    if source_type == "project-analysis":
+        return {"season_month", "sub_area", "vehicle_class", "fuel", "process", "pollutant"}
+    if source_type in {"population-inventory", "trips-inventory"}:
+        return {"sub_area", "vehicle_class", "fuel"}
+    raise ValueError(f"Unsupported source type: {source_type}")
+
+
+def _has_sub_area(source_type: str) -> bool:
+    return source_type != "emissions-inventory"
+
+
+def _detect_skiprows(path: Path, source_type: str) -> int:
+    required_columns = set(_required_columns(source_type))
+    with path.open(newline="") as handle:
+        reader = csv.reader(handle)
+        for index, row in enumerate(reader):
+            normalized_row = {_normalize_column_name(value) for value in row if value.strip()}
+            if required_columns.issubset(normalized_row):
                 return index
     raise ValueError(f"Could not find {source_type} header row in: {path}")
+
+
+def _normalize_column_name(name: str) -> str:
+    normalized = name.strip().lower().replace(" ", "_")
+    normalized = re.sub(r"[^a-z0-9_]+", "_", normalized)
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+    return normalized
 
 
 def _normalize_sub_area(value: object) -> str:
@@ -173,59 +120,44 @@ def _filter_and_normalize_region_label(frame: pd.DataFrame, region_label: str | 
     return normalized
 
 
-def _clean_emissions_inventory_file(path: Path) -> pd.DataFrame:
-    frame = pd.read_csv(path, skiprows=_detect_skiprows(path, "emissions-inventory"))
-    for column in INVENTORY_NUMERIC_COLUMNS:
-        if column not in frame.columns:
-            raise ValueError(f"Missing expected column '{column}' in {path}")
-        frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    frame = frame.rename(columns=INVENTORY_COLUMN_RENAME_MAP)
-    frame["source_file"] = str(path)
+def _filter_calendar_year(frame: pd.DataFrame, year: int | None) -> pd.DataFrame:
+    if year is None:
+        return frame
+    if "calendar_year" not in frame.columns:
+        raise ValueError("--year is only supported for source types with a calendar_year column.")
+    return frame.loc[frame["calendar_year"] == year].copy()
+
+
+def _normalize_emissions_inventory_fuel(frame: pd.DataFrame) -> pd.DataFrame:
+    unknown = sorted(set(frame["fuel"].dropna().astype(str)) - set(EMISSIONS_INVENTORY_FUEL_MAP))
+    if unknown:
+        raise ValueError(f"Unsupported emissions-inventory fuel values: {unknown}")
+    frame = frame.copy()
+    frame["fuel"] = frame["fuel"].map(EMISSIONS_INVENTORY_FUEL_MAP)
     return frame
 
 
-def _clean_project_analysis_file(path: Path, region_label: str | None = None) -> pd.DataFrame:
-    frame = pd.read_csv(path, skiprows=_detect_skiprows(path, "project-analysis"))
-    missing = [column for column in PROJECT_ANALYSIS_COLUMN_RENAME_MAP if column not in frame.columns]
-    if missing:
-        raise ValueError(f"Missing expected project-analysis columns in {path}: {', '.join(missing)}")
-    for column in PROJECT_ANALYSIS_NUMERIC_COLUMNS:
-        frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    frame = frame.rename(columns=PROJECT_ANALYSIS_COLUMN_RENAME_MAP)
-    frame = _filter_and_normalize_region_label(frame, region_label)
-    if region_label is None:
-        frame["sub_area"] = frame["sub_area"].map(_normalize_sub_area)
-    frame["source_file"] = str(path)
-    return frame
+def _clean_file(path: Path, *, source_type: str, region_label: str | None) -> pd.DataFrame:
+    frame = pd.read_csv(path, skiprows=_detect_skiprows(path, source_type))
+    frame = frame.rename(columns={column: _normalize_column_name(column) for column in frame.columns})
 
+    required_columns = _required_columns(source_type)
+    missing_normalized = [column for column in required_columns if column not in frame.columns]
+    if missing_normalized:
+        raise ValueError(f"Missing expected {source_type} columns in {path}: {', '.join(missing_normalized)}")
 
-def _clean_population_inventory_file(path: Path, region_label: str | None = None) -> pd.DataFrame:
-    frame = pd.read_csv(path, skiprows=_detect_skiprows(path, "population-inventory"))
-    missing = [column for column in POPULATION_INVENTORY_COLUMN_RENAME_MAP if column not in frame.columns]
-    if missing:
-        raise ValueError(f"Missing expected population-inventory columns in {path}: {', '.join(missing)}")
-    for column in POPULATION_INVENTORY_NUMERIC_COLUMNS:
-        frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    frame = frame.rename(columns=POPULATION_INVENTORY_COLUMN_RENAME_MAP)
-    frame = _filter_and_normalize_region_label(frame, region_label)
-    if region_label is None:
-        frame["sub_area"] = frame["sub_area"].map(_normalize_sub_area)
-    frame["source_file"] = str(path)
-    return frame
+    string_columns = _string_columns(source_type)
+    for column in frame.columns:
+        if column not in string_columns:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
 
+    if _has_sub_area(source_type):
+        frame = _filter_and_normalize_region_label(frame, region_label)
+        if region_label is None:
+            frame["sub_area"] = frame["sub_area"].map(_normalize_sub_area)
+    elif "fuel" in frame.columns:
+        frame = _normalize_emissions_inventory_fuel(frame)
 
-def _clean_trips_inventory_file(path: Path, region_label: str | None = None) -> pd.DataFrame:
-    frame = pd.read_csv(path, skiprows=_detect_skiprows(path, "trips-inventory"))
-    missing = [column for column in TRIPS_INVENTORY_COLUMN_RENAME_MAP if column not in frame.columns]
-    if missing:
-        raise ValueError(f"Missing expected trips-inventory columns in {path}: {', '.join(missing)}")
-    for column in TRIPS_INVENTORY_NUMERIC_COLUMNS:
-        frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    frame = frame.rename(columns=TRIPS_INVENTORY_COLUMN_RENAME_MAP)
-    frame = _filter_and_normalize_region_label(frame, region_label)
-    if region_label is None:
-        frame["sub_area"] = frame["sub_area"].map(_normalize_sub_area)
-    frame["source_file"] = str(path)
     return frame
 
 
@@ -235,24 +167,23 @@ def clean_emfac_to_parquet(
     output_path: str,
     source_type: str,
     region_label: str | None = None,
+    year: int | None = None,
 ) -> Path:
     files = _iter_input_csvs(input_path)
-    if source_type == "emissions-inventory":
-        if region_label is not None:
-            print(
-                f"warning: ignoring --region-label {region_label!r} for source-type 'emissions-inventory'",
-                file=sys.stderr,
-            )
-        cleaned_frames = [_clean_emissions_inventory_file(path) for path in files]
-    elif source_type == "project-analysis":
-        cleaned_frames = [_clean_project_analysis_file(path, region_label=region_label) for path in files]
-    elif source_type == "population-inventory":
-        cleaned_frames = [_clean_population_inventory_file(path, region_label=region_label) for path in files]
-    elif source_type == "trips-inventory":
-        cleaned_frames = [_clean_trips_inventory_file(path, region_label=region_label) for path in files]
-    else:
+    if source_type not in SOURCE_TYPES:
         raise ValueError(f"Unsupported source type: {source_type}")
+    if region_label is not None and not _has_sub_area(source_type):
+        print(
+            f"warning: ignoring --region-label {region_label!r} for source-type '{source_type}'",
+            file=sys.stderr,
+        )
+        region_label = None
+    cleaned_frames = [
+        _clean_file(path, source_type=source_type, region_label=region_label)
+        for path in files
+    ]
     combined = pd.concat(cleaned_frames, ignore_index=True)
+    combined = _filter_calendar_year(combined, year)
 
     destination = Path(output_path).expanduser().resolve()
     if destination.suffix.lower() != ".parquet":
@@ -288,10 +219,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional region label such as SF. Keeps only rows whose sub_area ends with '(SF)', adds region='SF', then strips the suffix from sub_area.",
     )
+    parser.add_argument(
+        "--year",
+        type=int,
+        default=None,
+        help="Optional calendar year filter applied after cleaning and concatenation.",
+    )
     return parser
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     output = clean_emfac_to_parquet(
@@ -299,6 +236,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         output_path=args.output,
         source_type=args.source_type,
         region_label=args.region_label,
+        year=args.year,
     )
     print(f"output={output}")
     return 0

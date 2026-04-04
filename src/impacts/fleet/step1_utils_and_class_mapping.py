@@ -1,29 +1,20 @@
-"""Fleet Step 1: shared utilities and EMFAC-to-BEAM class mapping.
+"""Fleet Step 1: prepare shared EMFAC workflow inputs.
 
 Substeps:
 1.1 Build or load the EMFAC-to-BEAM class crosswalk.
-1.2 Read BEAM skims emissions in chunks.
-1.3 Scale pollutants, energy, and travel metrics.
-1.4 Map BEAM vehicle types to class and fuel outputs.
-1.5 Persist the processed skim table when requested.
+1.2 Build the shared EMFAC formatter used by later steps.
+1.3 Persist the resolved fleet workflow snapshot for reproducibility.
 """
 
-import concurrent.futures
-import gc
 import json
 import os
 import sys
-import time
 from collections import defaultdict
 from typing import Any
 
 import pandas as pd
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.csv as pv
-import pyarrow.parquet as pq  # Added for parquet compression
-from tqdm import tqdm
-from tqdm.auto import tqdm
 
 # Get the absolute path to the directory containing this script
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -31,17 +22,6 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir)
 
 from impacts.fleet.config import BeamClasses
-
-process_color_map = {
-    'IDLEX':   '#fde725',  # Light yellow
-    'RUNEX':   '#7ad151',  # Light green
-    'PMBW':    '#22a884',  # Teal
-    'PMTW':    '#2a788e',  # Blue-green
-    'STREX': '#8e0152',   # Dark magenta
-    'RUNLOSS': '#4b0082',   # Indigo
-    'HOTSOAK': '#414487',  # Purple-blue
-    'DIURN': '#440154',  # Dark purple
-}
 
 # Step 1.1: class mapping helpers
 
@@ -110,8 +90,71 @@ def generate_emfac_beam_class_mapping(emfac_pop_by_model_year_file, vehicle_clas
     return {k: v for k, v in mapping.items() if v != "NotMatched"}
 
 
+def _sanitize_token(value: object) -> str:
+    return str(value).replace(" ", "").replace("_", "").replace("/", "").replace("-", "")
+
+
+def create_emfac_id(row: pd.Series) -> str:
+    return (
+        f"{_sanitize_token(row['model_year_group'])}"
+        f"{_sanitize_token(row['vehicle_class'])}"
+        f"{_sanitize_token(row['fuel'])}"
+    )
+
+
+def categorize_model_year(year, bin_years=None) -> str:
+    if bin_years is None:
+        bin_years = [1993, 2006, 2018]
+    bin_years = sorted(bin_years)
+    if year <= bin_years[0]:
+        return str(bin_years[0])
+    for i in range(len(bin_years) - 1):
+        if year <= bin_years[i + 1]:
+            return str(bin_years[i + 1])
+    return str(bin_years[-1])
+
+
+def build_emissions_formatter(mapping_config):
+    def format_emissions_data(emfac_types: pd.DataFrame) -> pd.DataFrame:
+        result_ft_df = emfac_types.copy()
+        result_ft_df["mappedClass"] = result_ft_df["vehicle_class"].map(mapping_config["class"]["emfac-ft"])
+        result_ft_df.dropna(subset=["mappedClass"], inplace=True)
+        result_ft_df["mappedFuel"] = result_ft_df["fuel"].map(mapping_config["fuel"]["emfac-ft"])
+        result_ft_df.dropna(subset=["mappedFuel"], inplace=True)
+
+        result_pax_df = emfac_types.copy()
+        result_pax_df["mappedClass"] = result_pax_df["vehicle_class"].map(mapping_config["class"]["emfac-pax"])
+        result_pax_df.dropna(subset=["mappedClass"], inplace=True)
+        result_pax_df["mappedFuel"] = result_pax_df["fuel"].map(mapping_config["fuel"]["emfac-pax"])
+        result_pax_df.dropna(subset=["mappedFuel"], inplace=True)
+
+        result_bus_df = emfac_types.copy()
+        result_bus_df["mappedClass"] = result_bus_df["vehicle_class"].map(mapping_config["class"]["emfac-bus"])
+        result_bus_df.dropna(subset=["mappedClass"], inplace=True)
+        result_bus_df["mappedFuel"] = result_bus_df["fuel"].map(mapping_config["fuel"]["emfac-bus"])
+        result_bus_df.dropna(subset=["mappedFuel"], inplace=True)
+
+        result_df = pd.concat([result_ft_df, result_pax_df, result_bus_df])
+        result_df["model_year_group"] = result_df["model_year"].apply(
+            lambda value: categorize_model_year(value, mapping_config["fleet"]["model_year_bins"])
+        )
+        if "sub_area" in result_df.columns:
+            result_df[["county", "area"]] = result_df["sub_area"].str.extract(r"^([^()]+)\s*\(([^)]+)\)")
+        else:
+            if "county" not in result_df.columns:
+                result_df["county"] = ""
+            if "area" not in result_df.columns:
+                result_df["area"] = ""
+        result_df["county"] = result_df["county"].astype(str).str.strip().str.lower()
+        result_df["area"] = result_df["area"].astype(str).str.strip()
+        result_df["emfacId"] = result_df.apply(create_emfac_id, axis=1)
+        return result_df
+
+    return format_emissions_data
+
+
 def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
-    """Step 1.1: generate the EMFAC-to-BEAM class map and persist config state."""
+    """Step 1: prepare the shared EMFAC class mapping and formatter."""
     area = workflow["area"]
     scenario = workflow["scenario"]
     config = workflow["config"]
@@ -125,6 +168,7 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
         to_filter_out=[BeamClasses.CLASS_2B3_VOCATIONAL],
     )
     config["mapping"]["class"]["emfac"] = emfac_class_map
+    format_emissions_data = build_emissions_formatter(config["mapping"])
 
     emissions_work_dir = os.path.join(work_dir, config["run"]["emissions_dir"])
     os.makedirs(emissions_work_dir, exist_ok=True)
@@ -133,235 +177,6 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
         json.dump({"area": area, "scenario": scenario, "work_dir": work_dir, "config": config}, f, indent=2)
 
     workflow["emfac_class_map"] = emfac_class_map
+    workflow["format_emissions_data"] = format_emissions_data
     workflow["emissions_config_path"] = config_path
     return workflow
-
-
-# Step 1.2-1.5: skim processing helpers
-
-def read_skims_emissions_chunked(
-        vehicle_types,
-        network,
-        emissions_skims_file,
-        expansion_factor,
-        scenario_name,
-        processed_skim_output=None,  # New parameter for the output compressed file path
-        chunk_size=1000000,
-        compression='snappy',  # Default compression method
-        force_reprocess=False  # Parameter to force reprocessing even if file exists
-):
-    """
-    Read and process emissions data from skims file in chunks (optimized)
-
-    Args:
-        vehicle_types: DataFrame with vehicle type information
-        network: DataFrame with network information
-        emissions_skims_file: Path to emissions skims file
-        expansion_factor: Factor to scale observations
-        scenario_name: Name of the scenario
-        processed_skim_output: Path to store the compressed processed file (default: None)
-        chunk_size: Size of chunks to process at once
-        compression: Compression method for output file (default: 'snappy')
-        force_reprocess: If True, reprocess even if output file exists (default: False)
-
-    Returns:
-        DataFrame with processed emissions data or None if file exists and force_reprocess is False
-    """
-
-    # Check if output file already exists and we're not forcing reprocessing
-    if processed_skim_output and os.path.exists(processed_skim_output) and not force_reprocess:
-        print(f"Processed file {processed_skim_output} already exists. Skipping processing.")
-        return pd.read_parquet(processed_skim_output)
-
-    # Define schema for skims data
-    SKIMS_SCHEMA = pa.schema([
-        ('hour', pa.int64()),
-        ('linkId', pa.int64()),
-        ('tazId', pa.string()),
-        ('vehicleTypeId', pa.string()),
-        ('emissionsProcess', pa.string()),
-        ('travelTimeInSecond', pa.float64()),
-        ('energyInJoule', pa.float64()),
-        ('observations', pa.int64()),
-        ('iterations', pa.int64()),
-        ('CH4', pa.float64()),
-        ('CO', pa.float64()),
-        ('CO2', pa.float64()),
-        ('HC', pa.float64()),
-        ('NH3', pa.float64()),
-        ('NOx', pa.float64()),
-        ('PM', pa.float64()),
-        ('PM10', pa.float64()),
-        ('PM2_5', pa.float64()),
-        ('ROG', pa.float64()),
-        ('SOx', pa.float64()),
-        ('TOG', pa.float64()),
-        ('BC', pa.float64()),
-        ('BCm', pa.float64()),
-        ('BCh', pa.float64())
-    ])
-    # List of pollutants to process
-    pollutant_cols = ['CH4', 'CO', 'CO2', 'HC', 'NH3', 'NOx', 'PM', 'PM10', 'PM2_5', 'ROG', 'SOx', 'TOG', 'BC', 'BCm',
-                      'BCh']
-
-    start_time = time.time()
-    print(f"Processing emissions data from {emissions_skims_file}")
-
-    # Create optimized lookups
-    unique_vehicle_types = vehicle_types['vehicleTypeId'].unique()
-    vehicle_type_dict = vehicle_types.set_index('vehicleTypeId')[['mappedClass', 'mappedFuel']].to_dict('index')
-    network_lengths = network.set_index('linkId')['linkLength'].to_dict()
-
-    # Constants for calculations
-    expansion_factor_scalar = pa.scalar(expansion_factor, type=pa.float64())
-    million_scalar = pa.scalar(1e6, type=pa.float64())
-    joule_to_kwh_scalar = pa.scalar(3.6e6, type=pa.float64())
-    second_to_hour_scalar = pa.scalar(3.6e3, type=pa.float64())
-    mile_conversion = 6.21371192e-4  # meters to miles
-
-    # Set up PyArrow CSV reader
-    csv_reader = pv.open_csv(
-        emissions_skims_file,
-        read_options=pv.ReadOptions(block_size=chunk_size, use_threads=True),
-        parse_options=pv.ParseOptions(delimiter=','),
-        convert_options=pv.ConvertOptions(column_types=SKIMS_SCHEMA)
-    )
-
-    # Progress tracking
-    file_size = os.path.getsize(emissions_skims_file)
-    progress = tqdm(total=file_size, unit='B', unit_scale=True, desc="Processing emissions data")
-
-    # Define function to process chunks in parallel
-    def process_chunk(chunk):
-        # Filter to relevant vehicle types
-        mask = pc.is_in(chunk['vehicleTypeId'], pa.array(unique_vehicle_types))
-        filtered = chunk.filter(mask)
-
-        if filtered.num_rows == 0:
-            return None
-
-        # Calculate expanded observations
-        observations_expansion = pc.multiply(filtered['observations'], expansion_factor_scalar)
-
-        # Calculate scaled pollutants using PyArrow operations
-        new_fields = []
-        new_columns = []
-
-        for pollutant in pollutant_cols:
-            new_fields.append(pa.field(f'scaled_{pollutant}', pa.float64(), True))
-            new_columns.append(
-                pc.multiply(
-                    pc.divide(filtered[pollutant], million_scalar),
-                    observations_expansion
-                )
-            )
-
-        # Calculate kwh using PyArrow
-        new_fields.append(pa.field('kwh', pa.float64(), True))
-        new_columns.append(
-            pc.multiply(
-                pc.divide(filtered['energyInJoule'], joule_to_kwh_scalar),
-                observations_expansion
-            )
-        )
-
-        # Calculate vht using PyArrow
-        new_fields.append(pa.field('vht', pa.float64(), True))
-        new_columns.append(
-            pc.multiply(
-                pc.divide(filtered['travelTimeInSecond'], second_to_hour_scalar),
-                observations_expansion
-            )
-        )
-
-        # Create new record batch with additional columns
-        new_schema = filtered.schema
-        for field in new_fields:
-            new_schema = new_schema.append(field)
-
-        result_batch = pa.RecordBatch.from_arrays(
-            filtered.columns + new_columns,
-            schema=new_schema
-        )
-
-        # Convert to pandas after all Arrow computations
-        df = result_batch.to_pandas()
-
-        # Add mapped class and fuel
-        df['mappedClass'] = df['vehicleTypeId'].map({k: v['mappedClass'] for k, v in vehicle_type_dict.items()})
-        df['mappedFuel'] = df['vehicleTypeId'].map({k: v['mappedFuel'] for k, v in vehicle_type_dict.items()})
-
-        # Add link length and calculate VMT
-        df['linkLength'] = df['linkId'].map(network_lengths)
-        df['vmt'] = df['linkLength'] * mile_conversion * df['observations'] * expansion_factor
-
-        # Rename process column
-        df.rename(columns={'emissionsProcess': 'process'}, inplace=True)
-
-        # Melt the dataframe for pollutants
-        id_cols = ['hour', 'linkId', 'tazId', 'mappedClass', 'mappedFuel',
-                   'process', 'kwh', 'vmt', 'vht']
-
-        # Efficient melt operation
-        result_dfs = []
-        for pollutant in pollutant_cols:
-            temp_df = df[id_cols + [f'scaled_{pollutant}']].copy()
-            temp_df['pollutant'] = pollutant
-            temp_df['rate'] = temp_df[f'scaled_{pollutant}']
-            temp_df = temp_df.drop(columns=[f'scaled_{pollutant}'])
-            result_dfs.append(temp_df)
-
-        melted = pd.concat(result_dfs, ignore_index=True)
-        melted['scenario'] = scenario_name
-
-        return melted
-
-    # Process chunks in parallel
-    result_chunks = []
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = []
-
-        for chunk in csv_reader:
-            progress.update(chunk.nbytes)
-            futures.append(executor.submit(process_chunk, chunk))
-
-        for future in concurrent.futures.as_completed(futures):
-            result = future.result()
-            if result is not None and not result.empty:
-                result_chunks.append(result)
-
-    progress.close()
-
-    # Combine all chunks
-    if not result_chunks:
-        print("No valid data processed")
-        return pd.DataFrame()
-
-    final_result = pd.concat(result_chunks, ignore_index=True)
-
-    # Save compressed output if path is provided
-    if processed_skim_output:
-        print(f"Compressing and saving processed data to {processed_skim_output}")
-        # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(processed_skim_output), exist_ok=True)
-
-        # Convert pandas DataFrame to PyArrow Table
-        table = pa.Table.from_pandas(final_result)
-
-        # Write to compressed parquet file
-        pq.write_table(
-            table,
-            processed_skim_output,
-            compression=compression,
-            use_dictionary=True,
-            version='2.6',
-            write_statistics=True
-        )
-        print(f"Successfully saved compressed file to {processed_skim_output}")
-
-    # Clean up memory
-    del result_chunks
-    gc.collect()
-
-    print(f"Processing completed in {time.time() - start_time:.2f} seconds")
-    return final_result

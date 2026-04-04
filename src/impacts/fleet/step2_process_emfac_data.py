@@ -72,14 +72,14 @@ def calculate_road_dust_emissions(silt_loading, rainy_days):
     return E_25_g, E_10_g, E_total_g
 
 
-def generate_road_dust_rates(rainy_days_file, silt_loading_file, air_basin_region):
+def generate_road_dust_rates(rainy_days_file, silt_loading_file, air_basin_region=None):
     """
     Process rainy days and silt loading data to create road dust emission rates.
 
     Parameters:
     rainy_days_file (str): Path to the rainy days CSV file
     silt_loading_file (str): Path to the silt loading CSV file
-    air_basin_region (list): List of air basins to filter by
+    air_basin_region (list | None): Optional list of air basins to filter by
 
     Returns:
     pd.DataFrame: DataFrame with road dust emission rates
@@ -106,9 +106,12 @@ def generate_road_dust_rates(rainy_days_file, silt_loading_file, air_basin_regio
     # Ensure consistent county names across datasets
     silt_loading_df['County'] = silt_loading_df['County'].str.strip().str.lower()
     silt_loading_df['Air Basin'] = silt_loading_df['Air Basin'].str.strip()
-    silt_filtered_df = silt_loading_df[silt_loading_df['Air Basin'].isin(air_basin_region)]
-    if silt_filtered_df.empty:
-        raise ValueError(f"No data found in silt loading for the specified air basins: {air_basin_region}")
+    if air_basin_region:
+        silt_filtered_df = silt_loading_df[silt_loading_df['Air Basin'].isin(air_basin_region)]
+        if silt_filtered_df.empty:
+            raise ValueError(f"No data found in silt loading for the specified air basins: {air_basin_region}")
+    else:
+        silt_filtered_df = silt_loading_df
     road_categories = ['Freeway', 'Major', 'Collector', 'Local Urban', 'Local Rural']
     county_averages = silt_filtered_df.groupby('County')[road_categories].mean().reset_index()
     county_averages = county_averages.sort_values('County')
@@ -117,9 +120,12 @@ def generate_road_dust_rates(rainy_days_file, silt_loading_file, air_basin_regio
     rainy_days_df = pd.read_csv(rainy_days_file)
     rainy_days_df['County'] = rainy_days_df['County'].str.strip().str.lower()
     rainy_days_df['Air Basin'] = rainy_days_df['Air Basin'].str.strip()
-    rainy_filtered_df = rainy_days_df[rainy_days_df['Air Basin'].isin(air_basin_region)]
-    if rainy_filtered_df.empty:
-        raise ValueError(f"No data found in rainy days for the specified air basins: {air_basin_region}")
+    if air_basin_region:
+        rainy_filtered_df = rainy_days_df[rainy_days_df['Air Basin'].isin(air_basin_region)]
+        if rainy_filtered_df.empty:
+            raise ValueError(f"No data found in rainy days for the specified air basins: {air_basin_region}")
+    else:
+        rainy_filtered_df = rainy_days_df
     rainfall_averages = rainy_filtered_df.groupby('County')['Annual Rainfall Days'].mean().reset_index()
     rainfall_averages = rainfall_averages.sort_values('County')
 
@@ -261,27 +267,25 @@ def process_chunk(chunk_data):
 
 # Step 2.3: filter and aggregate raw rate sources
 
+def _derive_county_area_from_sub_area(df: pd.DataFrame) -> pd.DataFrame:
+    if "sub_area" not in df.columns:
+        return df
+    derived = df.copy()
+    derived[["county", "area"]] = derived["sub_area"].astype(str).str.extract(r"^([^()]+)\s*\(([^)]+)\)")
+    derived["county"] = derived["county"].fillna("").str.strip().str.lower()
+    derived["area"] = derived["area"].fillna("").str.strip()
+    return derived
+
+
 def process_emfac_rates(
         emfac_rates_by_model_year_file,
-        format_func,
-        season_month,
-        calendar_year,
-        air_basin_area,
-        temperature,
-        relative_humidity,
-        include_nan=True):
+        format_func):
     """
     Process EMFAC emissions rates with improved air basin filtering.
 
     Args:
         emfac_rates_by_model_year_file: Path to EMFAC rates input file
         format_func: Function to format the data
-        season_month: Season or month to filter by
-        calendar_year: Calendar year to filter by
-        air_basin_area: Air basin area(s) to filter by (can be list or single string)
-        temperature: Temperature to filter by
-        relative_humidity: Relative humidity to filter by
-        include_nan: Whether to include NaN values in filtering
 
     Returns:
         DataFrame with processed EMFAC rates
@@ -292,42 +296,11 @@ def process_emfac_rates(
     df = table.to_pandas()
     print(f"CSV file loaded. Shape: {df.shape}")
 
-    # Apply filters based on config
-    print("Applying filters...")
-    if 'season_month' in df.columns:
-        print(f"Filtering by season_month: {season_month}")
-        df = df[(df['season_month'] == season_month) | (include_nan & df['season_month'].isna())]
-        print(f"After season_month filter. Shape: {df.shape}")
-
-    if 'calendar_year' in df.columns:
-        print(f"Filtering by calendar_year: {calendar_year}")
-        df = df[(df['calendar_year'] == calendar_year) | (include_nan & df['calendar_year'].isna())]
-        print(f"After calendar_year filter. Shape: {df.shape}")
-
-    # Improved air basin area filtering to handle partial matches
-    if 'sub_area' in df.columns:
-        print(f"Filtering by air_basin_area: {air_basin_area}")
-        # Create a filter condition for partial matches
-        sub_area_filter = include_nan & df['sub_area'].isna()
-
-        for area in air_basin_area:
-            # Look for exact match or area in parentheses (e.g., "Santa Clara (SF)" for "SF")
-            sub_area_filter = sub_area_filter | df['sub_area'].str.contains(f'\\({area}\\)', regex=True) | (
-                    df['sub_area'] == area)
-
-        # Apply the filter
-        df = df[sub_area_filter]
-        print(f"After sub_area filter. Shape: {df.shape}")
-
-    if 'temperature' in df.columns:
-        print(f"Filtering by temperature: {temperature}")
-        df = df[(df['temperature'] == temperature) | (include_nan & df['temperature'].isna())]
-        print(f"After temperature filter. Shape: {df.shape}")
-
-    if 'relative_humidity' in df.columns:
-        print(f"Filtering by relative_humidity: {relative_humidity}")
-        df = df[(df['relative_humidity'] == relative_humidity) | (include_nan & df['relative_humidity'].isna())]
-        print(f"After relative_humidity filter. Shape: {df.shape}")
+    df = _derive_county_area_from_sub_area(df)
+    df = df.drop(
+        columns=["calendar_year", "season_month", "temperature", "relative_humidity", "sub_area"],
+        errors="ignore",
+    )
 
     # Group by MY_group and calculate statistics
     print("Filling missing values and formatting data...")
@@ -388,7 +361,6 @@ def process_emfac_rates(
 def process_emfac_emissions(study_area, scenario_name, work_dir, config, format_func):
     # Get file paths
     emfac_config = config["rates"]["emfac"]
-    filters_config = config["rates"]["filters"]
     emfac_rates_by_model_year_file = os.path.join(work_dir, emfac_config['emfac_rates_by_model_year_file'])
     emfac_emission_rate_output_file = os.path.join(
         work_dir,
@@ -401,12 +373,7 @@ def process_emfac_emissions(study_area, scenario_name, work_dir, config, format_
         emfac_rates = process_emfac_rates(
             emfac_rates_by_model_year_file,
             format_func,
-            filters_config['season_month'],
-            filters_config['calendar_year'],
-            filters_config['sub_area'],
-            filters_config['temperature'],
-            filters_config['relative_humidity'],
-            include_nan=filters_config["include_nan"])
+        )
 
         print(f"Writing EMFAC emission rate to: {emfac_emission_rate_output_file}")
         emfac_rates.to_csv(emfac_emission_rate_output_file, index=False)
@@ -417,7 +384,6 @@ def process_emfac_emissions(study_area, scenario_name, work_dir, config, format_
 def process_black_carbon(study_area, scenario_name, work_dir, config, format_func):
     # Get file paths
     black_carbon_config = config["rates"]["black_carbon"]
-    filters_config = config["rates"]["filters"]
     bc_rates_by_model_year_file = os.path.join(work_dir, black_carbon_config['black_carbon_rates_file'])
     bc_emission_rate_output_file = os.path.join(
         work_dir,
@@ -430,12 +396,6 @@ def process_black_carbon(study_area, scenario_name, work_dir, config, format_fun
         bc_rates = process_emfac_rates(
             bc_rates_by_model_year_file,
             format_func,
-            filters_config['season_month'],
-            filters_config['calendar_year'],
-            filters_config['sub_area'],
-            filters_config['temperature'],
-            filters_config['relative_humidity'],
-            include_nan=filters_config["include_nan"]
         )
 
         print(f"Writing Black Carbon emission rate to: {bc_emission_rate_output_file}")
@@ -459,8 +419,6 @@ def process_road_dust(study_area, scenario_name, work_dir, config, emfac_ids):
         pd.DataFrame: Road dust emission rates for all EMFAC IDs
     """
     road_dust_config = config["rates"]["road_dust"]
-    filters_config = config["rates"]["filters"]
-
     # Get road dust file paths
     _rainy_days_file = os.path.join(work_dir, road_dust_config['rainy_days_file'])
     _silt_loading_file = os.path.join(work_dir, road_dust_config['silt_loading_file'])
@@ -479,12 +437,11 @@ def process_road_dust(study_area, scenario_name, work_dir, config, emfac_ids):
             # Ensure output directory exists
             os.makedirs(os.path.dirname(road_dust_output_file), exist_ok=True)
 
-            print(f"Processing road dust for air basins: {filters_config['sub_area']}")
             print(f"Using rainy days file: {_rainy_days_file}")
             print(f"Using silt loading file: {_silt_loading_file}")
 
             # Process road dust emission rates
-            road_dust_rates = generate_road_dust_rates(_rainy_days_file, _silt_loading_file, filters_config['sub_area'])
+            road_dust_rates = generate_road_dust_rates(_rainy_days_file, _silt_loading_file, None)
 
             print(f"Generated base road dust rates with {len(road_dust_rates)} rows")
             print(f"Duplicating rates for {len(emfac_ids)} EMFAC IDs")
@@ -705,9 +662,6 @@ def process_emfac_population(_study_area, _scenario_name, _work_dir, config, for
     else:
         print(f"Processing EMFAC population data for {_study_area}, scenario: {_scenario_name}")
 
-        include_nan = config["rates"]["filters"]["include_nan"]
-        calendar_year = config["rates"]["filters"]["calendar_year"]
-        air_basin_area = config["rates"]["filters"]["sub_area"]
         _emfac_population_by_model_year_file = os.path.join(
             _work_dir,
             config["rates"]["emfac"]["emfac_pop_by_model_year_file"]
@@ -721,8 +675,6 @@ def process_emfac_population(_study_area, _scenario_name, _work_dir, config, for
 
         # Create a progress bar for the filtering steps
         filtering_steps = [
-            "Calendar year",
-            "Air basin area",
             "Convert population",
             "Clean data",
             "Format data",
@@ -731,31 +683,6 @@ def process_emfac_population(_study_area, _scenario_name, _work_dir, config, for
         ]
 
         with tqdm(total=len(filtering_steps), desc="Processing population data") as pbar:
-            # Filter by calendar year
-            if 'calendar_year' in df.columns:
-                print(f"Filtering by calendar year: {calendar_year}")
-                before_count = len(df)
-                df = df[(df['calendar_year'] == calendar_year) | (include_nan & df['calendar_year'].isna())]
-                print(f"After filtering: {len(df)} rows (removed {before_count - len(df)} rows)")
-            pbar.update(1)
-
-            # Filter by sub area
-            if 'sub_area' in df.columns:
-                print(f"Filtering by air basin area: {air_basin_area}")
-                before_count = len(df)
-                # Create a filter condition for partial matches
-                sub_area_filter = include_nan & df['sub_area'].isna()
-
-                for _area in air_basin_area:
-                    # Look for exact match or area in parentheses (e.g., "Santa Clara (SF)" for "SF")
-                    sub_area_filter = sub_area_filter | df['sub_area'].str.contains(f'\\({_area}\\)', regex=True) | (
-                            df['sub_area'] == _area)
-
-                # Apply the filter
-                df = df[sub_area_filter]
-                print(f"After filtering: {len(df)} rows (removed {before_count - len(df)} rows)")
-            pbar.update(1)
-
             # Convert population column to float for calculations
             if 'population' in df.columns:
                 print("Converting population to numeric values")
@@ -845,9 +772,6 @@ def process_emfac_vmt(_study_area, _scenario_name, _work_dir, config, format_fun
     else:
         print(f"Processing EMFAC VMT data for {_study_area}, scenario: {_scenario_name}")
 
-        include_nan = config["rates"]["filters"]["include_nan"]
-        calendar_year = config["rates"]["filters"]["calendar_year"]
-        air_basin_area = config["rates"]["filters"]["sub_area"]
         _emfac_vmt_by_model_year_file = os.path.join(
             _work_dir,
             config["rates"]["emfac"]["emfac_vmt_by_model_year_file"]
@@ -861,8 +785,6 @@ def process_emfac_vmt(_study_area, _scenario_name, _work_dir, config, format_fun
 
         # Create a progress bar for the filtering steps
         filtering_steps = [
-            "Calendar year",
-            "Air basin area",
             "Convert numeric columns",
             "Format data",
             "Clean data",
@@ -871,31 +793,6 @@ def process_emfac_vmt(_study_area, _scenario_name, _work_dir, config, format_fun
         ]
 
         with tqdm(total=len(filtering_steps), desc="Processing VMT data") as pbar:
-            # Filter by calendar year
-            if 'calendar_year' in df.columns:
-                print(f"Filtering by calendar year: {calendar_year}")
-                before_count = len(df)
-                df = df[(df['calendar_year'] == calendar_year) | (include_nan & df['calendar_year'].isna())]
-                print(f"After filtering: {len(df)} rows (removed {before_count - len(df)} rows)")
-            pbar.update(1)
-
-            # Filter by sub area
-            if 'sub_area' in df.columns:
-                print(f"Filtering by air basin area: {air_basin_area}")
-                before_count = len(df)
-                # Create a filter condition for partial matches
-                sub_area_filter = include_nan & df['sub_area'].isna()
-
-                for _area in air_basin_area:
-                    # Look for exact match or area in parentheses (e.g., "Santa Clara (SF)" for "SF")
-                    sub_area_filter = sub_area_filter | df['sub_area'].str.contains(f'\\({_area}\\)', regex=True) | (
-                            df['sub_area'] == _area)
-
-                # Apply the filter
-                df = df[sub_area_filter]
-                print(f"After filtering: {len(df)} rows (removed {before_count - len(df)} rows)")
-            pbar.update(1)
-
             # Convert numeric columns to float for calculations
             numeric_columns = ['total_vmt', 'cvmt', 'evmt']
             print("Converting numeric columns to float")
@@ -957,66 +854,13 @@ def process_emfac_vmt(_study_area, _scenario_name, _work_dir, config, format_fun
     return emfac_vmt
 
 
-def _build_emissions_formatter(mapping_config):
-    def format_emissions_data(emfac_types: pd.DataFrame) -> pd.DataFrame:
-        result_ft_df = emfac_types.copy()
-        result_ft_df['mappedClass'] = result_ft_df['vehicle_class'].map(mapping_config["class"]["emfac-ft"])
-        result_ft_df.dropna(subset=['mappedClass'], inplace=True)
-        result_ft_df['mappedFuel'] = result_ft_df['fuel'].map(mapping_config["fuel"]["emfac-ft"])
-        result_ft_df.dropna(subset=['mappedFuel'], inplace=True)
-
-        result_pax_df = emfac_types.copy()
-        result_pax_df['mappedClass'] = result_pax_df['vehicle_class'].map(mapping_config["class"]["emfac-pax"])
-        result_pax_df.dropna(subset=['mappedClass'], inplace=True)
-        result_pax_df['mappedFuel'] = result_pax_df['fuel'].map(mapping_config["fuel"]["emfac-pax"])
-        result_pax_df.dropna(subset=['mappedFuel'], inplace=True)
-
-        result_bus_df = emfac_types.copy()
-        result_bus_df['mappedClass'] = result_bus_df['vehicle_class'].map(mapping_config["class"]["emfac-bus"])
-        result_bus_df.dropna(subset=['mappedClass'], inplace=True)
-        result_bus_df['mappedFuel'] = result_bus_df['fuel'].map(mapping_config["fuel"]["emfac-bus"])
-        result_bus_df.dropna(subset=['mappedFuel'], inplace=True)
-
-        result_df = pd.concat([result_ft_df, result_pax_df, result_bus_df])
-        result_df['model_year_group'] = result_df['model_year'].apply(
-            lambda x: workflow_categorize_model_year(x, mapping_config["fleet"]["model_year_bins"])
-        )
-        result_df[['county', 'area']] = result_df['sub_area'].str.extract(r'^([^()]+)\s*\(([^)]+)\)')
-        result_df['county'] = result_df['county'].str.strip().str.lower()
-        result_df['area'] = result_df['area'].str.strip()
-        result_df['emfacId'] = result_df.apply(workflow_create_emfac_id, axis=1)
-        return result_df
-
-    return format_emissions_data
-
-
-def workflow_create_emfac_id(row):
-    return f"{_sanitize_token(row['model_year_group'])}{_sanitize_token(row['vehicle_class'])}{_sanitize_token(row['fuel'])}"
-
-
-def _sanitize_token(value):
-    return str(value).replace(" ", "").replace("_", "").replace("/", "").replace("-", "")
-
-
-def workflow_categorize_model_year(year, bin_years=None):
-    if bin_years is None:
-        bin_years = [1993, 2006, 2018]
-    bin_years = sorted(bin_years)
-    if year <= bin_years[0]:
-        return str(bin_years[0])
-    for i in range(len(bin_years) - 1):
-        if year <= bin_years[i + 1]:
-            return str(bin_years[i + 1])
-    return str(bin_years[-1])
-
-
 def run_step2(workflow: dict[str, Any]) -> dict[str, Any]:
     """Step 2: build EMFAC population, VMT, fleet, and combined emissions rates."""
     area = workflow["area"]
     scenario = workflow["scenario"]
     work_dir = workflow["work_dir"]
     config = workflow["config"]
-    format_emissions_data = _build_emissions_formatter(config["mapping"])
+    format_emissions_data = workflow["format_emissions_data"]
 
     emfac_pop = process_emfac_population(area, scenario, work_dir, config, format_emissions_data)
     emfac_vmt = process_emfac_vmt(area, scenario, work_dir, config, format_emissions_data)
@@ -1030,7 +874,6 @@ def run_step2(workflow: dict[str, Any]) -> dict[str, Any]:
     print("\n=== CARB Emissions Rates ===\n")
     print(f"rates: {len(emfac_rates):,}")
 
-    workflow["format_emissions_data"] = format_emissions_data
     workflow["emfac_pop"] = emfac_pop
     workflow["emfac_vmt"] = emfac_vmt
     workflow["emfac_fleet"] = emfac_fleet

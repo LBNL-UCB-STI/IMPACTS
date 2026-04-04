@@ -25,7 +25,6 @@ beam:
   local_output_folder: beam/beam_output/
 
 impacts:
-  override_files: false
   local_input_folder: impacts/input/
   local_output_folder: impacts/impacts_output/
   emissions:
@@ -58,4 +57,3 @@ impacts:
   exposure:
     enabled: true
     population_folder: urbansim/2018
-

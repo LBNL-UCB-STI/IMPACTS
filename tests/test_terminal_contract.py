@@ -83,7 +83,6 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.shared.geography.fips.counties[0] == "001"
     assert config.beam.local_input_folder == "pilates/beam/production/"
     assert config.beam.local_output_folder == "beam/beam_output/"
-    assert config.impacts.override_files is False
     assert config.impacts.local_input_folder == "impacts/input/"
     assert config.impacts.dispersions.inmap.enabled is True
     assert config.impacts.dispersions.inmap.grid_path.endswith("isrm_polygon_wgs84.gpkg")
@@ -118,7 +117,7 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
         encoding="utf-8",
     )
 
-    overlay = Path(__file__).resolve().parents[1] / "src" / "impacts" / "adapters" / "pilates_settings.yaml"
+    overlay = Path(__file__).resolve().parents[1] / "src" / "impacts" / "adapters" / "pilates_overlay.yaml"
     config = build_settings_from_pilates(pilates_settings=pilates_settings, impacts_overlay=overlay)
 
     assert config.run.region == "sfbay"
