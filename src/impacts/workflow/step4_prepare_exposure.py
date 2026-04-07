@@ -59,7 +59,16 @@ def _prepare_aermod_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
             raise ValueError(f"AERMOD concentrations must include '{col}'.")
     prepared = gdf.rename(columns={"PrimaryPM25": "aermod_PrimaryPM25", "BC": "aermod_BC", "NO2": "aermod_NO2"})
     prepared["aermod_SecondaryPM25"] = 0.0  # AERMOD models primary dispersion only
+    support_map = {
+        "has_aermod_primarypm25": "has_aermod_primarypm25",
+        "has_aermod_bc": "has_aermod_bc",
+        "has_aermod_no2": "has_aermod_no2",
+    }
     keep = [_AERMOD_SOURCE_ID_COLUMN, "aermod_PrimaryPM25", "aermod_SecondaryPM25", "aermod_BC", "aermod_NO2"]
+    for source_col, renamed_col in support_map.items():
+        if source_col in prepared.columns:
+            prepared = prepared.rename(columns={source_col: renamed_col})
+            keep.append(renamed_col)
     return prepared[keep + (["geometry"] if "geometry" in prepared.columns else [])].copy()
 
 
@@ -93,6 +102,9 @@ def _build_full_exposure_grid(
         result["aermod_SecondaryPM25"] = 0.0
         result["aermod_BC"] = np.nan
         result["aermod_NO2"] = np.nan
+        result["has_aermod_primarypm25"] = False
+        result["has_aermod_bc"] = False
+        result["has_aermod_no2"] = False
 
     for col in ("inmap_PrimaryPM25", "inmap_SecondaryPM25", "aermod_PrimaryPM25", "aermod_SecondaryPM25", "aermod_BC", "aermod_NO2"):
         if col in result.columns:
@@ -100,22 +112,26 @@ def _build_full_exposure_grid(
     for col in ("inmap_BC", "inmap_NO2"):
         if col in result.columns:
             result[col] = pd.to_numeric(result[col], errors="coerce").fillna(0.0)
+    for col in ("has_aermod_primarypm25", "has_aermod_bc", "has_aermod_no2"):
+        if col not in result.columns:
+            result[col] = False
+        result[col] = result[col].fillna(False).astype(bool)
 
-    # Use AERMOD where non-zero, fall back to InMAP elsewhere (matches R script logic)
+    # Use explicit AERMOD support masks rather than numeric > 0 heuristics.
     result["PrimaryPM25"] = np.where(
-        result["aermod_PrimaryPM25"] > 0,
+        result["has_aermod_primarypm25"],
         result["aermod_PrimaryPM25"],
         result["inmap_PrimaryPM25"],
     )
     result["SecondaryPM25"] = result["inmap_SecondaryPM25"]
     result["TotalPM25"] = result["SecondaryPM25"] + result["PrimaryPM25"]
     result["BC"] = np.where(
-        result["aermod_BC"] > 0,
+        result["has_aermod_bc"],
         result["aermod_BC"],
         result.get("inmap_BC", 0.0),
     )
     result["NO2"] = np.where(
-        result["aermod_NO2"] > 0,
+        result["has_aermod_no2"],
         result["aermod_NO2"],
         result.get("inmap_NO2", 0.0),
     )
@@ -125,6 +141,7 @@ def _build_full_exposure_grid(
         "TotalPM25", "PrimaryPM25", "SecondaryPM25", "BC", "NO2",
         "inmap_PrimaryPM25", "inmap_SecondaryPM25",
         "aermod_PrimaryPM25", "aermod_SecondaryPM25",
+        "has_aermod_primarypm25", "has_aermod_bc", "has_aermod_no2",
     ]
     for col in ("inmap_BC", "inmap_NO2", "aermod_BC", "aermod_NO2"):
         if col in result.columns:

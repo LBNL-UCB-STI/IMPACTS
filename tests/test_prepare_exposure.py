@@ -78,6 +78,9 @@ def test_build_full_exposure_grid_uses_inmap_secondary_and_aermod_primary(tmp_pa
             "aermod_SecondaryPM25": [0.0],
             "aermod_BC": [0.5],
             "aermod_NO2": [3.0],
+            "has_aermod_primarypm25": [True],
+            "has_aermod_bc": [True],
+            "has_aermod_no2": [True],
             "geometry": [full_grid.geometry.iloc[0]],
         },
         geometry="geometry",
@@ -97,3 +100,6 @@ def test_build_full_exposure_grid_uses_inmap_secondary_and_aermod_primary(tmp_pa
     assert by_id.loc[22, "TotalPM25"] == 2.5    # no aermod → inmap primary 0.0 + inmap secondary 2.5
     assert by_id.loc[22, "BC"] == 0.0
     assert by_id.loc[22, "NO2"] == 0.0
+    assert bool(by_id.loc[11, "has_aermod_primarypm25"]) is True
+    assert bool(by_id.loc[11, "has_aermod_bc"]) is True
+    assert bool(by_id.loc[11, "has_aermod_no2"]) is True

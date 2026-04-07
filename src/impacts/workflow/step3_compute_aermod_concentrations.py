@@ -33,6 +33,11 @@ _AERMOD_SOURCE_ID_COLUMN = "aermod_cell_id"
 _SOURCE_POPULATION_COLUMN = "source_population"
 _SOURCE_TEMPORAL_COLUMN = "source_temporal_class"
 _SOURCE_HEIGHT_COLUMN = "source_release_height"
+_AERMOD_SUPPORT_COLUMNS = {
+    "PrimaryPM25": "has_aermod_primarypm25",
+    "BC": "has_aermod_bc",
+    "NO2": "has_aermod_no2",
+}
 
 # Maps canonical pollutant names (from emissions columns) to output concentration column names.
 # Mirrors the InMAP naming convention used in step 2 so impacts steps work uniformly.
@@ -591,6 +596,7 @@ def _apply_kernels(
     ny = int(target_iy.max()) - iy_min + 1
 
     result_arrays = {col: np.zeros(len(target_index), dtype=np.float64) for col in output_cols}
+    support_arrays = {col: np.zeros(len(target_index), dtype=bool) for col in output_cols}
 
     for pattern_key, source_group in source_df.groupby("pattern_key", dropna=False):
         kernel = kernel_library.get(str(pattern_key))
@@ -605,6 +611,8 @@ def _apply_kernels(
         # Build 2D kernel array centred at (dix_max, diy_max)
         kernel_2d = np.zeros((2 * dix_max + 1, 2 * diy_max + 1), dtype=np.float64)
         kernel_2d[dix + dix_max, diy + diy_max] = kernel["response_per_ton"]
+        kernel_support_2d = np.zeros((2 * dix_max + 1, 2 * diy_max + 1), dtype=np.float64)
+        kernel_support_2d[dix + dix_max, diy + diy_max] = 1.0
 
         # Source grid positions
         si = source_group["source_ix"].to_numpy(dtype=np.int64) - ix_min
@@ -619,19 +627,33 @@ def _apply_kernels(
 
         for emis_col, out_col in zip(emissions_cols, output_cols):
             emissions_grid = np.zeros((nx, ny), dtype=np.float64)
+            source_values = source_group[emis_col].to_numpy(dtype=np.float64)[valid_src]
             np.add.at(
                 emissions_grid,
                 (si[valid_src], sj[valid_src]),
-                source_group[emis_col].to_numpy(dtype=np.float64)[valid_src],
+                source_values,
             )
             conc_full = fftconvolve(emissions_grid, kernel_2d, mode="full")
             result_arrays[out_col][in_bounds] += conc_full[ti[in_bounds], tj[in_bounds]]
+            source_support_grid = np.zeros((nx, ny), dtype=np.float64)
+            positive_src = source_values > 0.0
+            if positive_src.any():
+                np.add.at(
+                    source_support_grid,
+                    (si[valid_src][positive_src], sj[valid_src][positive_src]),
+                    1.0,
+                )
+                support_full = fftconvolve(source_support_grid, kernel_support_2d, mode="full")
+                support_arrays[out_col][in_bounds] |= support_full[ti[in_bounds], tj[in_bounds]] > 0.0
 
     if not result_arrays:
         return pd.DataFrame(columns=[target_id_col])
     concentrations = pd.DataFrame({target_id_col: target_ids})
     for name, values in result_arrays.items():
         concentrations[name] = values
+        support_col = _AERMOD_SUPPORT_COLUMNS.get(name)
+        if support_col:
+            concentrations[support_col] = support_arrays[name]
     # TotalPM25 is primary PM2.5 dispersion only. BC is a separate primary pollutant and
     # is NOT included here — secondary species come from InMAP and are merged in step 4.
     if "PrimaryPM25" in concentrations.columns:
@@ -641,27 +663,29 @@ def _apply_kernels(
 
 def _compute_no2_from_isrm_matrix(
     *,
-    concentrations_df: pd.DataFrame,
+    concentrations_gdf: gpd.GeoDataFrame,
     target_id_col: str,
-    target_grid: gpd.GeoDataFrame,
     isrm_matrix_path: str,
-) -> pd.DataFrame:
-    """Convert kernel-dispersed NOx concentration to NO2 using ISRM column-sum ratios.
+) -> gpd.GeoDataFrame:
+    """Convert attached AERMOD-dispersed NOx concentration to NO2 using ISRM column-sum ratios.
 
     ratio[j] = sum_i M[i,j]  (column sum of the sparse NOx→NO2 ISRM matrix)
     NO2_100m[r] = NOx_conc_kernel[r] × ratio[inmap_cell_id(r)]
 
-    The kernel produces a "NO2" column that actually holds dispersed NOx (mapped via
-    pollutants_map). We post-multiply by the local NO2/NOx ratio derived from the
-    ISRM matrix so that the column becomes true NO2 concentration.
+    Step 3 attaches the raw AERMOD-dispersed NOx field to the full target grid first.
+    We then post-multiply only cells explicitly marked as AERMOD-backed via has_aermod_no2.
     """
-    if "NO2" not in concentrations_df.columns:
+    if "NO2" not in concentrations_gdf.columns:
         logger.warning("%s NO2 column not found in concentrations; skipping ISRM ratio step", _step_label("3.5"))
-        return concentrations_df
+        return concentrations_gdf
 
-    if "inmap_cell_id" not in target_grid.columns:
+    if "inmap_cell_id" not in concentrations_gdf.columns:
         logger.warning("%s target_grid missing inmap_cell_id; skipping ISRM ratio step", _step_label("3.5"))
-        return concentrations_df
+        return concentrations_gdf
+
+    if "has_aermod_no2" not in concentrations_gdf.columns:
+        logger.warning("%s has_aermod_no2 mask missing from concentrations; skipping ISRM ratio step", _step_label("3.5"))
+        return concentrations_gdf
 
     data = np.load(isrm_matrix_path)
     receptor_ids = data["receptor_ids"].astype(np.int64)
@@ -673,19 +697,18 @@ def _compute_no2_from_isrm_matrix(
     np.add.at(col_ratio, receptor_ids, values)
     col_ratio = np.asarray(col_ratio, dtype=np.float64)
 
-    # Map each 100m target cell to its parent ISRM cell
-    cell_map = target_grid.set_index(target_id_col)["inmap_cell_id"]
-    target_ids = concentrations_df[target_id_col].to_numpy()
-    inmap_ids = pd.Series(target_ids).map(cell_map).fillna(-1).astype(np.int64).to_numpy()
-
+    target_ids = concentrations_gdf[target_id_col].to_numpy()
+    inmap_ids = pd.to_numeric(concentrations_gdf["inmap_cell_id"], errors="coerce").fillna(-1).astype(np.int64).to_numpy()
     valid = (inmap_ids >= 0) & (inmap_ids < receptor_dim)
+    aermod_backed = concentrations_gdf["has_aermod_no2"].fillna(False).astype(bool).to_numpy()
+    apply_mask = valid & aermod_backed
     cell_ratio = np.zeros(len(target_ids), dtype=np.float64)
-    cell_ratio[valid] = col_ratio[inmap_ids[valid]]
+    cell_ratio[apply_mask] = col_ratio[inmap_ids[apply_mask]]
     cell_ratio = np.asarray(cell_ratio, dtype=np.float64)
 
-    result = concentrations_df.copy()
+    result = concentrations_gdf.copy()
     result["NO2"] = np.multiply(
-        result["NO2"].to_numpy(dtype=np.float64),
+        pd.to_numeric(result["NO2"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64),
         cell_ratio,
         dtype=np.float64,
     )
@@ -717,7 +740,11 @@ def _attach_concentrations(
     lookup = concentrations_df.set_index(target_id_col)
     target_ids = result[target_id_col].to_numpy()
     for col in concentration_cols:
-        result[col] = lookup[col].reindex(target_ids, fill_value=0.0).to_numpy(dtype=np.float64)
+        support_col = _AERMOD_SUPPORT_COLUMNS.get(col)
+        if support_col or col in _AERMOD_SUPPORT_COLUMNS.values():
+            result[col] = lookup[col].reindex(target_ids, fill_value=False).to_numpy(dtype=bool)
+        else:
+            result[col] = lookup[col].reindex(target_ids, fill_value=0.0).to_numpy(dtype=np.float64)
     return gpd.GeoDataFrame(result, geometry="geometry", crs=target_grid.crs)
 
 
@@ -838,33 +865,33 @@ def run(
     )
     _trace_frame("4", "aermod_concentrations", concentrations_df, key_cols=[target_id_col])
 
-    log_substep_banner("3.5", "compute NO2 from ISRM NO2/NOx column-sum ratios", logger=logger)
-    _no2_matrix_path = pipeline.asrv_nox_to_no2_ratios_file or pipeline.isrm_nox_to_no2_ratios_file
-    if _no2_matrix_path and "NO2" in concentrations_df.columns:
-        concentrations_df = _compute_no2_from_isrm_matrix(
-            concentrations_df=concentrations_df,
-            target_id_col=target_id_col,
-            target_grid=target_grid,
-            isrm_matrix_path=_no2_matrix_path,
-        )
-        _trace_frame("5", "aermod_concentrations_with_isrm_no2", concentrations_df, key_cols=[target_id_col])
-    elif "NO2" in concentrations_df.columns:
-        logger.info(
-            "%s no ISRM NO2/NOx matrix configured (asrv_nox_to_no2_ratios_file / isrm_nox_to_no2_ratios_file); "
-            "NO2 column will not be produced",
-            _step_label("3.5"),
-        )
-        concentrations_df = concentrations_df.drop(columns=["NO2"])
-    else:
-        logger.info("%s NO2 column absent from kernel output; skipping ratio step", _step_label("3.5"))
-
-    log_substep_banner("3.6", "write concentration outputs", logger=logger)
-    output_path = raw_dir / "beam_aermod_concentrations.parquet"
     result_gdf = _attach_concentrations(
         target_grid=target_grid,
         concentrations_df=concentrations_df,
         target_id_col=target_id_col,
     )
+
+    log_substep_banner("3.5", "compute NO2 from ISRM NO2/NOx column-sum ratios", logger=logger)
+    _no2_matrix_path = pipeline.asrv_nox_to_no2_ratios_file or pipeline.isrm_nox_to_no2_ratios_file
+    if _no2_matrix_path and "NO2" in result_gdf.columns:
+        result_gdf = _compute_no2_from_isrm_matrix(
+            concentrations_gdf=result_gdf,
+            target_id_col=target_id_col,
+            isrm_matrix_path=_no2_matrix_path,
+        )
+        _trace_frame("5", "aermod_concentrations_with_isrm_no2", pd.DataFrame(result_gdf.drop(columns="geometry", errors="ignore")), key_cols=[target_id_col])
+    elif "NO2" in result_gdf.columns:
+        logger.info(
+            "%s no ISRM NO2/NOx matrix configured (asrv_nox_to_no2_ratios_file / isrm_nox_to_no2_ratios_file); "
+            "NO2 column will not be produced",
+            _step_label("3.5"),
+        )
+        result_gdf = result_gdf.drop(columns=["NO2", "has_aermod_no2"], errors="ignore")
+    else:
+        logger.info("%s NO2 column absent from kernel output; skipping ratio step", _step_label("3.5"))
+
+    log_substep_banner("3.6", "write concentration outputs", logger=logger)
+    output_path = raw_dir / "beam_aermod_concentrations.parquet"
     _write_outputs(result_gdf, output_path)
     logger.info("%s AERMOD concentrations → %s", _step_label("3.6"), output_path)
     return result_gdf, target_grid[target_id_col].to_numpy(dtype=int), output_path
