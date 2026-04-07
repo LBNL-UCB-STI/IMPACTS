@@ -36,8 +36,6 @@ from .rdata_conversion import rdata_to_parquet
 
 DEFAULT_OUTPUT_NAME = "nox_to_no2_full_isrm_matrix.npz"
 DEFAULT_WRITE_CHUNK_ROWS = 256
-INPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "input")
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "output")
 REGIONAL_NOX_NOX_MATRIX_NAME = "nox_nox_regional_grid_matrix.parquet"
 REGIONAL_NO2_RATIO_NAME = "no2_nox_regional_grid_ratio.parquet"
 REGIONAL_NOX_TO_NO2_MATRIX_NAME = "nox_to_no2_regional_grid_matrix.parquet"
@@ -85,31 +83,24 @@ def _normalize_square_matrix(df: pd.DataFrame) -> pd.DataFrame:
     return matrix.apply(pd.to_numeric, errors="coerce").fillna(0.0)
 
 
-def _prepare_rdata_inputs(input_dir: str) -> Path:
-    input_root = Path(input_dir).resolve()
-    parquet_candidates = sorted(input_root.glob("cmaqtestNO2_ratio*.parquet"))
-    if parquet_candidates:
-        return parquet_candidates[0]
-
-    rdata_path = input_root / "cmaqtestNO2_ratio.RData"
-    if not rdata_path.exists():
-        raise FileNotFoundError(
-            f"Expected either {rdata_path.name} or a converted cmaqtestNO2_ratio parquet in {input_root}"
-        )
-
-    written = rdata_to_parquet(rdata_path, input_root)
-    parquet_candidates = [path for path in written if path.suffix == ".parquet"]
-    if not parquet_candidates:
-        raise ValueError(f"Converting {rdata_path} produced no parquet outputs")
-
-    pdat_candidates = [
-        path for path in parquet_candidates if path.stem.endswith("__pdat") or path.stem == "cmaqtestNO2_ratio"
-    ]
-    return pdat_candidates[0] if pdat_candidates else parquet_candidates[0]
+def _prepare_ratio_table_input(ratio_table_path: str | Path) -> Path:
+    target = Path(ratio_table_path).expanduser().resolve()
+    if not target.exists():
+        raise FileNotFoundError(f"Configured CMAQ ratio table not found: {target}")
+    if target.suffix.lower() == ".rdata":
+        written = rdata_to_parquet(target, target.parent)
+        parquet_candidates = [path for path in written if path.suffix == ".parquet"]
+        if not parquet_candidates:
+            raise ValueError(f"Converting {target} produced no parquet outputs")
+        pdat_candidates = [
+            path for path in parquet_candidates if path.stem.endswith("__pdat") or path.stem == "cmaqtestNO2_ratio"
+        ]
+        return pdat_candidates[0] if pdat_candidates else parquet_candidates[0]
+    return target
 
 
-def _load_cmaq_ratio_table(input_dir: str) -> pd.DataFrame:
-    ratio_path = _prepare_rdata_inputs(input_dir)
+def _load_cmaq_ratio_table(ratio_table_path: str | Path) -> pd.DataFrame:
+    ratio_path = _prepare_ratio_table_input(ratio_table_path)
     table = pd.read_parquet(ratio_path)
     required = {"col", "row", "value"}
     missing = required.difference(table.columns)
@@ -120,12 +111,11 @@ def _load_cmaq_ratio_table(input_dir: str) -> pd.DataFrame:
         )
     return table
 
-def _load_precomputed_no2_matrix(input_dir: str) -> pd.DataFrame | None:
-    input_root = Path(input_dir).resolve()
-    parquet_path = input_root / REGIONAL_NOX_TO_NO2_MATRIX_NAME
-    if parquet_path.exists():
-        return _normalize_square_matrix(pd.read_parquet(parquet_path))
-    return None
+def _load_precomputed_no2_matrix(regional_matrix_path: str | Path) -> pd.DataFrame:
+    target = Path(regional_matrix_path).expanduser().resolve()
+    if not target.exists():
+        raise FileNotFoundError(f"Configured regional NOx->NO2 matrix not found: {target}")
+    return _normalize_square_matrix(pd.read_parquet(target))
 
 
 def cr_xy(col: Iterable[float], row: Iterable[float]) -> pd.DataFrame:
@@ -219,8 +209,24 @@ def _extract_ids(files: Iterable[str]) -> List[str]:
     return sorted(set(ids))
 
 
-def convert_cmaq_polygon(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR) -> None:
-    pdat = _load_cmaq_ratio_table(input_dir).copy()
+def _resolve_geopoints_parent(geopoints_file: str | Path) -> str:
+    target = Path(geopoints_file).expanduser().resolve()
+    if not target.exists() or not target.is_file():
+        raise FileNotFoundError(f"Configured geopoints file not found: {target}")
+    if not re.match(r"^grid_\d+_geopoint\.(shp|gpkg|geojson|parquet)$", target.name, flags=re.IGNORECASE):
+        raise ValueError(
+            "geopoints file must point to one member of the grid geopoint set, "
+            f"for example grid_843_geopoint.shp; got {target.name}"
+        )
+    return str(target.parent)
+
+
+def convert_cmaq_polygon(
+    *,
+    output_dir: str,
+    ratio_table_path: str | Path,
+) -> None:
+    pdat = _load_cmaq_ratio_table(ratio_table_path).copy()
     coords = cr_xy(pdat["col"], pdat["row"])
     pdat[["x", "y"]] = coords
     gdf = grid_polygons_from_centers(pdat[["x", "y", "value", "col", "row"]])
@@ -228,17 +234,18 @@ def convert_cmaq_polygon(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DI
     gdf.to_file(os.path.join(output_dir, "baaqmd.geojson"), driver="GeoJSON")
 
 
-def generate_xwalk(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR, n_workers: int = 6) -> None:
-    datdir = os.path.join(input_dir, "sfbay_grid_geopoints_inmap_1.9.6")
-    grid_path = os.path.join(input_dir, "grid_polygon", "grid_polygon.shp")
+def generate_xwalk(
+    *,
+    output_dir: str,
+    grid_path: str | Path,
+    geopoints_file: str | Path,
+    n_workers: int = 6,
+) -> None:
+    datdir = _resolve_geopoints_parent(geopoints_file)
+    grid_path = str(Path(grid_path).expanduser().resolve())
     if not os.path.isdir(datdir) or not os.path.exists(grid_path):
-        precomputed_no2 = _load_precomputed_no2_matrix(input_dir)
-        if precomputed_no2 is not None:
-            tqdm.write("Skipping generate_xwalk: direct NOx-to-NO2 matrix found in input-dir")
-            return
         raise FileNotFoundError(
-            "generate_xwalk requires both sfbay_grid_geopoints_inmap_1.9.6/ and grid_polygon/grid_polygon.shp "
-            f"under {input_dir}"
+            "generate_xwalk requires explicit existing --geopoints-file and --grid-polygon inputs"
         )
 
     bounding_box = get_bounding_box(grid_path)
@@ -254,10 +261,15 @@ def generate_xwalk(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR, n_w
     pd.concat(results).to_parquet(os.path.join(output_dir, REGIONAL_NOX_NOX_MATRIX_NAME))
 
 
-def cmaq_ratio_to_grid(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR) -> None:
-    grid_path = Path(input_dir).resolve() / "grid_polygon" / "grid_polygon.shp"
+def cmaq_ratio_to_grid(
+    *,
+    output_dir: str,
+    ratio_table_path: str | Path,
+    grid_path: str | Path,
+) -> None:
+    grid_path = Path(grid_path).expanduser().resolve()
     grid = gpd.read_file(grid_path)
-    pdat = _load_cmaq_ratio_table(input_dir).copy()
+    pdat = _load_cmaq_ratio_table(ratio_table_path).copy()
     coords = cr_xy(pdat["col"], pdat["row"])
     pdat[["x", "y"]] = coords
     mm = grid_polygons_from_centers(pdat[["x", "y", "value", "col", "row"]]).drop(columns=["value"])
@@ -277,12 +289,15 @@ def cmaq_ratio_to_grid(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR)
     grouped.to_parquet(os.path.join(output_dir, REGIONAL_NO2_RATIO_NAME), index=False)
 
 
-def nox_to_no2_grid(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR) -> None:
-    direct_matrix = _load_precomputed_no2_matrix(input_dir)
-    if direct_matrix is not None:
+def nox_to_no2_grid(
+    *,
+    output_dir: str,
+    regional_matrix_path: str | Path | None = None,
+) -> None:
+    if regional_matrix_path is not None:
+        direct_matrix = _load_precomputed_no2_matrix(regional_matrix_path)
         direct_matrix.to_parquet(os.path.join(output_dir, REGIONAL_NOX_TO_NO2_MATRIX_NAME))
         return
-
     res = pd.read_parquet(os.path.join(output_dir, REGIONAL_NOX_NOX_MATRIX_NAME))
     no2ratio = pd.read_parquet(os.path.join(output_dir, REGIONAL_NO2_RATIO_NAME))
     res.index = pd.to_numeric(res.index, errors="coerce").astype(int)
@@ -302,26 +317,36 @@ def nox_to_no2_grid(input_dir: str = INPUT_DIR, output_dir: str = OUTPUT_DIR) ->
     res_dat.to_parquet(os.path.join(output_dir, REGIONAL_NOX_TO_NO2_MATRIX_NAME))
 
 
-STEPS = {
-    "convert_cmaq_polygon": lambda i, o: convert_cmaq_polygon(i, o),
-    "generate_xwalk": lambda i, o: generate_xwalk(i, o),
-    "cmaq_ratio_to_grid": lambda i, o: cmaq_ratio_to_grid(i, o),
-    "nox_to_no2_grid": lambda i, o: nox_to_no2_grid(i, o),
-}
-STEP_ORDER = list(STEPS.keys())
+STEP_ORDER = [
+    "convert_cmaq_polygon",
+    "generate_xwalk",
+    "cmaq_ratio_to_grid",
+    "nox_to_no2_grid",
+]
 
 
 def run_pipeline(
+    *,
     steps: Optional[List[str]] = None,
-    input_dir: str = INPUT_DIR,
-    output_dir: str = OUTPUT_DIR,
+    output_dir: str,
+    ratio_table_path: str | Path,
+    grid_path: str | Path,
+    geopoints_file: str | Path,
+    regional_matrix_path: str | Path | None = None,
 ) -> None:
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     resolved_steps = steps or STEP_ORDER
     progress = tqdm(resolved_steps, desc="NOx->NO2 preprocessing", unit="step", dynamic_ncols=True)
     for step_name in progress:
         progress.set_postfix_str(step_name)
-        STEPS[step_name](input_dir, output_dir)
+        if step_name == "convert_cmaq_polygon":
+            convert_cmaq_polygon(output_dir=output_dir, ratio_table_path=ratio_table_path)
+        elif step_name == "generate_xwalk":
+            generate_xwalk(output_dir=output_dir, grid_path=grid_path, geopoints_file=geopoints_file)
+        elif step_name == "cmaq_ratio_to_grid":
+            cmaq_ratio_to_grid(output_dir=output_dir, ratio_table_path=ratio_table_path, grid_path=grid_path)
+        elif step_name == "nox_to_no2_grid":
+            nox_to_no2_grid(output_dir=output_dir, regional_matrix_path=regional_matrix_path)
     progress.close()
 
 
@@ -418,31 +443,44 @@ def _write_sparse_npz(
 
 def build_complete_matrix(
     *,
-    input_dir: str | Path,
-    output_dir: str | Path,
+    output_file: str | Path,
     isrm_zarr: str,
-    output_name: str = DEFAULT_OUTPUT_NAME,
+    ratio_table_path: str | Path | None = None,
+    regional_matrix_path: str | Path | None = None,
+    grid_path: str | Path | None = None,
+    geopoints_file: str | Path | None = None,
 ) -> Path:
-    input_root = Path(input_dir).resolve()
-    output_root = Path(output_dir).resolve()
+    output_path = Path(output_file).expanduser().resolve()
+    output_root = output_path.parent
     output_root.mkdir(parents=True, exist_ok=True)
 
-    run_pipeline(input_dir=str(input_root), output_dir=str(output_root))
-
-    sparse_matrix_path = output_root / REGIONAL_NOX_TO_NO2_MATRIX_NAME
-    if not sparse_matrix_path.exists():
-        raise FileNotFoundError(f"Expected {sparse_matrix_path} after running NOx/NO2 preprocessing")
+    if regional_matrix_path is None:
+        if ratio_table_path is None or grid_path is None or geopoints_file is None:
+            raise ValueError(
+                "When --regional-matrix is not provided, you must pass --cmaq-ratio-table, "
+                "--grid-polygon, and --geopoints-file."
+            )
+        run_pipeline(
+            output_dir=str(output_root),
+            ratio_table_path=ratio_table_path,
+            grid_path=grid_path,
+            geopoints_file=geopoints_file,
+            regional_matrix_path=regional_matrix_path,
+        )
+        sparse_matrix_path = output_root / REGIONAL_NOX_TO_NO2_MATRIX_NAME
+        if not sparse_matrix_path.exists():
+            raise FileNotFoundError(f"Expected {sparse_matrix_path} after running NOx/NO2 preprocessing")
+        sparse_matrix = _read_transfer_matrix(sparse_matrix_path)
+    else:
+        sparse_matrix = _load_precomputed_no2_matrix(regional_matrix_path)
 
     if not str(isrm_zarr).strip():
         raise ValueError("isrm_zarr must be provided explicitly. Use --isrm-zarr and point it to the ISRM zarr store.")
     sr = _load_isrm_store(str(isrm_zarr))
     source_dim = int(sr["SOA"].shape[1])
     receptor_dim = int(sr["SOA"].shape[2])
-
-    sparse_matrix = _read_transfer_matrix(sparse_matrix_path)
     source_ids, receptor_ids, values = _extract_sparse_triplets(sparse_matrix)
 
-    output_path = output_root / output_name
     _write_sparse_npz(
         output_path=output_path,
         source_ids=source_ids,
@@ -459,17 +497,27 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m impacts.tools.inmap.build_complete_nox_to_no2_matrix",
         description="Build a full-domain workflow-ready NOx-to-NO2 ISRM matrix.",
     )
-    parser.add_argument("--input-dir", required=True, help="Directory containing NOx/NO2 preprocessing inputs")
-    parser.add_argument("--output-dir", required=True, help="Directory where outputs will be written")
+    parser.add_argument("--output-file", required=True, help="Full output .npz file path to write")
+    parser.add_argument(
+        "--cmaq-ratio-table",
+        help="Explicit path to the CMAQ ratio table (.RData or .parquet). Required unless --regional-matrix is provided.",
+    )
+    parser.add_argument(
+        "--grid-polygon",
+        help="Explicit path to grid_polygon.shp. Required unless --regional-matrix is provided.",
+    )
+    parser.add_argument(
+        "--geopoints-file",
+        help="Explicit path to one grid_<id>_geopoint file from the geopoint set. Required unless --regional-matrix is provided.",
+    )
+    parser.add_argument(
+        "--regional-matrix",
+        help="Explicit path to nox_to_no2_regional_grid_matrix.parquet. If set, preprocessing inputs are not needed.",
+    )
     parser.add_argument(
         "--isrm-zarr",
         required=True,
         help="Local path or s3:// URL for the ISRM zarr store.",
-    )
-    parser.add_argument(
-        "--output-name",
-        default=DEFAULT_OUTPUT_NAME,
-        help=f"Filename for the sparse full-domain matrix. Default: {DEFAULT_OUTPUT_NAME}",
     )
     return parser
 
@@ -478,10 +526,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     output_path = build_complete_matrix(
-        input_dir=args.input_dir,
-        output_dir=args.output_dir,
+        output_file=args.output_file,
         isrm_zarr=args.isrm_zarr,
-        output_name=args.output_name,
+        ratio_table_path=args.cmaq_ratio_table,
+        regional_matrix_path=args.regional_matrix,
+        grid_path=args.grid_polygon,
+        geopoints_file=args.geopoints_file,
     )
     print(output_path)
     return 0

@@ -671,6 +671,7 @@ def _compute_no2_from_isrm_matrix(
     # Column sums: ratio[j] = Σ_i M[i,j] = NO2/NOx conversion factor for ISRM cell j
     col_ratio = np.zeros(receptor_dim, dtype=np.float64)
     np.add.at(col_ratio, receptor_ids, values)
+    col_ratio = np.asarray(col_ratio, dtype=np.float64)
 
     # Map each 100m target cell to its parent ISRM cell
     cell_map = target_grid.set_index(target_id_col)["inmap_cell_id"]
@@ -680,9 +681,14 @@ def _compute_no2_from_isrm_matrix(
     valid = (inmap_ids >= 0) & (inmap_ids < receptor_dim)
     cell_ratio = np.zeros(len(target_ids), dtype=np.float64)
     cell_ratio[valid] = col_ratio[inmap_ids[valid]]
+    cell_ratio = np.asarray(cell_ratio, dtype=np.float64)
 
     result = concentrations_df.copy()
-    result["NO2"] = result["NO2"].to_numpy(dtype=np.float64) * cell_ratio
+    result["NO2"] = np.multiply(
+        result["NO2"].to_numpy(dtype=np.float64),
+        cell_ratio,
+        dtype=np.float64,
+    )
     logger.info(
         "%s NO2 computed from ISRM column-sum ratios: %d / %d cells have ratio > 0",
         _step_label("3.5"),
@@ -756,8 +762,6 @@ def run(
     if emissions_input_gdf is None:
         keep_cols = [source_id_col] + emissions_cols
         emissions_gdf = emissions_gdf[keep_cols + ["geometry"]].copy()
-    if target_grid_gdf is None:
-        target_grid = target_grid[[target_id_col, "geometry"]].copy()
     _trace_frame("0", "aermod_source_emissions", pd.DataFrame(emissions_gdf.drop(columns="geometry")), key_cols=[source_id_col])
 
     log_substep_banner("3.1", "prepare local AERMOD grid indices", logger=logger)
