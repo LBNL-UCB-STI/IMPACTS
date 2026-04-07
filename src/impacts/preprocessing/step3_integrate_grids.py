@@ -324,7 +324,7 @@ def run(
     pipeline: PipelineConfig,
     raw_dir: Path,
     input_root: Path,
-) -> Tuple[str, Optional[gpd.GeoDataFrame], Optional[str]]:
+) -> Tuple[str, Optional[gpd.GeoDataFrame]]:
     """Map staged BEAM network to OSM and intersect it with enabled dispersion grids and county boundaries."""
     from osm_chordify.osm.intersect import intersect_road_network_with_zones
 

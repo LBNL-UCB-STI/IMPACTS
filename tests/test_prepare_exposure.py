@@ -64,7 +64,8 @@ def test_build_full_exposure_grid_uses_inmap_secondary_and_aermod_primary(tmp_pa
     prepared_inmap = gpd.GeoDataFrame(
         {
             "inmap_cell_id": [101, 202],
-            "SecondaryPM25": [1.5, 2.5],
+            "inmap_PrimaryPM25": [0.0, 0.0],
+            "inmap_SecondaryPM25": [1.5, 2.5],
             "geometry": full_grid.geometry,
         },
         geometry="geometry",
@@ -73,9 +74,10 @@ def test_build_full_exposure_grid_uses_inmap_secondary_and_aermod_primary(tmp_pa
     prepared_aermod = gpd.GeoDataFrame(
         {
             "aermod_cell_id": [11],
-            "PrimaryPM25": [0.25],
-            "BC": [0.5],
-            "NO2": [3.0],
+            "aermod_PrimaryPM25": [0.25],
+            "aermod_SecondaryPM25": [0.0],
+            "aermod_BC": [0.5],
+            "aermod_NO2": [3.0],
             "geometry": [full_grid.geometry.iloc[0]],
         },
         geometry="geometry",
@@ -89,9 +91,9 @@ def test_build_full_exposure_grid_uses_inmap_secondary_and_aermod_primary(tmp_pa
     ).drop(columns="geometry")
 
     by_id = result.set_index("aermod_cell_id")
-    assert by_id.loc[11, "PM25"] == 1.75
+    assert by_id.loc[11, "TotalPM25"] == 1.75   # aermod primary 0.25 + inmap secondary 1.5
     assert by_id.loc[11, "BC"] == 0.5
     assert by_id.loc[11, "NO2"] == 3.0
-    assert by_id.loc[22, "PM25"] == 2.5
+    assert by_id.loc[22, "TotalPM25"] == 2.5    # no aermod → inmap primary 0.0 + inmap secondary 2.5
     assert by_id.loc[22, "BC"] == 0.0
     assert by_id.loc[22, "NO2"] == 0.0

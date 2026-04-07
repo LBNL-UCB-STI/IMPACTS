@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 from typing import Dict
 from typing import Optional
 
@@ -21,14 +22,9 @@ from .prepare_emissions_from_skims import _build_combined_allocated_table
 from .prepare_emissions_from_skims import _build_combined_grouped_table
 from .prepare_emissions_from_skims import _reuse_existing_outputs
 from .prepare_emissions_from_skims import load_or_prepare_skims_df
+from . import _step_label
 
 logger = logging.getLogger(__name__)
-
-
-def _step_label(step: str, zone_label: Optional[str] = None) -> str:
-    suffix = f"[{zone_label}]" if zone_label else ""
-    return f"Step 1.{step}{suffix}"
-
 
 _COUNTY_CORRECTION_COLUMNS = {
     "county_fips": "countyfp",
@@ -37,7 +33,6 @@ _COUNTY_CORRECTION_COLUMNS = {
 }
 _VMT_PROCESSES = {"RUNEX", "PMBW", "PMTW", "PRDUST", "RUNLOSS"}
 _TRIP_PROCESSES = {"HOTSOAK", "DIURN", "STREX"}
-_METERS_PER_MILE = 1609.344
 
 
 def _safe_ratio(
@@ -55,7 +50,7 @@ def _safe_ratio(
     if invalid.any():
         logger.warning(
             "%s zero source totals encountered for %s in %d county rows; using neutral factor 1.0",
-            _step_label("3"),
+            _step_label("1.3"),
             label,
             int(invalid.sum()),
         )
@@ -132,13 +127,13 @@ def apply_county_corrections(
     trip_used = sorted([proc for proc in unique_processes if proc in _TRIP_PROCESSES])
     neutral_used = sorted([proc for proc in unique_processes if proc not in _VMT_PROCESSES and proc not in _TRIP_PROCESSES])
     if vmt_used:
-        logger.info("%s using factor_totVMT for processes: %s", _step_label("4"), ", ".join(vmt_used))
+        logger.info("%s using factor_totVMT for processes: %s", _step_label("1.4"), ", ".join(vmt_used))
     if trip_used:
-        logger.info("%s using factor_totTrips for processes: %s", _step_label("4"), ", ".join(trip_used))
+        logger.info("%s using factor_totTrips for processes: %s", _step_label("1.4"), ", ".join(trip_used))
     if neutral_used:
         logger.warning(
             "%s no county correction factor mapping for processes; using neutral factor 1.0: %s",
-            _step_label("4"),
+            _step_label("1.4"),
             ", ".join(neutral_used),
         )
 
@@ -276,7 +271,7 @@ def _build_combined_corrected_table(
     if pipeline.activity_totals_file:
         logger.info(
             "%s deriving county activity correction factors from %s",
-            _step_label("3"),
+            _step_label("1.3"),
             pipeline.activity_totals_file,
         )
         beam_activity_totals = _build_beam_activity_totals(
@@ -288,7 +283,7 @@ def _build_combined_corrected_table(
             corrections_path=pipeline.activity_totals_file,
             correction_columns=pipeline.activity_totals_columns or None,
         )
-        logger.info("%s correcting allocated emissions by county/process factors", _step_label("4"))
+        logger.info("%s correcting allocated emissions by county/process factors", _step_label("1.4"))
         corrected = apply_county_corrections(
             allocated_df,
             county_correction_factors,
@@ -298,7 +293,7 @@ def _build_combined_corrected_table(
         corrected = allocated_df
         beam_activity_totals = None
         county_correction_factors = None
-        logger.info("%s no corrections configured; using allocated totals as-is", _step_label("4"))
+        logger.info("%s no corrections configured; using allocated totals as-is", _step_label("1.4"))
     return corrected, beam_activity_totals, county_correction_factors
 
 
@@ -350,11 +345,11 @@ def run(
     if beam_activity_totals is not None and not beam_activity_totals.empty:
         beam_activity_totals_path = str(raw_dir / "beam_activity_totals.parquet")
         beam_activity_totals.to_parquet(beam_activity_totals_path, index=False)
-        logger.info("%s BEAM activity totals → %s", _step_label("3"), beam_activity_totals_path)
+        logger.info("%s BEAM activity totals → %s", _step_label("1.3"), beam_activity_totals_path)
     if county_correction_factors is not None and not county_correction_factors.empty:
         beam_activity_correction_factors_path = str(raw_dir / "beam_activity_correction_factors.parquet")
         county_correction_factors.to_parquet(beam_activity_correction_factors_path, index=False)
-        logger.info("%s BEAM activity correction factors → %s", _step_label("3"), beam_activity_correction_factors_path)
+        logger.info("%s BEAM activity correction factors → %s", _step_label("1.3"), beam_activity_correction_factors_path)
 
     beam_emissions_for_aermod_path = None
 
@@ -384,7 +379,7 @@ def run(
             beam_emissions_for_aermod_path = str(beam_emissions_for_aermod_stem) + ".parquet"
             logger.info(
                 "%s BEAM emissions for AERMOD → %s",
-                _step_label("5", "aermod"),
+                _step_label("1.5", "aermod"),
                 beam_emissions_for_aermod_path,
             )
 
@@ -414,11 +409,11 @@ def run(
         )
         beam_inmap_study_area_grid_path = str(raw_dir / "beam_inmap_study_area_grid.gpkg")
         inmap_study_area_grid.to_file(beam_inmap_study_area_grid_path, driver="GPKG")
-        logger.info("%s InMAP study area grid → %s", _step_label("6", "inmap"), beam_inmap_study_area_grid_path)
+        logger.info("%s InMAP study area grid → %s", _step_label("1.6", "inmap"), beam_inmap_study_area_grid_path)
         beam_emissions_for_inmap_path = str(beam_emissions_for_inmap_stem) + ".parquet"
         logger.info(
             "%s BEAM emissions for InMAP → %s",
-            _step_label("6", "inmap"),
+            _step_label("1.6", "inmap"),
             beam_emissions_for_inmap_path,
         )
 

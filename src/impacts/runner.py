@@ -59,15 +59,13 @@ def run_from_input_manifest(
     from .workflow.step1_process_emissions import run as run_emissions_processing
     from .workflow.prepare_emissions_from_skims import resolve_prepared_skims_path
 
-    intersection_df = None
     _log_step_banner("PREPROCESS STEP 3", "network mapping and grid intersection")
     grid_intersection_path, intersection_df = run_grid_intersection(pipeline, outputs_dir, input_root)
-    pipeline_for_runtime = pipeline
 
     _log_step_banner("STEP 1", "emissions processing")
     logger.info("Using Step 1 implementation: emissions_processing")
     emissions_outputs = run_emissions_processing(
-        pipeline_for_runtime,
+        pipeline,
         outputs_dir,
         input_root,
         grid_intersection_path,
@@ -85,11 +83,11 @@ def run_from_input_manifest(
         from .workflow.step2_compute_inmap_concentrations import run as run_inmap_dispersion
         from .workflow.step3_compute_aermod_concentrations import run as run_aermod_dispersion
         from .workflow.step4_prepare_exposure import run as run_prepare_exposure
-        if pipeline_for_runtime.inmap_enabled and emissions_outputs.get("beam_emissions_for_inmap"):
+        if pipeline.inmap_enabled and emissions_outputs.get("beam_emissions_for_inmap"):
             _log_step_banner("STEP 2", "inmap concentrations")
             logger.info("Using Step 2 implementation: inmap_concentrations_and_export")
             _, _, concentration_path = run_inmap_dispersion(
-                pipeline=pipeline_for_runtime,
+                pipeline=pipeline,
                 raw_dir=outputs_dir,
                 emissions_input_path=emissions_outputs["beam_emissions_for_inmap"],
                 inmap_study_area_grid_path=emissions_outputs.get("beam_inmap_study_area_grid"),
@@ -98,14 +96,14 @@ def run_from_input_manifest(
         else:
             logger.info(
                 "InMAP concentrations skipped: inmap_enabled=%s beam_emissions_for_inmap=%s",
-                pipeline_for_runtime.inmap_enabled,
+                pipeline.inmap_enabled,
                 emissions_outputs.get("beam_emissions_for_inmap"),
             )
-        if pipeline_for_runtime.aermod_enabled and pipeline_for_runtime.asrv_patterns_file and emissions_outputs.get("beam_emissions_for_aermod"):
+        if pipeline.aermod_enabled and pipeline.asrv_patterns_file and emissions_outputs.get("beam_emissions_for_aermod"):
             _log_step_banner("STEP 3", "aermod concentrations")
             logger.info("Using Step 3 implementation: aermod_concentrations_and_export")
             _, _, aermod_concentration_path = run_aermod_dispersion(
-                pipeline=pipeline_for_runtime,
+                pipeline=pipeline,
                 raw_dir=outputs_dir,
                 emissions_input_path=emissions_outputs["beam_emissions_for_aermod"],
             )
@@ -113,15 +111,15 @@ def run_from_input_manifest(
         else:
             logger.info(
                 "AERMOD concentrations skipped: aermod_enabled=%s asrv_patterns_file=%s beam_emissions_for_aermod=%s",
-                pipeline_for_runtime.aermod_enabled,
-                pipeline_for_runtime.asrv_patterns_file,
+                pipeline.aermod_enabled,
+                pipeline.asrv_patterns_file,
                 emissions_outputs.get("beam_emissions_for_aermod"),
             )
         if concentration_path is not None:
             _log_step_banner("STEP 4", "prepare exposure")
             logger.info("Using Step 4 implementation: prepare_exposure")
             _, exposure_grid_path, population_distribution_path, population_counts_path = run_prepare_exposure(
-                pipeline=pipeline_for_runtime,
+                pipeline=pipeline,
                 raw_dir=outputs_dir,
                 inmap_concentrations_path=str(concentration_path),
                 aermod_concentrations_path=str(aermod_concentration_path) if aermod_concentration_path else None,
@@ -172,7 +170,7 @@ def run_from_input_manifest(
                 else None
             ),
         },
-        "pipeline": pipeline_for_runtime.to_dict(),
+        "pipeline": pipeline.to_dict(),
         "population_inputs": population_inputs,
         "deterministic_contract": {
             "uses_only_manifest_paths": True,
@@ -182,18 +180,14 @@ def run_from_input_manifest(
             "dispersion_completed": run_dispersion,
             "stopped_after": (
                 "step4_prepare_exposure"
-                if population_distribution_path is not None
+                if exposure_grid_path is not None or population_distribution_path is not None
                 else (
-                    "step4_prepare_exposure"
-                    if exposure_grid_path is not None
+                    "step3_compute_aermod_concentrations"
+                    if aermod_concentration_path is not None
                     else (
-                        "step3_compute_aermod_concentrations"
-                        if aermod_concentration_path is not None
-                        else (
-                            "step2_compute_inmap_concentrations"
-                            if concentration_path is not None
-                            else "step1_process_emissions"
-                        )
+                        "step2_compute_inmap_concentrations"
+                        if concentration_path is not None
+                        else "step1_process_emissions"
                     )
                 )
             ),

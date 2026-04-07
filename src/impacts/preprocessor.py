@@ -15,19 +15,6 @@ from .common import register_local_input
 
 CONTRACT_VERSION = "1"
 logger = logging.getLogger(__name__)
-PERSONS_COLUMNS = [
-    "household_id",
-    "cell_id",
-    "age",
-    "sex",
-    "income",
-]
-HOUSEHOLDS_COLUMNS = [
-    "household_id",
-    "cell_id",
-    "income",
-    "income_category",
-]
 
 
 def _validate_configured_local_path(

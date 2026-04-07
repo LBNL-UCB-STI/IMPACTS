@@ -16,25 +16,20 @@ from ..common import read_table
 from ..common import read_vector
 from ..common import resolve_manifest_input_path
 from ..manifest.schema import PipelineConfig
+from . import _step_label
 
 logger = logging.getLogger(__name__)
 _INMAP_SOURCE_ID_COLUMN = "inmap_cell_id"
 _AERMOD_SOURCE_ID_COLUMN = "aermod_cell_id"
-_INMAP_KEEP_COLUMNS = [_INMAP_SOURCE_ID_COLUMN, "inmap_PrimaryPM25", "inmap_SecondaryPM25", "inmap_BC", "inmap_NO2"]
-_AERMOD_KEEP_COLUMNS = [_AERMOD_SOURCE_ID_COLUMN, "aermod_PrimaryPM25", "aermod_SecondaryPM25", "aermod_BC", "aermod_NO2"]
 _PERSON_REQUIRED_COLUMNS = ["person_id", "household_id", "home_x", "home_y"]
 _HOUSEHOLD_REQUIRED_COLUMNS = ["household_id"]
 
 
-def _step_label(step: str) -> str:
-    return f"Step 4.{step}"
-
-
 def _trace_frame(step: str, label: str, df: pd.DataFrame) -> None:
-    logger.info("%s trace %s shape=%s", _step_label(step), label, df.shape)
+    logger.info("%s trace %s shape=%s", _step_label(f"4.{step}"), label, df.shape)
     preview = list(df.columns[:20])
     suffix = "" if len(df.columns) <= 20 else " ..."
-    logger.info("%s trace %s columns(%d): %s%s", _step_label(step), label, len(df.columns), preview, suffix)
+    logger.info("%s trace %s columns(%d): %s%s", _step_label(f"4.{step}"), label, len(df.columns), preview, suffix)
 
 
 def _prepare_inmap_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -273,7 +268,7 @@ def run(
     _trace_frame("2", "full_exposure_grid", pd.DataFrame(full_exposure_grid.drop(columns="geometry", errors="ignore")))
     output_path = raw_dir / "beam_concentration_distribution.parquet"
     _write_exposure_grid(exposure_grid=full_exposure_grid, output_path=output_path)
-    logger.info("%s concentration distribution → %s", _step_label("2"), output_path)
+    logger.info("%s concentration distribution → %s", _step_label("4.2"), output_path)
 
     population_distribution_output_path: Optional[Path] = None
     population_counts_output_path: Optional[Path] = None
@@ -295,7 +290,7 @@ def run(
         population_distribution_output_path = raw_dir / "beam_population_distribution.parquet"
         population_distribution_output_path.parent.mkdir(parents=True, exist_ok=True)
         population_table.to_parquet(population_distribution_output_path, index=False)
-        logger.info("%s population distribution → %s", _step_label("3"), population_distribution_output_path)
+        logger.info("%s population distribution → %s", _step_label("4.3"), population_distribution_output_path)
 
         log_substep_banner("4.4", "build population counts", logger=logger)
         population_counts = _build_population_exposure_distribution(
@@ -311,8 +306,8 @@ def run(
         population_counts_output_path.parent.mkdir(parents=True, exist_ok=True)
         population_counts.to_parquet(population_counts_output_path, index=False)
         population_counts.to_file(population_counts_output_path.with_suffix(".gpkg"), driver="GPKG")
-        logger.info("%s population counts → %s", _step_label("4"), population_counts_output_path)
+        logger.info("%s population counts → %s", _step_label("4.4"), population_counts_output_path)
     else:
-        logger.info("%s population table skipped: persons/households not both available", _step_label("3"))
+        logger.info("%s population table skipped: persons/households not both available", _step_label("4.3"))
 
     return full_exposure_grid, output_path, population_distribution_output_path, population_counts_output_path

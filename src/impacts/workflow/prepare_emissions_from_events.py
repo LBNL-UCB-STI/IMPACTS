@@ -42,13 +42,11 @@ import pandas as pd
 from ..config.defaults import grams_per_short_ton
 from ..config.defaults import meters_per_mile
 from ..config.defaults import parked_processes
-from ..config.defaults import running_processes
 from ..manifest.file_ops import file_entry
 from ..manifest.file_ops import parquet_available
 from ..common import prepared_table_target
 from ..common import read_table
 from ..common import resolve_manifest_input_path
-from ..common import resolve_latest_events_local_path
 from ..common import normalize_county_fips
 
 logger = logging.getLogger(__name__)
@@ -201,7 +199,6 @@ def _parse_interval_bounds(raw: object) -> tuple[Optional[float], Optional[float
     text = str(raw).strip()
     if not text:
         return None, None, False
-    left_inclusive = text.startswith("[")
     right_inclusive = text.endswith("]")
     inner = text.strip("[]() ")
     parts = [part.strip() for part in inner.split(",")]
@@ -553,21 +550,15 @@ def prepare_events_inputs(
     )
     skims_path = _write_staged_skims(skims_df, input_root=input_root)
     logger.info("Step 1: wrote skims derived from events %d rows → %s", len(skims_df), skims_path)
-    staged = (
-        events_path,
-        str(skims_path),
-        skims_df,
-    )
-    events_path, skims_path, base_skims_df = staged
+    skims_path = str(skims_path)
     manifest_inputs["skims_from_events"] = file_entry(
         kind="local",
         path=events_path,
         staged_path=skims_path,
         optional=True,
     )
-    logger.info("Step 1: wrote source skims %d rows → %s", len(base_skims_df), skims_path)
 
-    activity_df = build_activity_table(base_skims_df)
+    activity_df = build_activity_table(skims_df)
     suffix = ".parquet" if parquet_available() else ".csv.gz"
     skims_dir = input_root / "skims"
     skims_dir.mkdir(parents=True, exist_ok=True)

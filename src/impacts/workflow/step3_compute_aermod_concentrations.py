@@ -21,6 +21,7 @@ from ..common import read_vector
 from ..config.defaults import annualization_days as default_annualization_days
 from ..config.defaults import grams_per_short_ton
 from ..manifest.schema import PipelineConfig
+from . import _step_label
 
 logger = logging.getLogger(__name__)
 
@@ -55,27 +56,23 @@ class _Kernel(TypedDict):
     response_per_ton: np.ndarray
 
 
-def _step_label(step: str) -> str:
-    return f"Step 3.{step}"
-
-
 def _trace_frame(step: str, label: str, df: pd.DataFrame, *, key_cols: Optional[list[str]] = None) -> None:
-    logger.info("%s trace %s shape=%s", _step_label(step), label, df.shape)
+    logger.info("%s trace %s shape=%s", _step_label(f"3.{step}"), label, df.shape)
     preview = list(df.columns[:20])
     suffix = "" if len(df.columns) <= 20 else " ..."
-    logger.info("%s trace %s columns(%d): %s%s", _step_label(step), label, len(df.columns), preview, suffix)
+    logger.info("%s trace %s columns(%d): %s%s", _step_label(f"3.{step}"), label, len(df.columns), preview, suffix)
     if key_cols:
         present = [col for col in key_cols if col in df.columns]
         if present and not df.empty:
             logger.info(
                 "%s trace %s sample_keys=%s",
-                _step_label(step),
+                _step_label(f"3.{step}"),
                 label,
                 df[present].head(5).to_dict(orient="records"),
             )
 
 
-def _resolve_source_grid_id_column(pipeline: PipelineConfig, df: pd.DataFrame) -> str:
+def _resolve_source_grid_id_column(df: pd.DataFrame) -> str:
     if _AERMOD_SOURCE_ID_COLUMN not in df.columns:
         raise ValueError(
             "AERMOD emissions input is missing a source grid id column. "
@@ -557,7 +554,7 @@ def _load_or_build_kernel_library(
     )
     if kernels_path.exists():
         kernel_df = pd.read_parquet(kernels_path)
-        logger.info("%s reusing cached ASRV kernels from %s", _step_label("3"), kernels_path)
+        logger.info("%s reusing cached ASRV kernels from %s", _step_label("3.3"), kernels_path)
         patterns_df = pd.read_parquet(normalized_patterns_path) if normalized_patterns_path.exists() else None
         return _deserialize_kernel_library(kernel_df), patterns_df
 
@@ -567,7 +564,7 @@ def _load_or_build_kernel_library(
     kernels_path.parent.mkdir(parents=True, exist_ok=True)
     _serialize_kernel_library(kernel_library).to_parquet(kernels_path, index=False)
     patterns_df.to_parquet(normalized_patterns_path, index=False)
-    logger.info("%s cached ASRV kernels at %s", _step_label("3"), kernels_path)
+    logger.info("%s cached ASRV kernels at %s", _step_label("3.3"), kernels_path)
     return kernel_library, patterns_df
 
 
@@ -659,11 +656,11 @@ def _compute_no2_from_isrm_matrix(
     ISRM matrix so that the column becomes true NO2 concentration.
     """
     if "NO2" not in concentrations_df.columns:
-        logger.warning("%s NO2 column not found in concentrations; skipping ISRM ratio step", _step_label("5"))
+        logger.warning("%s NO2 column not found in concentrations; skipping ISRM ratio step", _step_label("3.5"))
         return concentrations_df
 
     if "inmap_cell_id" not in target_grid.columns:
-        logger.warning("%s target_grid missing inmap_cell_id; skipping ISRM ratio step", _step_label("5"))
+        logger.warning("%s target_grid missing inmap_cell_id; skipping ISRM ratio step", _step_label("3.5"))
         return concentrations_df
 
     data = np.load(isrm_matrix_path)
@@ -688,7 +685,7 @@ def _compute_no2_from_isrm_matrix(
     result["NO2"] = result["NO2"].to_numpy(dtype=np.float64) * cell_ratio
     logger.info(
         "%s NO2 computed from ISRM column-sum ratios: %d / %d cells have ratio > 0",
-        _step_label("5"),
+        _step_label("3.5"),
         int((cell_ratio > 0).sum()),
         len(target_ids),
     )
@@ -710,8 +707,6 @@ def _attach_concentrations(
     result = target_grid.copy()
     concentration_cols = [col for col in concentrations_df.columns if col != target_id_col]
     if not concentration_cols:
-        for col in concentration_cols:
-            result[col] = 0.0
         return result
     lookup = concentrations_df.set_index(target_id_col)
     target_ids = result[target_id_col].to_numpy()
@@ -755,7 +750,7 @@ def run(
         emissions_gdf = emissions_gdf.to_crs(epsg=int(pipeline.output_epsg))
     if target_grid.crs is not None:
         target_grid = target_grid.to_crs(epsg=int(pipeline.output_epsg))
-    source_id_col = _resolve_source_grid_id_column(pipeline, emissions_gdf)
+    source_id_col = _resolve_source_grid_id_column(emissions_gdf)
     target_id_col = _resolve_target_grid_id_column(pipeline, target_grid)
     emissions_cols = _emissions_columns(emissions_gdf, pipeline)
     if emissions_input_gdf is None:
@@ -785,7 +780,7 @@ def run(
     )
     logger.info(
         "%s prepared %d source cells over %d target cells at %.2fm grid spacing",
-        _step_label("1"),
+        _step_label("3.1"),
         len(source_df),
         len(target_grid),
         grid_size_meters,
@@ -824,7 +819,7 @@ def run(
     log_substep_banner("3.3", "build ASRV kernels", logger=logger)
     logger.info(
         "%s using %d ASRV pattern(s) across %d source cells",
-        _step_label("3"),
+        _step_label("3.3"),
         len(requested_pattern_keys),
         len(source_df),
     )
@@ -853,11 +848,11 @@ def run(
         logger.info(
             "%s no ISRM NO2/NOx matrix configured (asrv_nox_to_no2_ratios_file / isrm_nox_to_no2_ratios_file); "
             "NO2 column will not be produced",
-            _step_label("5"),
+            _step_label("3.5"),
         )
         concentrations_df = concentrations_df.drop(columns=["NO2"])
     else:
-        logger.info("%s NO2 column absent from kernel output; skipping ratio step", _step_label("5"))
+        logger.info("%s NO2 column absent from kernel output; skipping ratio step", _step_label("3.5"))
 
     log_substep_banner("3.6", "write concentration outputs", logger=logger)
     output_path = raw_dir / "beam_aermod_concentrations.parquet"
@@ -867,5 +862,5 @@ def run(
         target_id_col=target_id_col,
     )
     _write_outputs(result_gdf, output_path)
-    logger.info("%s AERMOD concentrations → %s", _step_label("6"), output_path)
+    logger.info("%s AERMOD concentrations → %s", _step_label("3.6"), output_path)
     return result_gdf, target_grid[target_id_col].to_numpy(dtype=int), output_path

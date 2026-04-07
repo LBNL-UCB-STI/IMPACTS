@@ -10,7 +10,6 @@ from typing import List
 from typing import Optional
 
 import duckdb
-import numpy as np
 import pandas as pd
 
 from ..common import annualize_prepared_skims_for_grid_allocation
@@ -19,17 +18,11 @@ from ..common import prepare_skims_for_grid_allocation
 from ..common import prepared_table_target
 from ..common import read_table
 from ..common import resolve_manifest_input_path
-from ..common import resolve_emissions_skims_local_path
-from ..common import resolve_latest_events_local_path
 from ..common import register_managed_input
 from ..manifest.file_ops import file_entry
+from . import _step_label
 
 logger = logging.getLogger(__name__)
-
-
-def _step_label(step: str, zone_label: Optional[str] = None) -> str:
-    suffix = f"[{zone_label}]" if zone_label else ""
-    return f"Step 1.{step}{suffix}"
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +64,7 @@ def _reuse_existing_outputs(raw_dir: Path) -> Optional[Dict[str, Optional[str]]]
     }
     logger.info(
         "%s reusing existing emissions outputs; skipping recomputation (inmap=%s, aermod=%s)",
-        _step_label("0"),
+        _step_label("1.0"),
         outputs["beam_emissions_for_inmap"],
         outputs["beam_emissions_for_aermod"],
     )
@@ -110,7 +103,7 @@ def _build_combined_grouped_table(
     missing = [col for col in required_cols if col not in intersection.columns]
     if missing:
         raise ValueError(
-            f"{_step_label('1')} requires canonical intersection columns. Missing: {missing}"
+            f"{_step_label('1.1')} requires canonical intersection columns. Missing: {missing}"
         )
 
     metric_cols = [
@@ -152,7 +145,7 @@ def _build_combined_grouped_table(
     if grouped.empty:
         return None
 
-    logger.info("%s BEAM mapping across grids rows=%d", _step_label("1"), len(grouped))
+    logger.info("%s BEAM mapping across grids rows=%d", _step_label("1.1"), len(grouped))
     return grouped
 
 
@@ -193,27 +186,27 @@ def _build_combined_allocated_table(
         county_activity = ",\n                ".join([
             f"COALESCE(CAST(s.{col} AS DOUBLE), 0.0) * COALESCE(CAST(g.{county_prop} AS DOUBLE), 0.0) AS {col}_county_allocated"
             for col in activity_cols
-        ]) if county_prop else ""
+        ])
         county_alloc = ",\n                ".join([
             f"COALESCE(CAST(s.{col} AS DOUBLE), 0.0) * COALESCE(CAST(g.{county_prop} AS DOUBLE), 0.0) AS {col}_county_allocated"
             for col in emission_cols
-        ]) if county_prop else ""
+        ])
         aermod_activity = ",\n                ".join([
             f"COALESCE(CAST(s.{col} AS DOUBLE), 0.0) * COALESCE(CAST(g.{aermod_prop} AS DOUBLE), 0.0) AS {col}_aermod_allocated"
             for col in activity_cols
-        ]) if aermod_prop else ""
+        ])
         inmap_activity = ",\n                ".join([
             f"COALESCE(CAST(s.{col} AS DOUBLE), 0.0) * COALESCE(CAST(g.{inmap_prop} AS DOUBLE), 0.0) AS {col}_inmap_allocated"
             for col in activity_cols
-        ]) if inmap_prop else ""
+        ])
         aermod_alloc = ",\n                ".join([
             f"COALESCE(CAST(s.{col} AS DOUBLE), 0.0) * COALESCE(CAST(g.{aermod_prop} AS DOUBLE), 0.0) AS {col}_aermod_allocated"
             for col in emission_cols
-        ]) if aermod_prop else ""
+        ])
         inmap_alloc = ",\n                ".join([
             f"COALESCE(CAST(s.{col} AS DOUBLE), 0.0) * COALESCE(CAST(g.{inmap_prop} AS DOUBLE), 0.0) AS {col}_inmap_allocated"
             for col in emission_cols
-        ]) if inmap_prop else ""
+        ])
         extra_select = ",\n                ".join([
             part
             for part in [
@@ -248,7 +241,7 @@ def _build_combined_allocated_table(
     if allocated.empty:
         return None
 
-    logger.info("%s BEAM emissions allocated across grids rows=%d", _step_label("2"), len(allocated))
+    logger.info("%s BEAM emissions allocated across grids rows=%d", _step_label("1.2"), len(allocated))
     return allocated
 
 
@@ -433,7 +426,6 @@ def load_or_prepare_skims_df(
 
     from .prepare_emissions_from_events import build_staged_skims_from_events
 
-    events_skims_path = None
     events_skims_path = build_staged_skims_from_events(
         input_root=input_root,
         network_path=network_path,
@@ -555,7 +547,7 @@ def prepare_skims_inputs(
         "staged_skims_input": str(staged_skims_input),
         "prepared_grouped_skims_path": str(prepared_grouped_skims_path),
         "prepared_skims_path": str(prepared_skims_path),
-        "skims_df": read_table(prepared_skims_path),
+        "skims_df": skims_df,
         "activity_path": None if event_inputs is None else event_inputs["activity_path"],
         "activity_df": source_activity_df,
     }

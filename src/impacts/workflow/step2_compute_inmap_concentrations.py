@@ -22,39 +22,36 @@ from ..config.defaults import concentrations
 from ..config.defaults import pollutants as default_pollutants
 from ..config.defaults import tons_per_year_to_ug_per_s
 from ..manifest.schema import PipelineConfig
+from . import _step_label
 
 logger = logging.getLogger(__name__)
-
-
-def _step_label(step_num: int, step: str) -> str:
-    return f"Step {step_num}.{step}"
 
 
 def _trace_columns(step: str, label: str, columns: list[str]) -> None:
     preview = columns[:20]
     suffix = "" if len(columns) <= 20 else " ..."
-    logger.info("%s trace %s columns(%d): %s%s", _step_label(2, step), label, len(columns), preview, suffix)
+    logger.info("%s trace %s columns(%d): %s%s", _step_label(f"2.{step}"), label, len(columns), preview, suffix)
 
 
 def _trace_frame(step: str, label: str, df: pd.DataFrame, *, key_cols: Optional[list[str]] = None) -> None:
-    logger.info("%s trace %s shape=%s", _step_label(2, step), label, df.shape)
+    logger.info("%s trace %s shape=%s", _step_label(f"2.{step}"), label, df.shape)
     _trace_columns(step, label, list(df.columns))
     if key_cols:
         present = [col for col in key_cols if col in df.columns]
         if present and not df.empty:
             sample = df[present].head(5).to_dict(orient="records")
-            logger.info("%s trace %s sample_keys=%s", _step_label(2, step), label, sample)
+            logger.info("%s trace %s sample_keys=%s", _step_label(f"2.{step}"), label, sample)
 
 
 def _trace_array(step: str, label: str, values: np.ndarray) -> None:
     arr = np.asarray(values).reshape(-1)
     size = int(arr.shape[0])
     if size == 0:
-        logger.info("%s trace %s length=0", _step_label(2, step), label)
+        logger.info("%s trace %s length=0", _step_label(f"2.{step}"), label)
         return
     logger.info(
         "%s trace %s length=%d min=%s max=%s sum=%s nonzero=%d sample=%s",
-        _step_label(2, step),
+        _step_label(f"2.{step}"),
         label,
         size,
         float(arr.min()),
@@ -225,7 +222,7 @@ def _build_no2_transfer_matrix(
             shape = matrix.shape
         logger.info(
             "%s loaded NOx->NO2 transfer matrix from %s shape=%s",
-            _step_label(2, "2"),
+            _step_label("2.2"),
             isrm_nox_to_no2_ratios_file,
             shape,
         )
@@ -248,7 +245,7 @@ def _compute_custom_receptor_response(
     n_receptors = int(receptor_cells.size)
     logger.info(
         "%s computing %s from %s over %d source cells → %d receptor cells using custom transfer matrix",
-        _step_label(2, "2"),
+        _step_label("2.2"),
         result_key,
         emissions_key,
         int(source_cells.size),
@@ -291,7 +288,7 @@ def _compute_custom_receptor_response(
 
     logger.info(
         "%s computed %s in %.2fs",
-        _step_label(2, "2"),
+        _step_label("2.2"),
         result_key,
         time.perf_counter() - started,
     )
@@ -333,9 +330,9 @@ def _prepare_grid_emissions(
         for col, source_col in source_column_map.items()
         if source_col is not None
     }
-    logger.info("%s trace source_column_map=%s", _step_label(2, "0"), source_column_map)
+    logger.info("%s trace source_column_map=%s", _step_label("2.0"), source_column_map)
     _trace_frame("0", "prepared_grid_emissions", grouped, key_cols=[source_id_col])
-    logger.info("%s trace available_source_pollutants=%s", _step_label(2, "0"), sorted(available_pollutants))
+    logger.info("%s trace available_source_pollutants=%s", _step_label("2.0"), sorted(available_pollutants))
     return grouped, available_pollutants
 
 
@@ -357,7 +354,6 @@ def _align_emissions_to_isrm_sources(
 ) -> tuple[np.ndarray, pd.DataFrame]:
     """Step 2.1: align emissions source cells to the ISRM source index."""
     source_dim = int(sr["SOA"].shape[1])
-    receptor_dim = int(sr["SOA"].shape[2])
     raw_source_cells = np.sort(emis[source_id_col].unique().astype(int))
     valid_mask = (raw_source_cells >= 0) & (raw_source_cells < source_dim)
     source_cells = raw_source_cells[valid_mask]
@@ -366,18 +362,11 @@ def _align_emissions_to_isrm_sources(
     source_indexed.index.name = source_id_col
     logger.info(
         "%s aligned emissions to ISRM sources: raw_source_cells=%d kept=%d dropped=%d source_dim=%d",
-        _step_label(2, "1"),
+        _step_label("2.1"),
         int(raw_source_cells.size),
         int(source_cells.size),
         dropped,
         source_dim,
-    )
-    logger.info(
-        "%s trace receptor_dim=%d raw_source_head=%s kept_source_head=%s",
-        _step_label(2, "1"),
-        receptor_dim,
-        raw_source_cells[:10].tolist(),
-        source_cells[:10].tolist(),
     )
     _trace_frame("1", "source_indexed", source_indexed.reset_index(), key_cols=[source_id_col])
     for col in source_indexed.columns:
@@ -398,7 +387,7 @@ def _compute_species_response(
     source_values = source_indexed[emissions_key].to_numpy()
     logger.info(
         "%s computing %s from %s over %d source cells → %d receptor cells",
-        _step_label(2, "2"),
+        _step_label("2.2"),
         species_key,
         emissions_key,
         int(source_cells.size),
@@ -408,7 +397,7 @@ def _compute_species_response(
     arr = _matrix_response(sr, species_key, source_cells, source_values, receptor_cells)
     logger.info(
         "%s computed %s in %.2fs",
-        _step_label(2, "2"),
+        _step_label("2.2"),
         species_key,
         time.perf_counter() - started,
     )
@@ -424,9 +413,9 @@ def _compute_no2_response(
     receptor_cells: np.ndarray,
     isrm_nox_to_no2_ratios_file: Optional[str],
 ) -> Optional[np.ndarray]:
-    logger.info("%s resolving NO2 source from ISRM zarr or configured NOx->NO2 transfer matrix", _step_label(2, "1"))
+    logger.info("%s resolving NO2 source from ISRM zarr or configured NOx->NO2 transfer matrix", _step_label("2.1"))
     if "NO2" in sr:
-        logger.info("%s using NO2 transfer matrix from ISRM zarr", _step_label(2, "1"))
+        logger.info("%s using NO2 transfer matrix from ISRM zarr", _step_label("2.1"))
         return _compute_species_response(
             sr=sr,
             species_key="NO2",
@@ -442,11 +431,11 @@ def _compute_no2_response(
     if no2_transfer_matrix is None:
         logger.warning(
             "%s NO2 skipped: ISRM zarr has no NO2 and no configured ISRM NOx->NO2 transfer matrix was available",
-            _step_label(2, "1"),
+            _step_label("2.1"),
         )
         return None
 
-    logger.info("%s using configured ISRM NOx->NO2 transfer matrix", _step_label(2, "1"))
+    logger.info("%s using configured ISRM NOx->NO2 transfer matrix", _step_label("2.1"))
     return _compute_custom_receptor_response(
         transfer_matrix=no2_transfer_matrix,
         emissions_key="tons_per_year_NOx_inmap_allocated",
@@ -457,43 +446,18 @@ def _compute_no2_response(
     )
 
 
-def _has_no2_fallback_matrix(
-    *,
-    isrm_nox_to_no2_ratios_file: Optional[str],
-) -> bool:
-    return bool(isrm_nox_to_no2_ratios_file)
-
-
-def _read_receptor_vector(sr, key: str, receptor_dim: int) -> np.ndarray:
-    values = np.asarray(sr[key][:]).reshape(-1)
-    logger.info(
-        "%s trace receptor_vector[%s] raw_length=%d expected=%d sample=%s",
-        _step_label(2, "3"),
-        key,
-        int(values.shape[0]),
-        receptor_dim,
-        values[:5].tolist(),
-    )
-    if values.shape[0] < receptor_dim:
-        raise ValueError(
-            f"{_step_label(2, '3')} {key} length {values.shape[0]} is shorter than receptor_dim {receptor_dim}"
-        )
-    return values[:receptor_dim]
-
-
 def _assemble_concentration_results(
     *,
     receptor_cells: np.ndarray,
     factor: float,
-    output_factors: Optional[dict[str, float]],
     arrays: dict[str, np.ndarray],
     source_id_col: str,
 ) -> pd.DataFrame:
     """Step 2.3: assemble concentration outputs on the receptor dimension."""
     n_receptors = int(receptor_cells.size)
-    logger.info("%s assembling concentration DataFrame for %d receptors", _step_label(2, "3"), n_receptors)
+    logger.info("%s assembling concentration DataFrame for %d receptors", _step_label("2.3"), n_receptors)
     for name, arr in arrays.items():
-        logger.info("%s %s response length=%d", _step_label(2, "3"), name, int(np.asarray(arr).shape[0]))
+        logger.info("%s %s response length=%d", _step_label("2.3"), name, int(np.asarray(arr).shape[0]))
         _trace_array("3", name, arr)
     bad = {
         name: int(np.asarray(arr).shape[0])
@@ -502,7 +466,7 @@ def _assemble_concentration_results(
     }
     if bad:
         raise ValueError(
-            f"{_step_label(2, '3')} produced mismatched receptor lengths: expected {n_receptors}, got {bad}"
+            f"{_step_label('2.3')} produced mismatched receptor lengths: expected {n_receptors}, got {bad}"
         )
 
     results = pd.DataFrame({source_id_col: receptor_cells})
@@ -513,8 +477,7 @@ def _assemble_concentration_results(
     ] + ["TotalPM25"]
     for output_key in ordered_output_keys:
         if output_key in arrays:
-            resolved_factor = float((output_factors or {}).get(output_key, factor))
-            results[output_key] = resolved_factor * arrays[output_key]
+            results[output_key] = factor * arrays[output_key]
 
     _trace_frame("3", "concentrations", results, key_cols=[source_id_col])
     return results
@@ -529,14 +492,14 @@ def _build_beam_inmap_concentrations_gdf(
 ) -> gpd.GeoDataFrame:
     logger.info(
         "%s building BEAM InMAP concentrations GeoDataFrame from %s using grid_id_col=%s",
-        _step_label(2, "4"),
+        _step_label("2.4"),
         inmap_grid_path,
         grid_id_col,
     )
     grid = read_vector(inmap_grid_path)
     if grid_id_col not in grid.columns:
         raise ValueError(
-            f"{_step_label(2, '4')} grid id column '{grid_id_col}' not found in {inmap_grid_path}. "
+            f"{_step_label('2.4')} grid id column '{grid_id_col}' not found in {inmap_grid_path}. "
             f"Available columns: {list(grid.columns)}"
         )
     grid = grid.copy()
@@ -566,9 +529,9 @@ def _write_concentration_outputs(
     if out.suffix.lower() != ".parquet":
         raise ValueError("Output path must end with .parquet for Step 2 BEAM InMAP concentrations")
     gpkg_path = out.with_suffix(".gpkg")
-    logger.info("%s writing BEAM InMAP concentrations GeoParquet to %s", _step_label(2, "5"), out)
+    logger.info("%s writing BEAM InMAP concentrations GeoParquet to %s", _step_label("2.5"), out)
     beam_inmap_concentrations_gdf.to_parquet(out, index=False)
-    logger.info("%s writing BEAM InMAP concentrations GPKG to %s", _step_label(2, "5"), gpkg_path)
+    logger.info("%s writing BEAM InMAP concentrations GPKG to %s", _step_label("2.5"), gpkg_path)
     beam_inmap_concentrations_gdf.to_file(gpkg_path, driver="GPKG")
     return out, gpkg_path
 
@@ -584,12 +547,6 @@ def compute_isrm_concentrations(
     isrm_nox_to_no2_ratios_file: Optional[str] = None,
     pollutants_map: Optional[dict[str, str]] = None,
 ) -> pd.DataFrame:
-    logger.info(
-        "%s trace compute_start factor=%s bc_required=%s",
-        _step_label(2, "0"),
-        factor,
-        True,
-    )
     emis, available_pollutants = _prepare_grid_emissions(
         grid_emissions_df,
         source_id_col=source_id_col,
@@ -605,14 +562,13 @@ def compute_isrm_concentrations(
     requested_pollutant_set = set(requested_pollutants)
     specs = _concentration_specs()
     arrays: dict[str, np.ndarray] = {}
-    output_factors: dict[str, float] = {}
     concentration_plan: list[tuple[str, dict[str, str]]] = []
     for concentration_name in concentrations:
         spec = specs.get(concentration_name)
         if spec is None:
             logger.warning(
                 "%s concentration %s is listed in defaults.concentrations but has no computation spec",
-                _step_label(2, "1"),
+                _step_label("2.1"),
                 concentration_name,
             )
             continue
@@ -623,26 +579,24 @@ def compute_isrm_concentrations(
         if required_pollutant not in available_pollutants:
             logger.warning(
                 "%s requested pollutant %s is missing source emissions needed for concentration %s",
-                _step_label(2, "1"),
+                _step_label("2.1"),
                 required_pollutant,
                 concentration_output,
             )
             continue
         if concentration_output == "NO2":
-            has_no2 = "NO2" in sr or _has_no2_fallback_matrix(
-                isrm_nox_to_no2_ratios_file=isrm_nox_to_no2_ratios_file,
-            )
+            has_no2 = "NO2" in sr or bool(isrm_nox_to_no2_ratios_file)
             if not has_no2:
                 logger.warning(
                     "%s requested pollutant NOx has no NO2 concentration source: ISRM zarr has no NO2 and "
                     "no isrm_nox_to_no2_ratios_file fallback was configured",
-                    _step_label(2, "1"),
+                    _step_label("2.1"),
                 )
                 continue
         elif spec["zarr"] not in sr:
             logger.warning(
                 "%s requested pollutant %s is missing required concentration source %s in ISRM zarr",
-                _step_label(2, "1"),
+                _step_label("2.1"),
                 required_pollutant,
                 concentration_output,
             )
@@ -685,7 +639,7 @@ def compute_isrm_concentrations(
     if missing_total_pm_components:
         logger.warning(
             "%s TotalPM25 was not calculated because required concentration components are missing: %s",
-            _step_label(2, "2"),
+            _step_label("2.2"),
             missing_total_pm_components,
         )
     else:
@@ -695,7 +649,6 @@ def compute_isrm_concentrations(
     return _assemble_concentration_results(
         receptor_cells=receptor_cells,
         factor=factor,
-        output_factors=output_factors,
         arrays=arrays,
         source_id_col=source_id_col,
     )
@@ -721,7 +674,7 @@ def run(
 
     log_step_banner("Step 2", "Compute InMAP Concentrations", logger=logger)
     log_substep_banner("2.0", "load emissions input", logger=logger)
-    logger.info("%s loading BEAM emissions for InMAP from %s", _step_label(2, "0"), emissions_input_path)
+    logger.info("%s loading BEAM emissions for InMAP from %s", _step_label("2.0"), emissions_input_path)
     emissions_df = read_table(emissions_input_path)
     _trace_frame("0", "loaded_emissions", emissions_df, key_cols=["inmap_cell_id"])
     beam_inmap_grid_ids = (
@@ -733,17 +686,17 @@ def run(
     )
     logger.info(
         "%s trace beam_inmap_grid_ids count=%d sample=%s",
-        _step_label(2, "0"),
+        _step_label("2.0"),
         int(beam_inmap_grid_ids.shape[0]),
         beam_inmap_grid_ids[:10].tolist(),
     )
 
     log_substep_banner("2.1", "load ISRM source data", logger=logger)
-    logger.info("%s loading ISRM store from %s", _step_label(2, "0"), pipeline.isrm_url)
+    logger.info("%s loading ISRM store from %s", _step_label("2.0"), pipeline.isrm_url)
     sr = _load_isrm_store(pipeline.isrm_url)
     logger.info(
         "%s trace isrm_shapes SOA=%s TotalPop=%s MortalityRate=%s",
-        _step_label(2, "0"),
+        _step_label("2.0"),
         getattr(sr["SOA"], "shape", None),
         getattr(sr["TotalPop"], "shape", None) if "TotalPop" in sr else None,
         getattr(sr["MortalityRate"], "shape", None) if "MortalityRate" in sr else None,
