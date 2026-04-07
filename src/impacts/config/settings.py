@@ -319,10 +319,7 @@ class Exposure:
         )
         if result.enabled and not result.population_folder:
             raise ValueError("Missing required value: impacts.exposure.population_folder")
-        return cls(
-            enabled=result.enabled,
-            population_folder=result.population_folder,
-        )
+        return result
 
 
 @dataclass(frozen=True)

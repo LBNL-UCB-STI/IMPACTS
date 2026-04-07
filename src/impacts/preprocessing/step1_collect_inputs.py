@@ -245,14 +245,12 @@ def run(
         population_artifact_entries = {
             "persons": find_latest_beam_population_reference(optional=True),
             "households": find_latest_beam_households_reference(optional=True),
-            "plans": None,
         }
         population_artifact_keys = {
             "persons": BEAM_POPULATION_PREFIX,
             "households": BEAM_HOUSEHOLDS_PREFIX,
-            "plans": "plans",
         }
-        for stem in ("persons", "households", "plans"):
+        for stem in ("persons", "households"):
             existing_entry = population_artifact_entries[stem]
             if existing_entry is not None:
                 population_inputs[stem] = existing_entry
@@ -266,7 +264,6 @@ def run(
                     source_path=source_path,
                     relative_target=str(Path(exposure.population_folder) / Path(source_path).name),
                     artifact_key=population_artifact_keys[stem],
-                    optional=(stem == "plans"),
                     prefer_reference=True,
                     metadata={"artifact_family": population_artifact_keys[stem]},
                 )

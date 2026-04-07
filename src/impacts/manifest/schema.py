@@ -177,6 +177,7 @@ class InputsManifest:
             "inputs manifest",
         )
         pipeline = _required_dict(payload.get("pipeline"), "pipeline")
+        # Validate the embedded pipeline payload against the maintained schema.
         PipelineConfig.from_dict(pipeline)
         return cls(
             contract_version=_required_string(payload.get("contract_version"), "contract_version"),

@@ -334,7 +334,6 @@ def run(
         logger.info("Step 3: reusing existing grid intersection %s", grid_intersection_path)
         return str(grid_intersection_path), None
     mapped_network_path = str((input_root / "network" / "beam_osm_mapped.parquet").resolve())
-    mapped_network_gpkg = str(Path(mapped_network_path).with_suffix(".gpkg"))
     log_substep_banner("3.1", "map BEAM network to OSM", logger=logger)
     if Path(mapped_network_path).exists():
         logger.info("Step 3.1: reusing BEAM/OSM mapping %s", mapped_network_path)
@@ -349,7 +348,7 @@ def run(
             network_osm_id_col=pipeline.beam_osm_id_col,
             output_epsg=int(pipeline.output_epsg),
         )
-        mapped_network.to_file(mapped_network_gpkg, driver="GPKG")
+        mapped_network.to_file(str(Path(mapped_network_path).with_suffix(".gpkg")), driver="GPKG")
         logger.info("Step 3.1 complete: wrote %s", mapped_network_path)
     mapped_network = _load_geodataframe(mapped_network_path)
     epsg = int(pipeline.output_epsg)

@@ -257,7 +257,11 @@ def _compute_custom_receptor_response(
     if isinstance(transfer_matrix, pd.DataFrame):
         aligned = transfer_matrix.reindex(index=source_cells, fill_value=0.0)
         # keep only columns that are in receptor_cells (which is sorted)
-        cols_in_rc = [c for c in aligned.columns if np.searchsorted(receptor_cells, c) < n_receptors and receptor_cells[np.searchsorted(receptor_cells, c)] == c]
+        cols_in_rc = []
+        for column in aligned.columns:
+            position = np.searchsorted(receptor_cells, column)
+            if position < n_receptors and receptor_cells[position] == column:
+                cols_in_rc.append(column)
         if cols_in_rc:
             sub = aligned[cols_in_rc].to_numpy().T.dot(source_values)
             positions = np.searchsorted(receptor_cells, np.asarray(cols_in_rc, dtype=int))

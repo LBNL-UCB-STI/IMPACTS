@@ -43,7 +43,6 @@ from ..config.defaults import grams_per_short_ton
 from ..config.defaults import meters_per_mile
 from ..config.defaults import parked_processes
 from ..manifest.file_ops import file_entry
-from ..manifest.file_ops import parquet_available
 from ..common import prepared_table_target
 from ..common import read_table
 from ..common import resolve_manifest_input_path
@@ -491,14 +490,10 @@ def find_staged_events_path(input_root: Path, manifest_inputs: Optional[Dict[str
 
 
 def _write_staged_skims(skims_df: pd.DataFrame, *, input_root: Path) -> Path:
-    suffix = ".parquet" if parquet_available() else ".csv.gz"
     skims_dir = input_root / "skims"
     skims_dir.mkdir(parents=True, exist_ok=True)
-    skims_path = skims_dir / f"skims_from_events{suffix}"
-    if suffix == ".parquet":
-        skims_df.to_parquet(skims_path, index=False)
-    else:
-        skims_df.to_csv(skims_path, index=False, compression="gzip")
+    skims_path = skims_dir / "skims_from_events.parquet"
+    skims_df.to_parquet(skims_path, index=False)
     return skims_path
 
 
@@ -559,14 +554,10 @@ def prepare_events_inputs(
     )
 
     activity_df = build_activity_table(skims_df)
-    suffix = ".parquet" if parquet_available() else ".csv.gz"
     skims_dir = input_root / "skims"
     skims_dir.mkdir(parents=True, exist_ok=True)
-    activity_path = skims_dir / f"activity_from_events{suffix}"
-    if suffix == ".parquet":
-        activity_df.to_parquet(activity_path, index=False)
-    else:
-        activity_df.to_csv(activity_path, index=False, compression="gzip")
+    activity_path = skims_dir / "activity_from_events.parquet"
+    activity_df.to_parquet(activity_path, index=False)
     manifest_inputs["activity_from_events"] = file_entry(
         kind="local",
         path=events_path,

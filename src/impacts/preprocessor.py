@@ -51,7 +51,6 @@ def build_inputs_manifest(
         input_root=input_root,
         key="settings",
         source_path=str(config_path),
-        relative_target="config/settings.yaml",
     )
     from .preprocessing.step1_collect_inputs import run as preprocess_step1
     from .preprocessing.step2_prepare_grids import run as preprocess_step2
@@ -166,7 +165,7 @@ def build_inputs_manifest(
             "container_output_dir": "/output",
             "entrypoint": "python -m impacts run",
             "command_template": "python -m impacts run --input-manifest {input_manifest} --output-dir {output_dir}",
-            "canonical_output_filenames": ["impacts_exposure_table.parquet", "impacts_exposure_table.csv.gz"],
+            "canonical_output_filenames": ["impacts_exposure_table.parquet"],
             "manifest_filenames": ["inputs_manifest.yaml", "run_manifest.yaml", "postprocess_manifest.yaml"],
         },
         "population_inputs": dict(step1_outputs["population_inputs"]),

@@ -247,18 +247,3 @@ def file_entry(
     if src.exists():
         entry["sha256"] = sha256_path(src)
     return entry
-
-
-def parquet_available() -> bool:
-    try:
-        import pyarrow  # noqa: F401
-
-        return True
-    except Exception:
-        pass
-    try:
-        import fastparquet  # noqa: F401
-
-        return True
-    except Exception:
-        return False

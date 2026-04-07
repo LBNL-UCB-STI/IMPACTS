@@ -7,13 +7,8 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
+from impacts.config._coerce import _reject_unknown_keys
 from impacts.manifest.file_ops import write_structured_file
-
-
-def _reject_unknown_keys(payload: Dict[str, Any], allowed: set[str], label: str) -> None:
-    unknown = sorted(set(payload.keys()) - allowed)
-    if unknown:
-        raise ValueError(f"Unsupported keys under {label}: {unknown}")
 
 def _deep_update_strings(value: Any, resolver) -> Any:
     if isinstance(value, dict):

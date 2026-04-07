@@ -37,7 +37,6 @@ from .consist_artifacts import log_input_reference
 from .consist_artifacts import resolve_logged_path
 from .manifest.file_ops import file_entry
 from .manifest.file_ops import is_remote_path
-from .manifest.file_ops import parquet_available
 
 logger = logging.getLogger(__name__)
 
@@ -616,7 +615,6 @@ def register_local_input(
     input_root: Path,
     key: str,
     source_path: str,
-    relative_target: str,
     optional: bool = False,
 ) -> str:
     source = str(Path(source_path).resolve())
@@ -657,7 +655,6 @@ def register_managed_input(
         input_root=input_root,
         key=key,
         source_path=source_path,
-        relative_target=relative_target,
         optional=optional,
     )
 
@@ -686,7 +683,6 @@ def register_optional_input(
         input_root=input_root,
         key=key,
         source_path=source_path,
-        relative_target=relative_target,
         optional=True,
     )
 
@@ -699,8 +695,7 @@ def resolve_manifest_input_path(entry: Dict[str, Any], *, label: str) -> str:
 
 
 def prepared_table_target(input_root: Path, stem: str) -> Path:
-    suffix = ".parquet" if parquet_available() else ".csv.gz"
-    return input_root / "skims" / f"{stem}{suffix}"
+    return input_root / "skims" / f"{stem}.parquet"
 
 
 # ---------------------------------------------------------------------------
