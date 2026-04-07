@@ -61,17 +61,8 @@ def run_from_input_manifest(
 
     intersection_df = None
     _log_step_banner("PREPROCESS STEP 3", "network mapping and grid intersection")
-    step3_result = run_grid_intersection(pipeline, outputs_dir, input_root)
-    if isinstance(step3_result, tuple) and len(step3_result) == 3:
-        grid_intersection_path, intersection_df, aermod_subset_grid_path = step3_result
-    else:
-        grid_intersection_path, intersection_df = step3_result
-        aermod_subset_grid_path = None
+    grid_intersection_path, intersection_df = run_grid_intersection(pipeline, outputs_dir, input_root)
     pipeline_for_runtime = pipeline
-    if aermod_subset_grid_path:
-        pipeline_payload = pipeline.to_dict()
-        pipeline_payload["aermod_grid_path"] = aermod_subset_grid_path
-        pipeline_for_runtime = PipelineConfig.from_dict(pipeline_payload)
 
     _log_step_banner("STEP 1", "emissions processing")
     logger.info("Using Step 1 implementation: emissions_processing")
@@ -158,7 +149,6 @@ def run_from_input_manifest(
             "skims_emissions": prepared_skims_path,
             "grid_intersection": str(grid_intersection_path),
             "aermod_full_grid": pipeline.aermod_full_grid_path,
-            "aermod_network_intersected_grid": str(aermod_subset_grid_path) if aermod_subset_grid_path else None,
             **emissions_outputs,
             "beam_inmap_concentrations": str(concentration_path) if concentration_path else None,
             "beam_inmap_concentrations_gpkg": (

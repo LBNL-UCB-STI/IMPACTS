@@ -199,8 +199,7 @@ class Beam:
 class InmapDispersion:
     enabled: bool
     isrm_zarr: Optional[str] = None
-    isrm_nox_to_no2_matrix_npz: Optional[str] = None
-    isrm_nox_to_no2_matrix_factor: Optional[float] = None
+    isrm_nox_to_no2_ratios_file: Optional[str] = None
     grid_path: Optional[str] = None
     grid_id: Optional[str] = None
     grid_epsg: Optional[int] = None
@@ -212,8 +211,7 @@ class InmapDispersion:
             {
                 "enabled",
                 "isrm_zarr",
-                "isrm_nox_to_no2_matrix_npz",
-                "isrm_nox_to_no2_matrix_factor",
+                "isrm_nox_to_no2_ratios_file",
                 "grid_path",
                 "grid_id",
                 "grid_epsg",
@@ -224,8 +222,7 @@ class InmapDispersion:
         result = cls(
             enabled=enabled,
             isrm_zarr=_optional_string(payload.get("isrm_zarr")),
-            isrm_nox_to_no2_matrix_npz=_optional_string(payload.get("isrm_nox_to_no2_matrix_npz")),
-            isrm_nox_to_no2_matrix_factor=_optional_float(payload.get("isrm_nox_to_no2_matrix_factor")),
+            isrm_nox_to_no2_ratios_file=_optional_string(payload.get("isrm_nox_to_no2_ratios_file")),
             grid_path=_optional_string(payload.get("grid_path")),
             grid_id=_optional_string(payload.get("grid_id")),
             grid_epsg=_optional_int(payload.get("grid_epsg")),
@@ -233,10 +230,8 @@ class InmapDispersion:
         if result.enabled:
             if not result.isrm_zarr:
                 raise ValueError("Missing required value: impacts.dispersions.inmap.isrm_zarr")
-            if not result.isrm_nox_to_no2_matrix_npz:
-                raise ValueError("Missing required value: impacts.dispersions.inmap.isrm_nox_to_no2_matrix_npz")
-            if result.isrm_nox_to_no2_matrix_factor is None:
-                raise ValueError("Missing required value: impacts.dispersions.inmap.isrm_nox_to_no2_matrix_factor")
+            if not result.isrm_nox_to_no2_ratios_file:
+                raise ValueError("Missing required value: impacts.dispersions.inmap.isrm_nox_to_no2_ratios_file")
             if not result.grid_path:
                 raise ValueError("Missing required value: impacts.dispersions.inmap.grid_path")
         return result
@@ -248,12 +243,13 @@ class AermodDispersion:
     grid_size_meters: Optional[float] = None
     asrv_patterns_file: Optional[str] = None
     asrv_patterns_epsg: Optional[int] = None
+    asrv_nox_to_no2_ratios_file: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "AermodDispersion":
         _reject_unknown_keys(
             payload,
-            {"enabled", "grid_size_meters", "asrv_patterns_file", "asrv_patterns_epsg"},
+            {"enabled", "grid_size_meters", "asrv_patterns_file", "asrv_patterns_epsg", "asrv_nox_to_no2_ratios_file"},
             "impacts.dispersions.aermod",
         )
         enabled = _required_bool(payload.get("enabled"), "impacts.dispersions.aermod.enabled")
@@ -262,6 +258,7 @@ class AermodDispersion:
             grid_size_meters=_optional_float(payload.get("grid_size_meters")),
             asrv_patterns_file=_optional_string(payload.get("asrv_patterns_file")),
             asrv_patterns_epsg=_optional_int(payload.get("asrv_patterns_epsg")),
+            asrv_nox_to_no2_ratios_file=_optional_string(payload.get("asrv_nox_to_no2_ratios_file")),
         )
         if result.enabled:
             if result.grid_size_meters is None:
@@ -456,8 +453,7 @@ class ImpactsSettings:
                     "inmap": {
                         "enabled": self.impacts.dispersions.inmap.enabled,
                         "isrm_zarr": self.impacts.dispersions.inmap.isrm_zarr,
-                        "isrm_nox_to_no2_matrix_npz": self.impacts.dispersions.inmap.isrm_nox_to_no2_matrix_npz,
-                        "isrm_nox_to_no2_matrix_factor": self.impacts.dispersions.inmap.isrm_nox_to_no2_matrix_factor,
+                        "isrm_nox_to_no2_ratios_file": self.impacts.dispersions.inmap.isrm_nox_to_no2_ratios_file,
                         "grid_path": self.impacts.dispersions.inmap.grid_path,
                         "grid_id": self.impacts.dispersions.inmap.grid_id,
                         "grid_epsg": self.impacts.dispersions.inmap.grid_epsg,
@@ -467,6 +463,7 @@ class ImpactsSettings:
                         "grid_size_meters": self.impacts.dispersions.aermod.grid_size_meters,
                         "asrv_patterns_file": self.impacts.dispersions.aermod.asrv_patterns_file,
                         "asrv_patterns_epsg": self.impacts.dispersions.aermod.asrv_patterns_epsg,
+                        "asrv_nox_to_no2_ratios_file": self.impacts.dispersions.aermod.asrv_nox_to_no2_ratios_file,
                     },
                 },
                 "exposure": {

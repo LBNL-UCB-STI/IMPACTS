@@ -77,7 +77,7 @@ def build_inputs_manifest(
     )
     staged_activity_totals = step1_outputs["staged_activity_totals"]
     staged_isrm = step1_outputs["staged_isrm"]
-    staged_isrm_nox_to_no2_matrix_npz = step1_outputs["staged_isrm_nox_to_no2_matrix_npz"]
+    staged_isrm_nox_to_no2_ratios_file = step1_outputs["staged_isrm_nox_to_no2_ratios_file"]
     staged_asrv_patterns_file = step1_outputs["staged_asrv_patterns_file"]
     staged_inmap_grid_source = step1_outputs["staged_inmap_grid"]
     inmap_grid_epsg = None
@@ -144,12 +144,8 @@ def build_inputs_manifest(
             "aermod_full_grid_path": staged_aermod_full_grid,
             "aermod_grid_path": staged_aermod_grid,
             "isrm_url": staged_isrm,
-            "isrm_nox_to_no2_matrix_npz_path": staged_isrm_nox_to_no2_matrix_npz,
-            "isrm_nox_to_no2_matrix_factor": (
-                float(inmap.isrm_nox_to_no2_matrix_factor)
-                if inmap.isrm_nox_to_no2_matrix_factor is not None
-                else None
-            ),
+            "isrm_nox_to_no2_ratios_file": staged_isrm_nox_to_no2_ratios_file,
+            "asrv_nox_to_no2_ratios_file": aermod.asrv_nox_to_no2_ratios_file,
             "asrv_patterns_file": staged_asrv_patterns_file,
             "asrv_patterns_epsg": int(asrv_patterns_epsg) if asrv_patterns_epsg is not None else None,
             "grid_size_meters": float(aermod.grid_size_meters) if aermod.grid_size_meters is not None else None,

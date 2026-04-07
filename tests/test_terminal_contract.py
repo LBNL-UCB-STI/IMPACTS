@@ -27,8 +27,7 @@ def _pipeline_payload(tmp_path: Path) -> dict:
         "inmap_grid_epsg": 26910,
         "mapping_columns": {"link_id": "linkId", "grid_id": "isrm"},
         "isrm_url": str(tmp_path / "isrm.zarr"),
-        "isrm_nox_to_no2_matrix_npz_path": str(tmp_path / "matrix.npz"),
-        "isrm_nox_to_no2_matrix_factor": 1.0,
+        "isrm_nox_to_no2_ratios_file": str(tmp_path / "matrix.npz"),
         "grid_size_meters": 100.0,
         "asrv_patterns_file": str(tmp_path / "asrv_patterns.parquet"),
         "asrv_patterns_epsg": 4326,
@@ -86,7 +85,6 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.local_input_folder == "impacts/input/"
     assert config.impacts.dispersions.inmap.enabled is True
     assert config.impacts.dispersions.inmap.grid_path.endswith("isrm_polygon_wgs84.gpkg")
-    assert config.impacts.dispersions.inmap.isrm_nox_to_no2_matrix_factor == 1.0
     assert config.impacts.dispersions.aermod.enabled is True
     assert config.impacts.exposure.enabled is True
     assert config.impacts.exposure.population_folder == "urbansim/2018"
@@ -130,7 +128,6 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
     assert config.impacts.emissions.osm_network_folder.endswith("r5/sfbay-cbg5500-weakConn-network")
     assert config.impacts.dispersions.inmap.enabled is True
     assert config.impacts.dispersions.inmap.isrm_zarr == "~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr"
-    assert config.impacts.dispersions.inmap.isrm_nox_to_no2_matrix_factor == 1.0
     assert config.impacts.dispersions.aermod.enabled is True
     assert config.impacts.dispersions.aermod.grid_size_meters == 100.0
     assert config.impacts.exposure.population_folder == "urbansim/2018"
@@ -180,8 +177,7 @@ def test_pipeline_manifest_allows_disabled_inmap_without_inmap_inputs(tmp_path: 
     payload["inmap_grid_path"] = None
     payload["inmap_grid_epsg"] = None
     payload["isrm_url"] = None
-    payload["isrm_nox_to_no2_matrix_npz_path"] = None
-    payload["isrm_nox_to_no2_matrix_factor"] = None
+    payload["isrm_nox_to_no2_ratios_file"] = None
 
     config = PipelineConfig.from_dict(payload)
 

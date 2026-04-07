@@ -12,6 +12,7 @@ import duckdb
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from scipy.signal import fftconvolve
 
 from ..common import log_step_banner
 from ..common import log_substep_banner
@@ -43,10 +44,9 @@ _POLLUTANT_TO_CONCENTRATION_COLUMN: dict[str, str] = {
     "ROG": "SOA",
 }
 
-_KERNEL_RADIUS_METERS = 1000.0
+_KERNEL_RADIUS_METERS = 4500.0
 _ASRV_SOURCE_RATE_G_PER_S_M2 = 0.1
 _ASRV_ACTIVE_DAYS_PER_YEAR = default_annualization_days
-_SOURCE_CHUNK_SIZE = 50_000
 
 
 class _Kernel(TypedDict):
@@ -470,17 +470,6 @@ def _assign_source_pattern_keys(
     if (~result["pattern_key"].isin(available_pattern_keys)).any():
         raise ValueError("Some source cells still have no matched ASRV pattern after fallback.")
     return result
-    site_pts = patterns_df[["DataSet_ID", "Grid_X", "Grid_Y"]].merge(site_ref, on="DataSet_ID", how="left")
-    site_pts["dist_to_centroid"] = np.sqrt(
-        (site_pts["Grid_X"] - site_pts["centroid_x"]) ** 2 + (site_pts["Grid_Y"] - site_pts["centroid_y"]) ** 2
-    )
-    site_pts = site_pts.sort_values(["DataSet_ID", "dist_to_centroid"])
-    return (
-        site_pts.groupby("DataSet_ID", dropna=False)
-        .head(1)
-        .rename(columns={"Grid_X": "site_xm", "Grid_Y": "site_ym"})[["DataSet_ID", "site_xm", "site_ym"]]
-        .reset_index(drop=True)
-    )
 
 
 def _build_kernel_for_pattern(pattern_df: pd.DataFrame, *, grid_size_meters: float) -> _Kernel:
@@ -590,48 +579,120 @@ def _apply_kernels(
     emissions_cols: list[str],
     kernel_library: dict[str, _Kernel],
 ) -> pd.DataFrame:
-    target_key_index = pd.Index(target_index["target_key"].to_numpy(dtype=np.int64))
-    target_ids = target_index[target_id_col].to_numpy(dtype=np.int64)
     def _output_col(emissions_col: str) -> str:
         pollutant = emissions_col.removeprefix("tons_per_year_").removesuffix("_aermod_allocated")
         return _POLLUTANT_TO_CONCENTRATION_COLUMN.get(pollutant, f"concentration_{pollutant}")
 
-    result_arrays = {
-        _output_col(col): np.zeros(len(target_index), dtype=np.float64)
-        for col in emissions_cols
-    }
-    stride = int(target_index["target_iy"].max()) + 1 if not target_index.empty else 1
+    output_cols = [_output_col(col) for col in emissions_cols]
+    target_ids = target_index[target_id_col].to_numpy(dtype=np.int64)
+    target_ix = target_index["target_ix"].to_numpy(dtype=np.int64)
+    target_iy = target_index["target_iy"].to_numpy(dtype=np.int64)
+
+    ix_min = int(target_ix.min())
+    iy_min = int(target_iy.min())
+    nx = int(target_ix.max()) - ix_min + 1
+    ny = int(target_iy.max()) - iy_min + 1
+
+    result_arrays = {col: np.zeros(len(target_index), dtype=np.float64) for col in output_cols}
+
     for pattern_key, source_group in source_df.groupby("pattern_key", dropna=False):
         kernel = kernel_library.get(str(pattern_key))
         if kernel is None or kernel["response_per_ton"].size == 0:
             raise ValueError(f"No AERMOD ASRV kernel available for pattern {pattern_key}")
-        for start in range(0, len(source_group), _SOURCE_CHUNK_SIZE):
-            chunk = source_group.iloc[start : start + _SOURCE_CHUNK_SIZE]
-            source_ix = chunk["source_ix"].to_numpy(dtype=np.int64)
-            source_iy = chunk["source_iy"].to_numpy(dtype=np.int64)
-            source_values = {
-                _output_col(col): chunk[col].to_numpy(dtype=np.float64)
-                for col in emissions_cols
-            }
-            for dix, diy, response in zip(kernel["dix"], kernel["diy"], kernel["response_per_ton"], strict=True):
-                keys = (source_ix + np.int64(dix)) * np.int64(stride) + (source_iy + np.int64(diy))
-                positions = target_key_index.get_indexer(keys)
-                valid_mask = positions >= 0
-                if not valid_mask.any():
-                    continue
-                valid_positions = positions[valid_mask]
-                for name, values in source_values.items():
-                    np.add.at(result_arrays[name], valid_positions, values[valid_mask] * float(response))
+
+        dix = kernel["dix"].astype(np.int64)
+        diy = kernel["diy"].astype(np.int64)
+        dix_max = int(np.abs(dix).max())
+        diy_max = int(np.abs(diy).max())
+
+        # Build 2D kernel array centred at (dix_max, diy_max)
+        kernel_2d = np.zeros((2 * dix_max + 1, 2 * diy_max + 1), dtype=np.float64)
+        kernel_2d[dix + dix_max, diy + diy_max] = kernel["response_per_ton"]
+
+        # Source grid positions
+        si = source_group["source_ix"].to_numpy(dtype=np.int64) - ix_min
+        sj = source_group["source_iy"].to_numpy(dtype=np.int64) - iy_min
+        valid_src = (si >= 0) & (si < nx) & (sj >= 0) & (sj < ny)
+
+        # Target positions in the fftconvolve 'full' output array
+        # output[i,j] accumulates contributions to receptor at (ix_min + i - dix_max, iy_min + j - diy_max)
+        ti = target_ix - ix_min + dix_max
+        tj = target_iy - iy_min + diy_max
+        in_bounds = (ti >= 0) & (ti < nx + 2 * dix_max) & (tj >= 0) & (tj < ny + 2 * diy_max)
+
+        for emis_col, out_col in zip(emissions_cols, output_cols):
+            emissions_grid = np.zeros((nx, ny), dtype=np.float64)
+            np.add.at(
+                emissions_grid,
+                (si[valid_src], sj[valid_src]),
+                source_group[emis_col].to_numpy(dtype=np.float64)[valid_src],
+            )
+            conc_full = fftconvolve(emissions_grid, kernel_2d, mode="full")
+            result_arrays[out_col][in_bounds] += conc_full[ti[in_bounds], tj[in_bounds]]
+
     if not result_arrays:
         return pd.DataFrame(columns=[target_id_col])
     concentrations = pd.DataFrame({target_id_col: target_ids})
     for name, values in result_arrays.items():
         concentrations[name] = values
-    total_pm_components = ["SOA", "pNO3", "pNH4", "pSO4", "PrimaryPM25", "BC"]
-    present_pm_components = [c for c in total_pm_components if c in concentrations.columns]
-    if present_pm_components:
-        concentrations["TotalPM25"] = sum(concentrations[c] for c in present_pm_components)
+    # TotalPM25 is primary PM2.5 dispersion only. BC is a separate primary pollutant and
+    # is NOT included here — secondary species come from InMAP and are merged in step 4.
+    if "PrimaryPM25" in concentrations.columns:
+        concentrations["TotalPM25"] = concentrations["PrimaryPM25"]
     return concentrations.reset_index(drop=True)
+
+
+def _compute_no2_from_isrm_matrix(
+    *,
+    concentrations_df: pd.DataFrame,
+    target_id_col: str,
+    target_grid: gpd.GeoDataFrame,
+    isrm_matrix_path: str,
+) -> pd.DataFrame:
+    """Convert kernel-dispersed NOx concentration to NO2 using ISRM column-sum ratios.
+
+    ratio[j] = sum_i M[i,j]  (column sum of the sparse NOx→NO2 ISRM matrix)
+    NO2_100m[r] = NOx_conc_kernel[r] × ratio[inmap_cell_id(r)]
+
+    The kernel produces a "NO2" column that actually holds dispersed NOx (mapped via
+    pollutants_map). We post-multiply by the local NO2/NOx ratio derived from the
+    ISRM matrix so that the column becomes true NO2 concentration.
+    """
+    if "NO2" not in concentrations_df.columns:
+        logger.warning("%s NO2 column not found in concentrations; skipping ISRM ratio step", _step_label("5"))
+        return concentrations_df
+
+    if "inmap_cell_id" not in target_grid.columns:
+        logger.warning("%s target_grid missing inmap_cell_id; skipping ISRM ratio step", _step_label("5"))
+        return concentrations_df
+
+    data = np.load(isrm_matrix_path)
+    receptor_ids = data["receptor_ids"].astype(np.int64)
+    values = data["values"].astype(np.float64)
+    receptor_dim = int(data["receptor_dim"]) if "receptor_dim" in data else int(receptor_ids.max()) + 1
+
+    # Column sums: ratio[j] = Σ_i M[i,j] = NO2/NOx conversion factor for ISRM cell j
+    col_ratio = np.zeros(receptor_dim, dtype=np.float64)
+    np.add.at(col_ratio, receptor_ids, values)
+
+    # Map each 100m target cell to its parent ISRM cell
+    cell_map = target_grid.set_index(target_id_col)["inmap_cell_id"]
+    target_ids = concentrations_df[target_id_col].to_numpy()
+    inmap_ids = pd.Series(target_ids).map(cell_map).fillna(-1).astype(np.int64).to_numpy()
+
+    valid = (inmap_ids >= 0) & (inmap_ids < receptor_dim)
+    cell_ratio = np.zeros(len(target_ids), dtype=np.float64)
+    cell_ratio[valid] = col_ratio[inmap_ids[valid]]
+
+    result = concentrations_df.copy()
+    result["NO2"] = result["NO2"].to_numpy(dtype=np.float64) * cell_ratio
+    logger.info(
+        "%s NO2 computed from ISRM column-sum ratios: %d / %d cells have ratio > 0",
+        _step_label("5"),
+        int((cell_ratio > 0).sum()),
+        len(target_ids),
+    )
+    return result
 
 
 def _write_outputs(gdf: gpd.GeoDataFrame, output_path: Path) -> None:
@@ -778,7 +839,27 @@ def run(
     )
     _trace_frame("4", "aermod_concentrations", concentrations_df, key_cols=[target_id_col])
 
-    log_substep_banner("3.5", "write concentration outputs", logger=logger)
+    log_substep_banner("3.5", "compute NO2 from ISRM NO2/NOx column-sum ratios", logger=logger)
+    _no2_matrix_path = pipeline.asrv_nox_to_no2_ratios_file or pipeline.isrm_nox_to_no2_ratios_file
+    if _no2_matrix_path and "NO2" in concentrations_df.columns:
+        concentrations_df = _compute_no2_from_isrm_matrix(
+            concentrations_df=concentrations_df,
+            target_id_col=target_id_col,
+            target_grid=target_grid,
+            isrm_matrix_path=_no2_matrix_path,
+        )
+        _trace_frame("5", "aermod_concentrations_with_isrm_no2", concentrations_df, key_cols=[target_id_col])
+    elif "NO2" in concentrations_df.columns:
+        logger.info(
+            "%s no ISRM NO2/NOx matrix configured (asrv_nox_to_no2_ratios_file / isrm_nox_to_no2_ratios_file); "
+            "NO2 column will not be produced",
+            _step_label("5"),
+        )
+        concentrations_df = concentrations_df.drop(columns=["NO2"])
+    else:
+        logger.info("%s NO2 column absent from kernel output; skipping ratio step", _step_label("5"))
+
+    log_substep_banner("3.6", "write concentration outputs", logger=logger)
     output_path = raw_dir / "beam_aermod_concentrations.parquet"
     result_gdf = _attach_concentrations(
         target_grid=target_grid,
@@ -786,5 +867,5 @@ def run(
         target_id_col=target_id_col,
     )
     _write_outputs(result_gdf, output_path)
-    logger.info("%s AERMOD concentrations → %s", _step_label("5"), output_path)
+    logger.info("%s AERMOD concentrations → %s", _step_label("6"), output_path)
     return result_gdf, target_grid[target_id_col].to_numpy(dtype=int), output_path

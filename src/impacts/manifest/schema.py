@@ -107,14 +107,14 @@ class PipelineConfig:
     inmap_grid_path: Optional[str] = None
     inmap_grid_epsg: Optional[int] = None
     isrm_url: Optional[str] = None
-    isrm_nox_to_no2_matrix_npz_path: Optional[str] = None
-    isrm_nox_to_no2_matrix_factor: Optional[float] = None
+    isrm_nox_to_no2_ratios_file: Optional[str] = None
     asrv_patterns_file: Optional[str] = None
     asrv_patterns_epsg: Optional[int] = None
     aermod_full_grid_path: Optional[str] = None
     aermod_grid_path: Optional[str] = None
     aermod_grid_epsg: Optional[int] = None
     aermod_grid_id: Optional[str] = None
+    asrv_nox_to_no2_ratios_file: Optional[str] = None
     region: Optional[str] = None
     start_year: Optional[int] = None
     county_state_fips: Optional[str] = None
@@ -141,8 +141,7 @@ class PipelineConfig:
                 "inmap_grid_epsg",
                 "mapping_columns",
                 "isrm_url",
-                "isrm_nox_to_no2_matrix_npz_path",
-                "isrm_nox_to_no2_matrix_factor",
+                "isrm_nox_to_no2_ratios_file",
                 "asrv_patterns_file",
                 "asrv_patterns_epsg",
                 "grid_size_meters",
@@ -150,6 +149,7 @@ class PipelineConfig:
                 "aermod_grid_path",
                 "aermod_grid_epsg",
                 "aermod_grid_id",
+                "asrv_nox_to_no2_ratios_file",
                 "region",
                 "start_year",
                 "county_state_fips",
@@ -175,14 +175,14 @@ class PipelineConfig:
             inmap_grid_path=_optional_string(payload.get("inmap_grid_path")),
             inmap_grid_epsg=_optional_int(payload.get("inmap_grid_epsg")),
             isrm_url=_optional_string(payload.get("isrm_url")),
-            isrm_nox_to_no2_matrix_npz_path=_optional_string(payload.get("isrm_nox_to_no2_matrix_npz_path")),
-            isrm_nox_to_no2_matrix_factor=_optional_float(payload.get("isrm_nox_to_no2_matrix_factor")),
+            isrm_nox_to_no2_ratios_file=_optional_string(payload.get("isrm_nox_to_no2_ratios_file")),
             asrv_patterns_file=_optional_string(payload.get("asrv_patterns_file")),
             asrv_patterns_epsg=_optional_int(payload.get("asrv_patterns_epsg")),
             aermod_full_grid_path=_optional_string(payload.get("aermod_full_grid_path")),
             aermod_grid_path=_optional_string(payload.get("aermod_grid_path")),
             aermod_grid_epsg=_optional_int(payload.get("aermod_grid_epsg")),
             aermod_grid_id=_optional_string(payload.get("aermod_grid_id")),
+            asrv_nox_to_no2_ratios_file=_optional_string(payload.get("asrv_nox_to_no2_ratios_file")),
             region=_required_string(payload.get("region"), "pipeline.region"),
             start_year=_required_int(payload.get("start_year"), "pipeline.start_year"),
             county_state_fips=_required_string(payload.get("county_state_fips"), "pipeline.county_state_fips"),
@@ -200,10 +200,8 @@ class PipelineConfig:
                 raise ValueError("Missing required value: pipeline.inmap_grid_path")
             if not result.isrm_url:
                 raise ValueError("Missing required value: pipeline.isrm_url")
-            if not result.isrm_nox_to_no2_matrix_npz_path:
-                raise ValueError("Missing required value: pipeline.isrm_nox_to_no2_matrix_npz_path")
-            if result.isrm_nox_to_no2_matrix_factor is None:
-                raise ValueError("Missing required value: pipeline.isrm_nox_to_no2_matrix_factor")
+            if not result.isrm_nox_to_no2_ratios_file:
+                raise ValueError("Missing required value: pipeline.isrm_nox_to_no2_ratios_file")
         if result.aermod_enabled:
             if result.grid_size_meters is None:
                 raise ValueError("Missing required value: pipeline.grid_size_meters")

@@ -214,19 +214,19 @@ def _concentration_specs() -> dict[str, dict[str, str]]:
 
 def _build_no2_transfer_matrix(
     *,
-    isrm_nox_to_no2_matrix_npz_path: Optional[str],
+    isrm_nox_to_no2_ratios_file: Optional[str],
 ) -> Optional[Any]:
-    if isrm_nox_to_no2_matrix_npz_path:
-        if isrm_nox_to_no2_matrix_npz_path.lower().endswith(".npz"):
-            matrix = _read_sparse_transfer_matrix_npz(isrm_nox_to_no2_matrix_npz_path)
+    if isrm_nox_to_no2_ratios_file:
+        if isrm_nox_to_no2_ratios_file.lower().endswith(".npz"):
+            matrix = _read_sparse_transfer_matrix_npz(isrm_nox_to_no2_ratios_file)
             shape = (matrix["source_dim"], matrix["receptor_dim"])
         else:
-            matrix = _read_square_transfer_matrix(isrm_nox_to_no2_matrix_npz_path)
+            matrix = _read_square_transfer_matrix(isrm_nox_to_no2_ratios_file)
             shape = matrix.shape
         logger.info(
             "%s loaded NOx->NO2 transfer matrix from %s shape=%s",
             _step_label(2, "2"),
-            isrm_nox_to_no2_matrix_npz_path,
+            isrm_nox_to_no2_ratios_file,
             shape,
         )
         return matrix
@@ -422,7 +422,7 @@ def _compute_no2_response(
     source_cells: np.ndarray,
     source_indexed: pd.DataFrame,
     receptor_cells: np.ndarray,
-    isrm_nox_to_no2_matrix_npz_path: Optional[str],
+    isrm_nox_to_no2_ratios_file: Optional[str],
 ) -> Optional[np.ndarray]:
     logger.info("%s resolving NO2 source from ISRM zarr or configured NOx->NO2 transfer matrix", _step_label(2, "1"))
     if "NO2" in sr:
@@ -437,7 +437,7 @@ def _compute_no2_response(
         )
 
     no2_transfer_matrix = _build_no2_transfer_matrix(
-        isrm_nox_to_no2_matrix_npz_path=isrm_nox_to_no2_matrix_npz_path,
+        isrm_nox_to_no2_ratios_file=isrm_nox_to_no2_ratios_file,
     )
     if no2_transfer_matrix is None:
         logger.warning(
@@ -459,9 +459,9 @@ def _compute_no2_response(
 
 def _has_no2_fallback_matrix(
     *,
-    isrm_nox_to_no2_matrix_npz_path: Optional[str],
+    isrm_nox_to_no2_ratios_file: Optional[str],
 ) -> bool:
-    return bool(isrm_nox_to_no2_matrix_npz_path)
+    return bool(isrm_nox_to_no2_ratios_file)
 
 
 def _read_receptor_vector(sr, key: str, receptor_dim: int) -> np.ndarray:
@@ -578,11 +578,10 @@ def compute_isrm_concentrations(
     grid_emissions_df: pd.DataFrame,
     sr,
     factor: float,
-    isrm_nox_to_no2_matrix_factor: float,
     requested_pollutants: list[str],
     receptor_cells: np.ndarray,
     source_id_col: str = "inmap_cell_id",
-    isrm_nox_to_no2_matrix_npz_path: Optional[str] = None,
+    isrm_nox_to_no2_ratios_file: Optional[str] = None,
     pollutants_map: Optional[dict[str, str]] = None,
 ) -> pd.DataFrame:
     logger.info(
@@ -631,12 +630,12 @@ def compute_isrm_concentrations(
             continue
         if concentration_output == "NO2":
             has_no2 = "NO2" in sr or _has_no2_fallback_matrix(
-                isrm_nox_to_no2_matrix_npz_path=isrm_nox_to_no2_matrix_npz_path,
+                isrm_nox_to_no2_ratios_file=isrm_nox_to_no2_ratios_file,
             )
             if not has_no2:
                 logger.warning(
                     "%s requested pollutant NOx has no NO2 concentration source: ISRM zarr has no NO2 and "
-                    "no isrm_nox_to_no2_matrix_npz fallback was configured",
+                    "no isrm_nox_to_no2_ratios_file fallback was configured",
                     _step_label(2, "1"),
                 )
                 continue
@@ -666,12 +665,10 @@ def compute_isrm_concentrations(
                     source_cells=source_cells,
                     source_indexed=source_indexed,
                     receptor_cells=receptor_cells,
-                    isrm_nox_to_no2_matrix_npz_path=isrm_nox_to_no2_matrix_npz_path,
+                    isrm_nox_to_no2_ratios_file=isrm_nox_to_no2_ratios_file,
                 )
                 if no2_response is not None:
                     arrays["NO2"] = no2_response
-                    if "NO2" not in sr:
-                        output_factors["NO2"] = float(isrm_nox_to_no2_matrix_factor)
                 continue
 
             arrays[concentration_output] = _compute_species_response(
@@ -683,7 +680,7 @@ def compute_isrm_concentrations(
                 receptor_cells=receptor_cells,
             )
 
-    total_pm_components = ["SOA", "pNO3", "pNH4", "pSO4", "PrimaryPM25", "BC"]
+    total_pm_components = ["SOA", "pNO3", "pNH4", "pSO4", "PrimaryPM25"]
     missing_total_pm_components = [component for component in total_pm_components if component not in arrays]
     if missing_total_pm_components:
         logger.warning(
@@ -756,11 +753,10 @@ def run(
         grid_emissions_df=emissions_df,
         sr=sr,
         factor=float(tons_per_year_to_ug_per_s),
-        isrm_nox_to_no2_matrix_factor=float(pipeline.isrm_nox_to_no2_matrix_factor),
         requested_pollutants=pipeline.pollutants,
         receptor_cells=beam_inmap_grid_ids,
         source_id_col="inmap_cell_id",
-        isrm_nox_to_no2_matrix_npz_path=pipeline.isrm_nox_to_no2_matrix_npz_path,
+        isrm_nox_to_no2_ratios_file=pipeline.isrm_nox_to_no2_ratios_file,
         pollutants_map=pipeline.pollutants_map,
     )
     output_path = raw_dir / "beam_inmap_concentrations.parquet"

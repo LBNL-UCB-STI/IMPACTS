@@ -85,7 +85,6 @@ impacts:
       enabled: true
       isrm_zarr: ~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr
       isrm_nox_to_no2_matrix_npz: vehicle-tech/dispersions/inmap/nox_to_no2_full_isrm_matrix.npz
-      isrm_nox_to_no2_matrix_factor: 1.0
       grid_path: vehicle-tech/dispersions/inmap/isrm_polygon_wgs84.gpkg
       grid_id: isrm
       grid_epsg: 4326

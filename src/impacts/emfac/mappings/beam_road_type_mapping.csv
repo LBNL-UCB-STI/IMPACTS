@@ -1,0 +1,13 @@
+beam_road_type,road_category,carb_road_category,f_class
+motorway,f_class_1,Freeway,1
+motorway_link,f_class_2,Freeway,2
+trunk,f_class_2,Freeway,2
+trunk_link,f_class_3,Major,3
+primary,f_class_3,Major,3
+primary_link,f_class_4,Major,4
+secondary,f_class_5,Collector,5
+secondary_link,f_class_5,Collector,5
+tertiary,f_class_5,Collector,5
+tertiary_link,f_class_5,Collector,5
+unclassified,f_class_5,Collector,5
+residential,f_class_6,Local Urban,6

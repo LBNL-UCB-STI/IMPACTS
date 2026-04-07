@@ -20,8 +20,8 @@ from ..manifest.schema import PipelineConfig
 logger = logging.getLogger(__name__)
 _INMAP_SOURCE_ID_COLUMN = "inmap_cell_id"
 _AERMOD_SOURCE_ID_COLUMN = "aermod_cell_id"
-_INMAP_KEEP_COLUMNS = [_INMAP_SOURCE_ID_COLUMN, "SecondaryPM25"]
-_AERMOD_KEEP_COLUMNS = [_AERMOD_SOURCE_ID_COLUMN, "PrimaryPM25", "BC", "NO2"]
+_INMAP_KEEP_COLUMNS = [_INMAP_SOURCE_ID_COLUMN, "inmap_PrimaryPM25", "inmap_SecondaryPM25", "inmap_BC", "inmap_NO2"]
+_AERMOD_KEEP_COLUMNS = [_AERMOD_SOURCE_ID_COLUMN, "aermod_PrimaryPM25", "aermod_SecondaryPM25", "aermod_BC", "aermod_NO2"]
 _PERSON_REQUIRED_COLUMNS = ["person_id", "household_id", "home_x", "home_y"]
 _HOUSEHOLD_REQUIRED_COLUMNS = ["household_id"]
 
@@ -46,21 +46,26 @@ def _prepare_inmap_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         raise ValueError("InMAP concentrations must include 'PrimaryPM25'.")
 
     prepared = gdf.copy()
-    prepared["SecondaryPM25"] = (
+    prepared["inmap_SecondaryPM25"] = (
         pd.to_numeric(prepared["TotalPM25"], errors="coerce").fillna(0.0)
         - pd.to_numeric(prepared["PrimaryPM25"], errors="coerce").fillna(0.0)
     )
-    for col in _INMAP_KEEP_COLUMNS:
-        if col not in prepared.columns:
-            raise ValueError(f"InMAP concentrations must include '{col}'.")
-    return prepared[_INMAP_KEEP_COLUMNS + (["geometry"] if "geometry" in prepared.columns else [])].copy()
+    prepared = prepared.rename(columns={"PrimaryPM25": "inmap_PrimaryPM25", "BC": "inmap_BC", "NO2": "inmap_NO2"})
+    keep = [_INMAP_SOURCE_ID_COLUMN, "inmap_PrimaryPM25", "inmap_SecondaryPM25"]
+    for col in ("inmap_BC", "inmap_NO2"):
+        if col in prepared.columns:
+            keep.append(col)
+    return prepared[keep + (["geometry"] if "geometry" in prepared.columns else [])].copy()
 
 
 def _prepare_aermod_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    for col in _AERMOD_KEEP_COLUMNS:
+    for col in ("PrimaryPM25", "BC", "NO2"):
         if col not in gdf.columns:
             raise ValueError(f"AERMOD concentrations must include '{col}'.")
-    return gdf[_AERMOD_KEEP_COLUMNS + (["geometry"] if "geometry" in gdf.columns else [])].copy()
+    prepared = gdf.rename(columns={"PrimaryPM25": "aermod_PrimaryPM25", "BC": "aermod_BC", "NO2": "aermod_NO2"})
+    prepared["aermod_SecondaryPM25"] = 0.0  # AERMOD models primary dispersion only
+    keep = [_AERMOD_SOURCE_ID_COLUMN, "aermod_PrimaryPM25", "aermod_SecondaryPM25", "aermod_BC", "aermod_NO2"]
+    return prepared[keep + (["geometry"] if "geometry" in prepared.columns else [])].copy()
 
 
 def _build_full_exposure_grid(
@@ -79,25 +84,57 @@ def _build_full_exposure_grid(
             f"Full exposure grid is missing required columns {missing_grid_cols} in {pipeline.aermod_full_grid_path}."
         )
     result = full_grid[required_grid_cols + ["geometry"]].copy()
-    inmap_lookup = prepared_inmap[[_INMAP_SOURCE_ID_COLUMN, "SecondaryPM25"]].drop_duplicates(subset=[_INMAP_SOURCE_ID_COLUMN])
+
+    inmap_cols = [c for c in prepared_inmap.columns if c != "geometry"]
+    inmap_lookup = prepared_inmap[inmap_cols].drop_duplicates(subset=[_INMAP_SOURCE_ID_COLUMN])
     result = result.merge(inmap_lookup, how="left", on=_INMAP_SOURCE_ID_COLUMN)
+
     if prepared_aermod is not None:
-        aermod_lookup = prepared_aermod[[_AERMOD_SOURCE_ID_COLUMN, "PrimaryPM25", "BC", "NO2"]].drop_duplicates(
-            subset=[_AERMOD_SOURCE_ID_COLUMN]
-        )
+        aermod_cols = [c for c in prepared_aermod.columns if c != "geometry"]
+        aermod_lookup = prepared_aermod[aermod_cols].drop_duplicates(subset=[_AERMOD_SOURCE_ID_COLUMN])
         result = result.merge(aermod_lookup, how="left", on=_AERMOD_SOURCE_ID_COLUMN)
     else:
-        result["PrimaryPM25"] = np.nan
-        result["BC"] = np.nan
-        result["NO2"] = np.nan
+        result["aermod_PrimaryPM25"] = np.nan
+        result["aermod_SecondaryPM25"] = 0.0
+        result["aermod_BC"] = np.nan
+        result["aermod_NO2"] = np.nan
 
-    result["SecondaryPM25"] = pd.to_numeric(result["SecondaryPM25"], errors="coerce").fillna(0.0)
-    result["PrimaryPM25"] = pd.to_numeric(result["PrimaryPM25"], errors="coerce").fillna(0.0)
-    result["BC"] = pd.to_numeric(result["BC"], errors="coerce").fillna(0.0)
-    result["NO2"] = pd.to_numeric(result["NO2"], errors="coerce").fillna(0.0)
-    result["PM25"] = result["SecondaryPM25"] + result["PrimaryPM25"]
-    result = result.drop(columns=["SecondaryPM25", "PrimaryPM25"])
-    ordered = [_AERMOD_SOURCE_ID_COLUMN, _INMAP_SOURCE_ID_COLUMN, "PM25", "BC", "NO2", "geometry"]
+    for col in ("inmap_PrimaryPM25", "inmap_SecondaryPM25", "aermod_PrimaryPM25", "aermod_SecondaryPM25", "aermod_BC", "aermod_NO2"):
+        if col in result.columns:
+            result[col] = pd.to_numeric(result[col], errors="coerce").fillna(0.0)
+    for col in ("inmap_BC", "inmap_NO2"):
+        if col in result.columns:
+            result[col] = pd.to_numeric(result[col], errors="coerce").fillna(0.0)
+
+    # Use AERMOD where non-zero, fall back to InMAP elsewhere (matches R script logic)
+    result["PrimaryPM25"] = np.where(
+        result["aermod_PrimaryPM25"] > 0,
+        result["aermod_PrimaryPM25"],
+        result["inmap_PrimaryPM25"],
+    )
+    result["SecondaryPM25"] = result["inmap_SecondaryPM25"]
+    result["TotalPM25"] = result["SecondaryPM25"] + result["PrimaryPM25"]
+    result["BC"] = np.where(
+        result["aermod_BC"] > 0,
+        result["aermod_BC"],
+        result.get("inmap_BC", 0.0),
+    )
+    result["NO2"] = np.where(
+        result["aermod_NO2"] > 0,
+        result["aermod_NO2"],
+        result.get("inmap_NO2", 0.0),
+    )
+
+    ordered = [
+        _AERMOD_SOURCE_ID_COLUMN, _INMAP_SOURCE_ID_COLUMN,
+        "TotalPM25", "PrimaryPM25", "SecondaryPM25", "BC", "NO2",
+        "inmap_PrimaryPM25", "inmap_SecondaryPM25",
+        "aermod_PrimaryPM25", "aermod_SecondaryPM25",
+    ]
+    for col in ("inmap_BC", "inmap_NO2", "aermod_BC", "aermod_NO2"):
+        if col in result.columns:
+            ordered.append(col)
+    ordered.append("geometry")
     return gpd.GeoDataFrame(result[ordered], geometry="geometry", crs=full_grid.crs)
 
 

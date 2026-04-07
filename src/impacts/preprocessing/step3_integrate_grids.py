@@ -318,41 +318,6 @@ def _union_county_matches_with_unmatched(
     )
 
 
-def _write_aermod_intersected_subset_grid(
-    *,
-    full_grid_path: str,
-    full_grid_id_col: str,
-    intersected_zone_rows: gpd.GeoDataFrame,
-    output_path: Path,
-) -> str:
-    canonical_rows = canonicalize_intersection_schema(intersected_zone_rows)
-    if "aermod_cell_id" not in canonical_rows.columns:
-        raise ValueError(
-            "AERMOD intersection output must include an AERMOD cell id column after canonicalization."
-        )
-    full_grid = read_vector(full_grid_path)
-    if full_grid_id_col not in full_grid.columns:
-        raise ValueError(
-            f"AERMOD full grid is missing '{full_grid_id_col}' in {full_grid_path}. "
-            f"Available columns: {list(full_grid.columns)}"
-        )
-    keep_ids = (
-        pd.to_numeric(canonical_rows["aermod_cell_id"], errors="coerce")
-        .dropna()
-        .astype(int)
-        .unique()
-    )
-    subset = full_grid[
-        pd.to_numeric(full_grid[full_grid_id_col], errors="coerce").isin(keep_ids)
-    ].copy()
-    write_vector(subset, str(output_path))
-    logger.info(
-        "Step 3.2 subset grid: wrote %d AERMOD cells carrying %s and inmap_cell_id → %s",
-        len(subset),
-        full_grid_id_col,
-        output_path,
-    )
-    return str(output_path)
 
 
 def run(
@@ -367,8 +332,7 @@ def run(
     grid_intersection_path = raw_dir / "beam_osm_zone_county_intersection.parquet"
     if grid_intersection_path.exists():
         logger.info("Step 3: reusing existing grid intersection %s", grid_intersection_path)
-        aermod_subset_path = raw_dir / "aermod_network_intersected_grid.parquet"
-        return str(grid_intersection_path), None, str(aermod_subset_path) if aermod_subset_path.exists() else None
+        return str(grid_intersection_path), None
     mapped_network_path = str((input_root / "network" / "beam_osm_mapped.parquet").resolve())
     mapped_network_gpkg = str(Path(mapped_network_path).with_suffix(".gpkg"))
     log_substep_banner("3.1", "map BEAM network to OSM", logger=logger)
@@ -410,7 +374,6 @@ def run(
         )
         logger.info("Step 3.2 complete: %d rows", len(network_with_zones))
 
-    aermod_subset_grid_path: Optional[str] = None
     if pipeline.aermod_enabled:
         log_substep_banner("3.3", "intersect with AERMOD grid", logger=logger)
         logger.info("Step 3.3: intersecting line network with AERMOD grid %s", pipeline.aermod_grid_path)
@@ -421,14 +384,6 @@ def run(
             output_epsg=epsg,
             prefilter_zones_to_network_bbox=True,
             zone_label="aermod",
-        )
-        if not pipeline.aermod_grid_id:
-            raise ValueError("pipeline.aermod_grid_id must be configured before deriving the AERMOD subset grid.")
-        aermod_subset_grid_path = _write_aermod_intersected_subset_grid(
-            full_grid_path=pipeline.aermod_grid_path,
-            full_grid_id_col=pipeline.aermod_grid_id,
-            intersected_zone_rows=network_with_zones,
-            output_path=raw_dir / "aermod_network_intersected_grid.parquet",
         )
         logger.info("Step 3.3 complete: %d rows", len(network_with_zones))
     B = network_with_zones.reset_index(drop=True).copy()
@@ -478,4 +433,4 @@ def run(
     )
     logger.info("Step 3 complete: %d total rows → %s", len(C_canonical), grid_intersection_path)
 
-    return str(grid_intersection_path), C_canonical, aermod_subset_grid_path
+    return str(grid_intersection_path), C_canonical

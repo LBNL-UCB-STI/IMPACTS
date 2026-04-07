@@ -184,7 +184,7 @@ def run(
         )
 
     staged_inmap_grid = None
-    staged_isrm_nox_to_no2_matrix_npz = None
+    staged_isrm_nox_to_no2_ratios_file = None
     if inmap.enabled:
         inmap_grid_source = required_local_path(
             str((region_input_root / inmap.grid_path).resolve()),
@@ -199,16 +199,16 @@ def run(
             metadata={"artifact_family": "inmap_grid"},
         )
         no2_matrix_source = required_local_path(
-            str((region_input_root / inmap.isrm_nox_to_no2_matrix_npz).resolve()),
-            "impacts.dispersions.inmap.isrm_nox_to_no2_matrix_npz",
+            str((region_input_root / inmap.isrm_nox_to_no2_ratios_file).resolve()),
+            "impacts.dispersions.inmap.isrm_nox_to_no2_ratios_file",
         )
-        staged_isrm_nox_to_no2_matrix_npz = _register_manifest_input(
+        staged_isrm_nox_to_no2_ratios_file = _register_manifest_input(
             manifest_inputs,
             input_root=input_root,
-            key="isrm_nox_to_no2_matrix_npz",
+            key="isrm_nox_to_no2_ratios_file",
             source_path=no2_matrix_source,
-            relative_target=inmap.isrm_nox_to_no2_matrix_npz,
-            metadata={"artifact_family": "isrm_nox_to_no2_matrix_npz"},
+            relative_target=inmap.isrm_nox_to_no2_ratios_file,
+            metadata={"artifact_family": "isrm_nox_to_no2_ratios_file"},
         )
     staged_asrv_patterns_file = None
     if aermod.enabled:
@@ -280,7 +280,7 @@ def run(
         "staged_inmap_grid": staged_inmap_grid,
         "staged_activity_totals": staged_activity_totals,
         "staged_isrm": staged_isrm,
-        "staged_isrm_nox_to_no2_matrix_npz": staged_isrm_nox_to_no2_matrix_npz,
+        "staged_isrm_nox_to_no2_ratios_file": staged_isrm_nox_to_no2_ratios_file,
         "staged_asrv_patterns_file": staged_asrv_patterns_file,
         "population_inputs": population_inputs,
     }

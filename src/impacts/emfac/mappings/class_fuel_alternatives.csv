@@ -1,0 +1,6 @@
+source_vehicle_class,source_fuel,alternative_vehicle_class,alternative_fuel
+T6 Instate Tractor Class 6,NG,T6 Instate Other Class 6,NG
+T6 Utility Class 5,NG,T6 Public Class 5,NG
+T6 Utility Class 6,NG,T6 Public Class 6,NG
+T6 Utility Class 7,NG,T6 Public Class 7,NG
+T7 POAK Class 8,NG,T7 POLA Class 8,NG

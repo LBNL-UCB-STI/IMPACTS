@@ -1,0 +1,22 @@
+emfac:
+  region_label: SF
+  calendar_year: 2018
+  outputs: ~/Workspace/Models/emfac/processed/{calendar_year}/
+  model_year_groups:
+    - max_year: 2003
+    - min_year: 2004
+      max_year: 2013
+    - min_year: 2014
+      max_year: 2016
+    - min_year: 2017
+  inputs:
+    project_analysis_raw: ~/Workspace/Models/emfac/raw/project-analysis
+    emissions_inventory_raw: ~/Workspace/Models/emfac/raw/emissions-inventory
+    statewide_emissions_inventory_raw: ~/Workspace/Models/emfac/raw/EMFAC2021EI-EMFAC202XClass-Statewide2018-2025-2030-2035-2040-2045-2050-Annual-20260402001739.csv
+    population_raw: ~/Workspace/Models/emfac/raw/Default_Statewide_2018_2025_2030_2040_2050_Annual_population_20240612233346.csv
+    trips_raw: ~/Workspace/Models/emfac/raw/Default_Statewide_2018_2025_2030_2040_2050_Annual_trips_20240612233346.csv
+    black_carbon_raw: ~/Workspace/Models/emfac/raw/emfac_bc_rate_three_ver_2018.csv
+    rainy_days_file: ~/Workspace/Models/emfac/raw/road_dust/CA_input/rainy_days.csv
+    silt_loading_file: ~/Workspace/Models/emfac/raw/road_dust/CA_input/silt_loading.csv
+    road_type_lookup_file: ~/Workspace/Models/emfac/raw/road_dust/CA_input/road_type_lookup.csv
+    vehicle_weight_file: ~/Workspace/Models/emfac/raw/road_dust/CA_input/vehicle_weight.csv
