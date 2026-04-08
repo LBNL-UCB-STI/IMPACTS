@@ -1,57 +1,16 @@
-run:
+fleet:
   region: sfbay
   scenario: 2018-Baseline
+  work_dir: ~/Workspace/Simulation/sfbay
+  outputs: vehicle-tech/emissions/2018-Baseline
 
-shared:
-  geography:
-    FIPS:
-      state: "06"
-      counties:
-        - "001"
-        - "013"
-        - "041"
-        - "055"
-        - "075"
-        - "081"
-        - "085"
-        - "095"
-        - "097"
-    local_crs: EPSG:26910
+  emfac:
+    rates_file: ~/Workspace/Models/emfac/processed/2018/sf-emfac-2018-project-analysis-final-rates.parquet
+    fleet_file: ~/Workspace/Models/emfac/processed/2018/sf-emfac-2018-project-analysis-final-fleet.parquet
+    activity_file: ~/Workspace/Models/emfac/processed/2018/sf-emfac-2018-project-analysis-final-activity.parquet
 
-impacts:
-  local_input_folder: impacts/input/
-  local_output_folder: impacts/impacts_output/
-  emissions:
-    osm_network_folder: r5/sfbay-cbg5500-weakConn-network
-    emissions_rates_folder: vehicle-tech/emissions/2018-Baseline
-    activity_totals_file: vehicle-tech/emissions/SFBay_2018_Annual_activity_totals.parquet
-    annualization_days: 330
-    population_sample: 0.1
-    pollutants_map:
-      NH3: NH3
-      NOx: NOx
-      PM2_5: PM2_5
-      SOx: SOx
-      ROG: ROG
-      BC: BCh
-    rates:
-      emfac:
-        version: EMFAC2021
-        emfac_rates_by_model_year_file: emissions/rates/emfac/imputed_MTC_emission_rate_agg_NH3_added_2018_2025_2030_2040_2050.csv
-        emfac_vmt_by_model_year_file: emissions/rates/emfac/Default_Statewide_2018_2025_2030_2040_2050_Annual_vmt_20240612233346.csv
-        emfac_pop_by_model_year_file: emissions/rates/emfac/Default_Statewide_2018_2025_2030_2040_2050_Annual_population_20240612233346.csv
-      black_carbon:
-        version: ""
-        black_carbon_rates_file: emissions/rates/black_carbon/emfac_bc_rate_three_ver_2018.csv
-      road_dust:
-        version: ""
-        rainy_days_file: emissions/rates/road_dust/CA_input/rainy_days.csv
-        silt_loading_file: emissions/rates/road_dust/CA_input/silt_loading.csv
-
-beam:
-  carriers_file: beam-ft/20240123/2018-Baseline/carriers--2018-Baseline.csv
-  payloads_file: beam-ft/20240123/2018-Baseline/payloads--2018-Baseline.csv
-  tours_file: beam-ft/20240123/2018-Baseline/tours--2018-Baseline.csv
-  ft_vehicle_types_file: vehicle-tech/vehicleTypes--frism--2018-Baseline.csv
-  pax_vehicles_file: beam-pax/vehicles--atlas--2017-Baseline.csv.gz
-  pax_vehicle_types_file: vehicle-tech/vehicleTypes--atlas--2017-Baseline.csv
+  beam:
+    freight_directory: ~/Workspace/Simulation/sfbay/beam-ft/20250730/2018-Baseline
+    ft_vehicle_types_file: vehicle-tech/vehicleTypes--frism--2018-Baseline.csv
+    pax_vehicles_file: beam-pax/vehicles--atlas--2017-Baseline.csv.gz
+    pax_vehicle_types_file: vehicle-tech/vehicleTypes--atlas--2017-Baseline.csv

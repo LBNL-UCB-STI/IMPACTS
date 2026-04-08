@@ -193,8 +193,8 @@ def emfac2passenger_with_atlas_crosswalk(vehicle_types, atlas_emfac_fleet, work_
     vehicle_types_filtered = vehicle_types[vehicle_types["vehicleTypeId"].isin(vehicles["vehicleTypeId"].unique())].copy()
     vehicles_filtered = vehicles[vehicles["vehicleTypeId"].isin(vehicle_types_filtered["vehicleTypeId"].unique())].copy()
 
-    vehicle_types_filtered['model_year_group'] = vehicle_types_filtered['model_year_group'].astype(int)
-    atlas_emfac_fleet['model_year_group'] = atlas_emfac_fleet['model_year_group'].astype(int)
+    vehicle_types_filtered['model_year_group'] = vehicle_types_filtered['model_year_group'].astype(str)
+    atlas_emfac_fleet['model_year_group'] = atlas_emfac_fleet['model_year_group'].astype(str)
 
     # Step 2: Merge with EMFAC fleet data
     vehicles_atlas_emfac = pd.merge(

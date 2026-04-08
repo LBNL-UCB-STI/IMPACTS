@@ -10,7 +10,7 @@ import pandas as pd
 import yaml
 
 CONFIG_DIR = Path(__file__).resolve().parent
-DEFAULT_CONFIG_PATH = CONFIG_DIR / "default_config.yaml"
+DEFAULT_CONFIG_PATH = CONFIG_DIR / "config.yaml"
 EXAMPLE_CONFIG_PATH = Path("examples/sfbay_fleet/settings.yaml")
 MAPPINGS_DIR = CONFIG_DIR / "mappings"
 
@@ -106,14 +106,24 @@ def get_fuel_key(row):
 def _load_yaml(path: Path) -> dict:
     with path.open() as f:
         data = yaml.safe_load(f)
-    return data or {}
+    return (data or {}).get("fleet", data or {})
+
+
+def _expand_path(value: str | None) -> str | None:
+    if value in (None, ""):
+        return value
+    return str(Path(value).expanduser())
 
 
 def _expand_paths(config: dict) -> dict:
     config = deepcopy(config)
-    work_dir = config.get("shared", {}).get("paths", {}).get("work_dir")
-    if work_dir not in (None, ""):
-        config["shared"]["paths"]["work_dir"] = str(Path(work_dir).expanduser())
+    config["work_dir"] = _expand_path(config.get("work_dir"))
+    config["outputs"] = _expand_path(config.get("outputs"))
+    emfac = config.get("emfac", {})
+    if isinstance(emfac, dict):
+        for key in ("rates_file", "fleet_file", "activity_file"):
+            emfac[key] = _expand_path(emfac.get(key))
+        config["emfac"] = emfac
     return config
 
 
@@ -186,16 +196,19 @@ def _required_value(raw: dict, path: tuple[str, ...]):
 
 def _validate_workflow_settings(raw: dict, source_path: Path) -> None:
     required_paths = [
-        ("run", "region"),
-        ("run", "scenario"),
-        ("run", "output_directory"),
-        ("run", "output_run_name"),
-        ("shared", "paths", "work_dir"),
-        ("impacts", "local_input_folder"),
-        ("impacts", "local_output_folder"),
-        ("impacts", "emissions"),
-        ("impacts", "emissions", "rates"),
+        ("region",),
+        ("scenario",),
+        ("work_dir",),
+        ("outputs",),
+        ("emfac",),
+        ("emfac", "rates_file"),
+        ("emfac", "fleet_file"),
+        ("emfac", "activity_file"),
         ("beam",),
+        ("beam", "freight_directory"),
+        ("beam", "ft_vehicle_types_file"),
+        ("beam", "pax_vehicles_file"),
+        ("beam", "pax_vehicle_types_file"),
     ]
     missing = []
     for path in required_paths:
@@ -214,28 +227,23 @@ def load_workflow(config_path: str | Path | None = None) -> dict:
     raw = _load_yaml(source_path)
     _validate_workflow_settings(raw, source_path)
     raw = _expand_paths(raw)
-    output_directory = raw["run"]["output_directory"]
-    output_run_name = raw["run"]["output_run_name"]
-    impacts_settings = raw["impacts"]
-    emissions_settings = impacts_settings["emissions"]
+    outputs = raw["outputs"]
     config = {
         "override_rates": True,
         "override_fleet": True,
         "run": {
-            "output_dir": f"{output_directory}/{output_run_name}",
-            "emissions_dir": f"{output_directory}/{output_run_name}",
+            "output_dir": outputs,
+            "emissions_dir": outputs,
         },
-        "rates": emissions_settings["rates"],
+        "emfac": raw["emfac"],
         "beam": raw["beam"],
         "mapping": load_mapping_config(),
     }
     return {
-        "area": raw["run"]["region"],
-        "run_batch": raw["run"]["output_run_name"],
-        "scenario": raw["run"]["scenario"],
-        "work_dir": raw["shared"]["paths"]["work_dir"],
-        "shared": raw.get("shared", {}),
-        "impacts": impacts_settings,
+        "area": raw["region"],
+        "run_batch": Path(outputs).name,
+        "scenario": raw["scenario"],
+        "work_dir": raw["work_dir"],
         "config": config,
     }
 

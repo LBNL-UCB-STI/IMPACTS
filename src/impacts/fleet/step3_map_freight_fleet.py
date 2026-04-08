@@ -8,8 +8,10 @@ Substeps:
 3.5 Create mapped freight vehicle types and update carriers.
 """
 
+import os
 import os.path
 import sys
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -28,6 +30,21 @@ from impacts.fleet.config import get_fuel_key
 
 
 # Step 3.1: derive BEAM freight VMT from payload tours
+
+
+def _resolve_freight_input_file(config: dict[str, Any], prefix: str) -> str:
+    directory = Path(str(config["beam"]["freight_directory"])).expanduser().resolve()
+    matches = sorted(directory.glob(f"{prefix}--*"))
+    if not matches:
+        raise FileNotFoundError(f"No file matching '{prefix}--*' found in {directory}")
+    return str(matches[0])
+
+
+def _read_beam_table(path: str) -> pd.DataFrame:
+    source = Path(path).expanduser().resolve()
+    if source.suffix.lower() == ".parquet":
+        return pd.read_parquet(source)
+    return pd.read_csv(source)
 
 def calculate_tour_summary_by_vehicle(payloads_raw):
     """
@@ -655,14 +672,14 @@ def generate_emfac_mapped_freight_fleet(emfac_vmt, freight_classes, work_dir, co
         tuple: (updated_carriers_df, updated_vehicle_types_df)
     """
     # Prepare file paths
-    carriers_file = str(os.path.join(work_dir, config["beam"]["carriers_file"]))
-    payloads_file = str(os.path.join(work_dir, config["beam"]["payloads_file"]))
+    carriers_file = _resolve_freight_input_file(config, "carriers")
+    payloads_file = _resolve_freight_input_file(config, "payloads")
     vehicle_types_file = str(os.path.join(work_dir, config["beam"]["ft_vehicle_types_file"]))
 
     # Load source data
     print(f"Loading data from:\n  {carriers_file}\n  {vehicle_types_file}")
-    carriers_raw = pd.read_csv(carriers_file)
-    payloads_raw = pd.read_csv(payloads_file)
+    carriers_raw = _read_beam_table(carriers_file)
+    payloads_raw = _read_beam_table(payloads_file)
     vehicle_types_raw = pd.read_csv(vehicle_types_file, dtype=str)
 
     # Get freight vehicle types with EMFAC mappings

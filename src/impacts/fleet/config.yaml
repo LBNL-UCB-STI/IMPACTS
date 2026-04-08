@@ -1,0 +1,21 @@
+fleet:
+  region:
+  scenario:
+  work_dir:
+  outputs:
+
+  emfac:
+    rates_file: ~/Workspace/Models/emfac/processed/2018/sf-emfac-2018-project-analysis-final-rates.parquet
+    fleet_file: ~/Workspace/Models/emfac/processed/2018/sf-emfac-2018-project-analysis-final-fleet.parquet
+    activity_file: ~/Workspace/Models/emfac/processed/2018/sf-emfac-2018-project-analysis-final-activity.parquet
+    atlas_emfac_xwalk: ~/Workspace/Simulation/sfbay/atlas/atlas-emfac-xwalk.csv
+
+  beam:
+    freight_directory: ~/Workspace/Simulation/sfbay/beam-ft/20250730/2018-Baseline
+    ft_vehicle_types_file: ~/Workspace/Simulation/sfbay/vehicle-tech/vehicletypes--frism--2018-Baseline.csv
+    pax_vehicles_file: ~/Workspace/Simulation/sfbay/atlas/vehicles_2017.csv
+    pax_vehicle_types_file: ~/Workspace/Simulation/sfbay/vehicle-tech/vehicleTypes--atlas--2017-Baseline.csv
+    beam_atlas_adopt_mapping: ~/Workspace/Simulation/sfbay/atlas/vehicle_type_mapping_baseline.csv
+
+
+

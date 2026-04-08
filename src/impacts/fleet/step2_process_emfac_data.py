@@ -12,6 +12,7 @@ Substeps:
 import os
 import sys
 from multiprocessing import Pool
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -29,6 +30,7 @@ sys.path.insert(0, parent_dir)
 # Now use absolute import
 from python.utils.files_utils import check_files
 from impacts.fleet.config import emissions_config
+from impacts.fleet.step1_utils_and_class_mapping import create_emfac_id
 
 
 # Step 2.1: road dust calculations
@@ -856,16 +858,121 @@ def process_emfac_vmt(_study_area, _scenario_name, _work_dir, config, format_fun
 
 def run_step2(workflow: dict[str, Any]) -> dict[str, Any]:
     """Step 2: build EMFAC population, VMT, fleet, and combined emissions rates."""
-    area = workflow["area"]
-    scenario = workflow["scenario"]
-    work_dir = workflow["work_dir"]
     config = workflow["config"]
-    format_emissions_data = workflow["format_emissions_data"]
+    scenario = workflow["scenario"]
 
-    emfac_pop = process_emfac_population(area, scenario, work_dir, config, format_emissions_data)
-    emfac_vmt = process_emfac_vmt(area, scenario, work_dir, config, format_emissions_data)
+    activity_path = Path(config["emfac"]["activity_file"]).expanduser().resolve()
+    rates_path = Path(config["emfac"]["rates_file"]).expanduser().resolve()
+    fleet_path = Path(config["emfac"]["fleet_file"]).expanduser().resolve()
+
+    print(f"Loading EMFAC activity from: {activity_path}")
+    activity = pd.read_parquet(activity_path).rename(
+        columns={"vehicleCategory": "vehicle_class", "modelYear": "model_year_group"}
+    )
+    print(f"Loading EMFAC rates from: {rates_path}")
+    rates = pd.read_parquet(rates_path).rename(
+        columns={
+            "vehicleCategory": "vehicle_class",
+            "modelYear": "model_year_group",
+            "roadCategory": "road_category",
+            "speedMph_timeMin": "speed_time",
+        }
+    )
+    print(f"Loading EMFAC fleet from: {fleet_path}")
+    workflow["emfac_fleet_source"] = pd.read_parquet(fleet_path)
+
+    mapping = config["mapping"]
+
+    for frame in (activity, rates):
+        frame["vehicle_class"] = frame["vehicle_class"].astype(str)
+        frame["fuel"] = frame["fuel"].astype(str)
+        frame["model_year_group"] = frame["model_year_group"].astype(str)
+        frame["mappedClass"] = frame["vehicle_class"].map(mapping["class"]["emfac"])
+        frame["mappedFuel"] = (
+            frame["fuel"].map(mapping["fuel"]["emfac-ft"])
+            .fillna(frame["fuel"].map(mapping["fuel"]["emfac-pax"]))
+            .fillna(frame["fuel"].map(mapping["fuel"]["emfac-bus"]))
+        )
+        frame["emfacId"] = frame.apply(create_emfac_id, axis=1)
+
+    activity = activity.dropna(subset=["mappedClass", "mappedFuel"]).copy()
+    rates = rates.dropna(subset=["mappedClass", "mappedFuel"]).copy()
+
+    emfac_pop = (
+        activity.groupby("emfacId", dropna=False)
+        .agg(
+            vehicle_class=("vehicle_class", "first"),
+            fuel=("fuel", "first"),
+            model_year_group=("model_year_group", "first"),
+            mappedFuel=("mappedFuel", "first"),
+            mappedClass=("mappedClass", "first"),
+            population=("population", "sum"),
+        )
+        .reset_index()
+    )
+    total_population = emfac_pop["population"].sum()
+    emfac_pop["population_proportion"] = emfac_pop["population"] / total_population if total_population else 0.0
+
+    emfac_vmt = (
+        activity.groupby("emfacId", dropna=False)
+        .agg(
+            vehicle_class=("vehicle_class", "first"),
+            fuel=("fuel", "first"),
+            model_year_group=("model_year_group", "first"),
+            mappedFuel=("mappedFuel", "first"),
+            mappedClass=("mappedClass", "first"),
+            total_vmt=("total_vmt", "sum"),
+        )
+        .reset_index()
+    )
+    total_vmt = emfac_vmt["total_vmt"].sum()
+    emfac_vmt["vmt_proportion"] = emfac_vmt["total_vmt"] / total_vmt if total_vmt else 0.0
+
     emfac_fleet = pd.merge(emfac_pop, emfac_vmt[["emfacId", "total_vmt", "vmt_proportion"]], on="emfacId", how="left")
-    emfac_rates = process_emissions_rates(area, scenario, work_dir, config, format_emissions_data)
+
+    pollutant_columns = {
+        "bc_gram": "rate_bc_gram_float",
+        "ch4_gram": "rate_ch4_gram_float",
+        "co_gram": "rate_co_gram_float",
+        "co2_gram": "rate_co2_gram_float",
+        "hc_gram": "rate_hc_gram_float",
+        "nh3_gram": "rate_nh3_gram_float",
+        "nox_gram": "rate_nox_gram_float",
+        "pm_gram": "rate_pm_gram_float",
+        "pm10_gram": "rate_pm10_gram_float",
+        "pm25_gram": "rate_pm2_5_gram_float",
+        "rog_gram": "rate_rog_gram_float",
+        "sox_gram": "rate_sox_gram_float",
+        "tog_gram": "rate_tog_gram_float",
+    }
+    emfac_rates = rates.rename(columns=pollutant_columns).copy()
+    emfac_rates["speed_mph_float_bins"] = np.where(
+        emfac_rates["process"].isin(["RUNEX", "PMBW", "PTOEX"]),
+        emfac_rates["speed_time"].astype(str),
+        "",
+    )
+    emfac_rates["time_minutes_float_bins"] = np.where(
+        emfac_rates["process"].eq("STREX"),
+        emfac_rates["speed_time"].astype(str),
+        "",
+    )
+    if "road_category" not in emfac_rates.columns:
+        emfac_rates["road_category"] = ""
+    else:
+        emfac_rates["road_category"] = emfac_rates["road_category"].fillna("")
+    emfac_rates["scenario"] = scenario
+
+    keep_columns = [
+        "scenario",
+        "emfacId",
+        "county",
+        "speed_mph_float_bins",
+        "time_minutes_float_bins",
+        "road_category",
+        "process",
+        *[column for column in pollutant_columns.values() if column in emfac_rates.columns],
+    ]
+    emfac_rates = emfac_rates[keep_columns].copy()
 
     print("\n=== EMFAC Population ===\n")
     print(f"total_population: {emfac_pop['population'].sum() / 1_000_000:.1f}M")

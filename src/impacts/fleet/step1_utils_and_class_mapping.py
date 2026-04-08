@@ -10,6 +10,7 @@ import json
 import os
 import sys
 from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -26,7 +27,22 @@ from impacts.fleet.config import BeamClasses
 # Step 1.1: class mapping helpers
 
 
-def generate_emfac_beam_class_mapping(emfac_pop_by_model_year_file, vehicle_class_output_file, to_filter_out):
+def _read_table(path: str) -> pd.DataFrame:
+    source = Path(path).expanduser().resolve()
+    if source.suffix.lower() == ".parquet":
+        return pd.read_parquet(source)
+    table = pv.read_csv(str(source), read_options=pa.csv.ReadOptions(use_threads=True))
+    return table.to_pandas()
+
+
+def _normalize_vehicle_class_column(df: pd.DataFrame) -> pd.DataFrame:
+    result = df.copy()
+    if "vehicle_class" not in result.columns and "vehicleCategory" in result.columns:
+        result = result.rename(columns={"vehicleCategory": "vehicle_class"})
+    return result
+
+
+def generate_emfac_beam_class_mapping(emfac_activity_file, vehicle_class_output_file, to_filter_out):
     """
     Creates vehicle class mapping and saves it to a JSON file if it doesn't exist.
     If the file exists, loads and returns the existing mapping.
@@ -46,8 +62,7 @@ def generate_emfac_beam_class_mapping(emfac_pop_by_model_year_file, vehicle_clas
     # Create the mapping
     mapping = {}
 
-    table = pv.read_csv(emfac_pop_by_model_year_file, read_options=pa.csv.ReadOptions(use_threads=True))
-    df = table.to_pandas()
+    df = _normalize_vehicle_class_column(_read_table(emfac_activity_file))
 
     for vehicle in df["vehicle_class"].unique():
         if 'Utility' in vehicle or 'Public' in vehicle:
@@ -160,10 +175,10 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
     config = workflow["config"]
     work_dir = workflow["work_dir"]
 
-    emfac_pop_by_model_year_file = config["rates"]["emfac"]["emfac_pop_by_model_year_file"]
+    emfac_activity_file = config["emfac"]["activity_file"]
     vehicle_class_output_file = f"{config['run']['output_dir']}/{area}_vehicle_class_mapping_{scenario}.json"
     emfac_class_map = generate_emfac_beam_class_mapping(
-        emfac_pop_by_model_year_file=os.path.join(work_dir, emfac_pop_by_model_year_file),
+        emfac_activity_file=emfac_activity_file,
         vehicle_class_output_file=os.path.join(work_dir, vehicle_class_output_file),
         to_filter_out=[BeamClasses.CLASS_2B3_VOCATIONAL],
     )

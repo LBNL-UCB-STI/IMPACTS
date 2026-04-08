@@ -246,6 +246,26 @@ def _missing_rate_summary(frame: pd.DataFrame) -> dict[str, object]:
     }
 
 
+def _print_model_year_group_stats(
+    final_rates: pd.DataFrame,
+    aggregated_activity: pd.DataFrame,
+    fleet: pd.DataFrame,
+) -> None:
+    print("    4.4 Model year group stats")
+    if "modelYear" in final_rates.columns:
+        print("      Final rates rows by modelYear:")
+        for model_year, count in final_rates["modelYear"].value_counts(dropna=False).sort_index().items():
+            print(f"        {model_year}: {int(count):,}")
+    if "modelYear" in aggregated_activity.columns:
+        print("      Activity rows by modelYear:")
+        for model_year, count in aggregated_activity["modelYear"].value_counts(dropna=False).sort_index().items():
+            print(f"        {model_year}: {int(count):,}")
+    if "modelYear" in fleet.columns:
+        print("      Fleet rows by modelYear:")
+        for model_year, count in fleet["modelYear"].value_counts(dropna=False).sort_index().items():
+            print(f"        {model_year}: {int(count):,}")
+
+
 def run_step4(workflow: dict[str, object]) -> dict[str, object]:
     print("  Step 4. Finalize Output")
     print("    4.1 Load filled project analysis surface and activity weights")
@@ -266,6 +286,7 @@ def run_step4(workflow: dict[str, object]) -> dict[str, object]:
     _write_parquet(final_rates, workflow["paths"]["final_output"])
     _write_parquet(aggregated_activity, workflow["paths"]["final_activity_output"])
     _write_parquet(fleet, workflow["paths"]["final_fleet_output"])
+    _print_model_year_group_stats(final_rates, aggregated_activity, fleet)
     write_trace(
         workflow,
         "step4_finalize_output",

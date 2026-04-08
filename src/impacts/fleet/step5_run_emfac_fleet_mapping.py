@@ -13,6 +13,7 @@ import os
 import os.path
 import shutil
 import sys
+from pathlib import Path
 from typing import Any
 from typing import Dict
 from typing import Optional
@@ -30,17 +31,46 @@ from impacts.fleet.config import BeamClasses
 pd.set_option('display.max_columns', 20)
 
 
+def _resolve_freight_input_file(config, prefix):
+    directory = Path(str(config["beam"]["freight_directory"])).expanduser().resolve()
+    matches = sorted(directory.glob(f"{prefix}--*"))
+    if not matches:
+        raise FileNotFoundError(f"No file matching '{prefix}--*' found in {directory}")
+    return matches[0]
+
+
+def _mapped_output_path(path_like):
+    source = Path(path_like)
+    if source.suffix == ".gz" and source.name.endswith(".csv.gz"):
+        stem = source.name[:-7]
+        return str(source.with_name(f"{stem}--EM.csv.gz"))
+    if source.suffix:
+        stem = source.name[: -len(source.suffix)]
+        return str(source.with_name(f"{stem}--EM{source.suffix}"))
+    return str(source.with_name(f"{source.name}--EM"))
+
+
+def _write_table(frame, path):
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.suffix.lower() == ".parquet":
+        frame.to_parquet(target, index=False)
+        return
+    compression = "gzip" if target.name.endswith(".csv.gz") else None
+    frame.to_csv(target, index=False, compression=compression)
+
+
 def _resolve_output_paths(scenario, work_dir, config):
-    carriers_out_file = os.path.join(work_dir, config['beam']['carriers_file'].replace('.csv', '--EM.csv'))
+    carriers_out_file = str(_mapped_output_path(_resolve_freight_input_file(config, "carriers")))
     ft_vehtypes_out_file = os.path.join(
         work_dir,
-        config['beam']['ft_vehicle_types_file'].replace('.csv', '--EM.csv'),
+        _mapped_output_path(config['beam']['ft_vehicle_types_file']),
     )
     pax_vehtypes_out_file = os.path.join(
         work_dir,
-        config['beam']['pax_vehicle_types_file'].replace('.csv', '--EM.csv'),
+        _mapped_output_path(config['beam']['pax_vehicle_types_file']),
     )
-    vehicles_output = os.path.join(work_dir, config['beam']['pax_vehicles_file'].replace('.csv', '--EM.csv'))
+    vehicles_output = os.path.join(work_dir, _mapped_output_path(config['beam']['pax_vehicles_file']))
     emissions_rates_dir = os.path.join(
         os.path.dirname(os.path.join(work_dir, config['beam']['ft_vehicle_types_file'])),
         f"emissions/{scenario.replace('_', '-')}",
@@ -130,8 +160,8 @@ def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
         ft_vehtypes_out_file,
         pax_vehtypes_out_file,
     )
-    workflow["new_carriers"].to_csv(_resolve_output_paths(workflow["scenario"], workflow["work_dir"], workflow["config"])[0], index=False)
-    workflow["pax_vehicles"].to_csv(vehicles_output, index=False)
+    _write_table(workflow["new_carriers"], _resolve_output_paths(workflow["scenario"], workflow["work_dir"], workflow["config"])[0])
+    _write_table(workflow["pax_vehicles"], vehicles_output)
     workflow["fleet_output_paths"] = {
         "carriers": _resolve_output_paths(workflow["scenario"], workflow["work_dir"], workflow["config"])[0],
         "ft_vehicle_types": ft_vehtypes_out_file,
