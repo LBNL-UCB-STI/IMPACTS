@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,28 @@ def write_trace(workflow: dict[str, object], name: str, payload: dict[str, Any])
     with target.open("w") as handle:
         json.dump(_to_json_ready(payload), handle, indent=2, sort_keys=True)
     return target
+
+
+def write_failure_trace(
+    workflow: dict[str, object],
+    *,
+    step: str,
+    error: Exception,
+    payload: dict[str, Any] | None = None,
+) -> Path:
+    failure_payload: dict[str, Any] = {
+        "step": step,
+        "error_type": type(error).__name__,
+        "error_message": str(error),
+        "traceback": traceback.format_exc(),
+    }
+    if payload:
+        failure_payload.update(payload)
+    return write_trace(workflow, f"{step}_failure", failure_payload)
+
+
+def raise_runtime_error(step: str, error: Exception) -> None:
+    raise RuntimeError(f"EMFAC workflow failed during {step}: {type(error).__name__}: {error}") from error
 
 
 def frame_summary(frame: pd.DataFrame, *, name: str) -> dict[str, Any]:
@@ -42,11 +65,6 @@ def frame_summary(frame: pd.DataFrame, *, name: str) -> dict[str, Any]:
     elif "sub_area" in frame.columns:
         summary["county_count"] = int(frame["sub_area"].nunique(dropna=True))
     return summary
-
-
-def assert_row_count(expected: int, actual: int, *, label: str) -> None:
-    if expected != actual:
-        raise ValueError(f"{label} changed row count unexpectedly: expected {expected}, got {actual}")
 
 
 def _to_json_ready(value: Any) -> Any:

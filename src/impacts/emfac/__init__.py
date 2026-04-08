@@ -3,9 +3,9 @@
 __all__ = [
     "config",
     "main",
-    "step1_clean_input_tables",
-    "step2_append_nh3",
-    "step3_append_black_carbon",
-    "step4_append_road_dust",
-    "step5_finalize_output",
+    "step1_prepare_emissions_and_activities_tables",
+    "step2_build_comprehensive_project_analysis",
+    "step3_fill_project_analysis_rates",
+    "step4_finalize_output",
+    "tracing",
 ]
