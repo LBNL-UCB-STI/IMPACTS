@@ -1,0 +1,14 @@
+"""Fleet Step 3: prepare freight fleet inputs.
+
+This step is intentionally minimal for now and acts as the dedicated hook for
+freight-specific preparation between passenger mapping and freight mapping.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+def run_step3(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Step 3: placeholder freight-preparation hook."""
+    return workflow

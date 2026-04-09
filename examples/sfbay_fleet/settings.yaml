@@ -1,12 +1,10 @@
 fleet:
   region: sfbay
   scenario: 2018-Baseline
-  work_dir: ~/Workspace/Simulation/sfbay
-  outputs: vehicle-tech/emissions/2018-Baseline
+  output: vehicle-tech/emissions/2018-Baseline
 
   emfac:
     rates_file: ~/Workspace/Models/emfac/processed/2018/sf-emfac-2018-project-analysis-final-rates.parquet
-    fleet_file: ~/Workspace/Models/emfac/processed/2018/sf-emfac-2018-project-analysis-final-fleet.parquet
     activity_file: ~/Workspace/Models/emfac/processed/2018/sf-emfac-2018-project-analysis-final-activity.parquet
 
   beam:

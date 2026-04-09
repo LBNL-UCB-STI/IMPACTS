@@ -1,16 +1,15 @@
-"""Fleet Step 3: map EMFAC freight distributions onto BEAM freight vehicles.
+"""Fleet Step 4: map EMFAC freight distributions onto BEAM freight vehicles.
 
 Substeps:
-3.1 Estimate BEAM freight VMT from payload tours.
-3.2 Build the EMFAC freight VMT target distribution.
-3.3 Match BEAM vehicles to EMFAC classes, fuel types, and model-year groups.
-3.4 Evaluate how closely mapped VMT follows EMFAC targets.
-3.5 Create mapped freight vehicle types and update carriers.
+4.1 Estimate BEAM freight VMT from payload tours.
+4.2 Build the EMFAC freight VMT target distribution.
+4.3 Match BEAM vehicles to EMFAC classes, fuel types, and model-year groups.
+4.4 Evaluate how closely mapped VMT follows EMFAC targets.
+4.5 Create mapped freight vehicle types and update carriers.
 """
 
 import os
 import os.path
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -18,18 +17,13 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-# Get the absolute path to the directory containing this script
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.insert(0, parent_dir)
-
-# Now use absolute import
 from python.utils.files_utils import sanitize_name
 from impacts.fleet.config import BeamClasses
 from impacts.fleet.config import get_fuel_key
+from impacts.fleet.config import resolve_workflow_path
 
 
-# Step 3.1: derive BEAM freight VMT from payload tours
+# Step 4.1: derive BEAM freight VMT from payload tours
 
 
 def _resolve_freight_input_file(config: dict[str, Any], prefix: str) -> str:
@@ -112,7 +106,7 @@ def calculate_tour_summary_by_vehicle(payloads_raw):
     return summary
 
 
-# Step 3.2-3.3: match BEAM freight vehicles to EMFAC fleet records
+# Step 4.2-4.3: match BEAM freight vehicles to EMFAC fleet records
 
 def find_best_match(veh_class, veh_fuel, alternatives_mapping, df):
     """
@@ -222,7 +216,7 @@ def find_best_match(veh_class, veh_fuel, alternatives_mapping, df):
     }
 
 
-# Step 3.4: compare resulting VMT with EMFAC targets
+# Step 4.4: compare resulting VMT with EMFAC targets
 
 def analyze_vmt_distribution(beam_vmt_track, emfac_vmt_track):
     """
@@ -368,7 +362,7 @@ def analyze_vmt_distribution(beam_vmt_track, emfac_vmt_track):
     print(f"Average absolute difference by fuel: {fuel_comparison['abs_difference'].mean() * 100:.2f}%")
 
 
-# Step 3.5: create mapped freight fleet outputs
+# Step 4.5: create mapped freight fleet outputs
 
 def emfac2freight_by_model_year_class_fuel(ft_emfac_vmt, carriers_raw, payloads_raw, vehicle_types_formatted, alternatives_mapping):
     """
@@ -650,7 +644,7 @@ def process_emfac_mappings(mapping_results, vehicle_types, vehicle_types_raw):
     return new_fleet, vehicle_type_map
 
 
-def generate_emfac_mapped_freight_fleet(emfac_vmt, freight_classes, work_dir, config, format_func):
+def generate_emfac_mapped_freight_fleet(emfac_vmt, freight_classes, config, format_func):
     """
     Create updated vehicle types and carriers files based on EMFAC mapping.
 
@@ -665,7 +659,6 @@ def generate_emfac_mapped_freight_fleet(emfac_vmt, freight_classes, work_dir, co
         emfac_vmt (pandas.DataFrame): EMFAC VMT data with emissions characteristics
         freight_classes (list): List of vehicle classes to consider as freight vehicles
         format_func (callable): Function to format vehicle types for EMFAC mapping
-        work_dir (str): Working directory containing input files
         config (dict): Configuration dictionary with file paths and settings
 
     Returns:
@@ -674,7 +667,7 @@ def generate_emfac_mapped_freight_fleet(emfac_vmt, freight_classes, work_dir, co
     # Prepare file paths
     carriers_file = _resolve_freight_input_file(config, "carriers")
     payloads_file = _resolve_freight_input_file(config, "payloads")
-    vehicle_types_file = str(os.path.join(work_dir, config["beam"]["ft_vehicle_types_file"]))
+    vehicle_types_file = resolve_workflow_path(config["beam"]["ft_vehicle_types_file"])
 
     # Load source data
     print(f"Loading data from:\n  {carriers_file}\n  {vehicle_types_file}")
@@ -740,17 +733,15 @@ def _build_beam_vehicle_formatter(config):
     return format_beam_vehicle_types
 
 
-def run_step3(workflow: dict[str, Any]) -> dict[str, Any]:
-    """Step 3: map freight fleet records into EMFAC-backed BEAM vehicle types."""
-    format_beam_vehicle_types = workflow.get("format_beam_vehicle_types") or _build_beam_vehicle_formatter(workflow["config"])
+def run_step4(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Step 4: map freight fleet records into EMFAC-backed BEAM vehicle types."""
+    format_beam_vehicle_types = _build_beam_vehicle_formatter(workflow["config"])
     new_carriers, new_ft_vehicle_types = generate_emfac_mapped_freight_fleet(
         workflow["emfac_fleet"],
         BeamClasses.get_freight_classes(),
-        workflow["work_dir"],
         workflow["config"],
         format_beam_vehicle_types,
     )
-    workflow["format_beam_vehicle_types"] = format_beam_vehicle_types
     workflow["new_carriers"] = new_carriers
     workflow["new_ft_vehicle_types"] = new_ft_vehicle_types
     return workflow

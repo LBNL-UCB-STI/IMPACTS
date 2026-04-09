@@ -10,6 +10,7 @@ import pandas as pd
 import yaml
 
 CONFIG_DIR = Path(__file__).resolve().parent
+REPO_ROOT = CONFIG_DIR.parents[2]
 DEFAULT_CONFIG_PATH = CONFIG_DIR / "config.yaml"
 EXAMPLE_CONFIG_PATH = Path("examples/sfbay_fleet/settings.yaml")
 MAPPINGS_DIR = CONFIG_DIR / "mappings"
@@ -37,37 +38,6 @@ class BeamClasses:
     def get_passenger_classes(cls) -> list[str]:
         return [cls.CLASS_CAR, cls.CLASS_BIKE, cls.CLASS_MDP]
 
-
-emissions_config = {
-    "pollutants": {
-        "CH4": "rate_ch4_gram_float",
-        "CO": "rate_co_gram_float",
-        "CO2": "rate_co2_gram_float",
-        "HC": "rate_hc_gram_float",
-        "NH3": "rate_nh3_gram_float",
-        "NOx": "rate_nox_gram_float",
-        "PM": "rate_pm_gram_float",
-        "PM10": "rate_pm10_gram_float",
-        "PM2_5": "rate_pm2_5_gram_float",
-        "ROG": "rate_rog_gram_float",
-        "SOx": "rate_sox_gram_float",
-        "TOG": "rate_tog_gram_float",
-        "BC": "rate_bc_gram_float",
-        "BCm": "rate_bcm_gram_float",
-        "BCh": "rate_bch_gram_float",
-    },
-    "processes": [
-        "RUNEX",
-        "IDLEX",
-        "STREX",
-        "DIURN",
-        "HOTSOAK",
-        "RUNLOSS",
-        "PMTW",
-        "PMBW",
-        "PRDUST",
-    ],
-}
 
 vehicle_types_config = {
     "columns": [
@@ -115,15 +85,97 @@ def _expand_path(value: str | None) -> str | None:
     return str(Path(value).expanduser())
 
 
-def _expand_paths(config: dict) -> dict:
+def resolve_workflow_path(path_like: str | None) -> str:
+    if path_like in (None, ""):
+        raise ValueError("Expected a configured path value, got an empty value")
+    source = Path(str(path_like)).expanduser()
+    if not source.is_absolute():
+        source = REPO_ROOT / source
+    return str(source.resolve())
+
+
+def read_table(path_like: str, *, dtype: str | None = "str") -> pd.DataFrame:
+    resolved = Path(resolve_workflow_path(path_like))
+    if resolved.suffix.lower() == ".parquet":
+        frame = pd.read_parquet(resolved)
+        if dtype == "str":
+            return frame.fillna("").astype(str)
+        return frame
+    return pd.read_csv(resolved, dtype=dtype).fillna("")
+
+
+def _normalize_configured_path(
+    path_like: str | None,
+    *,
+    path_label: str,
+    expect_directory: bool = False,
+    must_exist: bool = True,
+) -> str | None:
+    if path_like in (None, ""):
+        return None
+    resolved = Path(resolve_workflow_path(path_like))
+    if must_exist and not resolved.exists():
+        raise FileNotFoundError(f"Configured fleet path '{path_label}' does not exist: {resolved}")
+    if expect_directory and must_exist and not resolved.is_dir():
+        raise NotADirectoryError(f"Configured fleet path '{path_label}' is not a directory: {resolved}")
+    if not expect_directory and must_exist and not resolved.is_file():
+        raise FileNotFoundError(f"Configured fleet path '{path_label}' is not a file: {resolved}")
+    return str(resolved)
+
+
+def _ingest_configured_sources(config: dict) -> dict:
     config = deepcopy(config)
-    config["work_dir"] = _expand_path(config.get("work_dir"))
-    config["outputs"] = _expand_path(config.get("outputs"))
+    config["output"] = _normalize_configured_path(
+        config.get("output"),
+        path_label="output",
+        must_exist=False,
+    )
     emfac = config.get("emfac", {})
     if isinstance(emfac, dict):
-        for key in ("rates_file", "fleet_file", "activity_file"):
-            emfac[key] = _expand_path(emfac.get(key))
+        emfac["rates_file"] = _normalize_configured_path(emfac.get("rates_file"), path_label="emfac.rates_file")
+        emfac["activity_file"] = _normalize_configured_path(emfac.get("activity_file"), path_label="emfac.activity_file")
+        emfac["atlas_emfac_xwalk"] = _normalize_configured_path(
+            emfac.get("atlas_emfac_xwalk"),
+            path_label="emfac.atlas_emfac_xwalk",
+        )
         config["emfac"] = emfac
+    beam = config.get("beam", {})
+    if isinstance(beam, dict):
+        beam["freight_directory"] = _normalize_configured_path(
+            beam.get("freight_directory"),
+            path_label="beam.freight_directory",
+            expect_directory=True,
+        )
+        beam["ft_vehicle_types_file"] = _normalize_configured_path(
+            beam.get("ft_vehicle_types_file"),
+            path_label="beam.ft_vehicle_types_file",
+        )
+        beam["pax_vehicles_file"] = _normalize_configured_path(
+            beam.get("pax_vehicles_file"),
+            path_label="beam.pax_vehicles_file",
+            must_exist=False,
+        )
+        beam["pax_vehicle_types_file"] = _normalize_configured_path(
+            beam.get("pax_vehicle_types_file"),
+            path_label="beam.pax_vehicle_types_file",
+            must_exist=False,
+        )
+        config["beam"] = beam
+    atlas = config.get("atlas", {})
+    if isinstance(atlas, dict):
+        atlas["vehicles_file"] = _normalize_configured_path(
+            atlas.get("vehicles_file"),
+            path_label="atlas.vehicles_file",
+        )
+        atlas["vehicles_types_file"] = _normalize_configured_path(
+            atlas.get("vehicles_types_file"),
+            path_label="atlas.vehicles_types_file",
+        )
+        atlas["curb_weight_mapping_file"] = _normalize_configured_path(
+            atlas.get("curb_weight_mapping_file"),
+            path_label="atlas.curb_weight_mapping_file",
+        )
+        config["atlas"] = atlas
     return config
 
 
@@ -198,17 +250,18 @@ def _validate_workflow_settings(raw: dict, source_path: Path) -> None:
     required_paths = [
         ("region",),
         ("scenario",),
-        ("work_dir",),
-        ("outputs",),
+        ("output",),
         ("emfac",),
         ("emfac", "rates_file"),
-        ("emfac", "fleet_file"),
         ("emfac", "activity_file"),
+        ("emfac", "atlas_emfac_xwalk"),
+        ("atlas",),
+        ("atlas", "vehicles_file"),
+        ("atlas", "vehicles_types_file"),
+        ("atlas", "curb_weight_mapping_file"),
         ("beam",),
         ("beam", "freight_directory"),
         ("beam", "ft_vehicle_types_file"),
-        ("beam", "pax_vehicles_file"),
-        ("beam", "pax_vehicle_types_file"),
     ]
     missing = []
     for path in required_paths:
@@ -226,24 +279,22 @@ def load_workflow(config_path: str | Path | None = None) -> dict:
     source_path = Path(config_path) if config_path is not None else DEFAULT_CONFIG_PATH
     raw = _load_yaml(source_path)
     _validate_workflow_settings(raw, source_path)
-    raw = _expand_paths(raw)
-    outputs = raw["outputs"]
+    raw = _ingest_configured_sources(raw)
+    output_root = raw["output"]
     config = {
-        "override_rates": True,
-        "override_fleet": True,
-        "run": {
-            "output_dir": outputs,
-            "emissions_dir": outputs,
-        },
+        "output": output_root,
         "emfac": raw["emfac"],
+        "atlas": raw["atlas"],
         "beam": raw["beam"],
         "mapping": load_mapping_config(),
     }
+    atlas_xwalk = raw.get("emfac", {}).get("atlas_emfac_xwalk")
+    if atlas_xwalk:
+        config["mapping"]["atlas"]["emfac"] = atlas_xwalk
     return {
         "area": raw["region"],
-        "run_batch": Path(outputs).name,
+        "run_batch": Path(output_root).name,
         "scenario": raw["scenario"],
-        "work_dir": raw["work_dir"],
         "config": config,
     }
 

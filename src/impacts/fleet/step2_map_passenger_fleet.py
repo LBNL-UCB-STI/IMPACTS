@@ -1,19 +1,179 @@
+"""Fleet Step 2: map EMFAC passenger distributions onto BEAM passenger vehicles.
+
+Substeps:
+2.1 Parse and rebuild BEAM passenger probability strings.
+2.2 Normalize BEAM passenger sampling distributions.
+2.3 Optionally crosswalk EMFAC classes through ATLAS body types.
+2.4 Map cars, bikes, and buses into EMFAC-backed vehicle types.
+2.5 Regenerate the passenger vehicle file from mapped vehicle types.
+"""
+
 import os
 import re
-import sys
+from typing import Any
 
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-# Get the absolute path to the directory containing this script
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(os.path.dirname(current_dir))
-sys.path.insert(0, parent_dir)
-
 from python.utils.files_utils import sanitize_name
-from python.utils.study_area_config import vehicle_types_config
+from impacts.fleet.config import BeamClasses
+from impacts.fleet.config import get_fuel_key
+from impacts.fleet.config import read_table
+from impacts.fleet.config import resolve_workflow_path
+from impacts.fleet.config import vehicle_types_config
 
+
+def _normalize_bodytype(value: object) -> str:
+    token = str(value).strip().lower()
+    mapping = {
+        "car": "Car",
+        "suv": "Suv",
+        "pickup": "Pickup",
+        "truck": "Pickup",
+        "van": "Van",
+        "minvan": "Van",
+    }
+    return mapping.get(token, str(value).strip().capitalize())
+
+
+def _normalize_atlas_fuel(value: object) -> str:
+    token = str(value).strip().lower()
+    mapping = {
+        "conv": "conv",
+        "ice": "conv",
+        "gas": "conv",
+        "gasoline": "conv",
+        "diesel": "conv",
+        "hybrid": "hybrid",
+        "phev": "phev",
+        "ev": "ev",
+        "aev": "ev",
+    }
+    return mapping.get(token, token)
+
+
+def _infer_vehicle_type_atlas_fuel_key(frame: pd.DataFrame) -> pd.Series:
+    adopt = frame.get("adopt_fuel", pd.Series(index=frame.index, dtype="object")).apply(_normalize_atlas_fuel)
+    primary = frame.get("primaryFuelType", pd.Series(index=frame.index, dtype="object")).astype(str).str.strip().str.lower()
+    secondary = frame.get("secondaryFuelType", pd.Series(index=frame.index, dtype="object")).astype(str).str.strip().str.lower()
+
+    result = adopt.copy()
+    missing = result.isna() | result.eq("") | result.eq("nan")
+    result.loc[missing & primary.eq("electricity") & secondary.eq("gasoline")] = "phev"
+    result.loc[missing & primary.eq("electricity") & ~secondary.eq("gasoline")] = "ev"
+    result.loc[missing & primary.eq("gasoline")] = "conv"
+    result.loc[missing & primary.eq("diesel")] = "conv"
+    return result.fillna("conv")
+
+
+def _derive_model_year_group(series: pd.Series) -> pd.Series:
+    years = pd.to_numeric(series, errors="coerce")
+    groups = pd.Series(index=series.index, dtype="string")
+    groups.loc[years <= 1995] = "1993"
+    groups.loc[(years >= 1996) & (years <= 2006)] = "2006"
+    groups.loc[years >= 2007] = "2018"
+    return groups
+
+
+def _normalize_vehicle_types_schema(vehicle_types: pd.DataFrame) -> pd.DataFrame:
+    result = vehicle_types.copy()
+    result["bodytype"] = result.get("bodytype", pd.Series(index=result.index, dtype="object")).apply(_normalize_bodytype)
+    result["atlas_fuel_key"] = _infer_vehicle_type_atlas_fuel_key(result)
+    result["modelyear"] = pd.to_numeric(result.get("modelyear"), errors="coerce")
+    if "model_year_group" not in result.columns or result["model_year_group"].isna().all():
+        result["model_year_group"] = _derive_model_year_group(result["modelyear"])
+    else:
+        result["model_year_group"] = (
+            pd.to_numeric(result["model_year_group"], errors="coerce")
+            .astype("Int64")
+            .astype(str)
+            .replace("<NA>", pd.NA)
+        )
+        missing = result["model_year_group"].isna() | result["model_year_group"].eq("nan")
+        result.loc[missing, "model_year_group"] = _derive_model_year_group(result.loc[missing, "modelyear"])
+    return result
+
+
+def _normalize_atlas_vehicles_schema(vehicles: pd.DataFrame) -> pd.DataFrame:
+    result = vehicles.copy()
+    result["bodytype"] = result.get("bodytype", pd.Series(index=result.index, dtype="object")).apply(_normalize_bodytype)
+    fuel_source = result.get("adopt_fuel", result.get("pred_power", pd.Series(index=result.index, dtype="object")))
+    result["atlas_fuel_key"] = fuel_source.apply(_normalize_atlas_fuel)
+    result["modelyear"] = pd.to_numeric(result.get("modelyear"), errors="coerce")
+    return result
+
+
+def _assign_original_vehicle_type_ids(vehicles: pd.DataFrame, vehicle_types: pd.DataFrame) -> pd.DataFrame:
+    if "vehicleTypeId" in vehicles.columns:
+        result = vehicles.copy()
+        result["vehicleTypeId"] = result["vehicleTypeId"].astype(str)
+        return result
+
+    result = _normalize_atlas_vehicles_schema(vehicles)
+    vehicle_types_norm = _normalize_vehicle_types_schema(vehicle_types)
+    candidate_id_column = "oldVehicleTypeId" if "oldVehicleTypeId" in vehicle_types_norm.columns else "vehicleTypeId"
+    candidates = vehicle_types_norm[
+        vehicle_types_norm["vehicleCategory"].isin([BeamClasses.CLASS_CAR, BeamClasses.CLASS_BIKE, BeamClasses.CLASS_MDP])
+        & vehicle_types_norm["bodytype"].notna()
+        & vehicle_types_norm["atlas_fuel_key"].notna()
+        & vehicle_types_norm["modelyear"].notna()
+    ][[candidate_id_column, "bodytype", "atlas_fuel_key", "modelyear"]].copy()
+    candidates = candidates.rename(columns={candidate_id_column: "vehicleTypeId"})
+    candidates["modelyear"] = candidates["modelyear"].astype(int)
+
+    fallback_fuels = {
+        "ev": ["phev", "hybrid", "conv"],
+        "phev": ["hybrid", "conv"],
+        "hybrid": ["conv"],
+        "conv": [],
+    }
+
+    unique_keys = result[["bodytype", "atlas_fuel_key", "modelyear"]].drop_duplicates().reset_index(drop=True)
+    assigned_rows = []
+    for _, row in unique_keys.iterrows():
+        bodytype = row["bodytype"]
+        fuel = row["atlas_fuel_key"]
+        year = pd.to_numeric(row["modelyear"], errors="coerce")
+        fuel_candidates = [fuel] + fallback_fuels.get(str(fuel), [])
+        match = candidates.iloc[0:0]
+        for fuel_key in fuel_candidates:
+            match = candidates[
+                (candidates["bodytype"] == bodytype)
+                & (candidates["atlas_fuel_key"] == fuel_key)
+            ].copy()
+            if not match.empty:
+                break
+        if match.empty:
+            match = candidates[candidates["bodytype"] == bodytype].copy()
+        if match.empty:
+            assigned_vehicle_type_id = pd.NA
+        else:
+            match["year_distance"] = np.where(
+                pd.isna(year),
+                0,
+                (match["modelyear"] - int(year)).abs(),
+            )
+            assigned_vehicle_type_id = match.sort_values(["year_distance", "modelyear", "vehicleTypeId"]).iloc[0]["vehicleTypeId"]
+        assigned_rows.append(
+            {
+                "bodytype": bodytype,
+                "atlas_fuel_key": fuel,
+                "modelyear": row["modelyear"],
+                "vehicleTypeId": assigned_vehicle_type_id,
+            }
+        )
+
+    assignments = pd.DataFrame(assigned_rows)
+    result = result.merge(assignments, on=["bodytype", "atlas_fuel_key", "modelyear"], how="left")
+    if result["vehicleTypeId"].isna().any():
+        missing = result[result["vehicleTypeId"].isna()][["bodytype", "atlas_fuel_key", "modelyear"]].drop_duplicates()
+        raise ValueError(f"Unable to assign vehicleTypeId for ATLAS vehicles:\n{missing.to_string(index=False)}")
+    result["vehicleTypeId"] = result["vehicleTypeId"].astype(str)
+    return result
+
+
+# Step 2.1: probability-string parsing and formatting
 
 def parse_sample_probability_string(prob_string):
     """
@@ -85,6 +245,8 @@ def create_sample_probability_string(income_bin, income_prob, ridehail_bin, ride
     # Use faster string joining
     return "; ".join(parts)
 
+
+# Step 2.2: normalize BEAM passenger probability inputs
 
 def process_vehicle_types_probabilities_by_vehicle_category_and_income_group(vehicle_types):
     """
@@ -158,7 +320,9 @@ def process_vehicle_types_probabilities_by_vehicle_category_and_income_group(veh
     return df
 
 
-def emfac2passenger_with_atlas_crosswalk(vehicle_types, atlas_emfac_fleet, work_dir, config):
+# Step 2.3: optional ATLAS crosswalk path for passenger cars
+
+def emfac2passenger_with_atlas_crosswalk(vehicle_types, atlas_emfac_fleet, config):
     """
     Distribute total_vmt and population values evenly across different vehicle typeIds
     that share the same emfacId and bodytype combination.
@@ -170,12 +334,15 @@ def emfac2passenger_with_atlas_crosswalk(vehicle_types, atlas_emfac_fleet, work_
     Returns:
         pd.DataFrame: DataFrame with distributed vmt and population values
     """
-    vehicles = pd.read_csv(str(os.path.join(work_dir, config["beam"]["pax_vehicles_file"])), dtype=str)
+    vehicles = _assign_original_vehicle_type_ids(
+        read_table(config["beam"]["pax_vehicles_file"]),
+        vehicle_types,
+    )
     vehicle_types_filtered = vehicle_types[vehicle_types["vehicleTypeId"].isin(vehicles["vehicleTypeId"].unique())].copy()
     vehicles_filtered = vehicles[vehicles["vehicleTypeId"].isin(vehicle_types_filtered["vehicleTypeId"].unique())].copy()
 
-    vehicle_types_filtered['model_year_group'] = vehicle_types_filtered['model_year_group'].astype(int)
-    atlas_emfac_fleet['model_year_group'] = atlas_emfac_fleet['model_year_group'].astype(int)
+    vehicle_types_filtered = _normalize_vehicle_types_schema(vehicle_types_filtered)
+    atlas_emfac_fleet['model_year_group'] = atlas_emfac_fleet['model_year_group'].astype(str)
 
     # Step 2: Merge with EMFAC fleet data
     vehicles_atlas_emfac = pd.merge(
@@ -370,20 +537,19 @@ def emfac2passenger_by_category_income(vehicle_types, car_emfac_fleet, config):
     return df_merged
 
 
-def create_atlas_emfac_crosswalk(car_emfac_fleet, work_dir, config):
+def create_atlas_emfac_crosswalk(car_emfac_fleet, config):
     """
     Create a crosswalk between EMFAC classes and bodytypes.
 
     Args:
         car_emfac_fleet (pd.DataFrame): DataFrame containing EMFAC fleet
-        work_dir (str): Working directory path containing input files
         config (dict): Configuration dictionary with data file paths and settings
 
     Returns:
         pd.DataFrame: car_emfac with added bodytype and bodytype_prop columns,
                       and updated emfacId column combined with bodytype
     """
-    emfac_bodytype_df = pd.read_csv(os.path.join(work_dir, config["mapping"]["atlas"]["emfac"]))
+    emfac_bodytype_df = pd.read_csv(resolve_workflow_path(config["mapping"]["atlas"]["emfac"]))
     result_rows = []
     for _, emfac_row in car_emfac_fleet.iterrows():
         emfac_class = emfac_row['vehicle_class']
@@ -417,7 +583,9 @@ def create_atlas_emfac_crosswalk(car_emfac_fleet, work_dir, config):
     return car_emfac_fleet_with_bodytype
 
 
-def generate_emfac_mapped_passenger_vehicle_types(emfac_fleet, car_class, bike_class, transit_class, filter_out_classes, work_dir, config, format_func):
+# Step 2.4-2.5: build mapped passenger vehicle types and passenger fleet
+
+def generate_emfac_mapped_passenger_vehicle_types(emfac_fleet, car_class, bike_class, transit_class, filter_out_classes, config, format_func):
     """
     Generate a passenger vehicle types with EMFAC mappings for different vehicle classes.
 
@@ -432,7 +600,6 @@ def generate_emfac_mapped_passenger_vehicle_types(emfac_fleet, car_class, bike_c
         transit_class (str): Identifier for transit vehicle classes
         filter_out_classes (list): classes to filter out, specifically freight classes
         format_func (function): Function to format vehicle types data
-        work_dir (str): Working directory path
         config (dict): Configuration dictionary with keys:
             - beam.pax_vehicle_types_file: Path to vehicle types file
             - mappedFuel: Fuel configuration parameters
@@ -441,10 +608,10 @@ def generate_emfac_mapped_passenger_vehicle_types(emfac_fleet, car_class, bike_c
         pd.DataFrame: Combined and mapped passenger vehicle types with EMFAC IDs
     """
     # Load vehicle types file
-    vehicle_types_file = os.path.join(work_dir, f"{config['beam']['pax_vehicle_types_file']}")
+    vehicle_types_file = resolve_workflow_path(config["beam"]["pax_vehicle_types_file"])
 
     # Read and filter vehicle types
-    vehicle_types_raw = pd.read_csv(vehicle_types_file, dtype=str)
+    vehicle_types_raw = _normalize_vehicle_types_schema(pd.read_csv(vehicle_types_file, dtype=str))
     vehicle_types_filtered = vehicle_types_raw[~vehicle_types_raw["vehicleCategory"].isin(filter_out_classes)]
 
     # Create masks for filtering
@@ -470,8 +637,8 @@ def generate_emfac_mapped_passenger_vehicle_types(emfac_fleet, car_class, bike_c
     processed_car_types = process_vehicle_types_probabilities_by_vehicle_category_and_income_group(car_vehicle_types)
 
     if config["mapping"]["atlas"]["enable_atlas_emfac_crosswalk"]:
-        atlas_emfac_fleet = create_atlas_emfac_crosswalk(car_emfac_fleet, work_dir, config)
-        car_beam_emfac = emfac2passenger_with_atlas_crosswalk(processed_car_types, atlas_emfac_fleet, work_dir, config)
+        atlas_emfac_fleet = create_atlas_emfac_crosswalk(car_emfac_fleet, config)
+        car_beam_emfac = emfac2passenger_with_atlas_crosswalk(processed_car_types, atlas_emfac_fleet, config)
     else:
         car_beam_emfac = emfac2passenger_by_category_income(processed_car_types, car_emfac_fleet, config)
 
@@ -559,7 +726,7 @@ def generate_emfac_mapped_passenger_vehicle_types(emfac_fleet, car_class, bike_c
     return result, vehicle_types_others
 
 
-def generate_fleet_from_vehicle_types(mapped_vehicle_types, car_class, bike_class, work_dir, config):
+def generate_fleet_from_vehicle_types(mapped_vehicle_types, car_class, bike_class, config):
     """
     Update vehicle.csv file by sampling from new vehicle types based on original vehicleTypeId.
     This highly optimized function uses vectorized operations and eliminates loops where possible.
@@ -568,15 +735,14 @@ def generate_fleet_from_vehicle_types(mapped_vehicle_types, car_class, bike_clas
         mapped_vehicle_types (pd.DataFrame): DataFrame containing mapped vehicle types
         car_class (str): Identifier for car vehicle class
         bike_class (str): Identifier for bike vehicle class
-        work_dir (str): Working directory path
         config (dict): Configuration dictionary with beam.pax_vehicles_file key
 
     Returns:
         pd.DataFrame: Updated vehicles DataFrame with new vehicleTypeIds and stateOfCharge values
     """
     # Read the vehicle.csv file
-    vehicles_file_path = os.path.join(work_dir, config["beam"]["pax_vehicles_file"])
-    vehicles_df = pd.read_csv(vehicles_file_path)
+    vehicles_file_path = resolve_workflow_path(config["beam"]["pax_vehicles_file"])
+    vehicles_df = _assign_original_vehicle_type_ids(read_table(vehicles_file_path), mapped_vehicle_types)
 
     # Create new columns in advance
     vehicles_df['oldVehicleTypeId'] = vehicles_df['vehicleTypeId']
@@ -687,3 +853,41 @@ def generate_fleet_from_vehicle_types(mapped_vehicle_types, car_class, bike_clas
             pbar.update(end_idx - start_idx)
 
     return vehicles_df
+
+
+def _build_beam_vehicle_formatter(config):
+    def format_beam_vehicle_types(vehicle_types: pd.DataFrame) -> pd.DataFrame:
+        result_df = vehicle_types.copy()
+        result_df['fuel_key'] = result_df.apply(get_fuel_key, axis=1)
+        result_df['mappedFuel'] = result_df['fuel_key'].map(config["mapping"]["fuel"]["beam"])
+        result_df['mappedClass'] = result_df['vehicleCategory']
+        return result_df
+
+    return format_beam_vehicle_types
+
+
+def run_step2(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Step 2: map passenger fleet records and regenerate the passenger vehicles file."""
+    config = workflow["config"]
+    format_beam_vehicle_types = _build_beam_vehicle_formatter(config)
+
+    new_pax_vehicle_types, other_pax_vehicle_types = generate_emfac_mapped_passenger_vehicle_types(
+        workflow["emfac_fleet"],
+        car_class=BeamClasses.CLASS_CAR,
+        bike_class=BeamClasses.CLASS_BIKE,
+        transit_class=BeamClasses.CLASS_MDP,
+        filter_out_classes=BeamClasses.get_freight_classes(),
+        config=config,
+        format_func=format_beam_vehicle_types,
+    )
+    pax_vehicles = generate_fleet_from_vehicle_types(
+        new_pax_vehicle_types,
+        car_class=BeamClasses.CLASS_CAR,
+        bike_class=BeamClasses.CLASS_BIKE,
+        config=config,
+    )
+
+    workflow["new_pax_vehicle_types"] = new_pax_vehicle_types
+    workflow["other_pax_vehicle_types"] = other_pax_vehicle_types
+    workflow["pax_vehicles"] = pax_vehicles
+    return workflow

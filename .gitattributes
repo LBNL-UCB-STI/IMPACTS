@@ -9,3 +9,4 @@ examples/pilates/upstream/**.prj filter=lfs diff=lfs merge=lfs -text
 examples/pilates/upstream/ITERS/**/*.parquet filter=lfs diff=lfs merge=lfs -text
 examples/pilates/pilates/beam/production/sfbay/urbansim/**/*.csv.gz filter=lfs diff=lfs merge=lfs -text
 examples/pilates/beam/beam_output/ITERS/**/*.parquet filter=lfs diff=lfs merge=lfs -text
+data/fleet/**/*.parquet filter=lfs diff=lfs merge=lfs -text

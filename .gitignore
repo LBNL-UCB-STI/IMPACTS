@@ -65,7 +65,6 @@ docs/api/
 docs/_rst/
 
 # Local runtime artifacts
-data/
 input/
 output/
 workspace/
