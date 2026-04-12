@@ -35,6 +35,7 @@ freight,T7IS,Class78Tractor,mixed heavy truck category representing general semi
 freight,T7 POAK Class 8,Class78Tractor,port drayage trucks moving containers to and from the Port of Oakland
 freight,T7 Other Port Class 8,Class78Tractor,port drayage trucks at other ports moving shipping containers locally
 freight,PTO,Class78Tractor,work trucks with equipment like cement mixers bucket trucks or utility trucks using engine power to run machinery
+freight,T7 SWCV Class 8,,garbage trucks refuse collection trucks operating on local routes with frequent stops
 passenger,LDA,Car,passenger cars like sedans used for personal travel
 passenger,LDT1,Car,small SUVs and pickup trucks used for personal travel
 passenger,LDT2,Car,larger SUVs and pickup trucks used for personal travel
@@ -55,4 +56,3 @@ other,T6 Utility Class 6,,larger utility trucks for electrical telecom or infras
 other,T6 Utility Class 7,,heavy utility trucks like crane trucks and major repair vehicles
 other,T7 Public Class 8,,large government trucks like heavy dump trucks snow plows and construction vehicles
 other,T7 Utility Class 8,,heavy utility trucks like large cranes transformer transport trucks and infrastructure service vehicles
-other,T7 SWCV Class 8,,garbage trucks refuse collection trucks operating on local routes with frequent stops

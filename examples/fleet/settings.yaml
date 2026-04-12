@@ -9,6 +9,9 @@ fleet:
     emfac_beam_class_map: examples/fleet/mappings/emfac_beam_class_mapping.csv
     emfac_beam_fuel_map: examples/fleet/mappings/emfac_beam_fuel_mappings.csv
     emfac_beam_fuel_alternatives_map: examples/fleet/mappings/emfac_beam_fuel_alternatives.csv
+    naics_emfac_sector_map: examples/fleet/mappings/naics_emfac_sector_mapping.csv
+    naics_emfac_priority_map: examples/fleet/mappings/naics_emfac_priority_mapping.csv
+    payloadtype_emfac_map: examples/fleet/mappings/payloadtype_emfac_category_mapping.csv
     beam_freight_class_alternatives_map: examples/fleet/mappings/freight_class_alternatives.csv
     beam_passenger_bodytype_alternatives_map: examples/fleet/mappings/passenger_bodytype_alternatives.csv
     fastsim_bodytype_xwalk_file: examples/fleet/mappings/fastsim_vehicle_bodytype_xwalk.csv
@@ -28,7 +31,8 @@ fleet:
 
   frism:
     year: 2018
-    carriers_files: ~/Workspace/Simulation/sfbay/beam-ft/20250730/2018-Baseline/carriers--2018-Baseline.parquet
+    carriers_file: ~/Workspace/Simulation/sfbay/beam-ft/20250730/2018-Baseline/carriers--2018-Baseline.parquet
+    payloads_file: ~/Workspace/Simulation/sfbay/beam-ft/20250730/2018-Baseline/payloads--2018-Baseline.parquet
     tours_file: ~/Workspace/Simulation/sfbay/beam-ft/20250730/2018-Baseline/tours--2018-Baseline.parquet
 
   fastsim:
@@ -38,4 +42,3 @@ fleet:
     freight:
       vehicle_types_file: ~/Workspace/Simulation/sfbay/beam-ft/20250730/vehicle-tech/vehicletypes--frism--2018-Baseline.csv
       fastsim_data_folder: ~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/fuel/Freight_Baseline_FASTSimData_2020
-

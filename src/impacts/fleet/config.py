@@ -147,6 +147,18 @@ def _ingest_configured_sources(config: dict) -> dict:
             mapping.get("emfac_beam_fuel_alternatives_map"),
             path_label="mapping.emfac_beam_fuel_alternatives_map",
         )
+        mapping["naics_emfac_sector_map"] = _normalize_configured_path(
+            mapping.get("naics_emfac_sector_map"),
+            path_label="mapping.naics_emfac_sector_map",
+        )
+        mapping["naics_emfac_priority_map"] = _normalize_configured_path(
+            mapping.get("naics_emfac_priority_map"),
+            path_label="mapping.naics_emfac_priority_map",
+        )
+        mapping["payloadtype_emfac_map"] = _normalize_configured_path(
+            mapping.get("payloadtype_emfac_map"),
+            path_label="mapping.payloadtype_emfac_map",
+        )
         mapping["beam_freight_class_alternatives_map"] = _normalize_configured_path(
             mapping.get("beam_freight_class_alternatives_map"),
             path_label="mapping.beam_freight_class_alternatives_map",
@@ -172,9 +184,13 @@ def _ingest_configured_sources(config: dict) -> dict:
         config["emfac"] = emfac
     frism = config.get("frism", {})
     if isinstance(frism, dict):
-        frism["carriers_files"] = _normalize_configured_path(
-            frism.get("carriers_files"),
-            path_label="frism.carriers_files",
+        frism["carriers_file"] = _normalize_configured_path(
+            frism.get("carriers_file"),
+            path_label="frism.carriers_file",
+        )
+        frism["payloads_file"] = _normalize_configured_path(
+            frism.get("payloads_file"),
+            path_label="frism.payloads_file",
         )
         frism["tours_file"] = _normalize_configured_path(
             frism.get("tours_file"),
@@ -250,6 +266,9 @@ def _validate_workflow_settings(raw: dict, source_path: Path) -> None:
         ("mapping", "emfac_beam_class_map"),
         ("mapping", "emfac_beam_fuel_map"),
         ("mapping", "emfac_beam_fuel_alternatives_map"),
+        ("mapping", "naics_emfac_sector_map"),
+        ("mapping", "naics_emfac_priority_map"),
+        ("mapping", "payloadtype_emfac_map"),
         ("mapping", "beam_freight_class_alternatives_map"),
         ("mapping", "beam_passenger_bodytype_alternatives_map"),
         ("mapping", "fastsim_bodytype_xwalk_file"),
@@ -263,7 +282,8 @@ def _validate_workflow_settings(raw: dict, source_path: Path) -> None:
         ("atlas", "households_file"),
         ("atlas", "persons_file"),
         ("frism",),
-        ("frism", "carriers_files"),
+        ("frism", "carriers_file"),
+        ("frism", "payloads_file"),
         ("frism", "tours_file"),
         ("fastsim",),
         ("fastsim", "passenger"),

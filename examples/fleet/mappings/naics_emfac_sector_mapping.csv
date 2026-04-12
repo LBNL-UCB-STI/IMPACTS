@@ -1,0 +1,100 @@
+naics_source,naics_code_2,naics_label,vehicleCategory
+seller,11,"Agriculture, Forestry, Fishing and Hunting",T7 Tractor Class 8
+seller,11,"Agriculture, Forestry, Fishing and Hunting",T7 Single Dump Class 8
+seller,11,"Agriculture, Forestry, Fishing and Hunting",T7 Single Other Class 8
+seller,11,"Agriculture, Forestry, Fishing and Hunting",T6 Instate Tractor Class 7
+seller,21,"Mining, Quarrying, and Oil and Gas Extraction",T7 Single Dump Class 8
+seller,21,"Mining, Quarrying, and Oil and Gas Extraction",T7 Tractor Class 8
+seller,21,"Mining, Quarrying, and Oil and Gas Extraction",T7 Single Other Class 8
+seller,21,"Mining, Quarrying, and Oil and Gas Extraction",T6 Instate Other Class 7
+seller,23,Construction,T7 Single Concrete/Transit Mix Class 8
+seller,23,Construction,T7 Single Dump Class 8
+seller,23,Construction,T7 Single Other Class 8
+seller,23,Construction,T6 Instate Other Class 7
+seller,23,Construction,T6 Instate Other Class 6
+seller,31,Manufacturing,T7 Tractor Class 8
+seller,31,Manufacturing,T7 CAIRP Class 8
+seller,31,Manufacturing,T7 NNOOS Class 8
+seller,31,Manufacturing,T6 Instate Delivery Class 7
+seller,31,Manufacturing,T6 Instate Delivery Class 6
+seller,32,Manufacturing,T7 Tractor Class 8
+seller,32,Manufacturing,T7 CAIRP Class 8
+seller,32,Manufacturing,T7 NNOOS Class 8
+seller,32,Manufacturing,T6 Instate Delivery Class 7
+seller,32,Manufacturing,T6 Instate Delivery Class 6
+seller,33,Manufacturing,T7 Tractor Class 8
+seller,33,Manufacturing,T7 CAIRP Class 8
+seller,33,Manufacturing,T7 NNOOS Class 8
+seller,33,Manufacturing,T6 Instate Delivery Class 7
+seller,33,Manufacturing,T6 Instate Delivery Class 6
+seller,42,Wholesale Trade,T7 Tractor Class 8
+seller,42,Wholesale Trade,T7 CAIRP Class 8
+seller,42,Wholesale Trade,T6 Instate Delivery Class 6
+seller,42,Wholesale Trade,T6 Instate Delivery Class 7
+seller,42,Wholesale Trade,LHD1
+seller,42,Wholesale Trade,MDV
+seller,44,Retail Trade,LHD1
+seller,44,Retail Trade,LHD2
+seller,44,Retail Trade,MDV
+seller,44,Retail Trade,T6 Instate Delivery Class 4
+seller,44,Retail Trade,T6 Instate Delivery Class 5
+seller,45,Retail Trade,LHD1
+seller,45,Retail Trade,LHD2
+seller,45,Retail Trade,MDV
+seller,45,Retail Trade,T6 Instate Delivery Class 4
+seller,45,Retail Trade,T6 Instate Delivery Class 5
+seller,48,Transportation and Warehousing,T7 Tractor Class 8
+seller,48,Transportation and Warehousing,T7 CAIRP Class 8
+seller,48,Transportation and Warehousing,T7 NNOOS Class 8
+seller,48,Transportation and Warehousing,T6 Instate Tractor Class 7
+seller,49,Transportation and Warehousing,T7 Tractor Class 8
+seller,49,Transportation and Warehousing,T7 CAIRP Class 8
+seller,49,Transportation and Warehousing,T7 NNOOS Class 8
+seller,49,Transportation and Warehousing,T6 Instate Tractor Class 7
+seller,56,Administrative and Support and Waste Management and Remediation Services,T7 SWCV Class 8
+seller,56,Administrative and Support and Waste Management and Remediation Services,T7 Single Dump Class 8
+seller,56,Administrative and Support and Waste Management and Remediation Services,T6 Instate Other Class 7
+seller,56,Administrative and Support and Waste Management and Remediation Services,T7 Single Other Class 8
+seller,56,Administrative and Support and Waste Management and Remediation Services,T6 Instate Other Class 6
+seller,72,Accommodation and Food Services,T6 Instate Delivery Class 5
+seller,72,Accommodation and Food Services,T6 Instate Delivery Class 6
+seller,72,Accommodation and Food Services,LHD1
+seller,72,Accommodation and Food Services,MDV
+seller,72,Accommodation and Food Services,T7 Tractor Class 8
+buyer,23,Construction,T7 Single Concrete/Transit Mix Class 8
+buyer,23,Construction,T7 Single Dump Class 8
+buyer,23,Construction,T7 Single Other Class 8
+buyer,23,Construction,T6 Instate Other Class 7
+buyer,42,Wholesale Trade,T7 Tractor Class 8
+buyer,42,Wholesale Trade,T7 CAIRP Class 8
+buyer,42,Wholesale Trade,T6 Instate Delivery Class 6
+buyer,42,Wholesale Trade,LHD1
+buyer,42,Wholesale Trade,MDV
+buyer,44,Retail Trade,LHD1
+buyer,44,Retail Trade,LHD2
+buyer,44,Retail Trade,T6 Instate Delivery Class 4
+buyer,44,Retail Trade,T6 Instate Delivery Class 5
+buyer,44,Retail Trade,MDV
+buyer,45,Retail Trade,LHD1
+buyer,45,Retail Trade,LHD2
+buyer,45,Retail Trade,T6 Instate Delivery Class 4
+buyer,45,Retail Trade,T6 Instate Delivery Class 5
+buyer,45,Retail Trade,MDV
+buyer,48,Transportation and Warehousing,T7 Tractor Class 8
+buyer,48,Transportation and Warehousing,T7 CAIRP Class 8
+buyer,48,Transportation and Warehousing,T7 NNOOS Class 8
+buyer,48,Transportation and Warehousing,T6 Instate Tractor Class 7
+buyer,49,Transportation and Warehousing,T7 Tractor Class 8
+buyer,49,Transportation and Warehousing,T7 CAIRP Class 8
+buyer,49,Transportation and Warehousing,T7 NNOOS Class 8
+buyer,49,Transportation and Warehousing,T6 Instate Tractor Class 7
+buyer,62,Health Care and Social Assistance,LHD1
+buyer,62,Health Care and Social Assistance,MDV
+buyer,62,Health Care and Social Assistance,T6 Instate Delivery Class 5
+buyer,62,Health Care and Social Assistance,T6 Instate Delivery Class 6
+buyer,62,Health Care and Social Assistance,LHD2
+buyer,72,Accommodation and Food Services,T6 Instate Delivery Class 5
+buyer,72,Accommodation and Food Services,T6 Instate Delivery Class 6
+buyer,72,Accommodation and Food Services,LHD1
+buyer,72,Accommodation and Food Services,MDV
+buyer,72,Accommodation and Food Services,T7 Tractor Class 8
