@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 from copy import deepcopy
 from pathlib import Path
 
@@ -12,8 +11,6 @@ import yaml
 CONFIG_DIR = Path(__file__).resolve().parent
 REPO_ROOT = CONFIG_DIR.parents[2]
 DEFAULT_CONFIG_PATH = CONFIG_DIR / "config.yaml"
-EXAMPLE_CONFIG_PATH = Path("examples/sfbay_fleet/settings.yaml")
-MAPPINGS_DIR = CONFIG_DIR / "mappings"
 
 
 class BeamClasses:
@@ -94,14 +91,22 @@ def resolve_workflow_path(path_like: str | None) -> str:
     return str(source.resolve())
 
 
-def read_table(path_like: str, *, dtype: str | None = "str") -> pd.DataFrame:
+def read_table(
+    path_like: str,
+    *,
+    dtype: str | None = "str",
+    columns: list[str] | tuple[str, ...] | None = None,
+) -> pd.DataFrame:
     resolved = Path(resolve_workflow_path(path_like))
     if resolved.suffix.lower() == ".parquet":
-        frame = pd.read_parquet(resolved)
+        frame = pd.read_parquet(resolved, columns=list(columns) if columns is not None else None)
         if dtype == "str":
             return frame.fillna("").astype(str)
         return frame
-    return pd.read_csv(resolved, dtype=dtype).fillna("")
+    read_kwargs = {"dtype": dtype}
+    if columns is not None:
+        read_kwargs["usecols"] = list(columns)
+    return pd.read_csv(resolved, **read_kwargs).fillna("")
 
 
 def _normalize_configured_path(
@@ -134,30 +139,49 @@ def _ingest_configured_sources(config: dict) -> dict:
     if isinstance(emfac, dict):
         emfac["rates_file"] = _normalize_configured_path(emfac.get("rates_file"), path_label="emfac.rates_file")
         emfac["activity_file"] = _normalize_configured_path(emfac.get("activity_file"), path_label="emfac.activity_file")
+        emfac["fleet_file"] = _normalize_configured_path(emfac.get("fleet_file"), path_label="emfac.fleet_file")
         emfac["atlas_emfac_xwalk"] = _normalize_configured_path(
             emfac.get("atlas_emfac_xwalk"),
             path_label="emfac.atlas_emfac_xwalk",
         )
         config["emfac"] = emfac
+    frism = config.get("frism", {})
+    if isinstance(frism, dict):
+        frism["carriers_files"] = _normalize_configured_path(
+            frism.get("carriers_files"),
+            path_label="frism.carriers_files",
+        )
+        frism["payloads_files"] = _normalize_configured_path(
+            frism.get("payloads_files"),
+            path_label="frism.payloads_files",
+        )
+        frism["tours_file"] = _normalize_configured_path(
+            frism.get("tours_file"),
+            path_label="frism.tours_file",
+        )
+        frism["ft_vehicle_types_file"] = _normalize_configured_path(
+            frism.get("ft_vehicle_types_file"),
+            path_label="frism.ft_vehicle_types_file",
+        )
+        config["frism"] = frism
     beam = config.get("beam", {})
     if isinstance(beam, dict):
-        beam["freight_directory"] = _normalize_configured_path(
-            beam.get("freight_directory"),
-            path_label="beam.freight_directory",
+        beam["vehicle_types_file"] = _normalize_configured_path(
+            beam.get("vehicle_types_file"),
+            path_label="beam.vehicle_types_file",
+        )
+        beam["fastsim_bodytype_xwalk_file"] = _normalize_configured_path(
+            beam.get("fastsim_bodytype_xwalk_file"),
+            path_label="beam.fastsim_bodytype_xwalk_file",
+        )
+        beam["fastsim_atlas_fuel_mapping_file"] = _normalize_configured_path(
+            beam.get("fastsim_atlas_fuel_mapping_file"),
+            path_label="beam.fastsim_atlas_fuel_mapping_file",
+        )
+        beam["fastsim_data_folder"] = _normalize_configured_path(
+            beam.get("fastsim_data_folder"),
+            path_label="beam.fastsim_data_folder",
             expect_directory=True,
-        )
-        beam["ft_vehicle_types_file"] = _normalize_configured_path(
-            beam.get("ft_vehicle_types_file"),
-            path_label="beam.ft_vehicle_types_file",
-        )
-        beam["pax_vehicles_file"] = _normalize_configured_path(
-            beam.get("pax_vehicles_file"),
-            path_label="beam.pax_vehicles_file",
-            must_exist=False,
-        )
-        beam["pax_vehicle_types_file"] = _normalize_configured_path(
-            beam.get("pax_vehicle_types_file"),
-            path_label="beam.pax_vehicle_types_file",
             must_exist=False,
         )
         config["beam"] = beam
@@ -167,74 +191,18 @@ def _ingest_configured_sources(config: dict) -> dict:
             atlas.get("vehicles_file"),
             path_label="atlas.vehicles_file",
         )
-        atlas["vehicles_types_file"] = _normalize_configured_path(
-            atlas.get("vehicles_types_file"),
-            path_label="atlas.vehicles_types_file",
+        atlas["households_file"] = _normalize_configured_path(
+            atlas.get("households_file"),
+            path_label="atlas.households_file",
         )
-        atlas["curb_weight_mapping_file"] = _normalize_configured_path(
-            atlas.get("curb_weight_mapping_file"),
-            path_label="atlas.curb_weight_mapping_file",
+        atlas["persons_file"] = _normalize_configured_path(
+            atlas.get("persons_file"),
+            path_label="atlas.persons_file",
         )
+        if atlas.get("income_bins") is not None:
+            atlas["income_bins"] = list(atlas["income_bins"])
         config["atlas"] = atlas
     return config
-
-
-def _load_mapping_table(path: Path) -> dict[str, dict[str, str]]:
-    grouped: dict[str, dict[str, str]] = {}
-    with path.open(newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            grouped.setdefault(row["mapping_group"], {})[row["source_value"]] = row["target_value"]
-    return grouped
-
-
-def _load_alternatives(path: Path) -> dict[str, dict[str, list[str]]]:
-    grouped: dict[str, dict[str, list[tuple[int, str]]]] = {}
-    with path.open(newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            domain = row["domain"]
-            source = row["source_value"]
-            grouped.setdefault(domain, {}).setdefault(source, []).append((int(row["priority"]), row["alternative_value"]))
-    return {
-        domain: {
-            source: [value for _, value in sorted(values, key=lambda item: item[0])]
-            for source, values in per_domain.items()
-        }
-        for domain, per_domain in grouped.items()
-    }
-
-
-def load_mapping_config() -> dict:
-    fuel_mappings = _load_mapping_table(MAPPINGS_DIR / "fuel_mappings.csv")
-    class_mappings = _load_mapping_table(MAPPINGS_DIR / "class_mappings.csv")
-    alternatives = _load_alternatives(MAPPINGS_DIR / "alternatives.csv")
-    return {
-        "fleet": {
-            "ignore_beam_passenger_distribution": False,
-            "ignore_beam_freight_distribution": False,
-            "model_year_bins": [1993, 2006, 2018],
-        },
-        "atlas": {
-            "enable_atlas_emfac_crosswalk": True,
-            "emfac": "atlas/atlas_emfac_xwalk.csv",
-            "alternatives": alternatives.get("atlas", {}),
-        },
-        "fuel": {
-            "beam": fuel_mappings["beam"],
-            "emfac-ft": fuel_mappings["emfac-ft"],
-            "emfac-pax": fuel_mappings["emfac-pax"],
-            "emfac-bus": fuel_mappings["emfac-bus"],
-            "alternatives": alternatives.get("fuel", {}),
-        },
-        "class": {
-            "emfac": {},
-            "emfac-ft": class_mappings["emfac-ft"],
-            "emfac-pax": class_mappings["emfac-pax"],
-            "emfac-bus": class_mappings["emfac-bus"],
-            "alternatives": alternatives.get("class", {}),
-        },
-    }
 
 
 def _required_value(raw: dict, path: tuple[str, ...]):
@@ -250,18 +218,26 @@ def _validate_workflow_settings(raw: dict, source_path: Path) -> None:
     required_paths = [
         ("region",),
         ("scenario",),
+        ("seed",),
         ("output",),
         ("emfac",),
         ("emfac", "rates_file"),
         ("emfac", "activity_file"),
+        ("emfac", "fleet_file"),
         ("emfac", "atlas_emfac_xwalk"),
         ("atlas",),
         ("atlas", "vehicles_file"),
-        ("atlas", "vehicles_types_file"),
-        ("atlas", "curb_weight_mapping_file"),
+        ("atlas", "households_file"),
+        ("atlas", "persons_file"),
+        ("frism",),
+        ("frism", "carriers_files"),
+        ("frism", "payloads_files"),
+        ("frism", "tours_file"),
+        ("frism", "ft_vehicle_types_file"),
         ("beam",),
-        ("beam", "freight_directory"),
-        ("beam", "ft_vehicle_types_file"),
+        ("beam", "vehicle_types_file"),
+        ("beam", "fastsim_bodytype_xwalk_file"),
+        ("beam", "fastsim_atlas_fuel_mapping_file"),
     ]
     missing = []
     for path in required_paths:
@@ -270,8 +246,7 @@ def _validate_workflow_settings(raw: dict, source_path: Path) -> None:
             missing.append(".".join(path))
     if missing:
         raise ValueError(
-            f"Fleet config at {source_path} is missing required keys: {', '.join(missing)}. "
-            f"Use {EXAMPLE_CONFIG_PATH} as a starting point."
+            f"Fleet config at {source_path} is missing required keys: {', '.join(missing)}."
         )
 
 
@@ -282,18 +257,15 @@ def load_workflow(config_path: str | Path | None = None) -> dict:
     raw = _ingest_configured_sources(raw)
     output_root = raw["output"]
     config = {
+        "seed": raw["seed"],
         "output": output_root,
         "emfac": raw["emfac"],
         "atlas": raw["atlas"],
+        "frism": raw["frism"],
         "beam": raw["beam"],
-        "mapping": load_mapping_config(),
     }
-    atlas_xwalk = raw.get("emfac", {}).get("atlas_emfac_xwalk")
-    if atlas_xwalk:
-        config["mapping"]["atlas"]["emfac"] = atlas_xwalk
     return {
         "area": raw["region"],
-        "run_batch": Path(output_root).name,
         "scenario": raw["scenario"],
         "config": config,
     }

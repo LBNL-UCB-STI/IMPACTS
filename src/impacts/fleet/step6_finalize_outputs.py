@@ -1,10 +1,10 @@
-"""Fleet Step 5: finalize mapped fleet outputs and the EMFAC rates store.
+"""Fleet Step 6: finalize mapped fleet outputs and the EMFAC rates store.
 
 Substeps:
-5.1 Resolve output file locations for mapped fleet artifacts.
-5.2 Prepare the emissions-rate store output directory.
-5.3 Write a DuckDB+Parquet EMFAC rates store and attach parquet paths to vehicle types.
-5.4 Persist mapped carriers, passenger vehicles, and vehicle-type tables.
+6.1 Resolve output file locations for mapped fleet artifacts.
+6.2 Prepare the emissions-rate store output directory.
+6.3 Write a DuckDB+Parquet EMFAC rates store and attach parquet paths to vehicle types.
+6.4 Persist mapped carriers, passenger vehicles, and vehicle-type tables.
 """
 
 import logging
@@ -35,14 +35,6 @@ _RATES_STRING_COLUMNS = {
 }
 
 
-def _resolve_freight_input_file(config, prefix):
-    directory = Path(str(config["beam"]["freight_directory"])).expanduser().resolve()
-    matches = sorted(directory.glob(f"{prefix}--*"))
-    if not matches:
-        raise FileNotFoundError(f"No file matching '{prefix}--*' found in {directory}")
-    return matches[0]
-
-
 def _mapped_output_path(path_like):
     source = Path(path_like)
     if source.suffix == ".gz" and source.name.endswith(".csv.gz"):
@@ -67,15 +59,17 @@ def _write_table(frame, path):
 def _resolve_output_paths(scenario, config):
     output_root = Path(str(config["output"])).expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
-    carriers_out_file = str(output_root / Path(_mapped_output_path(_resolve_freight_input_file(config, "carriers"))).name)
+    carriers_out_file = str(
+        output_root / Path(_mapped_output_path(resolve_workflow_path(config["frism"]["carriers_files"]))).name
+    )
     ft_vehtypes_out_file = str(
-        output_root / Path(_mapped_output_path(resolve_workflow_path(config["beam"]["ft_vehicle_types_file"]))).name
+        output_root / Path(_mapped_output_path(resolve_workflow_path(config["frism"]["ft_vehicle_types_file"]))).name
     )
     pax_vehtypes_out_file = str(
-        output_root / Path(_mapped_output_path(resolve_workflow_path(config["beam"]["pax_vehicle_types_file"]))).name
+        output_root / Path(_mapped_output_path(resolve_workflow_path(config["beam"]["vehicle_types_file"]))).name
     )
     vehicles_output = str(
-        output_root / Path(_mapped_output_path(resolve_workflow_path(config["beam"]["pax_vehicles_file"]))).name
+        output_root / Path(_mapped_output_path(resolve_workflow_path(config["atlas"]["vehicles_file"]))).name
     )
     emissions_rates_dir = str(output_root / "emissions" / scenario)
     return carriers_out_file, ft_vehtypes_out_file, pax_vehtypes_out_file, vehicles_output, emissions_rates_dir
@@ -187,8 +181,8 @@ def _write_updated_vehicle_types(
 
 # Step 5.3-5.4: build mapped BEAM outputs and attach emissions files
 
-def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
-    """Step 5: write mapped fleet outputs and the EMFAC emissions-rate store."""
+def run_step6(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Step 6: write mapped fleet outputs and the EMFAC emissions-rate store."""
     print("\n=== Map EMFAC To BEAM Population ===\n")
     carriers_out_file, ft_vehtypes_out_file, pax_vehtypes_out_file, vehicles_output, emissions_rates_dir = (
         _resolve_output_paths(workflow["scenario"], workflow["config"])

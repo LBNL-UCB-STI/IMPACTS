@@ -3,9 +3,10 @@
 __all__ = [
     "config",
     "main",
-    "step1_prepare_passenger_fleet",
-    "step2_map_passenger_fleet",
-    "step3_prepare_freight_fleet",
-    "step4_map_freight_fleet",
-    "step5_finalize_outputs",
+    "step1_build_vehicle_types",
+    "step2_prepare_passenger_fleet",
+    "step3_map_passenger_fleet",
+    "step4_prepare_freight_fleet",
+    "step5_map_freight_fleet",
+    "step6_finalize_outputs",
 ]

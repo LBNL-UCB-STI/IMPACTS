@@ -1,0 +1,31 @@
+fleet:
+  region: sfbay
+  scenario: 2018-Baseline
+  seed: 0
+  output: examples/fleet/output
+
+  emfac:
+    rates_file: ~/Workspace/Models/emfac/processed/2018/sf-emfac-2018-project-analysis-final-rates.parquet
+    activity_file: ~/Workspace/Models/emfac/processed/201/sf-emfac-2018-project-analysis-final-activity.parquet
+    fleet_file: ~/Workspace/Models/emfac/processed/201/sf-emfac-2018-project-analysis-final-fleet.parquet
+    atlas_emfac_xwalk: ~/Workspace/Simulation/sfbay/emissions/atlas-emfac-xwalk.csv
+
+  atlas:
+    year: 2019
+    vehicles_file: ~/Workspace/Simulation/sfbay/atlas/atlas-2019/vehicles_2019.parquet
+    households_file: ~/Workspace/Simulation/sfbay/atlas/atlas-2019/households.parquet
+    persons_file: ~/Workspace/Simulation/sfbay/atlas/atlas-2019/persons.parquet
+    income_bins: [0, 30, 60, 100, 200, 9999]
+
+  frism:
+    year: 2018
+    carriers_files: ~/Workspace/Simulation/sfbay/beam-ft/20250730/2018-Baseline/carriers--2018-Baseline.parquet
+    payloads_files: ~/Workspace/Simulation/sfbay/beam-ft/20250730/2018-Baseline/payloads--2018-Baseline.parquet
+    tours_file: ~/Workspace/Simulation/sfbay/beam-ft/20250730/2018-Baseline/tours--2018-Baseline.parquet
+    ft_vehicle_types_file: ~/Workspace/Simulation/sfbay/beam-ft/20250730/vehicle-tech/vehicletypes--frism--2018-Baseline.csv
+
+  beam:
+    vehicle_types_file: ~/Workspace/Simulation/sfbay/fastsim/vehicleTypes_inventory.csv
+    fastsim_data_folder: ~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/fuel/Baseline_FASTSimData_Representative_Vehicles_lookup_tables_output
+    fastsim_bodytype_xwalk_file: ~/Workspace/Simulation/sfbay/fastsim/fastsim_vehicle_bodytype_xwalk.csv
+    fastsim_atlas_fuel_mapping_file: ~/Workspace/Simulation/sfbay/fastsim/fastsim_atlas_fuel_mapping.csv

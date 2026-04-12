@@ -1,16 +1,15 @@
-"""Fleet Step 4: map EMFAC freight distributions onto BEAM freight vehicles.
+"""Fleet Step 5: map EMFAC freight distributions onto BEAM freight vehicles.
 
 Substeps:
-4.1 Estimate BEAM freight VMT from payload tours.
-4.2 Build the EMFAC freight VMT target distribution.
-4.3 Match BEAM vehicles to EMFAC classes, fuel types, and model-year groups.
-4.4 Evaluate how closely mapped VMT follows EMFAC targets.
-4.5 Create mapped freight vehicle types and update carriers.
+5.1 Estimate BEAM freight VMT from payload tours.
+5.2 Build the EMFAC freight VMT target distribution.
+5.3 Match BEAM vehicles to EMFAC classes, fuel types, and model-year groups.
+5.4 Evaluate how closely mapped VMT follows EMFAC targets.
+5.5 Create mapped freight vehicle types and update carriers.
 """
 
 import os
 import os.path
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -21,17 +20,6 @@ from python.utils.files_utils import sanitize_name
 from impacts.fleet.config import BeamClasses
 from impacts.fleet.config import get_fuel_key
 from impacts.fleet.config import resolve_workflow_path
-
-
-# Step 4.1: derive BEAM freight VMT from payload tours
-
-
-def _resolve_freight_input_file(config: dict[str, Any], prefix: str) -> str:
-    directory = Path(str(config["beam"]["freight_directory"])).expanduser().resolve()
-    matches = sorted(directory.glob(f"{prefix}--*"))
-    if not matches:
-        raise FileNotFoundError(f"No file matching '{prefix}--*' found in {directory}")
-    return str(matches[0])
 
 
 def _read_beam_table(path: str) -> pd.DataFrame:
@@ -665,9 +653,9 @@ def generate_emfac_mapped_freight_fleet(emfac_vmt, freight_classes, config, form
         tuple: (updated_carriers_df, updated_vehicle_types_df)
     """
     # Prepare file paths
-    carriers_file = _resolve_freight_input_file(config, "carriers")
-    payloads_file = _resolve_freight_input_file(config, "payloads")
-    vehicle_types_file = resolve_workflow_path(config["beam"]["ft_vehicle_types_file"])
+    carriers_file = resolve_workflow_path(config["frism"]["carriers_files"])
+    payloads_file = resolve_workflow_path(config["frism"]["payloads_files"])
+    vehicle_types_file = resolve_workflow_path(config["frism"]["ft_vehicle_types_file"])
 
     # Load source data
     print(f"Loading data from:\n  {carriers_file}\n  {vehicle_types_file}")
@@ -733,8 +721,8 @@ def _build_beam_vehicle_formatter(config):
     return format_beam_vehicle_types
 
 
-def run_step4(workflow: dict[str, Any]) -> dict[str, Any]:
-    """Step 4: map freight fleet records into EMFAC-backed BEAM vehicle types."""
+def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Step 5: map freight fleet records into EMFAC-backed BEAM vehicle types."""
     format_beam_vehicle_types = _build_beam_vehicle_formatter(workflow["config"])
     new_carriers, new_ft_vehicle_types = generate_emfac_mapped_freight_fleet(
         workflow["emfac_fleet"],

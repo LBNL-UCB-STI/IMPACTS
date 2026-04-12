@@ -1,11 +1,11 @@
-"""Fleet Step 2: map EMFAC passenger distributions onto BEAM passenger vehicles.
+"""Fleet Step 3: map EMFAC passenger distributions onto BEAM passenger vehicles.
 
 Substeps:
-2.1 Parse and rebuild BEAM passenger probability strings.
-2.2 Normalize BEAM passenger sampling distributions.
-2.3 Optionally crosswalk EMFAC classes through ATLAS body types.
-2.4 Map cars, bikes, and buses into EMFAC-backed vehicle types.
-2.5 Regenerate the passenger vehicle file from mapped vehicle types.
+3.1 Parse and rebuild BEAM passenger probability strings.
+3.2 Normalize BEAM passenger sampling distributions.
+3.3 Optionally crosswalk EMFAC classes through ATLAS body types.
+3.4 Map cars, bikes, and buses into EMFAC-backed vehicle types.
+3.5 Regenerate the passenger vehicle file from mapped vehicle types.
 """
 
 import os
@@ -322,7 +322,7 @@ def process_vehicle_types_probabilities_by_vehicle_category_and_income_group(veh
 
 # Step 2.3: optional ATLAS crosswalk path for passenger cars
 
-def emfac2passenger_with_atlas_crosswalk(vehicle_types, atlas_emfac_fleet, config):
+def emfac2passenger_with_atlas_crosswalk(vehicle_types, atlas_emfac_fleet, vehicles):
     """
     Distribute total_vmt and population values evenly across different vehicle typeIds
     that share the same emfacId and bodytype combination.
@@ -334,10 +334,7 @@ def emfac2passenger_with_atlas_crosswalk(vehicle_types, atlas_emfac_fleet, confi
     Returns:
         pd.DataFrame: DataFrame with distributed vmt and population values
     """
-    vehicles = _assign_original_vehicle_type_ids(
-        read_table(config["beam"]["pax_vehicles_file"]),
-        vehicle_types,
-    )
+    vehicles = _assign_original_vehicle_type_ids(vehicles, vehicle_types)
     vehicle_types_filtered = vehicle_types[vehicle_types["vehicleTypeId"].isin(vehicles["vehicleTypeId"].unique())].copy()
     vehicles_filtered = vehicles[vehicles["vehicleTypeId"].isin(vehicle_types_filtered["vehicleTypeId"].unique())].copy()
 
@@ -585,7 +582,17 @@ def create_atlas_emfac_crosswalk(car_emfac_fleet, config):
 
 # Step 2.4-2.5: build mapped passenger vehicle types and passenger fleet
 
-def generate_emfac_mapped_passenger_vehicle_types(emfac_fleet, car_class, bike_class, transit_class, filter_out_classes, config, format_func):
+def generate_emfac_mapped_passenger_vehicle_types(
+    emfac_fleet,
+    car_class,
+    bike_class,
+    transit_class,
+    filter_out_classes,
+    config,
+    format_func,
+    passenger_vehicle_types,
+    passenger_vehicles,
+):
     """
     Generate a passenger vehicle types with EMFAC mappings for different vehicle classes.
 
@@ -601,17 +608,12 @@ def generate_emfac_mapped_passenger_vehicle_types(emfac_fleet, car_class, bike_c
         filter_out_classes (list): classes to filter out, specifically freight classes
         format_func (function): Function to format vehicle types data
         config (dict): Configuration dictionary with keys:
-            - beam.pax_vehicle_types_file: Path to vehicle types file
             - mappedFuel: Fuel configuration parameters
 
     Returns:
         pd.DataFrame: Combined and mapped passenger vehicle types with EMFAC IDs
     """
-    # Load vehicle types file
-    vehicle_types_file = resolve_workflow_path(config["beam"]["pax_vehicle_types_file"])
-
-    # Read and filter vehicle types
-    vehicle_types_raw = _normalize_vehicle_types_schema(pd.read_csv(vehicle_types_file, dtype=str))
+    vehicle_types_raw = _normalize_vehicle_types_schema(passenger_vehicle_types.copy())
     vehicle_types_filtered = vehicle_types_raw[~vehicle_types_raw["vehicleCategory"].isin(filter_out_classes)]
 
     # Create masks for filtering
@@ -638,7 +640,7 @@ def generate_emfac_mapped_passenger_vehicle_types(emfac_fleet, car_class, bike_c
 
     if config["mapping"]["atlas"]["enable_atlas_emfac_crosswalk"]:
         atlas_emfac_fleet = create_atlas_emfac_crosswalk(car_emfac_fleet, config)
-        car_beam_emfac = emfac2passenger_with_atlas_crosswalk(processed_car_types, atlas_emfac_fleet, config)
+        car_beam_emfac = emfac2passenger_with_atlas_crosswalk(processed_car_types, atlas_emfac_fleet, passenger_vehicles)
     else:
         car_beam_emfac = emfac2passenger_by_category_income(processed_car_types, car_emfac_fleet, config)
 
@@ -726,7 +728,7 @@ def generate_emfac_mapped_passenger_vehicle_types(emfac_fleet, car_class, bike_c
     return result, vehicle_types_others
 
 
-def generate_fleet_from_vehicle_types(mapped_vehicle_types, car_class, bike_class, config):
+def generate_fleet_from_vehicle_types(mapped_vehicle_types, car_class, bike_class, vehicles_df):
     """
     Update vehicle.csv file by sampling from new vehicle types based on original vehicleTypeId.
     This highly optimized function uses vectorized operations and eliminates loops where possible.
@@ -735,14 +737,12 @@ def generate_fleet_from_vehicle_types(mapped_vehicle_types, car_class, bike_clas
         mapped_vehicle_types (pd.DataFrame): DataFrame containing mapped vehicle types
         car_class (str): Identifier for car vehicle class
         bike_class (str): Identifier for bike vehicle class
-        config (dict): Configuration dictionary with beam.pax_vehicles_file key
+        vehicles_df (pd.DataFrame): Prepared passenger vehicles from Step 1
 
     Returns:
         pd.DataFrame: Updated vehicles DataFrame with new vehicleTypeIds and stateOfCharge values
     """
-    # Read the vehicle.csv file
-    vehicles_file_path = resolve_workflow_path(config["beam"]["pax_vehicles_file"])
-    vehicles_df = _assign_original_vehicle_type_ids(read_table(vehicles_file_path), mapped_vehicle_types)
+    vehicles_df = _assign_original_vehicle_type_ids(vehicles_df.copy(), mapped_vehicle_types)
 
     # Create new columns in advance
     vehicles_df['oldVehicleTypeId'] = vehicles_df['vehicleTypeId']
@@ -866,8 +866,8 @@ def _build_beam_vehicle_formatter(config):
     return format_beam_vehicle_types
 
 
-def run_step2(workflow: dict[str, Any]) -> dict[str, Any]:
-    """Step 2: map passenger fleet records and regenerate the passenger vehicles file."""
+def run_step3(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Step 3: map passenger fleet records and regenerate the passenger vehicles file."""
     config = workflow["config"]
     format_beam_vehicle_types = _build_beam_vehicle_formatter(config)
 
@@ -879,12 +879,14 @@ def run_step2(workflow: dict[str, Any]) -> dict[str, Any]:
         filter_out_classes=BeamClasses.get_freight_classes(),
         config=config,
         format_func=format_beam_vehicle_types,
+        passenger_vehicle_types=workflow["prepared_pax_vehicle_types"],
+        passenger_vehicles=workflow["prepared_pax_vehicles"],
     )
     pax_vehicles = generate_fleet_from_vehicle_types(
         new_pax_vehicle_types,
         car_class=BeamClasses.CLASS_CAR,
         bike_class=BeamClasses.CLASS_BIKE,
-        config=config,
+        vehicles_df=workflow["prepared_pax_vehicles"],
     )
 
     workflow["new_pax_vehicle_types"] = new_pax_vehicle_types
