@@ -336,6 +336,11 @@ def run_step1(workflow: dict[str, object]) -> dict[str, object]:
         year=workflow["run"]["calendar_year"],
     )
     project_analysis = _normalize_project_analysis_activity(pd.read_parquet(project_analysis_path))
+    project_analysis = expand_pto_vehicle_category(
+        project_analysis,
+        workflow["run"].get("pto_as_process"),
+        process_column="process",
+    )
     project_analysis = _pivot_project_analysis(project_analysis)
     project_analysis.to_parquet(project_analysis_path, index=False)
     print("    1.2 Build study-area and statewide emissions inventories")

@@ -107,6 +107,72 @@ def _missing_rate_summary(frame: pd.DataFrame) -> dict[str, object]:
     }
 
 
+def _explain_dropped_source_coverage_rows(dropped_rows: pd.DataFrame) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    if dropped_rows.empty:
+        return [], []
+
+    result = dropped_rows.copy()
+    process = result["process"].astype(str)
+    fuel = result["fuel"].astype(str)
+
+    explanations: list[tuple[str, str, pd.Series]] = [
+        (
+            "evaporative_process_on_non_gasoline",
+            "Evaporative processes are not present in Bay Area source for these non-gasoline cohorts.",
+            process.isin({"DIURN", "HOTSOAK", "RUNLOSS"}) & ~fuel.isin({"Gas", "Phe"}),
+        ),
+        (
+            "strex_on_non_gasoline",
+            "Soak exhaust is not present in Bay Area source for these non-gasoline cohorts.",
+            (process == "STREX") & ~fuel.isin({"Gas", "Phe"}),
+        ),
+        (
+            "runex_on_electric",
+            "Running exhaust is not present in Bay Area source for these electric cohorts.",
+            (process == "RUNEX") & (fuel == "Elec"),
+        ),
+        (
+            "idlex_without_source_coverage",
+            "Idle exhaust is not present in Bay Area source for these class/fuel cohorts.",
+            process == "IDLEX",
+        ),
+        (
+            "ptoex_outside_supported_pto_cohorts",
+            "PTO exhaust is only sourced for the configured diesel PTO target vehicle categories.",
+            process == "PTOEX",
+        ),
+    ]
+
+    explained_rows = pd.Series(False, index=result.index)
+    explanation_summaries: list[dict[str, object]] = []
+    for code, message, mask in explanations:
+        matched = mask & ~explained_rows
+        if not matched.any():
+            continue
+        rows = result.loc[matched]
+        explained_rows.loc[matched] = True
+        explanation_summaries.append(
+            {
+                "code": code,
+                "message": message,
+                "rows": int(len(rows)),
+                "process_breakdown": {
+                    str(name): int(count)
+                    for name, count in rows["process"].value_counts(dropna=False).items()
+                },
+            }
+        )
+
+    unexplained = (
+        result.loc[~explained_rows, ["vehicleCategory", "fuel", "process"]]
+        .value_counts(dropna=False)
+        .head(10)
+        .reset_index(name="rows")
+        .to_dict(orient="records")
+    )
+    return explanation_summaries, unexplained
+
+
 def _merge_rate_columns(surface: pd.DataFrame, rates: pd.DataFrame, *, keys: list[str]) -> pd.DataFrame:
     value_columns = [column for column in POLLUTANT_COLUMNS if column in rates.columns]
     if not value_columns:
@@ -286,6 +352,7 @@ def _filter_unresolved_rows_without_source_coverage(
         .head(10)
         .items()
     ]
+    drop_explanations, unexplained_drop_combinations = _explain_dropped_source_coverage_rows(dropped_rows)
 
     if drop_mask.any():
         print("      Warning: filtering unresolved rows with no Bay Area project-analysis source coverage.")
@@ -305,6 +372,20 @@ def _filter_unresolved_rows_without_source_coverage(
             print("        Top dropped vehicle/fuel combinations:")
             for item in dropped_top_vehicle_fuel:
                 print(f"          {item['vehicleCategory']} + {item['fuel']}: {item['rows']:,}")
+        if drop_explanations:
+            print("        Interpretable drop reasons:")
+            for item in drop_explanations:
+                print(f"          {item['code']}: {item['rows']:,}")
+                print(f"            {item['message']}")
+                if item["process_breakdown"]:
+                    process_text = ", ".join(f"{process}={count:,}" for process, count in item["process_breakdown"].items())
+                    print(f"            Processes: {process_text}")
+        if unexplained_drop_combinations:
+            print("        Dropped without a good explanation yet:")
+            for item in unexplained_drop_combinations:
+                print(
+                    f"          {item['vehicleCategory']} + {item['fuel']} + {item['process']}: {item['rows']:,}"
+                )
         surface = surface.drop(index=classified.loc[drop_mask, "_surface_index"]).reset_index(drop=True)
 
     print(
