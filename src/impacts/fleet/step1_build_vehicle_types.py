@@ -1,12 +1,15 @@
-"""Fleet Step 1: build BEAM passenger vehicle types for the target ATLAS year.
+"""Fleet Step 1: build passenger vehicle types for the target ATLAS year.
 
 Substeps:
-1.1 Load beam.vehicle_types_file, inspect encoded model years, and filter or rebuild
-    vehicle types for <= atlas.year.
+1.1 Load fastsim.passenger.vehicle_types_file, inspect encoded model years, and
+    filter or rebuild vehicle types for <= atlas.year.
 1.2 Load ATLAS vehicles, households, and persons, then calculate fleetShare and
     representative income bins for unique ATLAS bodytype/adopt_fuel/modelyear rows.
 1.3 Map built FASTSim vehicle types to ATLAS rows and expand the final Step 1
     vehicle types using combined ids.
+1.4 Build the freight vehicle-type population from FRISM carriers and tours.
+1.5 Filter FRISM freight vehicle types to the population and attach all-bucket probabilities.
+1.6 Extract non-car passenger vehicle types from the source passenger vehicle-types file.
 """
 
 from __future__ import annotations
@@ -57,12 +60,7 @@ def _normalize_bodytype(value: object) -> str:
 def _combine_vehicle_type_ids(fastsim_vehicle_type_id: object, atlas_vehicle_type_id: object) -> str:
     fastsim_token = str(fastsim_vehicle_type_id).replace("_", "")
     atlas_token = str(atlas_vehicle_type_id).replace("_", "")
-    return f"{fastsim_token}_{atlas_token}"
-
-
-def _capitalize_token(value: object) -> str:
-    token = str(value)
-    return token[:1].upper() + token[1:] if token else token
+    return f"{fastsim_token}--{atlas_token}"
 
 
 def _build_atlas_vehicle_type_ids(
@@ -80,17 +78,67 @@ def _build_atlas_vehicle_type_ids(
 
 
 def _write_new_vehicle_types_file(frame: pd.DataFrame, output_dir: str) -> str:
-    target = Path(resolve_workflow_path(output_dir)) / "vehicleTypes--beam--step1-built.csv"
+    target = Path(resolve_workflow_path(output_dir)) / "vehicleTypes--passenger-car.csv"
     target.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(target, index=False)
     return str(target)
 
 
 def _write_vehicle_type_crosswalk_file(frame: pd.DataFrame, output_dir: str) -> str:
-    target = Path(resolve_workflow_path(output_dir)) / "vehicle_type_atlas_crosswalk.csv"
+    target = Path(resolve_workflow_path(output_dir)) / "vehicleTypeCrosswalk--fastsim-atlas.csv"
     target.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(target, index=False)
     return str(target)
+
+
+def _write_new_freight_vehicle_types_file(frame: pd.DataFrame, output_dir: str) -> str:
+    target = Path(resolve_workflow_path(output_dir)) / "vehicleTypes--freight.csv"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(target, index=False)
+    return str(target)
+
+
+def _write_passenger_section_vehicle_types_file(section_name: str, frame: pd.DataFrame, output_dir: str) -> str:
+    target = Path(resolve_workflow_path(output_dir)) / f"vehicleTypes--passenger-{section_name}.csv"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(target, index=False)
+    return str(target)
+
+
+def _remove_stale_step1_output_files(output_dir: str) -> None:
+    root = Path(resolve_workflow_path(output_dir))
+    for name in [
+        "vehicleTypes--beam--step1-built.csv",
+        "vehicle_type_atlas_crosswalk.csv",
+        "freightVehicleTypePopulation--step1.csv",
+        "vehicleTypes--passenger-car--step1-built.csv",
+        "vehicleTypeCrosswalk--passenger-atlas--step1.csv",
+        "vehicleTypePopulation--freight--step1.csv",
+        "vehicleTypePopulation--freight.csv",
+        "vehicleTypes--freight--step1-built.csv",
+        "vehicleTypes--passenger-noncar--step1-built.csv",
+        "vehicleTypes--passenger-noncar.csv",
+        "vehicleTypes--passenger-bus.csv",
+        "vehicleTypes--passenger-bike.csv",
+        "vehicleTypes--passenger-other.csv",
+    ]:
+        target = root / name
+        if target.exists():
+            target.unlink()
+
+
+def _align_vehicle_types_to_source_schema(
+    frame: pd.DataFrame,
+    source_columns: list[str],
+    *,
+    frame_name: str,
+) -> pd.DataFrame:
+    missing = [column for column in source_columns if column not in frame.columns]
+    if missing:
+        raise ValueError(
+            f"{frame_name} is missing source vehicle-types columns:\n" + "\n".join(missing)
+        )
+    return frame.loc[:, source_columns].copy()
 
 
 def _build_atlas_vehicle_type_targets(vehicles: pd.DataFrame) -> pd.DataFrame:
@@ -129,6 +177,99 @@ def _build_atlas_vehicle_type_targets(vehicles: pd.DataFrame) -> pd.DataFrame:
             "fleetShare",
         ]
     ]
+
+
+def _build_freight_vehicle_type_population(
+    carriers: pd.DataFrame,
+    tours: pd.DataFrame,
+) -> pd.DataFrame:
+    _require_column(carriers, "tourId", "FRISM carriers file")
+    _require_column(carriers, "vehicleTypeId", "FRISM carriers file")
+    _require_column(tours, "tourId", "FRISM tours file")
+
+    prepared_carriers = carriers[["tourId", "vehicleTypeId"]].copy()
+    prepared_carriers["tourId"] = prepared_carriers["tourId"].astype(str)
+    prepared_carriers["vehicleTypeId"] = prepared_carriers["vehicleTypeId"].astype(str)
+
+    prepared_tours = tours[["tourId"]].copy()
+    prepared_tours["tourId"] = prepared_tours["tourId"].astype(str)
+
+    matched = prepared_carriers.merge(
+        prepared_tours.drop_duplicates(),
+        on="tourId",
+        how="inner",
+    )
+    if matched.empty:
+        raise ValueError("No FRISM carrier rows could be matched to FRISM tours on tourId")
+
+    grouped = (
+        matched.groupby("vehicleTypeId", dropna=False)
+        .size()
+        .reset_index(name="vehicleCount")
+        .sort_values(["vehicleCount", "vehicleTypeId"], ascending=[False, True])
+        .reset_index(drop=True)
+    )
+    total = grouped["vehicleCount"].sum()
+    grouped["fleetShare"] = grouped["vehicleCount"] / total if total > 0 else 0.0
+    return grouped[["vehicleTypeId", "vehicleCount", "fleetShare"]]
+
+
+def _create_all_probability_string(probability: float) -> str:
+    return f"all | all:{float(probability):.6f}"
+
+
+def _normalize_freight_vehicle_type_id(value: object) -> str:
+    normalized = re.sub(r"^ft[-_]+", "", str(value).strip(), flags=re.IGNORECASE)
+    tokens = [token for token in re.split(r"[-_]+", normalized) if token]
+    if not tokens:
+        return ""
+    return "".join(token[:1].upper() + token[1:].lower() for token in tokens)
+
+
+def _build_freight_vehicle_types_from_population(
+    freight_vehicle_types: pd.DataFrame,
+    freight_vehicle_type_population: pd.DataFrame,
+) -> pd.DataFrame:
+    _require_column(freight_vehicle_types, "vehicleTypeId", "FRISM freight vehicle types file")
+    _require_column(freight_vehicle_type_population, "vehicleTypeId", "Freight vehicle type population")
+    _require_column(freight_vehicle_type_population, "fleetShare", "Freight vehicle type population")
+
+    prepared_types = freight_vehicle_types.copy()
+    prepared_types["vehicleTypeId"] = prepared_types["vehicleTypeId"].astype(str)
+
+    population = freight_vehicle_type_population[["vehicleTypeId", "fleetShare"]].drop_duplicates().copy()
+    population["vehicleTypeId"] = population["vehicleTypeId"].astype(str)
+    population["fleetShare"] = pd.to_numeric(population["fleetShare"], errors="coerce").fillna(0.0)
+
+    prepared = prepared_types.merge(population, on="vehicleTypeId", how="inner")
+    if prepared.empty:
+        raise ValueError("No FRISM freight vehicle types intersect with the freight vehicle-type population")
+
+    prepared["vehicleTypeId"] = prepared["vehicleTypeId"].map(_normalize_freight_vehicle_type_id)
+    duplicate_vehicle_type_ids = prepared["vehicleTypeId"][prepared["vehicleTypeId"].duplicated()].drop_duplicates()
+    if not duplicate_vehicle_type_ids.empty:
+        raise ValueError(
+            "Freight vehicleTypeId normalization produced duplicates:\n"
+            + "\n".join(duplicate_vehicle_type_ids.astype(str).tolist())
+        )
+    prepared["sampleProbabilityWithinCategory"] = prepared["fleetShare"].map(lambda value: f"{float(value):.6f}")
+    prepared["sampleProbabilityString"] = prepared["fleetShare"].map(_create_all_probability_string)
+    return prepared.drop(columns=["fleetShare"]).drop_duplicates().reset_index(drop=True)
+
+
+def _split_passenger_vehicle_types(vehicle_types: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    _require_column(vehicle_types, "vehicleTypeId", "Passenger vehicle types file")
+    _require_column(vehicle_types, "vehicleCategory", "Passenger vehicle types file")
+
+    category = vehicle_types["vehicleCategory"].astype(str)
+    vehicle_type_id = vehicle_types["vehicleTypeId"].astype(str)
+    bus_mask = category.eq("MediumDutyPassenger") & vehicle_type_id.str.contains("BUS-", case=False, na=False)
+    return {
+        "car": vehicle_types[category.eq("Car")].copy(),
+        "bus": vehicle_types[bus_mask].copy(),
+        "bike": vehicle_types[category.eq("Bike")].copy(),
+        "other": vehicle_types[~(category.eq("Car") | bus_mask | category.eq("Bike"))].copy(),
+    }
 
 
 def _format_income_bin(min_value: object, max_value: object) -> str:
@@ -734,10 +875,14 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
     """Step 1: build BEAM vehicle types for the target ATLAS year."""
     config = workflow["config"]
     rng = np.random.default_rng(int(config["seed"]))
+    _remove_stale_step1_output_files(config["output"])
 
-    print("=== Step 1.1: build vehicle types for atlas.year from beam inputs ===")
+    passenger_fastsim = config["fastsim"]["passenger"]
+    mapping_config = config["mapping"]
+
+    print("=== Step 1.1: build vehicle types for atlas.year from FASTSim passenger inputs ===")
     vehicle_types = _read_csv(
-        config["beam"]["vehicle_types_file"],
+        passenger_fastsim["vehicle_types_file"],
         columns=[
             "vehicleTypeId",
             "curbWeightInKg",
@@ -762,7 +907,7 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
             "sampleProbabilityString",
         ],
     )
-    _require_column(vehicle_types, "vehicleTypeId", "BEAM vehicle types file")
+    _require_column(vehicle_types, "vehicleTypeId", "FASTSim passenger vehicle types file")
     atlas_year = pd.to_numeric(config["atlas"]["year"], errors="coerce")
 
     encoded_years = _extract_model_year_from_vehicle_type_id(vehicle_types["vehicleTypeId"])
@@ -772,10 +917,10 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
         prepared_vehicle_types["modelyear"] = encoded_years
         prepared_vehicle_types = prepared_vehicle_types[prepared_vehicle_types["modelyear"].le(atlas_year)].copy()
     else:
-        fastsim_data_folder = config["beam"].get("fastsim_data_folder")
+        fastsim_data_folder = passenger_fastsim.get("fastsim_data_folder")
         if fastsim_data_folder in (None, ""):
             raise ValueError(
-                "beam.fastsim_data_folder is required when beam.vehicle_types_file does not contain model years at or below atlas.year"
+                "fastsim.passenger.fastsim_data_folder is required when fastsim.passenger.vehicle_types_file does not contain model years at or below atlas.year"
             )
         prepared_vehicle_types = _build_vehicle_types_from_fastsim_folder(
             vehicle_types,
@@ -784,7 +929,7 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
         )
         prepared_vehicle_types["modelyear"] = _extract_model_year_from_vehicle_type_id(prepared_vehicle_types["vehicleTypeId"])
 
-    fastsim_bodytype_xwalk = _read_csv(config["beam"]["fastsim_bodytype_xwalk_file"])
+    fastsim_bodytype_xwalk = _read_csv(mapping_config["fastsim_bodytype_xwalk_file"])
     vehicle_type_mapping = _build_fastsim_vehicle_type_mapping(
         prepared_vehicle_types,
         fastsim_bodytype_xwalk,
@@ -822,8 +967,8 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
         atlas_vehicle_type_targets["incomeProbability"],
         errors="coerce",
     ).fillna(0.0)
-    print("=== Step 1.3: create beam-to-atlas crosswalk file ===")
-    fastsim_atlas_fuel_mapping = _read_csv(config["beam"]["fastsim_atlas_fuel_mapping_file"])
+    print("=== Step 1.3: create fastsim-to-atlas crosswalk file ===")
+    fastsim_atlas_fuel_mapping = _read_csv(mapping_config["fastsim_atlas_fuel_mapping_file"])
     vehicle_type_atlas_crosswalk = _build_vehicle_type_atlas_crosswalk(
         prepared_vehicle_types,
         vehicle_type_mapping,
@@ -842,23 +987,100 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
         vehicle_type_atlas_crosswalk,
         config["atlas"].get("income_bins"),
     )
+    prepared_vehicle_types = _align_vehicle_types_to_source_schema(
+        prepared_vehicle_types,
+        list(vehicle_types.columns),
+        frame_name="Built passenger vehicle types",
+    )
     prepared_vehicle_types_file = _write_new_vehicle_types_file(prepared_vehicle_types, config["output"])
     vehicle_type_atlas_crosswalk_file = _write_vehicle_type_crosswalk_file(
         vehicle_type_atlas_crosswalk,
         config["output"],
     )
+    print("=== Step 1.4: build freight vehicle-type population from FRISM carriers and tours ===")
+    frism_carriers = _read_csv(
+        config["frism"]["carriers_files"],
+        columns=["tourId", "vehicleTypeId"],
+    )
+    frism_tours = _read_csv(
+        config["frism"]["tours_file"],
+        columns=["tourId"],
+    )
+    freight_vehicle_type_population = _build_freight_vehicle_type_population(
+        frism_carriers,
+        frism_tours,
+    )
+    print("=== Step 1.5: filter freight vehicle types to the freight population and calculate probabilities ===")
+    freight_fastsim = config["fastsim"]["freight"]
+    freight_vehicle_types = _read_csv(
+        freight_fastsim["vehicle_types_file"],
+    )
+    freight_vehicle_type_population = _round_fleet_share(freight_vehicle_type_population)
+    built_freight_vehicle_types = _build_freight_vehicle_types_from_population(
+        freight_vehicle_types,
+        freight_vehicle_type_population,
+    )
+    built_freight_vehicle_types_file = _write_new_freight_vehicle_types_file(
+        built_freight_vehicle_types,
+        config["output"],
+    )
+    print("=== Step 1.6: extract non-car passenger vehicle types from the source passenger vehicle-types file ===")
+    passenger_vehicle_type_sections = _split_passenger_vehicle_types(vehicle_types)
+    built_passenger_bus_vehicle_types = _align_vehicle_types_to_source_schema(
+        passenger_vehicle_type_sections["bus"],
+        list(vehicle_types.columns),
+        frame_name="Built passenger bus vehicle types",
+    )
+    built_passenger_bike_vehicle_types = _align_vehicle_types_to_source_schema(
+        passenger_vehicle_type_sections["bike"],
+        list(vehicle_types.columns),
+        frame_name="Built passenger bike vehicle types",
+    )
+    built_passenger_other_vehicle_types = _align_vehicle_types_to_source_schema(
+        passenger_vehicle_type_sections["other"],
+        list(vehicle_types.columns),
+        frame_name="Built passenger other vehicle types",
+    )
+    built_passenger_bus_vehicle_types_file = _write_passenger_section_vehicle_types_file(
+        "bus",
+        built_passenger_bus_vehicle_types,
+        config["output"],
+    )
+    built_passenger_bike_vehicle_types_file = _write_passenger_section_vehicle_types_file(
+        "bike",
+        built_passenger_bike_vehicle_types,
+        config["output"],
+    )
+    built_passenger_other_vehicle_types_file = _write_passenger_section_vehicle_types_file(
+        "other",
+        built_passenger_other_vehicle_types,
+        config["output"],
+    )
 
-    workflow["source_beam_vehicle_types"] = vehicle_types
+    workflow["source_fastsim_passenger_vehicle_types"] = vehicle_types
     workflow["source_atlas_vehicles"] = atlas_vehicles
     workflow["source_atlas_households"] = atlas_households
     workflow["source_atlas_persons"] = atlas_persons
-    workflow["source_beam_vehicle_bodytype_xwalk"] = fastsim_bodytype_xwalk
-    workflow["source_beam_fuel_mapping"] = fastsim_atlas_fuel_mapping
-    workflow["source_beam_vehicle_type_mapping"] = vehicle_type_mapping
+    workflow["source_fastsim_passenger_bodytype_xwalk"] = fastsim_bodytype_xwalk
+    workflow["source_fastsim_passenger_fuel_mapping"] = fastsim_atlas_fuel_mapping
+    workflow["source_fastsim_passenger_vehicle_type_mapping"] = vehicle_type_mapping
     workflow["built_vehicle_types"] = prepared_vehicle_types
     workflow["built_vehicle_types_file"] = prepared_vehicle_types_file
     workflow["atlas_vehicle_type_targets"] = atlas_vehicle_type_targets
     workflow["atlas_income_bin_targets"] = atlas_income_bin_targets
     workflow["vehicle_type_atlas_crosswalk"] = vehicle_type_atlas_crosswalk
     workflow["vehicle_type_atlas_crosswalk_file"] = vehicle_type_atlas_crosswalk_file
+    workflow["source_frism_carriers"] = frism_carriers
+    workflow["source_frism_tours"] = frism_tours
+    workflow["freight_vehicle_type_population"] = freight_vehicle_type_population
+    workflow["source_fastsim_freight_vehicle_types"] = freight_vehicle_types
+    workflow["built_freight_vehicle_types"] = built_freight_vehicle_types
+    workflow["built_freight_vehicle_types_file"] = built_freight_vehicle_types_file
+    workflow["passenger_vehicle_type_sections"] = passenger_vehicle_type_sections
+    workflow["built_passenger_bus_vehicle_types"] = built_passenger_bus_vehicle_types
+    workflow["built_passenger_bus_vehicle_types_file"] = built_passenger_bus_vehicle_types_file
+    workflow["built_passenger_bike_vehicle_types"] = built_passenger_bike_vehicle_types
+    workflow["built_passenger_bike_vehicle_types_file"] = built_passenger_bike_vehicle_types_file
+    workflow["built_passenger_other_vehicle_types"] = built_passenger_other_vehicle_types
+    workflow["built_passenger_other_vehicle_types_file"] = built_passenger_other_vehicle_types_file
     return workflow

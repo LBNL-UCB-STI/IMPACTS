@@ -76,12 +76,6 @@ def _load_yaml(path: Path) -> dict:
     return (data or {}).get("fleet", data or {})
 
 
-def _expand_path(value: str | None) -> str | None:
-    if value in (None, ""):
-        return value
-    return str(Path(value).expanduser())
-
-
 def resolve_workflow_path(path_like: str | None) -> str:
     if path_like in (None, ""):
         raise ValueError("Expected a configured path value, got an empty value")
@@ -135,15 +129,46 @@ def _ingest_configured_sources(config: dict) -> dict:
         path_label="output",
         must_exist=False,
     )
+    mapping = config.get("mapping", {})
+    if isinstance(mapping, dict):
+        mapping["emfac_atlas_map"] = _normalize_configured_path(
+            mapping.get("emfac_atlas_map"),
+            path_label="mapping.emfac_atlas_map",
+        )
+        mapping["emfac_beam_class_map"] = _normalize_configured_path(
+            mapping.get("emfac_beam_class_map"),
+            path_label="mapping.emfac_beam_class_map",
+        )
+        mapping["emfac_beam_fuel_map"] = _normalize_configured_path(
+            mapping.get("emfac_beam_fuel_map"),
+            path_label="mapping.emfac_beam_fuel_map",
+        )
+        mapping["emfac_beam_fuel_alternatives_map"] = _normalize_configured_path(
+            mapping.get("emfac_beam_fuel_alternatives_map"),
+            path_label="mapping.emfac_beam_fuel_alternatives_map",
+        )
+        mapping["beam_freight_class_alternatives_map"] = _normalize_configured_path(
+            mapping.get("beam_freight_class_alternatives_map"),
+            path_label="mapping.beam_freight_class_alternatives_map",
+        )
+        mapping["beam_passenger_bodytype_alternatives_map"] = _normalize_configured_path(
+            mapping.get("beam_passenger_bodytype_alternatives_map"),
+            path_label="mapping.beam_passenger_bodytype_alternatives_map",
+        )
+        mapping["fastsim_bodytype_xwalk_file"] = _normalize_configured_path(
+            mapping.get("fastsim_bodytype_xwalk_file"),
+            path_label="mapping.fastsim_bodytype_xwalk_file",
+        )
+        mapping["fastsim_atlas_fuel_mapping_file"] = _normalize_configured_path(
+            mapping.get("fastsim_atlas_fuel_mapping_file"),
+            path_label="mapping.fastsim_atlas_fuel_mapping_file",
+        )
+        config["mapping"] = mapping
     emfac = config.get("emfac", {})
     if isinstance(emfac, dict):
         emfac["rates_file"] = _normalize_configured_path(emfac.get("rates_file"), path_label="emfac.rates_file")
         emfac["activity_file"] = _normalize_configured_path(emfac.get("activity_file"), path_label="emfac.activity_file")
         emfac["fleet_file"] = _normalize_configured_path(emfac.get("fleet_file"), path_label="emfac.fleet_file")
-        emfac["atlas_emfac_xwalk"] = _normalize_configured_path(
-            emfac.get("atlas_emfac_xwalk"),
-            path_label="emfac.atlas_emfac_xwalk",
-        )
         config["emfac"] = emfac
     frism = config.get("frism", {})
     if isinstance(frism, dict):
@@ -151,40 +176,40 @@ def _ingest_configured_sources(config: dict) -> dict:
             frism.get("carriers_files"),
             path_label="frism.carriers_files",
         )
-        frism["payloads_files"] = _normalize_configured_path(
-            frism.get("payloads_files"),
-            path_label="frism.payloads_files",
-        )
         frism["tours_file"] = _normalize_configured_path(
             frism.get("tours_file"),
             path_label="frism.tours_file",
         )
-        frism["ft_vehicle_types_file"] = _normalize_configured_path(
-            frism.get("ft_vehicle_types_file"),
-            path_label="frism.ft_vehicle_types_file",
-        )
         config["frism"] = frism
-    beam = config.get("beam", {})
-    if isinstance(beam, dict):
-        beam["vehicle_types_file"] = _normalize_configured_path(
-            beam.get("vehicle_types_file"),
-            path_label="beam.vehicle_types_file",
-        )
-        beam["fastsim_bodytype_xwalk_file"] = _normalize_configured_path(
-            beam.get("fastsim_bodytype_xwalk_file"),
-            path_label="beam.fastsim_bodytype_xwalk_file",
-        )
-        beam["fastsim_atlas_fuel_mapping_file"] = _normalize_configured_path(
-            beam.get("fastsim_atlas_fuel_mapping_file"),
-            path_label="beam.fastsim_atlas_fuel_mapping_file",
-        )
-        beam["fastsim_data_folder"] = _normalize_configured_path(
-            beam.get("fastsim_data_folder"),
-            path_label="beam.fastsim_data_folder",
-            expect_directory=True,
-            must_exist=False,
-        )
-        config["beam"] = beam
+    fastsim = config.get("fastsim", {})
+    if isinstance(fastsim, dict):
+        passenger = fastsim.get("passenger", {})
+        if isinstance(passenger, dict):
+            passenger["vehicle_types_file"] = _normalize_configured_path(
+                passenger.get("vehicle_types_file"),
+                path_label="fastsim.passenger.vehicle_types_file",
+            )
+            passenger["fastsim_data_folder"] = _normalize_configured_path(
+                passenger.get("fastsim_data_folder"),
+                path_label="fastsim.passenger.fastsim_data_folder",
+                expect_directory=True,
+                must_exist=False,
+            )
+            fastsim["passenger"] = passenger
+        freight = fastsim.get("freight", {})
+        if isinstance(freight, dict):
+            freight["vehicle_types_file"] = _normalize_configured_path(
+                freight.get("vehicle_types_file"),
+                path_label="fastsim.freight.vehicle_types_file",
+            )
+            freight["fastsim_data_folder"] = _normalize_configured_path(
+                freight.get("fastsim_data_folder"),
+                path_label="fastsim.freight.fastsim_data_folder",
+                expect_directory=True,
+                must_exist=False,
+            )
+            fastsim["freight"] = freight
+        config["fastsim"] = fastsim
     atlas = config.get("atlas", {})
     if isinstance(atlas, dict):
         atlas["vehicles_file"] = _normalize_configured_path(
@@ -220,24 +245,31 @@ def _validate_workflow_settings(raw: dict, source_path: Path) -> None:
         ("scenario",),
         ("seed",),
         ("output",),
+        ("mapping",),
+        ("mapping", "emfac_atlas_map"),
+        ("mapping", "emfac_beam_class_map"),
+        ("mapping", "emfac_beam_fuel_map"),
+        ("mapping", "emfac_beam_fuel_alternatives_map"),
+        ("mapping", "beam_freight_class_alternatives_map"),
+        ("mapping", "beam_passenger_bodytype_alternatives_map"),
+        ("mapping", "fastsim_bodytype_xwalk_file"),
+        ("mapping", "fastsim_atlas_fuel_mapping_file"),
         ("emfac",),
         ("emfac", "rates_file"),
         ("emfac", "activity_file"),
         ("emfac", "fleet_file"),
-        ("emfac", "atlas_emfac_xwalk"),
         ("atlas",),
         ("atlas", "vehicles_file"),
         ("atlas", "households_file"),
         ("atlas", "persons_file"),
         ("frism",),
         ("frism", "carriers_files"),
-        ("frism", "payloads_files"),
         ("frism", "tours_file"),
-        ("frism", "ft_vehicle_types_file"),
-        ("beam",),
-        ("beam", "vehicle_types_file"),
-        ("beam", "fastsim_bodytype_xwalk_file"),
-        ("beam", "fastsim_atlas_fuel_mapping_file"),
+        ("fastsim",),
+        ("fastsim", "passenger"),
+        ("fastsim", "passenger", "vehicle_types_file"),
+        ("fastsim", "freight"),
+        ("fastsim", "freight", "vehicle_types_file"),
     ]
     missing = []
     for path in required_paths:
@@ -259,10 +291,11 @@ def load_workflow(config_path: str | Path | None = None) -> dict:
     config = {
         "seed": raw["seed"],
         "output": output_root,
+        "mapping": raw["mapping"],
         "emfac": raw["emfac"],
         "atlas": raw["atlas"],
         "frism": raw["frism"],
-        "beam": raw["beam"],
+        "fastsim": raw["fastsim"],
     }
     return {
         "area": raw["region"],

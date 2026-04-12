@@ -6,7 +6,10 @@ import sys
 from impacts.fleet.config import load_default_workflow
 from impacts.fleet.config import load_workflow
 from impacts.fleet.step1_build_vehicle_types import run_step1
-from impacts.fleet.step2_prepare_passenger_fleet import run_step2
+from impacts.fleet.step2_map_emfac_bus_bike import run_step2
+from impacts.fleet.step3_map_emfac_atlas import run_step3
+from impacts.fleet.step4_map_emfac_frism import run_step4
+from impacts.fleet.step5_map_emfac_rates import run_step5
 
 
 def _configure_run(config_path: str | Path | None = None) -> dict[str, object]:
@@ -25,13 +28,17 @@ def _print_run_banner(workflow: dict[str, object]) -> None:
 
 
 def run_all_steps(config_path: str | Path | None = None) -> None:
-    """Run Step 1 of the fleet workflow."""
+    """Run the active fleet workflow steps."""
     workflow = _configure_run(config_path)
     _print_run_banner(workflow)
     workflow = run_step1(workflow)
+    workflow = run_step2(workflow)
+    workflow = run_step3(workflow)
+    workflow = run_step4(workflow)
+    workflow = run_step5(workflow)
     prepared_vehicle_types_file = workflow.get("built_vehicle_types_file", "")
     if prepared_vehicle_types_file:
-        print(f"  Step 1 vehicle types file: {prepared_vehicle_types_file}")
+        print(f"  Passenger car vehicle types file: {prepared_vehicle_types_file}")
     print("  DONE")
 
 

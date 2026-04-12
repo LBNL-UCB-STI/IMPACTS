@@ -4,11 +4,20 @@ fleet:
   seed: 0
   output: examples/fleet/output
 
+  mapping:
+    emfac_atlas_map: examples/fleet/mappings/atlas_emfac_xwalk.csv
+    emfac_beam_class_map: examples/fleet/mappings/emfac_beam_class_mapping.csv
+    emfac_beam_fuel_map: examples/fleet/mappings/emfac_beam_fuel_mappings.csv
+    emfac_beam_fuel_alternatives_map: examples/fleet/mappings/emfac_beam_fuel_alternatives.csv
+    beam_freight_class_alternatives_map: examples/fleet/mappings/freight_class_alternatives.csv
+    beam_passenger_bodytype_alternatives_map: examples/fleet/mappings/passenger_bodytype_alternatives.csv
+    fastsim_bodytype_xwalk_file: examples/fleet/data/beam/fastsim_vehicle_bodytype_xwalk.csv
+    fastsim_atlas_fuel_mapping_file: examples/fleet/data/beam/fastsim_atlas_fuel_mapping.csv
+
   emfac:
     rates_file: examples/fleet/data/emfac-2021/sf-emfac-2018-project-analysis-final-rates.parquet
     activity_file: examples/fleet/data/emfac-2021/sf-emfac-2018-project-analysis-final-activity.parquet
     fleet_file: examples/fleet/data/emfac-2021/sf-emfac-2018-project-analysis-final-fleet.parquet
-    atlas_emfac_xwalk: examples/fleet/data/emfac-2021/atlas-emfac-xwalk.csv
 
   atlas:
     year: 2019
@@ -20,12 +29,12 @@ fleet:
   frism:
     year: 2018
     carriers_files: examples/fleet/data/frism-2018/carriers--2018-Baseline.parquet
-    payloads_files: examples/fleet/data/frism-2018/payloads--2018-Baseline.parquet
     tours_file: examples/fleet/data/frism-2018/tours--2018-Baseline.parquet
-    ft_vehicle_types_file: examples/fleet/data/frism-2018/vehicletypes--frism--2018-Baseline.csv
 
-  beam:
-    vehicle_types_file: examples/fleet/data/beam/vehicleTypes_inventory.csv
-    fastsim_data_folder: ~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/fuel/Baseline_FASTSimData_Representative_Vehicles_lookup_tables_output
-    fastsim_bodytype_xwalk_file: examples/fleet/data/beam/fastsim_vehicle_bodytype_xwalk.csv
-    fastsim_atlas_fuel_mapping_file: examples/fleet/data/beam/fastsim_atlas_fuel_mapping.csv
+  fastsim:
+    passenger:
+      vehicle_types_file: examples/fleet/data/beam/vehicleTypes_inventory.csv
+      fastsim_data_folder: ~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/fuel/Baseline_FASTSimData_Representative_Vehicles_lookup_tables_output
+    freight:
+      vehicle_types_file: examples/fleet/data/frism-2018/vehicletypes--frism--2018-Baseline.csv
+      fastsim_data_folder: ~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/fuel/Freight_Baseline_FASTSimData_2020
