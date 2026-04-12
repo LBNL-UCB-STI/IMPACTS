@@ -999,7 +999,7 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
     )
     print("=== Step 1.4: build freight vehicle-type population from FRISM carriers and tours ===")
     frism_carriers = _read_csv(
-        config["frism"]["carriers_files"],
+        config["frism"]["carriers_file"],
         columns=["tourId", "vehicleTypeId"],
     )
     frism_tours = _read_csv(

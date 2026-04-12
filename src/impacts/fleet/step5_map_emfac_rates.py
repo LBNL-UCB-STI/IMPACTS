@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import shutil
 from typing import Any
 
 import duckdb
@@ -17,15 +18,31 @@ from impacts.fleet.config import resolve_workflow_path
 
 _RATES_STRING_COLUMNS = {
     "county",
-    "emfacId",
     "process",
     "roadCategory",
-    "source_file",
     "speedMph_timeMin",
-    "vehicleCategory",
-    "fuel",
-    "modelYear",
 }
+
+_BEAM_RATES_COLUMNS = [
+    "county",
+    "process",
+    "speedMph_timeMin",
+    "roadCategory",
+    "bc_gram",
+    "ch4_gram",
+    "co_gram",
+    "co2_gram",
+    "hc_gram",
+    "nh3_gram",
+    "n2o_gram",
+    "nox_gram",
+    "pm_gram",
+    "pm10_gram",
+    "pm25_gram",
+    "rog_gram",
+    "sox_gram",
+    "tog_gram",
+]
 
 
 def _sanitize_emfac_component(value: object) -> str:
@@ -82,15 +99,16 @@ def _write_rates_store(
     emissions_rates: pd.DataFrame,
     emfac_ids: list[str],
     output_root: Path,
-    store_name: str,
 ) -> dict[str, str]:
-    store_root = output_root / "emissions" / store_name
+    store_root = output_root / "emissions"
+    for stale_dir in [store_root / "passenger", store_root / "freight"]:
+        if stale_dir.exists():
+            shutil.rmtree(stale_dir)
     parquet_root = store_root / "dataset"
     duckdb_path = store_root / "dataset.duckdb"
     parquet_root.mkdir(parents=True, exist_ok=True)
 
     rates = emissions_rates[emissions_rates["emfacId"].isin(emfac_ids)].copy()
-    rates["source_file"] = rates["emfacId"].astype(str) + ".parquet"
     for column_name in _RATES_STRING_COLUMNS.intersection(rates.columns):
         rates[column_name] = rates[column_name].astype("string")
 
@@ -100,7 +118,8 @@ def _write_rates_store(
         partition_dir = parquet_root / f"emfacId={emfac_id_str}"
         partition_dir.mkdir(parents=True, exist_ok=True)
         output_path = partition_dir / f"{emfac_id_str}.parquet"
-        parquet_frame = frame.drop(columns=["emfacId"], errors="ignore").reset_index(drop=True)
+        parquet_columns = [column for column in _BEAM_RATES_COLUMNS if column in frame.columns]
+        parquet_frame = frame[parquet_columns].reset_index(drop=True)
         table = pa.Table.from_pandas(parquet_frame, preserve_index=False)
         pq.write_table(table, output_path, compression="zstd")
         relative_paths[emfac_id_str] = str(output_path.relative_to(output_root))
@@ -160,30 +179,11 @@ def _build_passenger_vehicle_types_table(workflow: dict[str, Any]) -> pd.DataFra
 def _attach_rates_to_vehicle_types(
     *,
     vehicle_types: pd.DataFrame,
-    emissions_rates: pd.DataFrame,
-    output_root: Path,
-    store_name: str,
+    relative_paths: dict[str, str],
 ) -> tuple[pd.DataFrame, dict[str, str]]:
     prepared = vehicle_types.copy()
-    emfac_ids = sorted(prepared.get("emfacId", pd.Series(dtype="string")).fillna("").astype(str).unique().tolist())
-    emfac_ids = [emfac_id for emfac_id in emfac_ids if emfac_id]
-    if emfac_ids:
-        rates_store = _write_rates_store(
-            emissions_rates=emissions_rates,
-            emfac_ids=emfac_ids,
-            output_root=output_root,
-            store_name=store_name,
-        )
-        prepared = _assign_rate_filepaths(prepared, rates_store["relative_paths"])
-    else:
-        rates_store = {
-            "store_root": str(output_root / "emissions" / store_name),
-            "parquet_root": str(output_root / "emissions" / store_name / "dataset"),
-            "duckdb_path": str(output_root / "emissions" / store_name / "dataset.duckdb"),
-            "relative_paths": {},
-        }
-        prepared["emissionsRatesFile"] = ""
-    return prepared, rates_store
+    prepared = _assign_rate_filepaths(prepared, relative_paths)
+    return prepared
 
 
 def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
@@ -191,14 +191,25 @@ def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
     config = workflow["config"]
     output_root = Path(str(config["output"])).expanduser().resolve()
     emissions_rates = _load_emfac_rates_with_ids(config)
+    passenger_vehicle_types = _build_passenger_vehicle_types_table(workflow)
+    freight_vehicle_types = workflow["built_freight_vehicle_types"].copy()
+    passenger_emfac_ids = sorted(
+        [emfac_id for emfac_id in passenger_vehicle_types.get("emfacId", pd.Series(dtype="string")).fillna("").astype(str).unique().tolist() if emfac_id]
+    )
+    freight_emfac_ids = sorted(
+        [emfac_id for emfac_id in freight_vehicle_types.get("emfacId", pd.Series(dtype="string")).fillna("").astype(str).unique().tolist() if emfac_id]
+    )
+    shared_emfac_ids = sorted(set(passenger_emfac_ids) | set(freight_emfac_ids))
+    shared_rates_store = _write_rates_store(
+        emissions_rates=emissions_rates,
+        emfac_ids=shared_emfac_ids,
+        output_root=output_root,
+    )
 
     print("=== Step 5.1: attach emfac rates to passenger vehicle types ===")
-    passenger_vehicle_types = _build_passenger_vehicle_types_table(workflow)
-    passenger_vehicle_types_with_rates, passenger_rates_store = _attach_rates_to_vehicle_types(
+    passenger_vehicle_types_with_rates = _attach_rates_to_vehicle_types(
         vehicle_types=passenger_vehicle_types,
-        emissions_rates=emissions_rates,
-        output_root=output_root,
-        store_name="passenger",
+        relative_paths=shared_rates_store["relative_paths"],
     )
     passenger_output_file = _write_vehicle_types(
         passenger_vehicle_types_with_rates,
@@ -206,12 +217,9 @@ def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
     )
 
     print("=== Step 5.2: attach emfac rates to freight vehicle types ===")
-    freight_vehicle_types = workflow["built_freight_vehicle_types"].copy()
-    freight_vehicle_types_with_rates, freight_rates_store = _attach_rates_to_vehicle_types(
+    freight_vehicle_types_with_rates = _attach_rates_to_vehicle_types(
         vehicle_types=freight_vehicle_types,
-        emissions_rates=emissions_rates,
-        output_root=output_root,
-        store_name="freight",
+        relative_paths=shared_rates_store["relative_paths"],
     )
     freight_output_file = _write_vehicle_types(
         freight_vehicle_types_with_rates,
@@ -222,6 +230,5 @@ def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
     workflow["passenger_vehicle_types_with_rates_file"] = passenger_output_file
     workflow["freight_vehicle_types_with_rates"] = freight_vehicle_types_with_rates
     workflow["freight_vehicle_types_with_rates_file"] = freight_output_file
-    workflow["passenger_rates_store"] = passenger_rates_store
-    workflow["freight_rates_store"] = freight_rates_store
+    workflow["emfac_rates_store"] = shared_rates_store
     return workflow
