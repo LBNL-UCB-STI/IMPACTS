@@ -21,7 +21,7 @@ FINAL_RATE_GROUP_COLUMNS = [
     ACTIVITY_COLUMN,
     "roadCategory",
 ]
-VMT_WEIGHTED_PROCESSES = {"RUNEX", "PMBW", "PMTW"}
+VMT_WEIGHTED_PROCESSES = {"RUNEX", "PMBW", "PMTW", PTO_PROCESS_NAME}
 ACTIVITY_COLUMNS = ["total_vmt", "cvmt", "evmt", "population", "trips", "pto_total_vmt"]
 LIGHT_DUTY_VEHICLE_CATEGORIES = {"LDA", "LDT1", "LDT2"}
 
@@ -132,12 +132,10 @@ def _aggregation_weight_for_process(process: pd.Series, frame: pd.DataFrame) -> 
     weights = pd.Series(np.nan, index=frame.index, dtype="float64")
     process_values = process.astype(str)
     vmt_mask = process_values.isin(VMT_WEIGHTED_PROCESSES)
-    pto_mask = process_values == PTO_PROCESS_NAME
     prdust_mask = process_values == "PRDUST"
     weights.loc[vmt_mask] = pd.to_numeric(frame.loc[vmt_mask, "total_vmt"], errors="coerce")
-    weights.loc[pto_mask] = pd.to_numeric(frame.loc[pto_mask, "pto_total_vmt"], errors="coerce")
     weights.loc[prdust_mask] = pd.to_numeric(frame.loc[prdust_mask, "population"], errors="coerce")
-    other_mask = ~vmt_mask & ~pto_mask & ~prdust_mask
+    other_mask = ~vmt_mask & ~prdust_mask
     weights.loc[other_mask] = pd.to_numeric(frame.loc[other_mask, "trips"], errors="coerce")
     return weights
 

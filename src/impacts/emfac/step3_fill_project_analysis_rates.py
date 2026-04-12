@@ -423,16 +423,18 @@ def _apply_speed_fallback_keys(surface: pd.DataFrame, reference_rates: pd.DataFr
 def _fill_with_speed_fallback(
     surface: pd.DataFrame,
     *,
-    reference_rates: pd.DataFrame,
     project_analysis_source: pd.DataFrame,
     project_analysis_nh3_rates: pd.DataFrame,
     project_analysis_bc: pd.DataFrame,
     project_analysis_prdust: pd.DataFrame,
     emissions_inventory: pd.DataFrame,
     statewide_inventory: pd.DataFrame,
+    reference_rates: pd.DataFrame,
 ) -> pd.DataFrame:
-    speed_fallback_surface = _apply_speed_fallback_keys(surface, reference_rates)
-    return fill_project_analysis_rates(
+    speed_fallback_surface = surface.copy()
+    original_activity = speed_fallback_surface[ACTIVITY_COLUMN].copy()
+    speed_fallback_surface = _apply_speed_fallback_keys(speed_fallback_surface, reference_rates)
+    filled = fill_project_analysis_rates(
         speed_fallback_surface,
         project_analysis_source=project_analysis_source,
         project_analysis_nh3_rates=project_analysis_nh3_rates,
@@ -441,6 +443,11 @@ def _fill_with_speed_fallback(
         emissions_inventory=emissions_inventory,
         statewide_inventory=statewide_inventory,
     )
+    speed_mask = filled["process"].astype(str).isin(SPEED_MPH_PROCESSES)
+    resolved_mask = filled[POLLUTANT_COLUMNS].notna().any(axis=1)
+    restore_mask = speed_mask & resolved_mask
+    filled.loc[restore_mask, ACTIVITY_COLUMN] = original_activity.loc[restore_mask].to_numpy()
+    return filled
 
 
 def _select_nearest_floor_model_year_candidate(requested_model_year: int, available_model_years: tuple[int, ...] | None) -> int | None:
