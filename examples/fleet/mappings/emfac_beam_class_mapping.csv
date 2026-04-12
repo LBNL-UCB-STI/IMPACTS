@@ -30,12 +30,12 @@ freight,T7 NOOS Class 8,Class78Vocational,regional interstate trucks from nearby
 freight,T7 Single Concrete/Transit Mix Class 8,Class78Vocational,cement mixer trucks used in construction
 freight,T7 Single Dump Class 8,Class78Vocational,large dump trucks used for construction and material hauling
 freight,T7 Single Other Class 8,Class78Vocational,other heavy single-unit trucks like flatbeds or specialized construction trucks
+freight,T7 SWCV Class 8,Class78Vocational,garbage trucks refuse collection trucks operating on local routes with frequent stops
 freight,T7 Tractor Class 8,Class78Tractor,standard semi-trailer trucks used for long-haul freight movement
 freight,T7IS,Class78Tractor,mixed heavy truck category representing general semi trucks without specific subtype
 freight,T7 POAK Class 8,Class78Tractor,port drayage trucks moving containers to and from the Port of Oakland
 freight,T7 Other Port Class 8,Class78Tractor,port drayage trucks at other ports moving shipping containers locally
 freight,PTO,Class78Tractor,work trucks with equipment like cement mixers bucket trucks or utility trucks using engine power to run machinery
-freight,T7 SWCV Class 8,,garbage trucks refuse collection trucks operating on local routes with frequent stops
 passenger,LDA,Car,passenger cars like sedans used for personal travel
 passenger,LDT1,Car,small SUVs and pickup trucks used for personal travel
 passenger,LDT2,Car,larger SUVs and pickup trucks used for personal travel
