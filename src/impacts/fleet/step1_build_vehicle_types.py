@@ -1,7 +1,7 @@
 """Fleet Step 1: build passenger vehicle types for the target ATLAS year.
 
 Substeps:
-1.1 Load fastsim.passenger.vehicle_types_file, inspect encoded model years, and
+1.1 Load fastsim.passenger_vehicle_types_file, inspect encoded model years, and
     filter or rebuild vehicle types for <= atlas.year.
 1.2 Load ATLAS vehicles, households, and persons, then calculate fleetShare and
     representative income bins for unique ATLAS bodytype/adopt_fuel/modelyear rows.
@@ -739,13 +739,11 @@ def _build_fastsim_vehicle_type_mapping(
     body_col = "bodytype" if "bodytype" in fastsim_bodytype_xwalk.columns else "body_type"
     if body_col not in fastsim_bodytype_xwalk.columns:
         raise ValueError("FASTSim bodytype xwalk file is missing 'body_type'")
-    id_col = "vehicleTypeId" if "vehicleTypeId" in fastsim_bodytype_xwalk.columns else "vehicle_id"
-    if id_col not in fastsim_bodytype_xwalk.columns:
-        raise ValueError("FASTSim bodytype xwalk file is missing 'vehicle_id'")
+    _require_column(fastsim_bodytype_xwalk, "fastsim_id", "FASTSim bodytype xwalk file")
     _require_column(fastsim_bodytype_xwalk, "msrp_usd", "FASTSim bodytype xwalk file")
 
-    bodytypes = fastsim_bodytype_xwalk[[id_col, body_col, "msrp_usd"]].copy()
-    bodytypes["vehicleTypeId"] = bodytypes[id_col].apply(_vehicle_type_id_from_fastsim_token)
+    bodytypes = fastsim_bodytype_xwalk[["fastsim_id", body_col, "msrp_usd"]].copy()
+    bodytypes["vehicleTypeId"] = bodytypes["fastsim_id"].apply(_vehicle_type_id_from_fastsim_token)
     bodytypes["bodytype"] = bodytypes[body_col].astype(str)
     bodytypes["msrp_usd"] = pd.to_numeric(bodytypes["msrp_usd"], errors="coerce")
     bodytypes = bodytypes[["vehicleTypeId", "bodytype", "msrp_usd"]].drop_duplicates()
@@ -827,6 +825,12 @@ def _build_vehicle_types_from_fastsim_folder(
     fastsim_data_folder: str,
     atlas_year: Any,
 ) -> pd.DataFrame:
+    def _fuel_relative_path(file_name: Any) -> str:
+        value = str(file_name or "").strip()
+        if not value:
+            return ""
+        return value if value.startswith("fuel/") else f"fuel/{value}"
+
     folder = Path(resolve_workflow_path(fastsim_data_folder))
     files = sorted(
         path for path in folder.rglob("*")
@@ -853,14 +857,19 @@ def _build_vehicle_types_from_fastsim_folder(
             secondary_fuel = charge_sustaining.iloc[0]["fuel"] if not charge_sustaining.empty else ""
             template = _select_template_row(vehicle_types, primary_fuel, secondary_fuel)
             template["primaryFuelType"] = primary_fuel
-            template["primaryVehicleEnergyFile"] = charge_depleting.iloc[0]["file_name"]
+            template["primaryVehicleEnergyFile"] = _fuel_relative_path(charge_depleting.iloc[0]["file_name"])
             template["secondaryFuelType"] = secondary_fuel
-            template["secondaryVehicleEnergyFile"] = charge_sustaining.iloc[0]["file_name"] if not charge_sustaining.empty else ""
+            template["secondaryVehicleEnergyFile"] = (
+                _fuel_relative_path(charge_sustaining.iloc[0]["file_name"])
+                if not charge_sustaining.empty else ""
+            )
         else:
             primary_fuel = plain.iloc[0]["fuel"] if not plain.empty else charge_sustaining.iloc[0]["fuel"]
             template = _select_template_row(vehicle_types, primary_fuel, "")
             template["primaryFuelType"] = primary_fuel
-            template["primaryVehicleEnergyFile"] = plain.iloc[0]["file_name"] if not plain.empty else charge_sustaining.iloc[0]["file_name"]
+            template["primaryVehicleEnergyFile"] = _fuel_relative_path(
+                plain.iloc[0]["file_name"] if not plain.empty else charge_sustaining.iloc[0]["file_name"]
+            )
             template["secondaryFuelType"] = ""
             template["secondaryVehicleEnergyFile"] = ""
 
@@ -877,12 +886,12 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
     rng = np.random.default_rng(int(config["seed"]))
     _remove_stale_step1_output_files(config["output"])
 
-    passenger_fastsim = config["fastsim"]["passenger"]
+    fastsim_config = config["fastsim"]
     mapping_config = config["mapping"]
 
     print("=== Step 1.1: build vehicle types for atlas.year from FASTSim passenger inputs ===")
     vehicle_types = _read_csv(
-        passenger_fastsim["vehicle_types_file"],
+        fastsim_config["passenger_vehicle_types_file"],
         columns=[
             "vehicleTypeId",
             "curbWeightInKg",
@@ -917,10 +926,10 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
         prepared_vehicle_types["modelyear"] = encoded_years
         prepared_vehicle_types = prepared_vehicle_types[prepared_vehicle_types["modelyear"].le(atlas_year)].copy()
     else:
-        fastsim_data_folder = passenger_fastsim.get("fastsim_data_folder")
+        fastsim_data_folder = fastsim_config.get("ldv_fastsim_data_folder")
         if fastsim_data_folder in (None, ""):
             raise ValueError(
-                "fastsim.passenger.fastsim_data_folder is required when fastsim.passenger.vehicle_types_file does not contain model years at or below atlas.year"
+                "fastsim.ldv_fastsim_data_folder is required when fastsim.passenger_vehicle_types_file does not contain model years at or below atlas.year"
             )
         prepared_vehicle_types = _build_vehicle_types_from_fastsim_folder(
             vehicle_types,
@@ -929,7 +938,7 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
         )
         prepared_vehicle_types["modelyear"] = _extract_model_year_from_vehicle_type_id(prepared_vehicle_types["vehicleTypeId"])
 
-    fastsim_bodytype_xwalk = _read_csv(mapping_config["fastsim_bodytype_xwalk_file"])
+    fastsim_bodytype_xwalk = _read_csv(mapping_config["fastsim_atlas_bodytype_xwalk_file"])
     vehicle_type_mapping = _build_fastsim_vehicle_type_mapping(
         prepared_vehicle_types,
         fastsim_bodytype_xwalk,
@@ -1011,9 +1020,8 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
         frism_tours,
     )
     print("=== Step 1.5: filter freight vehicle types to the freight population and calculate probabilities ===")
-    freight_fastsim = config["fastsim"]["freight"]
     freight_vehicle_types = _read_csv(
-        freight_fastsim["vehicle_types_file"],
+        fastsim_config["freight_vehicle_types_file"],
     )
     freight_vehicle_type_population = _round_fleet_share(freight_vehicle_type_population)
     built_freight_vehicle_types = _build_freight_vehicle_types_from_population(

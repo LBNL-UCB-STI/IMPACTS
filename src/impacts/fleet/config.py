@@ -122,8 +122,59 @@ def _normalize_configured_path(
     return str(resolved)
 
 
+def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str | None:
+    resolved = _normalize_configured_path(
+        path_like,
+        path_label=path_label,
+        expect_directory=False,
+        must_exist=True,
+    )
+    if resolved is None:
+        return None
+    model_spec_path = Path(resolved)
+    model_spec = _load_model_spec(str(model_spec_path))
+    model_section = model_spec.get("model")
+    if not isinstance(model_section, dict):
+        raise ValueError(
+            f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
+            "It must contain a top-level 'model' mapping."
+        )
+    evidence = model_section.get("evidence")
+    if not isinstance(evidence, dict):
+        raise ValueError(
+            f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
+            "It must contain model.evidence."
+        )
+    naics_evidence = evidence.get("naics_sector")
+    if not isinstance(naics_evidence, list) or not naics_evidence:
+        raise ValueError(
+            f"Configured fleet path '{path_label}' has no evidence.naics_sector entries in {model_spec_path}. "
+            "It should contain the NAICS-sector-to-vehicle-category evidence mappings."
+        )
+    port_evidence = evidence.get("port_location")
+    if not isinstance(port_evidence, list) or not port_evidence:
+        raise ValueError(
+            f"Configured fleet path '{path_label}' has no evidence.port_location entries in {model_spec_path}. "
+            "It should contain the zone-to-vehicle-category evidence mappings for port assignments."
+        )
+    return str(model_spec_path)
+
+
+def _load_model_spec(model_spec_path: str) -> dict:
+    spec_path = Path(model_spec_path)
+    with spec_path.open() as f:
+        return yaml.safe_load(f) or {}
+
+
 def _ingest_configured_sources(config: dict) -> dict:
     config = deepcopy(config)
+    flat_model_file = config.get("vehicle_type_assignment_model_settings")
+    if flat_model_file not in (None, ""):
+        vta = config.get("vehicle_type_assignment", {})
+        if not isinstance(vta, dict):
+            vta = {}
+        vta["model_file"] = flat_model_file
+        config["vehicle_type_assignment"] = vta
     config["output"] = _normalize_configured_path(
         config.get("output"),
         path_label="output",
@@ -147,18 +198,6 @@ def _ingest_configured_sources(config: dict) -> dict:
             mapping.get("emfac_beam_fuel_alternatives_map"),
             path_label="mapping.emfac_beam_fuel_alternatives_map",
         )
-        mapping["naics_emfac_sector_map"] = _normalize_configured_path(
-            mapping.get("naics_emfac_sector_map"),
-            path_label="mapping.naics_emfac_sector_map",
-        )
-        mapping["naics_emfac_priority_map"] = _normalize_configured_path(
-            mapping.get("naics_emfac_priority_map"),
-            path_label="mapping.naics_emfac_priority_map",
-        )
-        mapping["payloadtype_emfac_map"] = _normalize_configured_path(
-            mapping.get("payloadtype_emfac_map"),
-            path_label="mapping.payloadtype_emfac_map",
-        )
         mapping["beam_freight_class_alternatives_map"] = _normalize_configured_path(
             mapping.get("beam_freight_class_alternatives_map"),
             path_label="mapping.beam_freight_class_alternatives_map",
@@ -167,13 +206,25 @@ def _ingest_configured_sources(config: dict) -> dict:
             mapping.get("beam_passenger_bodytype_alternatives_map"),
             path_label="mapping.beam_passenger_bodytype_alternatives_map",
         )
-        mapping["fastsim_bodytype_xwalk_file"] = _normalize_configured_path(
-            mapping.get("fastsim_bodytype_xwalk_file"),
-            path_label="mapping.fastsim_bodytype_xwalk_file",
+        mapping["fastsim_atlas_bodytype_xwalk_file"] = _normalize_configured_path(
+            mapping.get("fastsim_atlas_bodytype_xwalk_file"),
+            path_label="mapping.fastsim_atlas_bodytype_xwalk_file",
         )
         mapping["fastsim_atlas_fuel_mapping_file"] = _normalize_configured_path(
             mapping.get("fastsim_atlas_fuel_mapping_file"),
             path_label="mapping.fastsim_atlas_fuel_mapping_file",
+        )
+        mapping["frism_atlas_map"] = _normalize_configured_path(
+            mapping.get("frism_atlas_map"),
+            path_label="mapping.frism_atlas_map",
+        )
+        mapping["fastsim_frism_bodytype_xwalk_file"] = _normalize_configured_path(
+            mapping.get("fastsim_frism_bodytype_xwalk_file"),
+            path_label="mapping.fastsim_frism_bodytype_xwalk_file",
+        )
+        mapping["fastsim_frism_fuel_mapping_file"] = _normalize_configured_path(
+            mapping.get("fastsim_frism_fuel_mapping_file"),
+            path_label="mapping.fastsim_frism_fuel_mapping_file",
         )
         config["mapping"] = mapping
     emfac = config.get("emfac", {})
@@ -199,33 +250,84 @@ def _ingest_configured_sources(config: dict) -> dict:
         config["frism"] = frism
     fastsim = config.get("fastsim", {})
     if isinstance(fastsim, dict):
-        passenger = fastsim.get("passenger", {})
-        if isinstance(passenger, dict):
-            passenger["vehicle_types_file"] = _normalize_configured_path(
-                passenger.get("vehicle_types_file"),
-                path_label="fastsim.passenger.vehicle_types_file",
-            )
-            passenger["fastsim_data_folder"] = _normalize_configured_path(
-                passenger.get("fastsim_data_folder"),
-                path_label="fastsim.passenger.fastsim_data_folder",
-                expect_directory=True,
-                must_exist=False,
-            )
-            fastsim["passenger"] = passenger
-        freight = fastsim.get("freight", {})
-        if isinstance(freight, dict):
-            freight["vehicle_types_file"] = _normalize_configured_path(
-                freight.get("vehicle_types_file"),
-                path_label="fastsim.freight.vehicle_types_file",
-            )
-            freight["fastsim_data_folder"] = _normalize_configured_path(
-                freight.get("fastsim_data_folder"),
-                path_label="fastsim.freight.fastsim_data_folder",
-                expect_directory=True,
-                must_exist=False,
-            )
-            fastsim["freight"] = freight
+        fastsim["passenger_vehicle_types_file"] = _normalize_configured_path(
+            fastsim.get("passenger_vehicle_types_file"),
+            path_label="fastsim.passenger_vehicle_types_file",
+        )
+        fastsim["freight_vehicle_types_file"] = _normalize_configured_path(
+            fastsim.get("freight_vehicle_types_file"),
+            path_label="fastsim.freight_vehicle_types_file",
+        )
+        fastsim["ldv_fastsim_data_folder"] = _normalize_configured_path(
+            fastsim.get("ldv_fastsim_data_folder"),
+            path_label="fastsim.ldv_fastsim_data_folder",
+            expect_directory=True,
+            must_exist=False,
+        )
+        fastsim["mhdv_fastsim_data_folder"] = _normalize_configured_path(
+            fastsim.get("mhdv_fastsim_data_folder"),
+            path_label="fastsim.mhdv_fastsim_data_folder",
+            expect_directory=True,
+            must_exist=False,
+        )
         config["fastsim"] = fastsim
+    vta = config.get("vehicle_type_assignment", {})
+    if isinstance(vta, dict):
+        raw_model = vta.get("model")
+        if raw_model is not None:
+            model = str(raw_model).strip().lower()
+            if model != "dag":
+                raise ValueError(
+                    f"vehicle_type_assignment.model must be 'dag', got {raw_model}"
+                )
+            vta["model"] = model
+        model_file = _normalize_model_spec_path(vta.get("model_file"), path_label="vehicle_type_assignment.model_file")
+        if model_file is not None:
+            vta["model_file"] = model_file
+            model_spec = _load_model_spec(model_file)
+            scoring = model_spec.get("model", {}).get("scoring", {})
+            raw_floor = scoring.get("likelihood_floor", vta.get("likelihood_floor"))
+            if raw_floor is not None:
+                floor_value = float(raw_floor)
+                if not (0.0 < floor_value < 1.0):
+                    raise ValueError(
+                        f"vehicle_type_assignment likelihood_floor must be between 0 and 1 exclusive, got {floor_value}"
+                    )
+                vta["likelihood_floor"] = floor_value
+
+            weights = scoring.get("weights", {})
+            raw_prior_vmt_share = weights.get("prior_vmt_share")
+            if raw_prior_vmt_share is not None:
+                prior_vmt_share = float(raw_prior_vmt_share)
+                if prior_vmt_share < 0.0:
+                    raise ValueError(
+                        "vehicle_type_assignment prior_vmt_share weight must be non-negative, "
+                        f"got {prior_vmt_share}"
+                    )
+                vta["prior_vmt_share"] = prior_vmt_share
+
+            raw_naics_sector = weights.get("naics_sector")
+            if raw_naics_sector is not None:
+                naics_sector = float(raw_naics_sector)
+                if naics_sector < 0.0:
+                    raise ValueError(
+                        "vehicle_type_assignment naics_sector weight must be non-negative, "
+                        f"got {naics_sector}"
+                    )
+                vta["naics_sector"] = naics_sector
+
+            raw_port_location = weights.get("port_location")
+            if raw_port_location is not None:
+                port_location = float(raw_port_location)
+                if port_location < 0.0:
+                    raise ValueError(
+                        "vehicle_type_assignment port_location weight must be non-negative, "
+                        f"got {port_location}"
+                    )
+                vta["port_location"] = port_location
+
+        config["vehicle_type_assignment"] = vta
+
     atlas = config.get("atlas", {})
     if isinstance(atlas, dict):
         atlas["vehicles_file"] = _normalize_configured_path(
@@ -266,13 +368,14 @@ def _validate_workflow_settings(raw: dict, source_path: Path) -> None:
         ("mapping", "emfac_beam_class_map"),
         ("mapping", "emfac_beam_fuel_map"),
         ("mapping", "emfac_beam_fuel_alternatives_map"),
-        ("mapping", "naics_emfac_sector_map"),
-        ("mapping", "naics_emfac_priority_map"),
-        ("mapping", "payloadtype_emfac_map"),
         ("mapping", "beam_freight_class_alternatives_map"),
+        ("vehicle_type_assignment_model_settings",),
         ("mapping", "beam_passenger_bodytype_alternatives_map"),
-        ("mapping", "fastsim_bodytype_xwalk_file"),
+        ("mapping", "fastsim_atlas_bodytype_xwalk_file"),
         ("mapping", "fastsim_atlas_fuel_mapping_file"),
+        ("mapping", "frism_atlas_map"),
+        ("mapping", "fastsim_frism_bodytype_xwalk_file"),
+        ("mapping", "fastsim_frism_fuel_mapping_file"),
         ("emfac",),
         ("emfac", "rates_file"),
         ("emfac", "activity_file"),
@@ -316,6 +419,7 @@ def load_workflow(config_path: str | Path | None = None) -> dict:
         "atlas": raw["atlas"],
         "frism": raw["frism"],
         "fastsim": raw["fastsim"],
+        "vehicle_type_assignment": raw.get("vehicle_type_assignment", {}),
     }
     return {
         "area": raw["region"],

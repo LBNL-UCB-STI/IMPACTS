@@ -50,6 +50,24 @@ def _sanitize_emfac_component(value: object) -> str:
     return token.replace("_", "")
 
 
+def _sanitize_output_component(value: object) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", str("" if pd.isna(value) else value).strip()).strip("-")
+
+
+def _build_year_scenario_token(*, year: object, scenario: object) -> str:
+    year_token = _sanitize_output_component(year)
+    scenario_token = _sanitize_output_component(scenario)
+    if year_token and scenario_token:
+        return f"{year_token}-{scenario_token}"
+    return year_token or scenario_token
+
+
+def _build_vehicle_types_output_filename(*, source_name: str, year: object, scenario: object) -> str:
+    scenario_token = _build_year_scenario_token(year=year, scenario=scenario)
+    source_token = _sanitize_output_component(source_name)
+    return f"vehicleTypes--{source_token}--{scenario_token}--EM.csv"
+
+
 def _build_emfac_id(*, vehicle_category: object, fuel: object, model_year: object) -> str:
     return (
         f"{_sanitize_emfac_component(model_year)}"
@@ -99,11 +117,21 @@ def _write_rates_store(
     emissions_rates: pd.DataFrame,
     emfac_ids: list[str],
     output_root: Path,
+    scenario_token: str,
 ) -> dict[str, str]:
-    store_root = output_root / "emissions"
-    for stale_dir in [store_root / "passenger", store_root / "freight"]:
+    store_root = output_root / "emissions" / scenario_token
+    legacy_roots = [
+        output_root / "emissions" / "passenger",
+        output_root / "emissions" / "freight",
+        output_root / "emissions" / "dataset",
+        output_root / "emissions" / "dataset.duckdb",
+    ]
+    for stale_dir in [store_root / "passenger", store_root / "freight", *legacy_roots]:
         if stale_dir.exists():
-            shutil.rmtree(stale_dir)
+            if stale_dir.is_dir():
+                shutil.rmtree(stale_dir)
+            else:
+                stale_dir.unlink()
     parquet_root = store_root / "dataset"
     duckdb_path = store_root / "dataset.duckdb"
     parquet_root.mkdir(parents=True, exist_ok=True)
@@ -200,10 +228,14 @@ def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
         [emfac_id for emfac_id in freight_vehicle_types.get("emfacId", pd.Series(dtype="string")).fillna("").astype(str).unique().tolist() if emfac_id]
     )
     shared_emfac_ids = sorted(set(passenger_emfac_ids) | set(freight_emfac_ids))
+    frism_year = workflow["config"]["frism"]["year"]
+    atlas_year = workflow["config"]["atlas"]["year"]
+    scenario_name = str(workflow["scenario"])
     shared_rates_store = _write_rates_store(
         emissions_rates=emissions_rates,
         emfac_ids=shared_emfac_ids,
         output_root=output_root,
+        scenario_token=_build_year_scenario_token(year=frism_year, scenario=scenario_name),
     )
 
     print("=== Step 5.1: attach emfac rates to passenger vehicle types ===")
@@ -213,7 +245,14 @@ def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
     )
     passenger_output_file = _write_vehicle_types(
         passenger_vehicle_types_with_rates,
-        str(output_root / "vehicleTypes--passenger.csv"),
+        str(
+            output_root
+            / _build_vehicle_types_output_filename(
+                source_name="atlas",
+                year=atlas_year,
+                scenario=scenario_name,
+            )
+        ),
     )
 
     print("=== Step 5.2: attach emfac rates to freight vehicle types ===")
@@ -223,7 +262,14 @@ def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
     )
     freight_output_file = _write_vehicle_types(
         freight_vehicle_types_with_rates,
-        str(output_root / "vehicleTypes--freight.csv"),
+        str(
+            output_root
+            / _build_vehicle_types_output_filename(
+                source_name="frism",
+                year=frism_year,
+                scenario=scenario_name,
+            )
+        ),
     )
 
     workflow["passenger_vehicle_types_with_rates"] = passenger_vehicle_types_with_rates

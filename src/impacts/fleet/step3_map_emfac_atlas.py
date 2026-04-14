@@ -36,6 +36,18 @@ def _sanitize_emfac_component(value: object) -> str:
     return token.replace("_", "")
 
 
+def _sanitize_output_component(value: object) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", _normalize_text(value)).strip("-")
+
+
+def _build_year_scenario_token(*, year: object, scenario: object) -> str:
+    year_token = _sanitize_output_component(year)
+    scenario_token = _sanitize_output_component(scenario)
+    if year_token and scenario_token:
+        return f"{year_token}-{scenario_token}"
+    return year_token or scenario_token
+
+
 def _build_emfac_id(*, vehicle_category: object, fuel: object, model_year: object) -> str:
     return (
         f"{_sanitize_emfac_component(model_year)}"
@@ -736,9 +748,10 @@ def run_step3(workflow: dict[str, Any]) -> dict[str, Any]:
         income_bins=atlas_config.get("income_bins"),
         seed=int(config["seed"]),
     )
+    vehicles_output_name = f"vehicles--{_build_year_scenario_token(year=atlas_config['year'], scenario=workflow['scenario'])}--EM.parquet"
     vehicles_output_file = _write_parquet(
         vehicles_with_em,
-        str(Path(config["output"]) / "vehicle_2019_em.parquet"),
+        str(Path(config["output"]) / vehicles_output_name),
     )
     workflow["mapped_passenger_vehicles"] = vehicles_with_em
     workflow["mapped_passenger_vehicles_file"] = vehicles_output_file
