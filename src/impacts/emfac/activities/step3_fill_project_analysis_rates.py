@@ -138,7 +138,7 @@ def _replace_all_zero_pollutant_rows_with_missing(
     return result, summary
 
 
-def _assert_no_all_zero_pollutant_rows(frame: pd.DataFrame, *, label: str) -> None:
+def _assert_no_missing_rate_groups(frame: pd.DataFrame, *, label: str) -> None:
     missing_groups = _missing_rate_groups(frame)
     if missing_groups.empty:
         return
@@ -858,7 +858,7 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
         filled,
         project_analysis_source=project_analysis_source,
     )
-    _assert_no_all_zero_pollutant_rows(filled, label="Filled project-analysis rates")
+    _assert_no_missing_rate_groups(filled, label="Filled project-analysis rates")
     _write_parquet(filled, workflow["paths"]["project_analysis"])
     write_trace(
         workflow,

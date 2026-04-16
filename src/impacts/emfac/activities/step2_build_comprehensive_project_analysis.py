@@ -46,7 +46,7 @@ def _filter_to_supported_process_groups(
     *,
     project_analysis: pd.DataFrame,
     project_analysis_prdust: pd.DataFrame,
-) -> tuple[pd.DataFrame, dict[str, object]]:
+) -> pd.DataFrame:
     project_analysis_groups = project_analysis[GROUP_KEYS].drop_duplicates().assign(_supported=True)
     prdust_groups = project_analysis_prdust[GROUP_KEYS].drop_duplicates().assign(_supported=True)
     supported_groups = pd.concat([project_analysis_groups, prdust_groups], ignore_index=True).drop_duplicates()
@@ -54,22 +54,13 @@ def _filter_to_supported_process_groups(
     filtered = rates.merge(supported_groups, on=GROUP_KEYS, how="left")
     dropped = filtered.loc[filtered["_supported"].isna(), GROUP_KEYS].drop_duplicates().reset_index(drop=True)
     kept = filtered.loc[filtered["_supported"].notna()].drop(columns="_supported").reset_index(drop=True)
-    summary = {
-        "dropped_group_count": int(len(dropped)),
-        "dropped_by_process": {
-            str(process): int(count)
-            for process, count in dropped["process"].value_counts(dropna=False).items()
-        }
-        if not dropped.empty
-        else {},
-        "examples": dropped.head(10).to_dict(orient="records"),
-    }
-    if summary["dropped_group_count"] > 0:
+    dropped_group_count = int(len(dropped))
+    if dropped_group_count > 0:
         print(
             f"    2.2 Drop unsupported county/vehicle/fuel/modelYear/process combinations not present in EMFAC source: "
-            f"{summary['dropped_group_count']:,} group(s)"
+            f"{dropped_group_count:,} group(s)"
         )
-    return kept, summary
+    return kept
 
 
 def build_comprehensive_project_analysis(
@@ -168,7 +159,7 @@ def build_comprehensive_project_analysis(
     if prdust_mask.any():
         values.loc[prdust_mask] = pd.NA
     rates[ACTIVITY_COLUMN] = values
-    rates, _ = _filter_to_supported_process_groups(
+    rates = _filter_to_supported_process_groups(
         rates,
         project_analysis=project_analysis,
         project_analysis_prdust=project_analysis_prdust,
