@@ -1,0 +1,9 @@
+group,source,target,priority
+passenger,suv,car,1
+passenger,suv,truck,2
+passenger,truck,suv,1
+passenger,truck,minvan,2
+passenger,van,minvan,1
+passenger,van,truck,2
+passenger,minvan,van,1
+passenger,minvan,truck,2

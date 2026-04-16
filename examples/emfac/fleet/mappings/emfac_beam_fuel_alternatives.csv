@@ -1,0 +1,7 @@
+group,source,target,priority
+any,Elec,Phe,1
+any,Phe,Elec,1
+any,Gas,Dsl,1
+any,Dsl,Gas,1
+any,NG,Gas,1
+any,NG,Dsl,2
