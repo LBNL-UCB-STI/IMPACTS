@@ -3,21 +3,21 @@
 from pathlib import Path
 import sys
 
-from impacts.emfac.activities.config import load_default_workflow
-from impacts.emfac.activities.config import load_workflow
+from impacts.emfac.config import load_activities_workflow
+from impacts.emfac.config import load_default_activities_workflow
 from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import run_step1
 from impacts.emfac.activities.step2_build_comprehensive_project_analysis import run_step2
 from impacts.emfac.activities.step3_fill_project_analysis_rates import run_step3
 from impacts.emfac.activities.step4_finalize_output import run_step4
-from impacts.emfac.activities.common import raise_runtime_error
-from impacts.emfac.activities.common import write_failure_trace
-from impacts.emfac.activities.common import write_trace
+from impacts.emfac.common import raise_runtime_error
+from impacts.emfac.common import write_failure_trace
+from impacts.emfac.common import write_trace
 
 
 def _configure_run(config_path: str | Path | None = None) -> dict[str, object]:
     if config_path is None:
-        return load_default_workflow()
-    return load_workflow(config_path)
+        return load_default_activities_workflow()
+    return load_activities_workflow(config_path)
 
 
 def _print_run_banner(workflow: dict[str, object]) -> None:

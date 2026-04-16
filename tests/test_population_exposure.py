@@ -4,9 +4,9 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Polygon
 
-from impacts.workflow.step4_prepare_exposure import _aggregate_population_by_aermod_cell
-from impacts.workflow.step4_prepare_exposure import _build_population_exposure_distribution
-from impacts.workflow.step4_prepare_exposure import _prepare_population_table
+from impacts.pipeline.workflow.step4_prepare_exposure import _aggregate_population_by_aermod_cell
+from impacts.pipeline.workflow.step4_prepare_exposure import _build_population_exposure_distribution
+from impacts.pipeline.workflow.step4_prepare_exposure import _prepare_population_table
 
 
 def test_aggregate_population_by_aermod_cell_counts_people() -> None:

@@ -7,8 +7,8 @@ import pandas as pd
 from shapely.geometry import Polygon
 
 from impacts.manifest.schema import PipelineConfig
-from impacts.workflow.step4_prepare_exposure import _prepare_aermod_exposure_inputs
-from impacts.workflow.step4_prepare_exposure import _build_full_exposure_grid
+from impacts.pipeline.workflow.step4_prepare_exposure import _prepare_aermod_exposure_inputs
+from impacts.pipeline.workflow.step4_prepare_exposure import _build_full_exposure_grid
 
 
 def _pipeline(tmp_path: Path, grid_path: Path) -> PipelineConfig:

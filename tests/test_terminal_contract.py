@@ -60,10 +60,10 @@ def _inputs_manifest_payload(tmp_path: Path) -> dict:
         "input_dir": str(tmp_path / "workspace" / "staged"),
         "inputs_manifest_path": str(tmp_path / "workspace" / "inputs_manifest.yaml"),
         "maintained_execution_path": [
-            "impacts.preprocessing.step3_integrate_grids",
-            "impacts.workflow.step1_process_emissions",
-            "impacts.workflow.step2_compute_inmap_concentrations",
-            "impacts.workflow.step3_compute_aermod_concentrations",
+            "impacts.pipeline.preprocessing.step3_integrate_grids",
+            "impacts.pipeline.workflow.step1_process_emissions",
+            "impacts.pipeline.workflow.step2_compute_inmap_concentrations",
+            "impacts.pipeline.workflow.step3_compute_aermod_concentrations",
         ],
         "inputs": {"settings": {"path": str(tmp_path / "settings.yaml")}},
         "pipeline": _pipeline_payload(tmp_path),
@@ -74,7 +74,7 @@ def _inputs_manifest_payload(tmp_path: Path) -> dict:
 
 
 def test_example_settings_yaml_is_current_settings_file():
-    settings_yaml = Path(__file__).resolve().parents[1] / "examples" / "pilates" / "settings.yaml"
+    settings_yaml = Path(__file__).resolve().parents[1] / "examples" / "pipeline" / "pilates" / "settings.yaml"
 
     config = load_settings_from_yaml(settings_yaml)
 
@@ -82,7 +82,7 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.run.scenario == "base"
     assert config.shared.geography.fips.state == "06"
     assert config.shared.geography.fips.counties[0] == "001"
-    assert config.beam.local_input_folder == "pilates/beam/production/"
+    assert config.beam.local_input_folder == "beam/production/"
     assert config.beam.local_output_folder == "beam/beam_output/"
     assert config.impacts.local_input_folder == "impacts/input/"
     assert config.impacts.dispersions.inmap.enabled is True
@@ -258,9 +258,9 @@ def test_pipeline_manifest_allows_disabled_aermod_without_aermod_inputs(tmp_path
 
 
 def test_run_from_input_manifest_uses_current_step_name(monkeypatch, tmp_path: Path):
-    import impacts.preprocessing.step3_integrate_grids as step3_integrate_grids
-    import impacts.workflow.prepare_emissions_from_skims as prepare_emissions_from_skims
-    import impacts.workflow.step1_process_emissions as step1_process_emissions
+    import impacts.pipeline.preprocessing.step3_integrate_grids as step3_integrate_grids
+    import impacts.pipeline.workflow.prepare_emissions_from_skims as prepare_emissions_from_skims
+    import impacts.pipeline.workflow.step1_process_emissions as step1_process_emissions
     import impacts.runner as runner_module
 
     monkeypatch.setattr(runner_module, "load_structured_file", lambda _: _inputs_manifest_payload(tmp_path))

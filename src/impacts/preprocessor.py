@@ -107,13 +107,13 @@ def build_inputs_manifest(
         )
 
     maintained_execution_path = [
-        "impacts.preprocessing.step3_integrate_grids",
-        "impacts.workflow.step1_process_emissions",
+        "impacts.pipeline.preprocessing.step3_integrate_grids",
+        "impacts.pipeline.workflow.step1_process_emissions",
     ]
     if inmap.enabled:
-        maintained_execution_path.append("impacts.workflow.step2_compute_inmap_concentrations")
+        maintained_execution_path.append("impacts.pipeline.workflow.step2_compute_inmap_concentrations")
     if aermod.enabled:
-        maintained_execution_path.append("impacts.workflow.step3_compute_aermod_concentrations")
+        maintained_execution_path.append("impacts.pipeline.workflow.step3_compute_aermod_concentrations")
 
     manifest: Dict[str, Any] = {
         "contract_version": CONTRACT_VERSION,

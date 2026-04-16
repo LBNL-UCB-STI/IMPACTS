@@ -4,7 +4,7 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Polygon
 
-from impacts.workflow.step3_compute_aermod_concentrations import _attach_concentrations
+from impacts.pipeline.workflow.step3_compute_aermod_concentrations import _attach_concentrations
 
 
 def test_attach_concentrations_preserves_numeric_pollutants_and_boolean_support_masks() -> None:

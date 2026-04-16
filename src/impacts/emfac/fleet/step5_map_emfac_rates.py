@@ -13,8 +13,8 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from impacts.emfac.fleet.config import read_table
-from impacts.emfac.fleet.config import resolve_workflow_path
+from impacts.emfac.config import read_table
+from impacts.emfac.config import resolve_workflow_path
 
 
 _RATES_STRING_COLUMNS = {

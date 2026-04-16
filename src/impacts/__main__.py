@@ -249,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "rdata_to_parquet":
-        from impacts.tools.inmap.rdata_conversion import rdata_to_parquet
+        from impacts.inmap.rdata_conversion import rdata_to_parquet
 
         written = rdata_to_parquet(
             input_path=args.input,
@@ -261,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "build_nox_to_no2":
-        from impacts.tools.inmap.build_complete_nox_to_no2_matrix import main as build_nox_to_no2_main
+        from impacts.inmap.build_complete_nox_to_no2_matrix import main as build_nox_to_no2_main
 
         build_nox_to_no2_main(
             [

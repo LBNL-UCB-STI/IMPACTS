@@ -6,7 +6,7 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Polygon
 
-from impacts.workflow.step2_compute_inmap_concentrations import _build_beam_inmap_concentrations_gdf
+from impacts.pipeline.workflow.step2_compute_inmap_concentrations import _build_beam_inmap_concentrations_gdf
 
 
 def test_build_beam_inmap_concentrations_gdf_preserves_inmap_cell_id(tmp_path: Path) -> None:

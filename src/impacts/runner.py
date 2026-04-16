@@ -72,8 +72,8 @@ def run_from_input_manifest(
     logger.info("Loaded input manifest: %s", Path(input_manifest_path).resolve())
     logger.info("Output directory: %s", output_root)
 
-    from .preprocessing.step3_integrate_grids import run as run_grid_intersection
-    from .workflow.step1_process_emissions import run as run_emissions_processing
+    from .pipeline.preprocessing.step3_integrate_grids import run as run_grid_intersection
+    from .pipeline.workflow.step1_process_emissions import run as run_emissions_processing
     from .common import prepared_table_target
 
     _log_step_banner("PREPROCESS STEP 3", "network mapping and grid intersection")

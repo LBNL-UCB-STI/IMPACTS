@@ -10,8 +10,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from impacts.emfac.fleet.config import read_table
-from impacts.emfac.fleet.config import resolve_workflow_path
+from impacts.emfac.config import read_table
+from impacts.emfac.config import resolve_workflow_path
 
 
 _EMFAC_KEY_COLUMNS = ["vehicleCategory", "fuel", "modelYear"]

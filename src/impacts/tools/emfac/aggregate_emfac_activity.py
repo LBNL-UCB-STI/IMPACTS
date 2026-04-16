@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from impacts.emfac.step1_prepare_emissions_and_activities_tables import _annualize_daily_values_by_vehicle_category
+from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import _annualize_daily_values_by_vehicle_category
 
 _CALIFORNIA_COUNTY_FIPS = {
     "alameda": "001",

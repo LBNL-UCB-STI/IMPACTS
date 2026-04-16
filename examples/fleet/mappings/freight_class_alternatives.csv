@@ -1,7 +1,0 @@
-group,source,target,priority
-freight,Class12aVocational,Class2b3Vocational,1
-freight,Class2b3Vocational,Class12aVocational,1
-freight,Class456Vocational,Class78Vocational,1
-freight,Class78Vocational,Class78Tractor,1
-freight,Class78Vocational,Class456Vocational,2
-freight,Class78Tractor,Class78Vocational,1
