@@ -46,6 +46,11 @@ _BEAM_RATES_COLUMNS = [
 ]
 
 
+def _require_column(frame: pd.DataFrame, column_name: str, frame_name: str) -> None:
+    if column_name not in frame.columns:
+        raise ValueError(f"{frame_name} is missing required column '{column_name}'")
+
+
 def _sanitize_emfac_component(value: object) -> str:
     token = re.sub(r"[^A-Za-z0-9]+", "_", str("" if pd.isna(value) else value).strip()).strip("_")
     return token.replace("_", "")
