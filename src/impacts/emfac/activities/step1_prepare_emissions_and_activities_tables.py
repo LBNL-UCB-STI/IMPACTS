@@ -644,7 +644,6 @@ def _select_output_columns(frame: pd.DataFrame, source_type: str) -> pd.DataFram
             "process",
             "pollutant",
             "emission",
-            "emission_annualized",
         ],
         "ghg-inventory": [
             "county",
@@ -655,7 +654,6 @@ def _select_output_columns(frame: pd.DataFrame, source_type: str) -> pd.DataFram
             "process",
             "pollutant",
             "emission",
-            "emission_annualized",
         ],
         "emissions-inventory": [
             "vehicleCategory",
@@ -852,9 +850,9 @@ def _pivot_emission_inventory(frame: pd.DataFrame) -> pd.DataFrame:
     if "emission" not in frame.columns:
         raise ValueError("Emission inventory must include emission.")
     working = frame.copy()
-    working["emission_short_tons_per_year"] = _annualize_daily_values_by_vehicle_category(
-        working,
-        source_column="emission",
+    working["emission_short_tons_per_year"] = pd.to_numeric(
+        working["emission"],
+        errors="coerce",
     )
     return _pivot_inventory_measurements(
         working,

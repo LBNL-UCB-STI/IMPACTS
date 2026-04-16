@@ -1,4 +1,4 @@
-bodytype,LDA,LDT1,LDT2,MDV,cec_equivalent
+body_type,LDA,LDT1,LDT2,MDV,cec_equivalent
 car,1,0,0,0,"Car-Subcompact, Car-Compact, Car-Midsize, Car-Large, Car-Sport"
 suv,0.25,0.25,0.25,0.25,"Cross/Ut-Small-Car, Cross/Ut-Small-Trk, Cross/Ut-Midsize, Sport/Ut-Compact, Sport/Ut-Midsize, Sport/Ut-Large"
 truck,0,0,0.5,0.5,"Pickup-Compact, Pickup-Std, Pickup-Heavy"
