@@ -1,0 +1,54 @@
+run:
+  region: sfbay
+  scenario: base
+  start_year: 2018
+
+shared:
+  geography:
+    FIPS:
+      state: "06"
+      counties:
+        - "001"
+        - "013"
+        - "041"
+        - "055"
+        - "075"
+        - "081"
+        - "085"
+        - "095"
+        - "097"
+    local_crs: EPSG:26910
+
+
+beam:
+  local_input_folder: beam/production/
+  local_output_folder: beam/beam_output/
+
+impacts:
+  local_input_folder: impacts/input/
+  local_output_folder: impacts/impacts_output/
+  emissions:
+    osm_network_folder: r5/sfbay-cbg5500-weakConn-network
+    emissions_rates_folder: vehicle-tech/emissions/2018-Baseline
+    activity_totals_file: vehicle-tech/emissions/SFBay_2018_Annual_activity_totals.parquet
+    inventory_file: beam/production/sfbay/vehicle-tech/emissions/sf-emfac-2018-emissions-inventory-with-activity.parquet
+    annualization_days_or_file: src/impacts/emfac/vehicle_operation_days_per_year.csv
+    population_sample: 0.08
+    pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
+  dispersions:
+    inmap:
+      enabled: true
+      isrm_zarr: ~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr
+      isrm_nox_to_no2_ratios_file: vehicle-tech/dispersions/inmap/nox_to_no2_full_isrm_matrix.npz
+      grid_path: vehicle-tech/dispersions/inmap/isrm_polygon_wgs84.gpkg
+      grid_id: isrm
+      grid_epsg: 4326
+    aermod:
+      enabled: true
+      grid_size_meters: 100.0
+      asrv_patterns_file: vehicle-tech/dispersions/aermod/aermod_patterns_wgs84.parquet
+      asrv_patterns_epsg: 4326
+      asrv_nox_to_no2_ratios_file:
+  exposure:
+    enabled: true
+    population_folder: urbansim/atlas-2019

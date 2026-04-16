@@ -1,0 +1,12 @@
+beam/**
+!beam/
+!beam/.gitkeep
+!beam/beam_output/
+!beam/beam_output/.gitkeep
+!beam/production/
+!beam/production/.gitkeep
+
+impacts/*
+!impacts/.gitkeep
+.DS_Store
+__pycache__/

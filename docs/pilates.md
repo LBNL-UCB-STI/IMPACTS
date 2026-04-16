@@ -1,40 +1,33 @@
 # PILATES Integration
 
-This document describes the `impacts` integration pattern for PILATES and the example scenario under `examples/pilates/`.
+This document describes the `impacts` integration pattern for PILATES and the example scenario under `examples/pipeline/pilates/`.
 
 ## Example layout
 
 ```text
-examples/pilates/
+examples/pipeline/pilates/
   beam/
     beam_output/
+    production/
   impacts/
-  pilates/
-    beam/
-      production/
-  workspace/
-    staged/
-    outputs/
 ```
 
 Meaning:
 
 - `beam/beam_output/`: BEAM run outputs consumed by `impacts`
-- `pilates/beam/production/`: staged production inputs referenced by the example settings
+- `beam/production/`: production inputs referenced by the example settings
 - `impacts/`: downstream-facing published artifacts
-- `workspace/staged/`: copied and derived execution inputs
-- `workspace/outputs/`: internal step outputs
 
 ## Settings model
 
 The example uses one user-managed settings file:
 
-- `examples/pilates/settings.yaml`
+- `examples/pipeline/pilates/settings.yaml`
 - `src/impacts/adapters/pilates_settings.yaml` is the maintained starting template for the impacts overlay inside PILATES settings.
 
-That file is a thin impacts overlay that lives directly under `impacts`.
+That file is a thin impacts overlay kept with the example tree.
 
-During preprocess, `impacts` registers the user-provided settings file in the inputs manifest and writes generated intermediates under the workspace.
+During preprocess, `impacts` registers the user-provided settings file in the inputs manifest and writes managed artifacts under the configured `impacts.local_input_folder` and `impacts.local_output_folder`.
 
 ## Example settings shape
 
@@ -61,7 +54,7 @@ shared:
     local_crs: EPSG:26910
 
 beam:
-  local_input_folder: pilates/beam/production/
+  local_input_folder: beam/production/
   local_output_folder: beam/beam_output/
 
 impacts:
@@ -71,15 +64,9 @@ impacts:
     osm_network_folder: r5/sfbay-cbg5500-weakConn-network
     emissions_rates_folder: vehicle-tech/emissions/2018-Baseline
     activity_totals_file: vehicle-tech/emissions/SFBay_2018_Annual_activity_totals.parquet
-    annualization_days: 330
+    annualization_days_or_file: src/impacts/emfac/vehicle_operation_days_per_year.csv
     population_sample: 0.1
-    pollutants_map:
-      NH3: NH3
-      NOx: NOx
-      PM2_5: PM2_5
-      SOx: SOx
-      ROG: ROG
-      BC: BCh
+    pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
   dispersions:
     inmap:
       enabled: true
@@ -103,24 +90,16 @@ impacts:
 From the repo root:
 
 ```bash
-python -m impacts pipeline --config examples/pilates/settings.yaml --workspace examples/pilates/workspace
-```
-
-Or with the helper script:
-
-```bash
-python examples/pilates/run_pilates_example.py
+python -m impacts pipeline --config examples/pipeline/pilates/settings.yaml
 ```
 
 The full pipeline command produces:
 
-- `examples/pilates/workspace/inputs_manifest.yaml`
-- `examples/pilates/workspace/run_manifest.yaml`
-- `examples/pilates/workspace/outputs/emissions_inmap_grid_allocated.parquet`
-- optionally `examples/pilates/workspace/outputs/emissions_aermod_grid_allocated.parquet`
-- `examples/pilates/impacts/impacts_output/impacts_exposure_table.parquet`
-
-The helper script currently stops after emissions allocation and does not publish the final exposure artifact.
+- `examples/pipeline/pilates/impacts/impacts_output/inputs_manifest.yaml`
+- `examples/pipeline/pilates/impacts/impacts_output/run_manifest.yaml`
+- `examples/pipeline/pilates/impacts/impacts_output/beam_emissions_for_inmap.parquet`
+- optionally `examples/pipeline/pilates/impacts/impacts_output/beam_emissions_for_aermod.parquet`
+- `examples/pipeline/pilates/impacts/impacts_output/beam_concentration_distribution.parquet`
 
 ## Preparing smaller sample inputs
 
@@ -129,18 +108,18 @@ If your BEAM artifacts are too large, create smaller samples first.
 Events are sampled by vehicle id, so each selected vehicle keeps its full trace. Skims are sampled by row fraction.
 
 ```bash
-python examples/pilates/prepare_sample_data.py events \
+python examples/pipeline/pilates/prepare_sample_data.py events \
   --input /path/to/0.events.parquet \
   --fraction 0.05
 ```
 
 ```bash
-python examples/pilates/prepare_sample_data.py skims \
+python examples/pipeline/pilates/prepare_sample_data.py skims \
   --input /path/to/0.skimsEmissions.parquet \
   --fraction 0.05
 ```
 
 Outputs land in:
 
-- `examples/pilates/beam/events_sample.parquet`
-- `examples/pilates/beam/skimsEmissions_sample.parquet`
+- `examples/pipeline/pilates/beam/events_sample.parquet`
+- `examples/pipeline/pilates/beam/skimsEmissions_sample.parquet`
