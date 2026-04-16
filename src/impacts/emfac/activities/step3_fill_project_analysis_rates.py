@@ -102,13 +102,6 @@ def _missing_rate_groups(frame: pd.DataFrame) -> pd.DataFrame:
     return summary.loc[~summary["has_real_rate"]].drop(columns="has_real_rate")
 
 
-def _missing_rate_group_examples(frame: pd.DataFrame, *, limit: int = 10) -> list[dict[str, object]]:
-    missing_groups = _missing_rate_groups(frame)
-    if missing_groups.empty:
-        return []
-    return missing_groups.head(limit).to_dict(orient="records")
-
-
 def _zero_row_examples(frame: pd.DataFrame, *, limit: int = 10) -> list[dict[str, object]]:
     mask = _all_zero_pollutant_row_mask(frame)
     if not mask.any():
@@ -133,31 +126,15 @@ def _replace_all_zero_pollutant_rows_with_missing(
 
     result = frame.copy()
     zero_mask = _all_zero_pollutant_row_mask(result)
-    missing_groups = _missing_rate_groups(result)
     if not zero_mask.any():
-        return result, {
-            "label": label,
-            "rows": 0,
-            "examples": [],
-            "missing_group_count": int(len(missing_groups)),
-            "missing_group_examples": _missing_rate_group_examples(result),
-        }
+        return result, {"label": label, "rows": 0, "examples": []}
 
     result.loc[zero_mask, pollutant_columns] = pd.NA
     summary = {
         "label": label,
         "rows": int(zero_mask.sum()),
         "examples": _zero_row_examples(frame),
-        "missing_group_count": int(len(missing_groups)),
-        "missing_group_examples": missing_groups.head(10).to_dict(orient="records"),
     }
-    if summary["missing_group_count"] > 0:
-        print(
-            f"      Error: found {summary['missing_group_count']:,} county/vehicle/fuel/modelYear/process group(s) "
-            f"with no real pollutant rates in {label}."
-        )
-        for example in summary["missing_group_examples"][:5]:
-            print(f"        Example group: {example}")
     return result, summary
 
 
@@ -173,6 +150,43 @@ def _assert_no_all_zero_pollutant_rows(frame: pd.DataFrame, *, label: str) -> No
         "pollutant coverage anywhere within those groups. Check the source project-analysis rates and "
         f"inventory rows for these keys. Example groups: {examples}"
     )
+
+
+def _summarize_missing_rate_groups(frame: pd.DataFrame) -> dict[str, object]:
+    missing_groups = _missing_rate_groups(frame)
+    return {
+        "group_count": int(len(missing_groups)),
+        "rows": int(missing_groups["rows"].sum()) if not missing_groups.empty else 0,
+        "by_process": {
+            str(process): int(count)
+            for process, count in missing_groups["process"].value_counts(dropna=False).items()
+        }
+        if "process" in missing_groups.columns
+        else {},
+        "examples": missing_groups.head(10).to_dict(orient="records"),
+    }
+
+
+def _print_missing_rate_group_summary(frame: pd.DataFrame, *, label: str) -> dict[str, object]:
+    summary = _summarize_missing_rate_groups(frame)
+    if summary["group_count"] <= 0:
+        return summary
+
+    print(
+        f"      Error: found {summary['group_count']:,} county/vehicle/fuel/modelYear/process group(s) "
+        f"with no real pollutant rates after {label}."
+    )
+    print(
+        "        Grouped across all speed bins and pollutant columns; these groups have no positive "
+        "pollutant values anywhere in the current filled surface."
+    )
+    if summary["by_process"]:
+        print("        Affected groups by process:")
+        for process, count in summary["by_process"].items():
+            print(f"          {process}: {count:,}")
+    for example in summary["examples"][:5]:
+        print(f"        Example group: {example}")
+    return summary
 
 
 def _normalize_activity_column(frame: pd.DataFrame, *, column: str = ACTIVITY_COLUMN) -> pd.DataFrame:
@@ -773,6 +787,10 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
         emissions_inventory=emissions_inventory,
         statewide_inventory=statewide_inventory,
     )
+    grouped_missing_summaries: list[dict[str, object]] = []
+    grouped_missing_summaries.append(
+        {"label": "initial fill", **_print_missing_rate_group_summary(filled, label="initial fill")}
+    )
     zero_row_cleanups: list[dict[str, object]] = []
     print("    3.2 Apply class-fuel donor mapping for unresolved rows and refill")
     filled = _fill_with_class_fuel_alternatives(
@@ -786,6 +804,9 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
     )
     filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label="class-fuel donor refill")
     zero_row_cleanups.append(zero_summary)
+    grouped_missing_summaries.append(
+        {"label": "class-fuel donor refill", **_print_missing_rate_group_summary(filled, label="class-fuel donor refill")}
+    )
     print("    3.3 Apply speed fallback for unresolved rows and refill")
     filled = _fill_with_speed_fallback(
         filled,
@@ -799,6 +820,9 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
     )
     filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label="speed fallback refill")
     zero_row_cleanups.append(zero_summary)
+    grouped_missing_summaries.append(
+        {"label": "speed fallback refill", **_print_missing_rate_group_summary(filled, label="speed fallback refill")}
+    )
     print("    3.4 Apply model-year donor fallback for unresolved rows and refill")
     filled = _fill_with_model_year_donors(
         filled,
@@ -811,6 +835,9 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
     )
     filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label="model-year donor refill")
     zero_row_cleanups.append(zero_summary)
+    grouped_missing_summaries.append(
+        {"label": "model-year donor refill", **_print_missing_rate_group_summary(filled, label="model-year donor refill")}
+    )
     print("    3.5 Apply final speed fallback for unresolved rows and refill")
     filled = _fill_with_speed_fallback(
         filled,
@@ -824,6 +851,9 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
     )
     filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label="final speed fallback refill")
     zero_row_cleanups.append(zero_summary)
+    grouped_missing_summaries.append(
+        {"label": "final speed fallback refill", **_print_missing_rate_group_summary(filled, label="final speed fallback refill")}
+    )
     filled, source_filter_summary = _filter_unresolved_rows_without_source_coverage(
         filled,
         project_analysis_source=project_analysis_source,
@@ -844,6 +874,7 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
             "filled_surface": frame_summary(filled, name="filled_project_analysis"),
             "filled_surface_missing_rates": _missing_rate_summary(filled),
             "zero_row_cleanups": zero_row_cleanups,
+            "grouped_missing_rate_summaries": grouped_missing_summaries,
             "source_coverage_filter": source_filter_summary,
         },
     )
