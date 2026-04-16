@@ -8,7 +8,7 @@ No other module should define defaults independently.
 # Emissions
 # ---------------------------------------------------------------------------
 
-annualization_days: float = 330.0
+representative_days_per_year: float = 330.0
 """Number of representative days per year used to convert per-day gram
 emissions to annual tons.  Matches the EMFAC/CARB modelling convention."""
 

@@ -1,0 +1,7 @@
+source,target,priority
+Elec,Phe,1
+Phe,Elec,1
+Gas,Dsl,1
+Dsl,Gas,1
+NG,Gas,1
+NG,Dsl,2

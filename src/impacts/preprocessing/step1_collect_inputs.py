@@ -12,6 +12,7 @@ from ..common import log_substep_banner
 from ..common import optional_local_path
 from ..common import required_local_path
 from ..common import resolve_beam_network_local_path
+from ..common import resolve_beam_vehicle_types_local_path
 from ..common import resolve_emissions_skims_local_path
 from ..common import resolve_latest_events_local_path
 from ..common import resolve_osm_pbf_local_path
@@ -120,6 +121,19 @@ def run(
         optional=True,
     )
 
+    staged_vehicle_types = None
+    vehicle_types_source = resolve_beam_vehicle_types_local_path(beam_output_root)
+    if vehicle_types_source:
+        staged_vehicle_types = _register_manifest_input(
+            manifest_inputs,
+            input_root=input_root,
+            key="vehicle_types_input",
+            source_path=vehicle_types_source,
+            relative_target=Path(vehicle_types_source).name,
+            metadata={"artifact_family": "vehicle_types_input"},
+            optional=True,
+        )
+
     events_entry = find_latest_beam_events_reference(optional=True)
     staged_events = None
     if events_entry:
@@ -181,6 +195,20 @@ def run(
             relative_target=str(emissions.activity_totals_file),
             metadata={"artifact_family": "activity_totals_file"},
             optional=True,
+        )
+    staged_annualization_days_or_file = emissions.annualization_days_or_file
+    if isinstance(emissions.annualization_days_or_file, str):
+        annualization_days_source = required_local_path(
+            resolve_path(emissions.annualization_days_or_file, config_path),
+            "impacts.emissions.annualization_days_or_file",
+        )
+        staged_annualization_days_or_file = _register_manifest_input(
+            manifest_inputs,
+            input_root=input_root,
+            key="annualization_days_or_file_input",
+            source_path=annualization_days_source,
+            relative_target=Path(annualization_days_source).name,
+            metadata={"artifact_family": "annualization_days_or_file_input"},
         )
 
     staged_inmap_grid = None
@@ -273,9 +301,11 @@ def run(
         "staged_network": staged_network,
         "staged_osm": staged_osm,
         "staged_skims": staged_skims,
+        "staged_vehicle_types": staged_vehicle_types,
         "staged_events": staged_events,
         "staged_inmap_grid": staged_inmap_grid,
         "staged_activity_totals": staged_activity_totals,
+        "staged_annualization_days_or_file": staged_annualization_days_or_file,
         "staged_isrm": staged_isrm,
         "staged_isrm_nox_to_no2_ratios_file": staged_isrm_nox_to_no2_ratios_file,
         "staged_asrv_patterns_file": staged_asrv_patterns_file,

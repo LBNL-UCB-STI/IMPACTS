@@ -22,7 +22,14 @@ FINAL_RATE_GROUP_COLUMNS = [
     "roadCategory",
 ]
 VMT_WEIGHTED_PROCESSES = {"RUNEX", "PMBW", "PMTW", PTO_PROCESS_NAME}
-ACTIVITY_COLUMNS = ["total_vmt", "cvmt", "evmt", "population", "trips", "pto_total_vmt"]
+ACTIVITY_COLUMNS = [
+    "total_vmt_vehicle_miles_per_year",
+    "cvmt_vehicle_miles_per_year",
+    "evmt_vehicle_miles_per_year",
+    "population_vehicles",
+    "trips_per_year",
+    "pto_total_vmt_vehicle_miles_per_year",
+]
 LIGHT_DUTY_VEHICLE_CATEGORIES = {"LDA", "LDT1", "LDT2"}
 
 
@@ -103,17 +110,20 @@ def _build_activity_weights(emissions_inventory_path: str) -> pd.DataFrame:
 
 def _build_study_area_wide_fleet(activity_weights: pd.DataFrame, model_year_groups: dict[str, list[dict[str, object]]]) -> pd.DataFrame:
     fleet = _assign_model_year_groups(
-        activity_weights[["vehicleCategory", "fuel", "modelYear", "total_vmt"]].copy(),
+        activity_weights[["vehicleCategory", "fuel", "modelYear", "total_vmt_vehicle_miles_per_year"]].copy(),
         model_year_groups,
     )
     fleet = (
-        fleet.groupby(["vehicleCategory", "fuel", "modelYear"], dropna=False)["total_vmt"]
+        fleet.groupby(["vehicleCategory", "fuel", "modelYear"], dropna=False)["total_vmt_vehicle_miles_per_year"]
         .sum(min_count=1)
         .reset_index()
     )
-    total_vmt = fleet["total_vmt"].sum(min_count=1)
-    fleet["vmtShare"] = fleet["total_vmt"] / total_vmt if pd.notna(total_vmt) and total_vmt > 0 else pd.NA
-    return fleet.drop(columns=["total_vmt"])
+    total_vmt = fleet["total_vmt_vehicle_miles_per_year"].sum(min_count=1)
+    fleet["vmtShare"] = (
+        fleet["total_vmt_vehicle_miles_per_year"] / total_vmt
+        if pd.notna(total_vmt) and total_vmt > 0 else pd.NA
+    )
+    return fleet.drop(columns=["total_vmt_vehicle_miles_per_year"])
 
 
 def _build_aggregated_activity_table(
@@ -133,10 +143,12 @@ def _aggregation_weight_for_process(process: pd.Series, frame: pd.DataFrame) -> 
     process_values = process.astype(str)
     vmt_mask = process_values.isin(VMT_WEIGHTED_PROCESSES)
     prdust_mask = process_values == "PRDUST"
-    weights.loc[vmt_mask] = pd.to_numeric(frame.loc[vmt_mask, "total_vmt"], errors="coerce")
-    weights.loc[prdust_mask] = pd.to_numeric(frame.loc[prdust_mask, "population"], errors="coerce")
+    weights.loc[vmt_mask] = pd.to_numeric(
+        frame.loc[vmt_mask, "total_vmt_vehicle_miles_per_year"], errors="coerce"
+    )
+    weights.loc[prdust_mask] = pd.to_numeric(frame.loc[prdust_mask, "population_vehicles"], errors="coerce")
     other_mask = ~vmt_mask & ~prdust_mask
-    weights.loc[other_mask] = pd.to_numeric(frame.loc[other_mask, "trips"], errors="coerce")
+    weights.loc[other_mask] = pd.to_numeric(frame.loc[other_mask, "trips_per_year"], errors="coerce")
     return weights
 
 

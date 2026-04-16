@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+from impacts.emfac.step1_prepare_emissions_and_activities_tables import _annualize_daily_values_by_vehicle_category
 
 _CALIFORNIA_COUNTY_FIPS = {
     "alameda": "001",
@@ -105,6 +106,7 @@ def _normalize_input_frame(
     *,
     path: str,
     county_col: str,
+    vehicle_category_col: str,
     year_col: str,
     vmt_col: str,
     trips_col: str,
@@ -115,6 +117,9 @@ def _normalize_input_frame(
     if county_col not in normalized.columns:
         raise ValueError(f"Input {path} is missing required county column '{county_col}'.")
     normalized[county_col] = _normalize_countyfp(normalized[county_col])
+
+    if vehicle_category_col not in normalized.columns:
+        raise ValueError(f"Input {path} is missing required vehicle category column '{vehicle_category_col}'.")
 
     if year_col not in normalized.columns:
         if default_year is not None:
@@ -131,7 +136,7 @@ def _normalize_input_frame(
     if normalized[county_col].eq("").any():
         raise ValueError(f"Input {path} contains invalid county values in '{county_col}'.")
 
-    return normalized[[county_col, year_col, vmt_col, trips_col]].copy()
+    return normalized[[county_col, vehicle_category_col, year_col, vmt_col, trips_col]].copy()
 
 
 def _flatten_cli_values(values: Optional[list[object]]) -> list[object]:
@@ -149,6 +154,7 @@ def aggregate_emfac_activity(
     input_paths: list[str],
     output_path: str,
     county_col: str = "countyfp",
+    vehicle_category_col: str = "vehicleCategory",
     year_col: str = "year",
     vmt_col: str = "totVMT",
     trips_col: str = "totTrips",
@@ -167,6 +173,7 @@ def aggregate_emfac_activity(
                 frame,
                 path=path,
                 county_col=county_col,
+                vehicle_category_col=vehicle_category_col,
                 year_col=year_col,
                 vmt_col=vmt_col,
                 trips_col=trips_col,
@@ -177,8 +184,14 @@ def aggregate_emfac_activity(
     combined = pd.concat(frames, ignore_index=True)
     combined[county_col] = _normalize_countyfp(combined[county_col])
     combined[year_col] = pd.to_numeric(combined[year_col], errors="raise").astype(int)
-    combined[vmt_col] = pd.to_numeric(combined[vmt_col], errors="coerce").fillna(0.0)
-    combined[trips_col] = pd.to_numeric(combined[trips_col], errors="coerce").fillna(0.0)
+    combined[vmt_col] = _annualize_daily_values_by_vehicle_category(
+        combined.rename(columns={vehicle_category_col: "vehicleCategory"}),
+        source_column=vmt_col,
+    )
+    combined[trips_col] = _annualize_daily_values_by_vehicle_category(
+        combined.rename(columns={vehicle_category_col: "vehicleCategory"}),
+        source_column=trips_col,
+    )
 
     if county_fips_filters:
         normalized_filters = {
@@ -197,6 +210,12 @@ def aggregate_emfac_activity(
         .sort_values([year_col, county_col], kind="stable")
         .reset_index(drop=True)
     )
+    grouped = grouped.rename(
+        columns={
+            vmt_col: "tot_vmt_vehicle_miles_per_year",
+            trips_col: "tot_trips_per_year",
+        }
+    )
     _write_table(grouped, output_path)
     return grouped
 
@@ -204,11 +223,12 @@ def aggregate_emfac_activity(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m impacts.tools.emfac.aggregate_emfac_activity",
-        description="Aggregate EMFAC county-year totVMT and totTrips across one or more files.",
+        description="Aggregate EMFAC county-year activity and output annual totals with explicit units.",
     )
     parser.add_argument("--input", dest="inputs", action="append", required=True, help="Input CSV/CSV.GZ/Parquet file. Repeat for multiple files.")
     parser.add_argument("--output", required=True, help="Output CSV/CSV.GZ/Parquet file.")
     parser.add_argument("--county-col", default="countyfp")
+    parser.add_argument("--vehicle-category-col", default="vehicleCategory")
     parser.add_argument("--year-col", default="year")
     parser.add_argument("--vmt-col", default="totVMT")
     parser.add_argument("--trips-col", default="totTrips")
@@ -238,6 +258,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         input_paths=args.inputs,
         output_path=args.output,
         county_col=args.county_col,
+        vehicle_category_col=args.vehicle_category_col,
         year_col=args.year_col,
         vmt_col=args.vmt_col,
         trips_col=args.trips_col,

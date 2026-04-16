@@ -4,6 +4,7 @@ import csv
 import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from functools import lru_cache
 
 import pandas as pd
 
@@ -11,13 +12,23 @@ from impacts.emfac.common import frame_summary
 from impacts.emfac.common import write_trace
 
 GRAMS_PER_SHORT_TON = 907_184.74
+METRIC_TONS_PER_SHORT_TON = 0.90718474
+EMFAC_DAYS_PER_YEAR = 365.0
 PTO_PROCESS_NAME = "PTOEX"
+OPERATION_DAYS_CSV = Path(__file__).with_name("vehicle_operation_days_per_year.csv")
 FUEL_LABEL_MAP = {
     "Diesel": "Dsl",
     "Electricity": "Elec",
     "Gasoline": "Gas",
     "Natural Gas": "NG",
     "Plug-in Hybrid": "Phe",
+}
+EMFAC202X_VEHICLE_CATEGORY_ALIASES = {
+    "LHD1 Public": "LHD1",
+    "LHD1 Other": "LHD1",
+    "LHD2 Public": "LHD2",
+    "LHD2 Other": "LHD2",
+    "All Other Buses": "OBUS",
 }
 BEAM_TO_CARB_ROAD_CATEGORY = {
     "motorway": "Freeway",
@@ -36,6 +47,14 @@ BEAM_TO_CARB_ROAD_CATEGORY = {
 PROJECT_ANALYSIS_KEY_COLUMNS = ["county", "vehicleCategory", "fuel", "modelYear", "process", "speedMph_timeMin"]
 HEADER_DETECTION_COLUMNS = {
     "emissions-inventory": {"region", "calendar_year", "vehicle_category", "model_year", "speed", "fuel"},
+}
+ANNUAL_ACTIVITY_COLUMN_MAP = {
+    "total_vmt": "total_vmt_vehicle_miles_per_year",
+    "cvmt": "cvmt_vehicle_miles_per_year",
+    "evmt": "evmt_vehicle_miles_per_year",
+    "trips": "trips_per_year",
+    "population": "population_vehicles",
+    "pto_total_vmt": "pto_total_vmt_vehicle_miles_per_year",
 }
 
 
@@ -292,32 +311,51 @@ def build_nh3_inventory_rows(
     frame["fuel"] = frame["fuel"].astype(str)
     frame["modelYear"] = pd.to_numeric(frame["modelYear"], errors="raise").astype(int)
     frame["speed"] = pd.to_numeric(frame["speed"], errors="raise")
-    frame["total_vmt"] = pd.to_numeric(frame["total_vmt"], errors="coerce")
-    frame["nh3_runex"] = pd.to_numeric(frame["nh3_runex"], errors="coerce")
+    frame["total_vmt_vehicle_miles_per_year"] = pd.to_numeric(
+        frame["total_vmt_vehicle_miles_per_year"], errors="coerce"
+    )
+    frame["nh3_runex_short_tons_per_year"] = pd.to_numeric(
+        frame["nh3_runex_short_tons_per_year"], errors="coerce"
+    )
 
     rates: list[pd.DataFrame] = []
 
     runex = frame.loc[
-        frame["total_vmt"].notna() & (frame["total_vmt"] > 0) & frame["nh3_runex"].notna()
+        frame["total_vmt_vehicle_miles_per_year"].notna()
+        & (frame["total_vmt_vehicle_miles_per_year"] > 0)
+        & frame["nh3_runex_short_tons_per_year"].notna()
     ].copy()
     if not runex.empty:
         runex["process"] = "RUNEX"
         runex["pollutant"] = "NH3"
         runex["speedMph_timeMin"] = runex["speed"]
-        runex["rateGram"] = (runex["nh3_runex"] / runex["total_vmt"]) * GRAMS_PER_SHORT_TON
+        runex["rateGram"] = (
+            runex["nh3_runex_short_tons_per_year"] / runex["total_vmt_vehicle_miles_per_year"]
+        ) * GRAMS_PER_SHORT_TON
         rates.append(runex[["county", "vehicleCategory", "fuel", "modelYear", "process", "speedMph_timeMin", "pollutant", "rateGram"]])
 
-    if pto_config and pto_config.get("enabled") and {"pto_total_vmt", "nh3_pto"}.issubset(frame.columns):
-        frame["pto_total_vmt"] = pd.to_numeric(frame["pto_total_vmt"], errors="coerce")
-        frame["nh3_pto"] = pd.to_numeric(frame["nh3_pto"], errors="coerce")
+    if pto_config and pto_config.get("enabled") and {
+        "pto_total_vmt_vehicle_miles_per_year",
+        "nh3_pto_short_tons_per_year",
+    }.issubset(frame.columns):
+        frame["pto_total_vmt_vehicle_miles_per_year"] = pd.to_numeric(
+            frame["pto_total_vmt_vehicle_miles_per_year"], errors="coerce"
+        )
+        frame["nh3_pto_short_tons_per_year"] = pd.to_numeric(
+            frame["nh3_pto_short_tons_per_year"], errors="coerce"
+        )
         pto = frame.loc[
-            frame["pto_total_vmt"].notna() & (frame["pto_total_vmt"] > 0) & frame["nh3_pto"].notna()
+            frame["pto_total_vmt_vehicle_miles_per_year"].notna()
+            & (frame["pto_total_vmt_vehicle_miles_per_year"] > 0)
+            & frame["nh3_pto_short_tons_per_year"].notna()
         ].copy()
         if not pto.empty:
             pto["process"] = PTO_PROCESS_NAME
             pto["pollutant"] = "NH3"
             pto["speedMph_timeMin"] = pto["speed"]
-            pto["rateGram"] = (pto["nh3_pto"] / pto["pto_total_vmt"]) * GRAMS_PER_SHORT_TON
+            pto["rateGram"] = (
+                pto["nh3_pto_short_tons_per_year"] / pto["pto_total_vmt_vehicle_miles_per_year"]
+            ) * GRAMS_PER_SHORT_TON
             rates.append(pto[["county", "vehicleCategory", "fuel", "modelYear", "process", "speedMph_timeMin", "pollutant", "rateGram"]])
 
     if not rates:
@@ -512,6 +550,11 @@ def _normalize_source_frame(frame: pd.DataFrame, source_type: str) -> pd.DataFra
             "pm2_5_pmbw": "pm25_pmbw",
         }
     )
+    if "vehicleCategory" in frame.columns:
+        categories = frame["vehicleCategory"].astype(str).str.strip()
+        frame["vehicleCategory"] = categories.map(
+            lambda value: EMFAC202X_VEHICLE_CATEGORY_ALIASES.get(value, value)
+        )
     return frame
 
 
@@ -528,6 +571,37 @@ def _project_analysis_pollutant_column(pollutant: object) -> str:
     if label == "pm2_5_gram":
         return "pm25_gram"
     return label
+
+
+def _standardize_statewide_inventory_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    result = frame.copy()
+    for source_column, target_column in {
+        "total_vmt": "total_vmt_vehicle_miles_per_year",
+        "cvmt": "cvmt_vehicle_miles_per_year",
+        "evmt": "evmt_vehicle_miles_per_year",
+        "fuel_consumption": "fuel_consumption_1000_gallons_per_year",
+        "energy_consumption": "energy_consumption_kwh_per_year",
+    }.items():
+        if source_column in result.columns:
+            result = result.rename(columns={source_column: target_column})
+
+    emission_suffix_map: dict[str, str] = {}
+    for column in result.columns:
+        match = re.fullmatch(r"([a-z0-9]+)_([a-z0-9]+)", column)
+        if match is None:
+            continue
+        pollutant, process = match.groups()
+        if pollutant in {"total", "fuel", "energy", "vehicle", "model", "speed"}:
+            continue
+        if column in {"vehicleCategory", "modelYear"}:
+            continue
+        if column.endswith("_per_year"):
+            continue
+        unit_suffix = "metric_tons_per_year" if pollutant == "co2e" else "short_tons_per_year"
+        emission_suffix_map[column] = f"{pollutant}_{process}_{unit_suffix}"
+    if emission_suffix_map:
+        result = result.rename(columns=emission_suffix_map)
+    return result
 
 
 def _pivot_project_analysis_rates(frame: pd.DataFrame, *, key_columns: list[str]) -> pd.DataFrame:
@@ -561,8 +635,28 @@ def _select_output_columns(frame: pd.DataFrame, source_type: str) -> pd.DataFram
         "population-inventory": ["county", "vehicleCategory", "fuel", "modelYear", "population"],
         "trips-inventory": ["county", "vehicleCategory", "fuel", "modelYear", "trips"],
         "vmt-inventory": ["county", "vehicleCategory", "fuel", "modelYear", "speed", "total_vmt", "cvmt", "evmt"],
-        "emission-inventory": ["county", "vehicleCategory", "fuel", "modelYear", "speed", "process", "pollutant", "emission"],
-        "ghg-inventory": ["county", "vehicleCategory", "fuel", "modelYear", "speed", "process", "pollutant", "emission"],
+        "emission-inventory": [
+            "county",
+            "vehicleCategory",
+            "fuel",
+            "modelYear",
+            "speed",
+            "process",
+            "pollutant",
+            "emission",
+            "emission_annualized",
+        ],
+        "ghg-inventory": [
+            "county",
+            "vehicleCategory",
+            "fuel",
+            "modelYear",
+            "speed",
+            "process",
+            "pollutant",
+            "emission",
+            "emission_annualized",
+        ],
         "emissions-inventory": [
             "vehicleCategory",
             "fuel",
@@ -587,7 +681,19 @@ def _select_output_columns(frame: pd.DataFrame, source_type: str) -> pd.DataFram
             "fuel_consumption",
         ],
     }
-    return frame[columns_by_source[source_type]]
+    requested = columns_by_source[source_type]
+    selected = [column for column in requested if column in frame.columns]
+    missing_required = [
+        column
+        for column in requested
+        if column not in frame.columns
+    ]
+    if missing_required:
+        raise ValueError(f"{source_type} is missing expected columns after normalization: {missing_required}")
+    result = frame[selected].copy()
+    if source_type == "emissions-inventory":
+        result = _standardize_statewide_inventory_columns(result)
+    return result
 
 
 def _clean_file(path: Path, *, source_type: str, region_label: str | None) -> pd.DataFrame:
@@ -658,6 +764,61 @@ def _normalize_metric_label(value: object) -> str:
     return label
 
 
+def _annualize_daily_series(series: pd.Series) -> pd.Series:
+    return pd.to_numeric(series, errors="coerce") * EMFAC_DAYS_PER_YEAR
+
+
+@lru_cache(maxsize=1)
+def _load_operation_days_lookup() -> dict[str, float]:
+    frame = pd.read_csv(OPERATION_DAYS_CSV)
+    _require_columns(frame, {"vehicleCategory", "operation_days_per_year"}, "Vehicle operation days CSV")
+    result: dict[str, float] = {}
+    for row in frame.itertuples(index=False):
+        result[str(row.vehicleCategory).strip()] = float(row.operation_days_per_year)
+    return result
+
+
+def _operation_days_for_vehicle_categories(frame: pd.DataFrame, *, vehicle_category_column: str = "vehicleCategory") -> pd.Series:
+    if vehicle_category_column not in frame.columns:
+        raise ValueError(f"Expected vehicle category column '{vehicle_category_column}' for operation-day annualization.")
+    categories = frame[vehicle_category_column].astype(str).str.strip()
+    operation_days = categories.map(_load_operation_days_lookup())
+    if operation_days.isna().any():
+        missing = sorted(categories.loc[operation_days.isna()].drop_duplicates().tolist())
+        raise ValueError(
+            "Vehicle operation days CSV is missing vehicle categories: "
+            f"{missing[:20]}"
+        )
+    return pd.to_numeric(operation_days, errors="raise")
+
+
+def _annualize_daily_values_by_vehicle_category(
+    frame: pd.DataFrame,
+    *,
+    source_column: str,
+    vehicle_category_column: str = "vehicleCategory",
+    output_unit: str = "same",
+) -> pd.Series:
+    values = pd.to_numeric(frame[source_column], errors="coerce")
+    annualized = values * _operation_days_for_vehicle_categories(
+        frame,
+        vehicle_category_column=vehicle_category_column,
+    )
+    if output_unit == "metric_tons_per_year":
+        annualized = annualized * METRIC_TONS_PER_SHORT_TON
+    return annualized
+
+
+def _annualized_emission_metric_name(pollutant: object, process: object) -> str:
+    pollutant_label = _normalize_metric_label(pollutant)
+    process_label = _normalize_metric_label(process)
+    if pollutant_label == "co2e":
+        unit_suffix = "metric_tons_per_year"
+    else:
+        unit_suffix = "short_tons_per_year"
+    return f"{pollutant_label}_{process_label}_{unit_suffix}"
+
+
 def _pivot_inventory_measurements(
     frame: pd.DataFrame,
     *,
@@ -688,10 +849,17 @@ def _pivot_inventory_measurements(
 
 
 def _pivot_emission_inventory(frame: pd.DataFrame) -> pd.DataFrame:
+    if "emission" not in frame.columns:
+        raise ValueError("Emission inventory must include emission.")
+    working = frame.copy()
+    working["emission_short_tons_per_year"] = _annualize_daily_values_by_vehicle_category(
+        working,
+        source_column="emission",
+    )
     return _pivot_inventory_measurements(
-        frame,
-        value_columns=["emission"],
-        metric_builder=lambda row: f"{_normalize_metric_label(row['pollutant'])}_{_normalize_metric_label(row['process'])}",
+        working,
+        value_columns=["emission_short_tons_per_year"],
+        metric_builder=lambda row: _annualized_emission_metric_name(row["pollutant"], row["process"]),
     )
 
 
@@ -700,14 +868,28 @@ def _pivot_ghg_inventory(frame: pd.DataFrame) -> pd.DataFrame:
         pollutant = _normalize_metric_label(row["pollutant"])
         process = _normalize_metric_label(row["process"])
         if pollutant == "fuel":
-            return "fuel_consumption"
-        return f"{pollutant}_{process}"
+            return "fuel_consumption_1000_gallons_per_year"
+        if pollutant in {"energy", "electricity"}:
+            return "energy_consumption_kwh_per_year"
+        return _annualized_emission_metric_name(pollutant, process)
 
     if "emission" not in frame.columns:
-        return pd.DataFrame(columns=["county", "vehicleCategory", "fuel", "modelYear", "speed"])
+        raise ValueError("GHG inventory must include emission.")
+    working = frame.copy()
+    working["annualized_output_value"] = _annualize_daily_values_by_vehicle_category(
+        working,
+        source_column="emission",
+    )
+    co2e_mask = working["pollutant"].astype(str).str.strip().str.lower().eq("co2e")
+    if co2e_mask.any():
+        working.loc[co2e_mask, "annualized_output_value"] = _annualize_daily_values_by_vehicle_category(
+            working.loc[co2e_mask].copy(),
+            source_column="emission",
+            output_unit="metric_tons_per_year",
+        ).to_numpy()
     return _pivot_inventory_measurements(
-        frame,
-        value_columns=["emission"],
+        working,
+        value_columns=["annualized_output_value"],
         metric_builder=_metric_name,
     )
 
@@ -772,6 +954,16 @@ def process_emissions_inventory(
             ["county", "vehicleCategory", "fuel", "modelYear", "speed", "total_vmt", "cvmt", "evmt"]
         ]
         emissions["county"] = emissions["county"].astype(str)
+        for source_column, output_column in {
+            key: value
+            for key, value in ANNUAL_ACTIVITY_COLUMN_MAP.items()
+            if key in {"total_vmt", "cvmt", "evmt"}
+        }.items():
+            emissions[output_column] = _annualize_daily_values_by_vehicle_category(
+                emissions,
+                source_column=source_column,
+            )
+        emissions = emissions.drop(columns=["total_vmt", "cvmt", "evmt"])
         _require_unique_keys(
             emissions,
             ["county", "vehicleCategory", "fuel", "modelYear", "speed"],
@@ -790,12 +982,19 @@ def process_emissions_inventory(
             "Trips inventory",
         )
         result = emissions.merge(
-            population[["county", "vehicleCategory", "fuel", "modelYear", "population"]],
+            population[["county", "vehicleCategory", "fuel", "modelYear", "population"]].rename(
+                columns={"population": "population_vehicles"}
+            ),
             on=["county", "vehicleCategory", "fuel", "modelYear"],
             how="left",
             validate="many_to_one",
         ).merge(
-            trips[["county", "vehicleCategory", "fuel", "modelYear", "trips"]],
+            trips[["county", "vehicleCategory", "fuel", "modelYear", "trips"]].assign(
+                trips_per_year=lambda df: _annualize_daily_values_by_vehicle_category(
+                    df,
+                    source_column="trips",
+                )
+            )[["county", "vehicleCategory", "fuel", "modelYear", "trips_per_year"]],
             on=["county", "vehicleCategory", "fuel", "modelYear"],
             how="left",
             validate="many_to_one",
@@ -819,8 +1018,8 @@ def process_emissions_inventory(
             pto_activity = result.loc[result["vehicleCategory"].astype(str) == "PTO"].copy()
             if not pto_activity.empty:
                 pto_vmt = expand_pto_vehicle_category(
-                    pto_activity[["county", "vehicleCategory", "fuel", "modelYear", "speed", "total_vmt"]].rename(
-                        columns={"total_vmt": "pto_total_vmt"}
+                    pto_activity[["county", "vehicleCategory", "fuel", "modelYear", "speed", "total_vmt_vehicle_miles_per_year"]].rename(
+                        columns={"total_vmt_vehicle_miles_per_year": "pto_total_vmt_vehicle_miles_per_year"}
                     ),
                     pto_config,
                     process_column=None,
@@ -832,10 +1031,10 @@ def process_emissions_inventory(
                     how="left",
                     validate="many_to_one",
                 )
-                if "nh3_runex" in pto_activity.columns:
+                if "nh3_runex_short_tons_per_year" in pto_activity.columns:
                     pto_nh3 = expand_pto_vehicle_category(
-                        pto_activity[["county", "vehicleCategory", "fuel", "modelYear", "speed", "nh3_runex"]].rename(
-                            columns={"nh3_runex": "nh3_pto"}
+                        pto_activity[["county", "vehicleCategory", "fuel", "modelYear", "speed", "nh3_runex_short_tons_per_year"]].rename(
+                            columns={"nh3_runex_short_tons_per_year": "nh3_pto_short_tons_per_year"}
                         ),
                         pto_config,
                         process_column=None,

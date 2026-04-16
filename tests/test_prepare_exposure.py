@@ -7,6 +7,7 @@ import pandas as pd
 from shapely.geometry import Polygon
 
 from impacts.manifest.schema import PipelineConfig
+from impacts.workflow.step4_prepare_exposure import _prepare_aermod_exposure_inputs
 from impacts.workflow.step4_prepare_exposure import _build_full_exposure_grid
 
 
@@ -38,8 +39,8 @@ def _pipeline(tmp_path: Path, grid_path: Path) -> PipelineConfig:
             "activity_totals_columns": {"county": "countyfp", "year": "year"},
             "prepared_skims_group_cols": ["hour", "linkId"],
             "pollutants": ["NOx", "PM2_5", "BC"],
-            "pollutants_map": {"NOx": "NOx", "PM2_5": "PM2_5", "BC": "BC"},
-            "annualization_days": 330.0,
+            "source_pollutants": ["NOx", "PM2_5", "BC"],
+            "annualization_days_or_file": 330.0,
             "population_sample": 0.1,
         }
     )
@@ -103,3 +104,149 @@ def test_build_full_exposure_grid_uses_inmap_secondary_and_aermod_primary(tmp_pa
     assert bool(by_id.loc[11, "has_aermod_primarypm25"]) is True
     assert bool(by_id.loc[11, "has_aermod_bc"]) is True
     assert bool(by_id.loc[11, "has_aermod_no2"]) is True
+
+
+def test_prepare_aermod_exposure_inputs_allows_partial_aermod_outputs(tmp_path: Path) -> None:
+    aermod_gdf = gpd.GeoDataFrame(
+        {
+            "aermod_cell_id": [11],
+            "PrimaryPM25": [0.25],
+            "has_aermod_primarypm25": [True],
+            "geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])],
+        },
+        geometry="geometry",
+        crs="EPSG:26910",
+    )
+
+    prepared = _prepare_aermod_exposure_inputs(aermod_gdf).drop(columns="geometry")
+
+    assert list(prepared.columns) == [
+        "aermod_cell_id",
+        "aermod_PrimaryPM25",
+        "aermod_SecondaryPM25",
+        "aermod_BC",
+        "aermod_NO2",
+        "has_aermod_primarypm25",
+    ]
+    assert prepared.loc[0, "aermod_PrimaryPM25"] == 0.25
+    assert pd.isna(prepared.loc[0, "aermod_BC"])
+    assert pd.isna(prepared.loc[0, "aermod_NO2"])
+    assert bool(prepared.loc[0, "has_aermod_primarypm25"]) is True
+
+
+def test_build_full_exposure_grid_handles_missing_aermod_bc_and_no2_columns(tmp_path: Path) -> None:
+    full_grid = gpd.GeoDataFrame(
+        {
+            "aermod_cell_id": [11, 22],
+            "inmap_cell_id": [101, 202],
+            "geometry": [
+                Polygon([(0, 0), (1, 0), (1, 1), (0, 1)]),
+                Polygon([(1, 0), (2, 0), (2, 1), (1, 1)]),
+            ],
+        },
+        geometry="geometry",
+        crs="EPSG:26910",
+    )
+    grid_path = tmp_path / "full_grid.parquet"
+    full_grid.to_parquet(grid_path, index=False)
+
+    prepared_inmap = gpd.GeoDataFrame(
+        {
+            "inmap_cell_id": [101, 202],
+            "inmap_PrimaryPM25": [0.0, 0.0],
+            "inmap_SecondaryPM25": [1.5, 2.5],
+            "inmap_BC": [0.2, 0.4],
+            "inmap_NO2": [1.2, 2.4],
+            "geometry": full_grid.geometry,
+        },
+        geometry="geometry",
+        crs=full_grid.crs,
+    )
+    prepared_aermod = gpd.GeoDataFrame(
+        {
+            "aermod_cell_id": [11],
+            "aermod_PrimaryPM25": [0.25],
+            "aermod_SecondaryPM25": [0.0],
+            "has_aermod_primarypm25": [True],
+            "geometry": [full_grid.geometry.iloc[0]],
+        },
+        geometry="geometry",
+        crs=full_grid.crs,
+    )
+
+    result = _build_full_exposure_grid(
+        pipeline=_pipeline(tmp_path, grid_path),
+        prepared_inmap=prepared_inmap,
+        prepared_aermod=prepared_aermod,
+    ).drop(columns="geometry")
+
+    by_id = result.set_index("aermod_cell_id")
+    assert by_id.loc[11, "PrimaryPM25"] == 0.25
+    assert by_id.loc[11, "BC"] == 0.2
+    assert by_id.loc[11, "NO2"] == 1.2
+    assert bool(by_id.loc[11, "has_aermod_primarypm25"]) is True
+    assert bool(by_id.loc[11, "has_aermod_bc"]) is False
+    assert bool(by_id.loc[11, "has_aermod_no2"]) is False
+
+
+def test_build_full_exposure_grid_uses_per_pollutant_aermod_fallback_masks(tmp_path: Path) -> None:
+    full_grid = gpd.GeoDataFrame(
+        {
+            "aermod_cell_id": [11, 22],
+            "inmap_cell_id": [101, 202],
+            "geometry": [
+                Polygon([(0, 0), (1, 0), (1, 1), (0, 1)]),
+                Polygon([(1, 0), (2, 0), (2, 1), (1, 1)]),
+            ],
+        },
+        geometry="geometry",
+        crs="EPSG:26910",
+    )
+    grid_path = tmp_path / "full_grid.parquet"
+    full_grid.to_parquet(grid_path, index=False)
+
+    prepared_inmap = gpd.GeoDataFrame(
+        {
+            "inmap_cell_id": [101, 202],
+            "inmap_PrimaryPM25": [0.1, 0.2],
+            "inmap_SecondaryPM25": [1.0, 2.0],
+            "inmap_BC": [0.3, 0.4],
+            "inmap_NO2": [5.0, 6.0],
+            "geometry": full_grid.geometry,
+        },
+        geometry="geometry",
+        crs=full_grid.crs,
+    )
+    prepared_aermod = gpd.GeoDataFrame(
+        {
+            "aermod_cell_id": [11],
+            "aermod_PrimaryPM25": [0.9],
+            "aermod_SecondaryPM25": [0.0],
+            "aermod_BC": [0.8],
+            "aermod_NO2": [7.0],
+            "has_aermod_primarypm25": [True],
+            "has_aermod_bc": [False],
+            "has_aermod_no2": [True],
+            "geometry": [full_grid.geometry.iloc[0]],
+        },
+        geometry="geometry",
+        crs=full_grid.crs,
+    )
+
+    result = _build_full_exposure_grid(
+        pipeline=_pipeline(tmp_path, grid_path),
+        prepared_inmap=prepared_inmap,
+        prepared_aermod=prepared_aermod,
+    ).drop(columns="geometry")
+
+    by_id = result.set_index("aermod_cell_id")
+    assert by_id.loc[11, "PrimaryPM25"] == 0.9
+    assert by_id.loc[11, "SecondaryPM25"] == 1.0
+    assert by_id.loc[11, "TotalPM25"] == 1.9
+    assert by_id.loc[11, "BC"] == 0.3
+    assert by_id.loc[11, "NO2"] == 7.0
+    assert by_id.loc[22, "PrimaryPM25"] == 0.2
+    assert by_id.loc[22, "SecondaryPM25"] == 2.0
+    assert by_id.loc[22, "TotalPM25"] == 2.2
+    assert by_id.loc[22, "BC"] == 0.4
+    assert by_id.loc[22, "NO2"] == 6.0

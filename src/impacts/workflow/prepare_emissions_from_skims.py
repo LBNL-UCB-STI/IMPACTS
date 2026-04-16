@@ -12,15 +12,15 @@ from typing import Optional
 import duckdb
 import pandas as pd
 
-from ..common import annualize_prepared_skims_for_grid_allocation
 from ..common import normalize_county_fips
 from ..common import prepare_skims_for_grid_allocation
 from ..common import prepared_table_target
 from ..common import read_table
-from ..common import resolve_manifest_input_path
+from ..common import resolve_required_manifest_input
 from ..common import register_managed_input
 from ..manifest.file_ops import file_entry
 from . import _step_label
+from .annualization import annualize_prepared_skims_for_grid_allocation
 
 logger = logging.getLogger(__name__)
 
@@ -294,65 +294,19 @@ def _build_source_activity_totals(skims_df: pd.DataFrame) -> Optional[pd.DataFra
     return grouped
 
 
-def _resolve_staged_network_path(input_root: Path, manifest_inputs: Optional[Dict[str, Any]] = None) -> str:
-    if manifest_inputs and "network" in manifest_inputs:
-        return resolve_manifest_input_path(manifest_inputs["network"], label="network")
-    network_dir = input_root / "network"
-    for name in ["network.parquet", "network.csv.gz", "network.csv"]:
-        candidate = network_dir / name
-        if candidate.exists():
-            return str(candidate)
-    matches = sorted(
-        path for path in network_dir.rglob("*")
-        if path.is_file() and path.name in {"network.parquet", "network.csv.gz", "network.csv"}
-    )
-    if matches:
-        return str(matches[0])
-    raise FileNotFoundError(f"Could not find staged network file under {network_dir}")
-
-
 def resolve_prepared_skims_path(input_root: Path) -> Optional[str]:
-    for root in [input_root / "skims", input_root]:
-        for name in ["prepared_skims_for_grid_allocation.parquet", "prepared_skims_for_grid_allocation.csv.gz"]:
-            candidate = root / name
-            if candidate.exists():
-                return str(candidate)
+    candidate = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
+    if candidate.exists():
+        return str(candidate)
     return None
 
 
-def _resolve_staged_skims_input_path(input_root: Path, manifest_inputs: Optional[Dict[str, Any]] = None) -> Optional[str]:
-    if manifest_inputs:
-        for key in ["emissions_skims_input", "skims_from_events"]:
-            entry = manifest_inputs.get(key)
-            if entry:
-                return resolve_manifest_input_path(entry, label=key)
-    preferred = [
-        "skims_from_events.parquet",
-        "skims_from_events.csv.gz",
-        "0.skimsEmissions.parquet",
-        "0.skimsEmissions.csv.gz",
-        "0.skimsEmissionsTotals.csv.gz",
-    ]
-    for root in [input_root / "skims", input_root]:
-        for name in preferred:
-            candidate = root / name
-            if candidate.exists():
-                return str(candidate)
-
-    patterns = [
-        "*.skimsEmissions.parquet",
-        "*.skimsEmissions.csv.gz",
-        "*.skimsEmissionsTotals.csv.gz",
-        "skims_from_events.parquet",
-        "skims_from_events.csv.gz",
-    ]
-    for root in [input_root / "skims", input_root]:
-        if not root.exists():
-            continue
-        for pattern in patterns:
-            matches = sorted(path for path in root.rglob(pattern) if path.is_file())
-            if matches:
-                return str(matches[0])
+def _resolve_staged_skims_input_path(manifest_inputs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    if not manifest_inputs:
+        return None
+    for key in ["emissions_skims_input", "skims_from_events"]:
+        if key in manifest_inputs:
+            return resolve_required_manifest_input(manifest_inputs, key=key)
     return None
 
 
@@ -360,15 +314,15 @@ def prepare_staged_skims_for_processing(
     *,
     input_root: Path,
     skims_input_source: str,
+    network_path: str,
+    vehicle_types_path: Optional[str],
     beam_length_col: str,
     prepared_skims_group_cols: list[str],
     pollutants: list[str],
     pollutants_map: Dict[str, str],
-    annualization_days: float,
+    annualization_days_or_file: float | str,
     population_sample: float,
-    network_path: Optional[str] = None,
 ) -> pd.DataFrame:
-    resolved_network_path = network_path or _resolve_staged_network_path(input_root)
     prepared_grouped_skims_path = prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
     prepare_skims_for_grid_allocation(
         skims_path=skims_input_source,
@@ -381,11 +335,12 @@ def prepare_staged_skims_for_processing(
     annualize_prepared_skims_for_grid_allocation(
         prepared_skims_path=str(prepared_grouped_skims_path),
         output_path=str(prepared_skims_path),
-        network_path=resolved_network_path,
+        network_path=network_path,
         beam_length_col=beam_length_col,
         group_cols=list(prepared_skims_group_cols),
         required_pollutants=list(pollutants),
-        annualization_days=float(annualization_days),
+        annualization_days_or_file=annualization_days_or_file,
+        vehicle_types_path=vehicle_types_path,
         population_sample=float(population_sample),
     )
     return read_table(prepared_skims_path)
@@ -399,7 +354,7 @@ def load_or_prepare_skims_df(
     prepared_skims_group_cols: list[str],
     pollutants: list[str],
     pollutants_map: Dict[str, str],
-    annualization_days: float,
+    annualization_days_or_file: float | str,
     population_sample: float,
     manifest_inputs: Optional[Dict[str, Any]] = None,
 ) -> pd.DataFrame:
@@ -408,20 +363,28 @@ def load_or_prepare_skims_df(
         logger.info("Step 1: using prepared skims %s", prepared_path)
         return read_table(prepared_path)
 
-    network_path = _resolve_staged_network_path(input_root, manifest_inputs)
-    skims_input_source = _resolve_staged_skims_input_path(input_root, manifest_inputs)
+    if manifest_inputs is None:
+        raise ValueError("Step 1 requires manifest_inputs to resolve inputs.network.")
+    network_path = resolve_required_manifest_input(manifest_inputs, key="network")
+    vehicle_types_path = (
+        resolve_required_manifest_input(manifest_inputs, key="vehicle_types_input")
+        if "vehicle_types_input" in manifest_inputs
+        else None
+    )
+    skims_input_source = _resolve_staged_skims_input_path(manifest_inputs)
     if skims_input_source:
         logger.info("Step 1: preparing skims input %s", skims_input_source)
         return prepare_staged_skims_for_processing(
             input_root=input_root,
             skims_input_source=skims_input_source,
+            network_path=network_path,
+            vehicle_types_path=vehicle_types_path,
             beam_length_col=beam_length_col,
             prepared_skims_group_cols=prepared_skims_group_cols,
             pollutants=pollutants,
             pollutants_map=pollutants_map,
-            annualization_days=annualization_days,
+            annualization_days_or_file=annualization_days_or_file,
             population_sample=population_sample,
-            network_path=network_path,
         )
 
     from .prepare_emissions_from_events import build_staged_skims_from_events
@@ -429,6 +392,7 @@ def load_or_prepare_skims_df(
     events_skims_path = build_staged_skims_from_events(
         input_root=input_root,
         network_path=network_path,
+        vehicle_types_path=vehicle_types_path,
         intersection_path=intersection_path,
         manifest_inputs=manifest_inputs,
     )
@@ -441,13 +405,14 @@ def load_or_prepare_skims_df(
     return prepare_staged_skims_for_processing(
         input_root=input_root,
         skims_input_source=events_skims_path,
+        network_path=network_path,
+        vehicle_types_path=vehicle_types_path,
         beam_length_col=beam_length_col,
         prepared_skims_group_cols=prepared_skims_group_cols,
         pollutants=pollutants,
         pollutants_map=pollutants_map,
-        annualization_days=annualization_days,
+        annualization_days_or_file=annualization_days_or_file,
         population_sample=population_sample,
-        network_path=network_path,
     )
 
 
@@ -462,6 +427,7 @@ def prepare_skims_inputs(
     processing,
     skims_input_source: Optional[str],
     network_path: str,
+    vehicle_types_path: Optional[str],
     intersection_path: Optional[str] = None,
 ) -> dict[str, Any]:
     event_inputs: Optional[Dict[str, Any]] = None
@@ -477,12 +443,13 @@ def prepare_skims_inputs(
             manifest_inputs=manifest_inputs,
             input_root=input_root,
             network_path=network_path,
+            vehicle_types_path=vehicle_types_path,
             intersection_path=intersection_path,
             beam_length_col=processing.beam_length_col,
             prepared_skims_group_cols=list(processing.prepared_skims_group_cols),
             pollutants=list(processing.pollutants),
             pollutants_map=dict(processing.pollutants_map),
-            annualization_days=float(processing.annualization_days),
+            annualization_days_or_file=processing.annualization_days_or_file,
             population_sample=float(processing.population_sample),
         )
         if event_inputs is None:
@@ -522,7 +489,8 @@ def prepare_skims_inputs(
         beam_length_col=processing.beam_length_col,
         group_cols=list(processing.prepared_skims_group_cols),
         required_pollutants=canonical_pollutants,
-        annualization_days=float(processing.annualization_days),
+        annualization_days_or_file=processing.annualization_days_or_file,
+        vehicle_types_path=vehicle_types_path,
         population_sample=float(processing.population_sample),
     )
     manifest_inputs["prepared_skims_grouped"] = file_entry(

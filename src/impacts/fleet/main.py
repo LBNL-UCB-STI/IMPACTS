@@ -36,9 +36,18 @@ def run_all_steps(config_path: str | Path | None = None) -> None:
     workflow = run_step3(workflow)
     workflow = run_step4(workflow)
     workflow = run_step5(workflow)
-    prepared_vehicle_types_file = workflow.get("built_vehicle_types_file", "")
-    if prepared_vehicle_types_file:
-        print(f"  Passenger car vehicle types file: {prepared_vehicle_types_file}")
+    vehicles_output_file = workflow.get("mapped_passenger_vehicles_file", "")
+    carriers_output_file = workflow.get("mapped_freight_carriers_file", "")
+    passenger_vehicle_types_output = workflow.get("passenger_vehicle_types_with_rates_file", "")
+    freight_vehicle_types_output = workflow.get("freight_vehicle_types_with_rates_file", "")
+    if vehicles_output_file:
+        print(f"  Passenger vehicles file: {vehicles_output_file}")
+    if carriers_output_file:
+        print(f"  Freight carriers file: {carriers_output_file}")
+    if passenger_vehicle_types_output:
+        print(f"  Passenger vehicle types file: {passenger_vehicle_types_output}")
+    if freight_vehicle_types_output:
+        print(f"  Freight vehicle types file: {freight_vehicle_types_output}")
     print("  DONE")
 
 

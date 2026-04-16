@@ -12,7 +12,7 @@ from ..common import generate_fishnet_from_bounds
 from ..common import log_step_banner
 from ..common import log_substep_banner
 from ..common import read_vector
-from ..common import resolve_manifest_input_path
+from ..common import resolve_required_manifest_input
 from ..common import stage_county_boundaries
 from ..manifest.file_ops import file_entry
 
@@ -35,7 +35,7 @@ def run(
     staged_inmap_grid = None
     resolved_inmap_grid_id = None
     if inmap.enabled:
-        staged_inmap_grid = resolve_manifest_input_path(manifest_inputs["inmap_grid"], label="inmap_grid")
+        staged_inmap_grid = resolve_required_manifest_input(manifest_inputs, key="inmap_grid")
         log_substep_banner("2.1", "ensure InMAP grid id", logger=logger)
         staged_inmap_grid, resolved_inmap_grid_id = ensure_grid_cell_id(
             staged_inmap_grid,
@@ -46,7 +46,7 @@ def run(
         log_substep_banner("2.2", "constrain InMAP grid to network", logger=logger)
         staged_inmap_grid = constrain_grid_to_network(
             grid_path=staged_inmap_grid,
-            network_path=resolve_manifest_input_path(manifest_inputs["network"], label="network"),
+            network_path=resolve_required_manifest_input(manifest_inputs, key="network"),
             grid_id_col="inmap_cell_id",
             target_epsg=int(local_output_epsg),
             output_path=str((input_root / "inmap_grid" / "inmap_network_subset.parquet").resolve()),

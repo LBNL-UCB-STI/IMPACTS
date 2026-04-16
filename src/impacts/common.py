@@ -28,7 +28,7 @@ import shapely
 from shapely.geometry import LineString
 from tqdm import tqdm
 
-from .config.defaults import annualization_days as default_annualization_days
+from .config.defaults import representative_days_per_year as default_representative_days_per_year
 from .config.defaults import chunk_size as default_chunk_size
 from .config.defaults import grams_per_short_ton
 from .config.defaults import meters_per_mile as _METERS_PER_MILE
@@ -221,6 +221,30 @@ def resolve_emissions_skims_local_path(root: str) -> str:
         if match:
             return match
     raise FileNotFoundError(f"No BEAM skims emissions file found under configured BEAM output root: {resolved}")
+
+
+def resolve_beam_vehicle_types_local_path(root: str) -> Optional[str]:
+    resolved = required_local_path(root, "BEAM output root")
+    candidate_names = [
+        "vehicleTypes.csv.gz",
+        "vehicleTypes.csv",
+        "vehicleTypes.parquet",
+        "vehicleTypes--atlas--*.csv",
+        "vehicleTypes--frism--*.csv",
+        "vehicletypes--atlas--*.csv",
+        "vehicletypes--frism--*.csv",
+        "vehicleTypes_inventory.csv",
+    ]
+    candidates: list[Path] = []
+    resolved_path = Path(resolved)
+    for pattern in candidate_names:
+        candidates.extend(
+            candidate for candidate in resolved_path.rglob(pattern)
+            if candidate.is_file()
+        )
+    if not candidates:
+        return None
+    return str(max(candidates, key=lambda candidate: candidate.stat().st_mtime))
 
 
 def resolve_latest_events_local_path(root: str) -> Optional[str]:
@@ -694,6 +718,17 @@ def resolve_manifest_input_path(entry: Dict[str, Any], *, label: str) -> str:
         raise ValueError(f"Could not resolve input path for {label}") from exc
 
 
+def resolve_required_manifest_input(
+    manifest_inputs: Dict[str, Any],
+    *,
+    key: str,
+) -> str:
+    entry = manifest_inputs.get(key)
+    if not isinstance(entry, dict):
+        raise ValueError(f"Expected inputs.{key} in the inputs manifest.")
+    return resolve_manifest_input_path(entry, label=f"inputs.{key}")
+
+
 def prepared_table_target(input_root: Path, stem: str) -> Path:
     return input_root / "skims" / f"{stem}.parquet"
 
@@ -885,80 +920,6 @@ def prepare_skims_for_grid_allocation(
     else:
         raise ValueError("Prepared skims output must be .parquet or .csv.gz")
     return aggregated
-
-
-_SKIMS_DIMENSION_COLS = {
-    "linkId",
-    "vehicleTypeId",
-    "process",
-    "totTrips",
-    "totVMT",
-    "roadCategory",
-}
-
-
-def annualize_prepared_skims_for_grid_allocation(
-    prepared_skims_path: str,
-    output_path: str,
-    *,
-    network_path: str,
-    beam_length_col: str,
-    group_cols: Optional[list[str]] = None,
-    required_pollutants: Optional[list[str]] = None,
-    annualization_days: float = default_annualization_days,
-    population_sample: float = 1.0,
-) -> pd.DataFrame:
-    if annualization_days <= 0:
-        raise ValueError(f"Annualization days must be positive, got {annualization_days}")
-    if not 0 < population_sample <= 1:
-        raise ValueError(f"population_sample must be in the interval (0, 1], got {population_sample}")
-
-    prepared = read_table(prepared_skims_path)
-    link_lengths = read_table(network_path)
-    prepared_group_cols = group_cols or ["linkId", "vehicleTypeId", "process"]
-    required = required_pollutants or default_prepared_pollutants
-    missing_group_cols = [col for col in prepared_group_cols if col not in prepared.columns]
-    if missing_group_cols:
-        raise ValueError(f"Annualized skims missing required grouping columns: {missing_group_cols}")
-
-    if "linkId" not in link_lengths.columns or beam_length_col not in link_lengths.columns:
-        raise ValueError(
-            f"Link lengths table must include 'linkId' and '{beam_length_col}'."
-        )
-    network_cols = ["linkId", beam_length_col]
-    if "attributeOrigType" in link_lengths.columns:
-        network_cols.append("attributeOrigType")
-    link_lengths = link_lengths[network_cols].copy()
-    link_lengths[beam_length_col] = pd.to_numeric(link_lengths[beam_length_col], errors="coerce").fillna(0.0)
-    prepared = prepared.merge(link_lengths, how="left", on="linkId")
-    prepared[beam_length_col] = pd.to_numeric(prepared[beam_length_col], errors="coerce").fillna(0.0)
-    if "attributeOrigType" in prepared.columns:
-        prepared = prepared.rename(columns={"attributeOrigType": "roadCategory"})
-    scale_factor = 1.0 / population_sample
-
-    retained_dim_cols = [col for col in prepared.columns if col in _SKIMS_DIMENSION_COLS and col not in prepared_group_cols]
-    out = prepared[prepared_group_cols + retained_dim_cols].copy()
-    prepared_observations = pd.to_numeric(prepared.get("observations", 0.0), errors="coerce").fillna(0.0)
-    out["totTrips"] = prepared_observations * scale_factor * annualization_days
-    out["totVMT"] = out["totTrips"] * prepared[beam_length_col] / _METERS_PER_MILE
-    out = out.drop(columns=[col for col in [beam_length_col] if col in out.columns], errors="ignore")
-    for pollutant in required:
-        values = (
-            pd.to_numeric(prepared[pollutant], errors="coerce").fillna(0.0)
-            if pollutant in prepared.columns
-            else pd.Series(np.zeros(len(prepared), dtype=float), index=prepared.index)
-        )
-        out[f"tons_per_year_{pollutant}"] = values * scale_factor * annualization_days / grams_per_short_ton
-
-    output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    if output.suffix.lower() == ".parquet":
-        out.to_parquet(output, index=False)
-    elif output.name.lower().endswith(".csv.gz"):
-        out.to_csv(output, index=False, compression="gzip")
-    else:
-        raise ValueError("Annualized skims output must be .parquet or .csv.gz")
-    return out
 
 
 def stage_county_boundaries(

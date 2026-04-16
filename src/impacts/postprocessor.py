@@ -21,6 +21,8 @@ def postprocess_from_run_manifest(
     output_dir: str | Path,
     manifest_path: str | Path | None = None,
 ) -> Dict[str, Any]:
+    from .analysis.runner import run_from_run_manifest
+
     run_manifest = RunManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
     output_root = Path(output_dir).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -30,6 +32,9 @@ def postprocess_from_run_manifest(
 
     completion_path = output_root / "impacts_complete.txt"
     completion_path.write_text("End of impacts concluded.\n", encoding="utf-8")
+    analysis_outputs = run_from_run_manifest(
+        run_manifest_path=run_manifest_path,
+    )
 
     postprocess_manifest = {
         "contract_version": run_manifest.get("contract_version", "1"),
@@ -40,11 +45,12 @@ def postprocess_from_run_manifest(
             "name": "impacts_complete",
             "path": str(completion_path),
         },
+        "analysis_outputs": analysis_outputs,
         "validation": {
             "completed": True,
         },
         "notes": [
-            "Postprocessor intentionally left empty.",
+            "Postprocess runs maintained analysis outputs after workflow completion.",
             "End of impacts concluded.",
         ],
     }
@@ -58,19 +64,16 @@ def postprocess_from_run_manifest(
 
 def postprocess_from_settings(
     settings_path: str | Path,
-    workspace: str | Path,
     manifest_path: str | Path | None = None,
 ) -> Dict[str, Any]:
     from impacts.runner import run_from_settings
 
-    workspace_root = Path(workspace).resolve()
     settings = load_settings_from_yaml(settings_path)
     output_root = Path(
         resolve_path(settings.impacts.local_output_folder, settings_path) or settings.impacts.local_output_folder
     ).resolve()
     run_manifest = run_from_settings(
         settings_path=settings_path,
-        workspace=workspace_root,
         run_dispersion=True,
     )
     return postprocess_from_run_manifest(

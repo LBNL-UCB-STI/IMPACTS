@@ -45,8 +45,9 @@ from ..config.defaults import parked_processes
 from ..manifest.file_ops import file_entry
 from ..common import prepared_table_target
 from ..common import read_table
-from ..common import resolve_manifest_input_path
+from ..common import resolve_required_manifest_input
 from ..common import normalize_county_fips
+from .annualization import resolve_skims_annualization_factors
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +268,8 @@ def _calculate_emissions(
     *,
     rates_folder: str,
     pollutants_map: Dict[str, str],
-    annualization_days: float,
+    annualization_days_or_file: float | str,
+    vehicle_types_path: Optional[str],
     population_sample: float,
 ) -> pd.DataFrame:
     """Join emission rates onto zone-expanded skims and add tons_per_year_{pollutant}_{zone}_allocated columns.
@@ -277,7 +279,7 @@ def _calculate_emissions(
                parkingDurationInSecond_{zone}, and tripCount_{zone} columns.
         rates_folder: directory of emission rate CSV/parquet files.
         pollutants_map: canonical_pollutant → rate_file_pollutant_name mapping.
-        annualization_days: representative days per year.
+        annualization_days_or_file: representative days per year or a CSV path.
         population_sample: simulation sample fraction; emissions scaled by 1/population_sample.
     """
     from ..tools.beam.events_to_skims_emissions import read_rates_directory
@@ -309,7 +311,12 @@ def _calculate_emissions(
     ]
     rates_agg = rates.groupby(agg_cols, dropna=False)["rate"].mean().reset_index()
 
-    scale = annualization_days / population_sample / grams_per_short_ton
+    annualization_factors = resolve_skims_annualization_factors(
+        skims,
+        annualization_days_or_file=annualization_days_or_file,
+        vehicle_types_path=vehicle_types_path,
+    )
+    scale = annualization_factors / population_sample / grams_per_short_ton
     is_parked = skims["process"].isin(set(parked_processes))
 
     result = skims.copy()
@@ -342,7 +349,7 @@ def _calculate_emissions(
             else:
                 activity = result.loc[mask, f"tripCount_{zone}"].fillna(0.0)
 
-            result.loc[mask, col] = result.loc[mask, col] + rate * activity * scale
+            result.loc[mask, col] = result.loc[mask, col] + rate * activity * scale.loc[mask]
 
     sample_cols = [col for col in ["vehicleTypeId", "process", "countyfp", "roadCategory", "speedMph"] if col in result.columns]
     for canonical, matched_mask in matched_by_pollutant.items():
@@ -415,7 +422,8 @@ def build_skims_from_events(
     intersection_path: str,
     rates_folder: Optional[str] = None,
     pollutants_map: Optional[Dict[str, str]] = None,
-    annualization_days: Optional[float] = None,
+    annualization_days_or_file: Optional[float | str] = None,
+    vehicle_types_path: Optional[str] = None,
     population_sample: Optional[float] = None,
 ) -> pd.DataFrame:
     """Parse PathTraversal events and return a skims DataFrame.
@@ -448,12 +456,13 @@ def build_skims_from_events(
         before, len(skims),
     )
 
-    if rates_folder and pollutants_map and annualization_days is not None and population_sample is not None:
+    if rates_folder and pollutants_map and annualization_days_or_file is not None and population_sample is not None:
         skims = _calculate_emissions(
             skims,
             rates_folder=rates_folder,
             pollutants_map=pollutants_map,
-            annualization_days=annualization_days,
+            annualization_days_or_file=annualization_days_or_file,
+            vehicle_types_path=vehicle_types_path,
             population_sample=population_sample,
         )
 
@@ -474,18 +483,9 @@ def build_activity_table(skims: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def find_staged_events_path(input_root: Path, manifest_inputs: Optional[Dict[str, Any]] = None) -> Optional[str]:
+def find_staged_events_path(manifest_inputs: Optional[Dict[str, Any]] = None) -> Optional[str]:
     if manifest_inputs and "events_input" in manifest_inputs:
-        return resolve_manifest_input_path(manifest_inputs["events_input"], label="events_input")
-    search_roots = [input_root / "events", input_root]
-    patterns = ["*.events.parquet", "*.events.csv.gz", "*.events.csv"]
-    for root in search_roots:
-        if not root.exists():
-            continue
-        for pattern in patterns:
-            matches = sorted(path for path in root.rglob(pattern) if path.is_file())
-            if matches:
-                return str(matches[0])
+        return resolve_required_manifest_input(manifest_inputs, key="events_input")
     return None
 
 
@@ -501,10 +501,11 @@ def build_staged_skims_from_events(
     *,
     input_root: Path,
     network_path: str,
+    vehicle_types_path: Optional[str],
     intersection_path: str,
     manifest_inputs: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
-    events_path = find_staged_events_path(input_root, manifest_inputs)
+    events_path = find_staged_events_path(manifest_inputs)
     if not events_path:
         return None
 
@@ -512,6 +513,7 @@ def build_staged_skims_from_events(
     skims_df = build_skims_from_events(
         events_path,
         network_path=network_path,
+        vehicle_types_path=vehicle_types_path,
         intersection_path=intersection_path,
     )
     skims_path = _write_staged_skims(skims_df, input_root=input_root)
@@ -524,16 +526,17 @@ def prepare_events_inputs(
     manifest_inputs: Dict,
     input_root: Path,
     network_path: str,
+    vehicle_types_path: Optional[str],
     intersection_path: str,
     beam_length_col: str,
     prepared_skims_group_cols: List[str],
     pollutants: List[str],
     pollutants_map: Dict[str, str],
-    annualization_days: float,
+    annualization_days_or_file: float | str,
     population_sample: float,
 ) -> Optional[Dict[str, Any]]:
     """Build prepared skims/activity tables from registered BEAM events."""
-    events_path = find_staged_events_path(input_root, manifest_inputs)
+    events_path = find_staged_events_path(manifest_inputs)
     if not events_path:
         logger.info("Step 1: no events file found under %s", input_root)
         return None
@@ -541,6 +544,7 @@ def prepare_events_inputs(
     skims_df = build_skims_from_events(
         events_path,
         network_path=network_path,
+        vehicle_types_path=vehicle_types_path,
         intersection_path=intersection_path,
     )
     skims_path = _write_staged_skims(skims_df, input_root=input_root)
@@ -571,13 +575,14 @@ def prepare_events_inputs(
     skims_df = prepare_staged_skims_for_processing(
         input_root=input_root,
         skims_input_source=skims_path,
+        network_path=network_path,
+        vehicle_types_path=vehicle_types_path,
         beam_length_col=beam_length_col,
         prepared_skims_group_cols=list(prepared_skims_group_cols),
         pollutants=list(pollutants),
         pollutants_map=dict(pollutants_map),
-        annualization_days=float(annualization_days),
+        annualization_days_or_file=annualization_days_or_file,
         population_sample=float(population_sample),
-        network_path=network_path,
     )
     prepared_skims_path = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
 

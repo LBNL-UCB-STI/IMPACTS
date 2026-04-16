@@ -7,7 +7,9 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
+from .config.settings_builder import load_settings_from_yaml
 from .manifest.file_ops import load_structured_file
+from .manifest.file_ops import resolve_path
 from .manifest.file_ops import write_structured_file
 from .manifest.schema import InputsManifest
 from .manifest.schema import PipelineConfig
@@ -32,6 +34,20 @@ def _log_step_banner(label: str, name: str) -> None:
     logger.info("%s", banner)
 
 
+def _resolve_runtime_output_root(
+    *,
+    input_manifest: Dict[str, Any],
+) -> Path:
+    settings_source = input_manifest.get("settings_source")
+    if not settings_source:
+        raise ValueError("Input manifest is missing settings_source; cannot resolve impacts.local_output_folder.")
+    settings = load_settings_from_yaml(settings_source)
+    resolved = resolve_path(settings.impacts.local_output_folder, settings_source)
+    if not resolved:
+        raise ValueError("Could not resolve impacts.local_output_folder from settings.")
+    return Path(resolved).resolve()
+
+
 def run_from_input_manifest(
     input_manifest_path: str | Path,
     output_dir: str | Path,
@@ -49,30 +65,37 @@ def run_from_input_manifest(
     manifest_inputs = manifest.get("inputs", {}) or {}
     input_root = Path(manifest.get("input_dir", "")).resolve()
 
-    output_root = Path(output_dir).resolve()
-    outputs_dir = output_root / "outputs"
-    outputs_dir.mkdir(parents=True, exist_ok=True)
+    output_root = _resolve_runtime_output_root(
+        input_manifest=manifest,
+    )
+    output_root.mkdir(parents=True, exist_ok=True)
     logger.info("Loaded input manifest: %s", Path(input_manifest_path).resolve())
     logger.info("Output directory: %s", output_root)
 
     from .preprocessing.step3_integrate_grids import run as run_grid_intersection
     from .workflow.step1_process_emissions import run as run_emissions_processing
-    from .workflow.prepare_emissions_from_skims import resolve_prepared_skims_path
+    from .common import prepared_table_target
 
     _log_step_banner("PREPROCESS STEP 3", "network mapping and grid intersection")
-    grid_intersection_path, intersection_df = run_grid_intersection(pipeline, outputs_dir, input_root)
+    grid_intersection_path, intersection_df = run_grid_intersection(
+        pipeline,
+        output_root,
+        input_root,
+        manifest_inputs=manifest_inputs,
+    )
 
     _log_step_banner("STEP 1", "emissions processing")
     logger.info("Using Step 1 implementation: emissions_processing")
     emissions_outputs = run_emissions_processing(
         pipeline,
-        outputs_dir,
+        output_root,
         input_root,
         grid_intersection_path,
         intersection_df=intersection_df,
         manifest_inputs=manifest_inputs,
     )
-    prepared_skims_path = resolve_prepared_skims_path(input_root)
+    prepared_skims_candidate = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
+    prepared_skims_path = str(prepared_skims_candidate) if prepared_skims_candidate.exists() else None
 
     concentration_path: Optional[Path] = None
     aermod_concentration_path: Optional[Path] = None
@@ -88,7 +111,7 @@ def run_from_input_manifest(
             logger.info("Using Step 2 implementation: inmap_concentrations_and_export")
             _, _, concentration_path = run_inmap_dispersion(
                 pipeline=pipeline,
-                raw_dir=outputs_dir,
+                raw_dir=output_root,
                 emissions_input_path=emissions_outputs["beam_emissions_for_inmap"],
                 inmap_study_area_grid_path=emissions_outputs.get("beam_inmap_study_area_grid"),
             )
@@ -104,7 +127,7 @@ def run_from_input_manifest(
             logger.info("Using Step 3 implementation: aermod_concentrations_and_export")
             _, _, aermod_concentration_path = run_aermod_dispersion(
                 pipeline=pipeline,
-                raw_dir=outputs_dir,
+                raw_dir=output_root,
                 emissions_input_path=emissions_outputs["beam_emissions_for_aermod"],
             )
             logger.info("AERMOD concentrations complete: wrote %s", aermod_concentration_path)
@@ -120,7 +143,7 @@ def run_from_input_manifest(
             logger.info("Using Step 4 implementation: prepare_exposure")
             _, exposure_grid_path, population_distribution_path, population_counts_path = run_prepare_exposure(
                 pipeline=pipeline,
-                raw_dir=outputs_dir,
+                raw_dir=output_root,
                 inmap_concentrations_path=str(concentration_path),
                 aermod_concentrations_path=str(aermod_concentration_path) if aermod_concentration_path else None,
                 population_inputs=population_inputs,
@@ -140,7 +163,7 @@ def run_from_input_manifest(
         "model": "impacts",
         "input_manifest_path": str(Path(input_manifest_path).resolve()),
         "output_dir": str(output_root),
-        "outputs_dir": str(outputs_dir),
+        "outputs_dir": str(output_root),
         "command": " ".join(sys.argv),
         "image": "not_recorded",
         "outputs": {
@@ -203,20 +226,17 @@ def run_from_input_manifest(
 
 def run_from_settings(
     settings_path: str | Path,
-    workspace: str | Path,
     run_manifest_path: str | Path | None = None,
     run_dispersion: bool = False,
 ) -> Dict[str, Any]:
     from impacts.preprocessor import preprocess_workflow
 
-    workspace_root = Path(workspace).resolve()
     preprocess_manifest = preprocess_workflow(
         settings_path=settings_path,
-        staging_dir=workspace_root,
     )
     return run_from_input_manifest(
         input_manifest_path=preprocess_manifest["inputs_manifest_path"],
-        output_dir=workspace_root,
+        output_dir=preprocess_manifest["input_dir"],
         run_manifest_path=run_manifest_path,
         run_dispersion=run_dispersion,
     )

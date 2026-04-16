@@ -194,17 +194,17 @@ def _ingest_configured_sources(config: dict) -> dict:
             mapping.get("emfac_beam_fuel_map"),
             path_label="mapping.emfac_beam_fuel_map",
         )
-        mapping["emfac_beam_fuel_alternatives_map"] = _normalize_configured_path(
-            mapping.get("emfac_beam_fuel_alternatives_map"),
-            path_label="mapping.emfac_beam_fuel_alternatives_map",
+        mapping["emfac_fuel_alternatives_map"] = _normalize_configured_path(
+            mapping.get("emfac_fuel_alternatives_map"),
+            path_label="mapping.emfac_fuel_alternatives_map",
         )
-        mapping["beam_freight_class_alternatives_map"] = _normalize_configured_path(
-            mapping.get("beam_freight_class_alternatives_map"),
-            path_label="mapping.beam_freight_class_alternatives_map",
+        mapping["beam_class_alternatives_map"] = _normalize_configured_path(
+            mapping.get("beam_class_alternatives_map"),
+            path_label="mapping.beam_class_alternatives_map",
         )
-        mapping["beam_passenger_bodytype_alternatives_map"] = _normalize_configured_path(
-            mapping.get("beam_passenger_bodytype_alternatives_map"),
-            path_label="mapping.beam_passenger_bodytype_alternatives_map",
+        mapping["atlas_bodytype_alternatives_map"] = _normalize_configured_path(
+            mapping.get("atlas_bodytype_alternatives_map"),
+            path_label="mapping.atlas_bodytype_alternatives_map",
         )
         mapping["fastsim_atlas_bodytype_xwalk_file"] = _normalize_configured_path(
             mapping.get("fastsim_atlas_bodytype_xwalk_file"),
@@ -367,10 +367,10 @@ def _validate_workflow_settings(raw: dict, source_path: Path) -> None:
         ("mapping", "emfac_atlas_map"),
         ("mapping", "emfac_beam_class_map"),
         ("mapping", "emfac_beam_fuel_map"),
-        ("mapping", "emfac_beam_fuel_alternatives_map"),
-        ("mapping", "beam_freight_class_alternatives_map"),
+        ("mapping", "emfac_fuel_alternatives_map"),
+        ("mapping", "beam_class_alternatives_map"),
         ("vehicle_type_assignment_model_settings",),
-        ("mapping", "beam_passenger_bodytype_alternatives_map"),
+        ("mapping", "atlas_bodytype_alternatives_map"),
         ("mapping", "fastsim_atlas_bodytype_xwalk_file"),
         ("mapping", "fastsim_atlas_fuel_mapping_file"),
         ("mapping", "frism_atlas_map"),
@@ -389,10 +389,10 @@ def _validate_workflow_settings(raw: dict, source_path: Path) -> None:
         ("frism", "payloads_file"),
         ("frism", "tours_file"),
         ("fastsim",),
-        ("fastsim", "passenger"),
-        ("fastsim", "passenger", "vehicle_types_file"),
-        ("fastsim", "freight"),
-        ("fastsim", "freight", "vehicle_types_file"),
+        ("fastsim", "passenger_vehicle_types_file"),
+        ("fastsim", "freight_vehicle_types_file"),
+        ("fastsim", "ldv_fastsim_data_folder"),
+        ("fastsim", "mhdv_fastsim_data_folder"),
     ]
     missing = []
     for path in required_paths:

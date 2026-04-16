@@ -26,7 +26,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     preprocess = subparsers.add_parser("preprocess", help="Stage explicit inputs and write inputs_manifest.yaml")
     preprocess.add_argument("--config", required=True)
-    preprocess.add_argument("--staging-dir", required=True)
     preprocess.add_argument("--manifest-path")
 
     run = subparsers.add_parser("run", help="Run the maintained impacts pipeline from staged inputs only")
@@ -34,7 +33,6 @@ def build_parser() -> argparse.ArgumentParser:
     run_group.add_argument("--input-manifest")
     run_group.add_argument("--config")
     run.add_argument("--output-dir")
-    run.add_argument("--workspace")
     run.add_argument("--run-manifest")
 
     postprocess = subparsers.add_parser("postprocess", help="Publish the canonical impacts exposure table artifact")
@@ -42,12 +40,13 @@ def build_parser() -> argparse.ArgumentParser:
     postprocess_group.add_argument("--run-manifest")
     postprocess_group.add_argument("--config")
     postprocess.add_argument("--output-dir")
-    postprocess.add_argument("--workspace")
     postprocess.add_argument("--postprocess-manifest")
+
+    analysis = subparsers.add_parser("analysis", help="Run maintained analysis outputs from workflow artifacts")
+    analysis.add_argument("--config", required=True)
 
     pipeline = subparsers.add_parser("pipeline", help="Run preprocess, run, and postprocess end-to-end")
     pipeline.add_argument("--config", required=True)
-    pipeline.add_argument("--workspace", required=True)
     derive_settings = subparsers.add_parser(
         "derive_settings_from_pilates",
         help="Generate an impacts settings file from main PILATES settings and a thin impacts overlay.",
@@ -95,11 +94,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     aggregate_emfac_activity = subparsers.add_parser(
         "aggregate_emfac_activity",
-        help="Aggregate EMFAC county-year totVMT and totTrips across one or more files.",
+        help="Aggregate EMFAC county-year activity and write annual totals with explicit units.",
     )
     aggregate_emfac_activity.add_argument("--input", dest="inputs", action="append", required=True)
     aggregate_emfac_activity.add_argument("--output", required=True)
     aggregate_emfac_activity.add_argument("--county-col", default="countyfp")
+    aggregate_emfac_activity.add_argument("--vehicle-category-col", default="vehicleCategory")
     aggregate_emfac_activity.add_argument("--year-col", default="year")
     aggregate_emfac_activity.add_argument("--vmt-col", default="totVMT")
     aggregate_emfac_activity.add_argument("--trips-col", default="totTrips")
@@ -140,7 +140,6 @@ def main(argv: list[str] | None = None) -> int:
 
         preprocess_workflow(
             settings_path=args.config,
-            staging_dir=args.staging_dir,
             manifest_path=args.manifest_path,
         )
         return 0
@@ -158,11 +157,8 @@ def main(argv: list[str] | None = None) -> int:
                 run_manifest_path=args.run_manifest,
             )
         else:
-            if not args.workspace:
-                parser.error("--workspace is required with --config")
             run_from_settings(
                 settings_path=args.config,
-                workspace=args.workspace,
                 run_manifest_path=args.run_manifest,
             )
         return 0
@@ -180,11 +176,8 @@ def main(argv: list[str] | None = None) -> int:
                 manifest_path=args.postprocess_manifest,
             )
         else:
-            if not args.workspace:
-                parser.error("--workspace is required with --config")
             postprocess_from_settings(
                 settings_path=args.config,
-                workspace=args.workspace,
                 manifest_path=args.postprocess_manifest,
             )
         return 0
@@ -195,23 +188,29 @@ def main(argv: list[str] | None = None) -> int:
         from impacts.runner import run_from_input_manifest
 
         _print_pipeline_banner()
-        workspace = Path(args.workspace).resolve()
         settings = load_settings_from_yaml(args.config)
         downstream_output_root = Path(
             resolve_path(settings.impacts.local_output_folder, args.config) or settings.impacts.local_output_folder
         ).resolve()
         preprocess_manifest = preprocess_workflow(
             settings_path=args.config,
-            staging_dir=workspace,
         )
         run_manifest = run_from_input_manifest(
             input_manifest_path=preprocess_manifest["inputs_manifest_path"],
-            output_dir=workspace,
+            output_dir=preprocess_manifest["input_dir"],
             run_dispersion=True,
         )
         postprocess_from_run_manifest(
             run_manifest_path=run_manifest["run_manifest_path"],
             output_dir=downstream_output_root,
+        )
+        return 0
+
+    if args.command == "analysis":
+        from impacts.analysis.runner import run_from_settings
+
+        run_from_settings(
+            settings_path=args.config,
         )
         return 0
 

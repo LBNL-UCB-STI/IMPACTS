@@ -35,19 +35,19 @@ CLASS_FUEL_ALTERNATIVES = {
     ("T7 POAK Class 8", "NG"): ("T7 POLA Class 8", "NG"),
 }
 INVENTORY_POLLUTANT_MAP = {
-    "ch4_gram": "ch4",
-    "co_gram": "co",
-    "co2_gram": "co2",
-    "hc_gram": "hc",
-    "nh3_gram": "nh3",
-    "n2o_gram": "n2o",
-    "nox_gram": "nox",
-    "pm_gram": "pm",
-    "pm10_gram": "pm10",
-    "pm25_gram": "pm25",
-    "rog_gram": "rog",
-    "sox_gram": "sox",
-    "tog_gram": "tog",
+    "ch4_gram": "ch4_{process}_short_tons_per_year",
+    "co_gram": "co_{process}_short_tons_per_year",
+    "co2_gram": "co2_{process}_short_tons_per_year",
+    "hc_gram": "hc_{process}_short_tons_per_year",
+    "nh3_gram": "nh3_{process}_short_tons_per_year",
+    "n2o_gram": "n2o_{process}_short_tons_per_year",
+    "nox_gram": "nox_{process}_short_tons_per_year",
+    "pm_gram": "pm_{process}_short_tons_per_year",
+    "pm10_gram": "pm10_{process}_short_tons_per_year",
+    "pm25_gram": "pm25_{process}_short_tons_per_year",
+    "rog_gram": "rog_{process}_short_tons_per_year",
+    "sox_gram": "sox_{process}_short_tons_per_year",
+    "tog_gram": "tog_{process}_short_tons_per_year",
 }
 SPEED_MPH_PROCESSES = {"RUNEX", "PMBW", "PTOEX"}
 TIME_PROCESSES = {"STREX"}
@@ -56,6 +56,77 @@ OTHER_PROCESSES = {"DIURN", "HOTSOAK", "IDLEX", "PMTW", "RUNLOSS"}
 
 def _format_numeric_series(values: pd.Series) -> pd.Series:
     return values.map(lambda value: f"{float(value):g}" if pd.notna(value) else pd.NA)
+
+
+def _available_pollutant_columns(frame: pd.DataFrame) -> list[str]:
+    return [column for column in POLLUTANT_COLUMNS if column in frame.columns]
+
+
+def _all_zero_pollutant_row_mask(frame: pd.DataFrame) -> pd.Series:
+    pollutant_columns = _available_pollutant_columns(frame)
+    if not pollutant_columns:
+        return pd.Series(False, index=frame.index)
+
+    numeric = frame[pollutant_columns].apply(pd.to_numeric, errors="coerce")
+    has_any_value = numeric.notna().any(axis=1)
+    has_any_nonzero = numeric.fillna(0.0).ne(0.0).any(axis=1)
+    return has_any_value & ~has_any_nonzero
+
+
+def _zero_row_examples(frame: pd.DataFrame, *, limit: int = 10) -> list[dict[str, object]]:
+    mask = _all_zero_pollutant_row_mask(frame)
+    if not mask.any():
+        return []
+
+    columns = [
+        column
+        for column in ["county", "vehicleCategory", "fuel", "modelYear", "process", ACTIVITY_COLUMN, "roadCategory"]
+        if column in frame.columns
+    ]
+    return frame.loc[mask, columns].head(limit).to_dict(orient="records")
+
+
+def _replace_all_zero_pollutant_rows_with_missing(
+    frame: pd.DataFrame,
+    *,
+    label: str,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    pollutant_columns = _available_pollutant_columns(frame)
+    if not pollutant_columns:
+        return frame, {"label": label, "rows": 0, "examples": []}
+
+    result = frame.copy()
+    zero_mask = _all_zero_pollutant_row_mask(result)
+    if not zero_mask.any():
+        return result, {"label": label, "rows": 0, "examples": []}
+
+    result.loc[zero_mask, pollutant_columns] = pd.NA
+    summary = {
+        "label": label,
+        "rows": int(zero_mask.sum()),
+        "examples": _zero_row_examples(frame),
+    }
+    print(
+        f"      Warning: treating {summary['rows']:,} all-zero pollutant row(s) as unresolved coverage in {label}."
+    )
+    for example in summary["examples"][:5]:
+        print(f"        Example: {example}")
+    return result, summary
+
+
+def _assert_no_all_zero_pollutant_rows(frame: pd.DataFrame, *, label: str) -> None:
+    zero_mask = _all_zero_pollutant_row_mask(frame)
+    if not zero_mask.any():
+        return
+
+    examples = _zero_row_examples(frame)
+    raise ValueError(
+        f"{label} still contains {int(zero_mask.sum()):,} all-zero pollutant row(s). "
+        "This means matching EMFAC rate rows were found but every pollutant rate stayed zero, "
+        "so the fill pipeline could not recover valid coverage. Check the source project-analysis "
+        "rates and inventory rows for these keys, especially processes like IDLEX. "
+        f"Example rows: {examples}"
+    )
 
 
 def _normalize_activity_column(frame: pd.DataFrame, *, column: str = ACTIVITY_COLUMN) -> pd.DataFrame:
@@ -70,7 +141,7 @@ def _load_parquet(path: str) -> pd.DataFrame:
 
 
 def _missing_rate_summary(frame: pd.DataFrame) -> dict[str, object]:
-    available_columns = [column for column in POLLUTANT_COLUMNS if column in frame.columns]
+    available_columns = _available_pollutant_columns(frame)
     if not available_columns:
         return {
             "row_count": int(len(frame)),
@@ -80,12 +151,15 @@ def _missing_rate_summary(frame: pd.DataFrame) -> dict[str, object]:
             "missing_rate_cells": 0,
             "rows_with_any_rate": 0,
             "rows_with_no_rates": int(len(frame)),
+            "rows_with_all_zero_rates": 0,
             "missing_by_pollutant": {},
             "missing_rows_by_process": {},
         }
 
-    non_null = frame[available_columns].notna()
-    rows_with_any_rate = non_null.any(axis=1)
+    numeric = frame[available_columns].apply(pd.to_numeric, errors="coerce")
+    non_null = numeric.notna()
+    zero_rows = _all_zero_pollutant_row_mask(frame)
+    rows_with_any_rate = non_null.any(axis=1) & ~zero_rows
     return {
         "row_count": int(len(frame)),
         "pollutant_column_count": len(available_columns),
@@ -94,12 +168,13 @@ def _missing_rate_summary(frame: pd.DataFrame) -> dict[str, object]:
         "missing_rate_cells": int((~non_null).sum().sum()),
         "rows_with_any_rate": int(rows_with_any_rate.sum()),
         "rows_with_no_rates": int((~rows_with_any_rate).sum()),
+        "rows_with_all_zero_rates": int(zero_rows.sum()),
         "missing_by_pollutant": {
-            column: int(frame[column].isna().sum())
+            column: int(numeric[column].isna().sum())
             for column in available_columns
         },
         "missing_rows_by_process": {
-            str(process): int((~group[available_columns].notna().any(axis=1)).sum())
+            str(process): int((~group[available_columns].apply(pd.to_numeric, errors="coerce").notna().any(axis=1) | _all_zero_pollutant_row_mask(group)).sum())
             for process, group in frame.groupby("process", dropna=False)
         }
         if "process" in frame.columns
@@ -215,8 +290,8 @@ def _build_inventory_fill_frame(inventory: pd.DataFrame, *, include_county: bool
         process_frame["roadCategory"] = pd.NA
 
         has_values = False
-        for output_column, inventory_base in INVENTORY_POLLUTANT_MAP.items():
-            inventory_column = f"{inventory_base}_{process_key}"
+        for output_column, inventory_pattern in INVENTORY_POLLUTANT_MAP.items():
+            inventory_column = inventory_pattern.format(process=process_key)
             if inventory_column in frame.columns:
                 process_frame[output_column] = pd.to_numeric(frame[inventory_column], errors="coerce")
                 has_values = True
@@ -250,9 +325,11 @@ def fill_project_analysis_rates(
         (_normalize_activity_column(project_analysis_prdust), SURFACE_KEYS),
     ]:
         surface = _merge_rate_columns(surface, rates, keys=keys)
+        surface, _ = _replace_all_zero_pollutant_rows_with_missing(surface, label="rate merge")
 
     study_inventory_rates = _build_inventory_fill_frame(emissions_inventory, include_county=True)
     surface = _merge_rate_columns(surface, study_inventory_rates, keys=BASE_KEYS)
+    surface, _ = _replace_all_zero_pollutant_rows_with_missing(surface, label="study-area inventory fill")
 
     statewide_inventory_rates = _build_inventory_fill_frame(statewide_inventory, include_county=False)
     statewide_surface = surface.merge(
@@ -266,6 +343,10 @@ def fill_project_analysis_rates(
         if fill_column in statewide_surface.columns:
             statewide_surface[column] = statewide_surface[fill_column].combine_first(statewide_surface.get(column))
             statewide_surface = statewide_surface.drop(columns=fill_column)
+    statewide_surface, _ = _replace_all_zero_pollutant_rows_with_missing(
+        statewide_surface,
+        label="statewide inventory fill",
+    )
     return statewide_surface
 
 
@@ -646,6 +727,7 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
         emissions_inventory=emissions_inventory,
         statewide_inventory=statewide_inventory,
     )
+    zero_row_cleanups: list[dict[str, object]] = []
     print("    3.2 Apply class-fuel donor mapping for unresolved rows and refill")
     filled = _fill_with_class_fuel_alternatives(
         filled,
@@ -656,6 +738,8 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
         emissions_inventory=emissions_inventory,
         statewide_inventory=statewide_inventory,
     )
+    filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label="class-fuel donor refill")
+    zero_row_cleanups.append(zero_summary)
     print("    3.3 Apply speed fallback for unresolved rows and refill")
     filled = _fill_with_speed_fallback(
         filled,
@@ -667,6 +751,8 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
         emissions_inventory=emissions_inventory,
         statewide_inventory=statewide_inventory,
     )
+    filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label="speed fallback refill")
+    zero_row_cleanups.append(zero_summary)
     print("    3.4 Apply model-year donor fallback for unresolved rows and refill")
     filled = _fill_with_model_year_donors(
         filled,
@@ -677,6 +763,8 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
         emissions_inventory=emissions_inventory,
         statewide_inventory=statewide_inventory,
     )
+    filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label="model-year donor refill")
+    zero_row_cleanups.append(zero_summary)
     print("    3.5 Apply final speed fallback for unresolved rows and refill")
     filled = _fill_with_speed_fallback(
         filled,
@@ -688,10 +776,13 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
         emissions_inventory=emissions_inventory,
         statewide_inventory=statewide_inventory,
     )
+    filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label="final speed fallback refill")
+    zero_row_cleanups.append(zero_summary)
     filled, source_filter_summary = _filter_unresolved_rows_without_source_coverage(
         filled,
         project_analysis_source=project_analysis_source,
     )
+    _assert_no_all_zero_pollutant_rows(filled, label="Filled project-analysis rates")
     _write_parquet(filled, workflow["paths"]["project_analysis"])
     write_trace(
         workflow,
@@ -706,6 +797,7 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
             "statewide_inventory": frame_summary(statewide_inventory, name="statewide_inventory"),
             "filled_surface": frame_summary(filled, name="filled_project_analysis"),
             "filled_surface_missing_rates": _missing_rate_summary(filled),
+            "zero_row_cleanups": zero_row_cleanups,
             "source_coverage_filter": source_filter_summary,
         },
     )

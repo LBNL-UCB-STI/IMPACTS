@@ -32,7 +32,6 @@ def _validate_configured_local_path(
 
 def build_inputs_manifest(
     settings_path: str | Path,
-    staging_dir: str | Path,
 ) -> Dict[str, Any]:
     config_path = Path(settings_path).resolve()
     settings = load_settings_from_yaml(config_path)
@@ -41,9 +40,10 @@ def build_inputs_manifest(
     inmap = settings.impacts.dispersions.inmap
     aermod = settings.impacts.dispersions.aermod
 
-    workspace_root = Path(staging_dir).resolve()
     input_root = Path(resolve_path(settings.impacts.local_input_folder, config_path)).resolve()
+    output_root = Path(resolve_path(settings.impacts.local_output_folder, config_path)).resolve()
     input_root.mkdir(parents=True, exist_ok=True)
+    output_root.mkdir(parents=True, exist_ok=True)
 
     manifest_inputs: Dict[str, Any] = {}
     settings_entry_path = register_local_input(
@@ -62,6 +62,7 @@ def build_inputs_manifest(
         config_path=config_path,
     )
     staged_activity_totals = step1_outputs["staged_activity_totals"]
+    staged_annualization_days_or_file = step1_outputs["staged_annualization_days_or_file"]
     staged_isrm = step1_outputs["staged_isrm"]
     staged_isrm_nox_to_no2_ratios_file = step1_outputs["staged_isrm_nox_to_no2_ratios_file"]
     staged_asrv_patterns_file = step1_outputs["staged_asrv_patterns_file"]
@@ -118,9 +119,9 @@ def build_inputs_manifest(
         "contract_version": CONTRACT_VERSION,
         "model": "impacts",
         "settings_source": str(config_path),
-        "staging_dir": str(workspace_root),
+        "staging_dir": str(input_root),
         "input_dir": str(input_root),
-        "inputs_manifest_path": str(workspace_root / "inputs_manifest.yaml"),
+        "inputs_manifest_path": str(output_root / "inputs_manifest.yaml"),
         "maintained_execution_path": maintained_execution_path,
         "inputs": manifest_inputs,
         "pipeline": {
@@ -148,10 +149,10 @@ def build_inputs_manifest(
             "mapping_columns": mapping_columns,
             "prepared_skims_group_cols": list(emissions.prepared_skims_group_cols),
             "pollutants": list(emissions.pollutants),
-            "pollutants_map": dict(emissions.pollutants_map),
+            "source_pollutants": list(emissions.source_pollutants),
             "activity_totals_file": staged_activity_totals,
             "activity_totals_columns": dict(emissions.activity_totals_columns),
-            "annualization_days": float(emissions.annualization_days),
+            "annualization_days_or_file": staged_annualization_days_or_file,
             "population_sample": float(emissions.population_sample),
         },
         "pilates_contract": {
@@ -180,7 +181,6 @@ def build_inputs_manifest(
 
 def preprocess_workflow(
     settings_path: str | Path,
-    staging_dir: str | Path,
     manifest_path: str | Path | None = None,
 ) -> Dict[str, Any]:
     logging.basicConfig(
@@ -188,7 +188,7 @@ def preprocess_workflow(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         force=False,
     )
-    manifest = build_inputs_manifest(settings_path=settings_path, staging_dir=staging_dir)
+    manifest = build_inputs_manifest(settings_path=settings_path)
     output_manifest = Path(manifest_path) if manifest_path else Path(manifest["inputs_manifest_path"])
     manifest["inputs_manifest_path"] = str(output_manifest)
     typed_manifest = InputsManifest.from_dict(manifest)

@@ -18,7 +18,7 @@ from ..common import log_step_banner
 from ..common import log_substep_banner
 from ..common import read_table
 from ..common import read_vector
-from ..config.defaults import annualization_days as default_annualization_days
+from ..config.defaults import representative_days_per_year as default_representative_days_per_year
 from ..config.defaults import grams_per_short_ton
 from ..manifest.schema import PipelineConfig
 from . import _step_label
@@ -38,6 +38,7 @@ _AERMOD_SUPPORT_COLUMNS = {
     "BC": "has_aermod_bc",
     "NO2": "has_aermod_no2",
 }
+_AERMOD_SUPPORT_COLUMN_SET = set(_AERMOD_SUPPORT_COLUMNS.values())
 
 # Maps canonical pollutant names (from emissions columns) to output concentration column names.
 # Mirrors the InMAP naming convention used in step 2 so impacts steps work uniformly.
@@ -52,7 +53,7 @@ _POLLUTANT_TO_CONCENTRATION_COLUMN: dict[str, str] = {
 
 _KERNEL_RADIUS_METERS = 4500.0
 _ASRV_SOURCE_RATE_G_PER_S_M2 = 0.1
-_ASRV_ACTIVE_DAYS_PER_YEAR = default_annualization_days
+_ASRV_ACTIVE_DAYS_PER_YEAR = default_representative_days_per_year
 
 
 class _Kernel(TypedDict):
@@ -727,12 +728,46 @@ def _write_outputs(gdf: gpd.GeoDataFrame, output_path: Path) -> None:
     gdf.to_file(output_path.with_suffix(".gpkg"), driver="GPKG")
 
 
+def _validate_aermod_concentrations_schema(
+    concentrations_df: pd.DataFrame,
+    *,
+    target_id_col: str,
+) -> None:
+    if target_id_col not in concentrations_df.columns:
+        raise ValueError(
+            "AERMOD concentrations table is missing its target id column. "
+            f"Expected '{target_id_col}'."
+        )
+
+    concentration_cols = [
+        col for col in concentrations_df.columns
+        if col != target_id_col and col not in _AERMOD_SUPPORT_COLUMN_SET
+    ]
+    for col in concentration_cols:
+        if not pd.api.types.is_numeric_dtype(concentrations_df[col]):
+            raise TypeError(
+                "AERMOD concentration column has a non-numeric dtype. "
+                f"Column '{col}' has dtype {concentrations_df[col].dtype}."
+            )
+
+    for col in _AERMOD_SUPPORT_COLUMN_SET.intersection(concentrations_df.columns):
+        if pd.api.types.is_numeric_dtype(concentrations_df[col]):
+            values = pd.Series(concentrations_df[col]).dropna()
+            invalid = values[~values.isin([0, 1, 0.0, 1.0, True, False])]
+            if not invalid.empty:
+                raise TypeError(
+                    "AERMOD support mask contains numeric values outside boolean 0/1. "
+                    f"Column '{col}' sample_invalid={invalid.head(5).tolist()}."
+                )
+
+
 def _attach_concentrations(
     *,
     target_grid: gpd.GeoDataFrame,
     concentrations_df: pd.DataFrame,
     target_id_col: str,
 ) -> gpd.GeoDataFrame:
+    _validate_aermod_concentrations_schema(concentrations_df, target_id_col=target_id_col)
     result = target_grid.copy()
     concentration_cols = [col for col in concentrations_df.columns if col != target_id_col]
     if not concentration_cols:
@@ -740,8 +775,7 @@ def _attach_concentrations(
     lookup = concentrations_df.set_index(target_id_col)
     target_ids = result[target_id_col].to_numpy()
     for col in concentration_cols:
-        support_col = _AERMOD_SUPPORT_COLUMNS.get(col)
-        if support_col or col in _AERMOD_SUPPORT_COLUMNS.values():
+        if col in _AERMOD_SUPPORT_COLUMN_SET:
             result[col] = lookup[col].reindex(target_ids, fill_value=False).to_numpy(dtype=bool)
         else:
             result[col] = lookup[col].reindex(target_ids, fill_value=0.0).to_numpy(dtype=np.float64)

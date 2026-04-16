@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 
 _COUNTY_CORRECTION_COLUMNS = {
     "county_fips": "countyfp",
-    "tot_vmt": "totVMT",
-    "tot_trips": "totTrips",
+    "tot_vmt": "tot_vmt_vehicle_miles_per_year",
+    "tot_trips": "tot_trips_per_year",
 }
 _VMT_PROCESSES = {"RUNEX", "PMBW", "PMTW", "PRDUST", "RUNLOSS"}
 _TRIP_PROCESSES = {"HOTSOAK", "DIURN", "STREX"}
@@ -318,7 +318,7 @@ def run(
         prepared_skims_group_cols=list(pipeline.prepared_skims_group_cols),
         pollutants=list(pipeline.pollutants),
         pollutants_map=dict(pipeline.pollutants_map),
-        annualization_days=float(pipeline.annualization_days),
+        annualization_days_or_file=pipeline.annualization_days_or_file,
         population_sample=float(pipeline.population_sample),
         manifest_inputs=manifest_inputs,
     )

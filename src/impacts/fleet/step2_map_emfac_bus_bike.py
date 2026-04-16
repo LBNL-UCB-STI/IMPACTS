@@ -81,7 +81,7 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
     activity = read_table(
         emfac_config["activity_file"],
         dtype=None,
-        columns=_EMFAC_KEY_COLUMNS + ["population", "total_vmt"],
+        columns=_EMFAC_KEY_COLUMNS + ["population_vehicles", "total_vmt_vehicle_miles_per_year"],
     )
     fleet = read_table(
         emfac_config["fleet_file"],
@@ -90,7 +90,9 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
     )[_EMFAC_KEY_COLUMNS].drop_duplicates()
 
     activity_agg = (
-        activity.groupby(_EMFAC_KEY_COLUMNS, dropna=False, as_index=False)[["population", "total_vmt"]]
+        activity.groupby(_EMFAC_KEY_COLUMNS, dropna=False, as_index=False)[
+            ["population_vehicles", "total_vmt_vehicle_miles_per_year"]
+        ]
         .sum()
     )
     valid_keys = rates.merge(fleet, on=_EMFAC_KEY_COLUMNS, how="inner")
@@ -111,12 +113,12 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
 def _load_emfac_class_targets(config: dict[str, Any]) -> dict[str, str]:
     class_map_path = config["mapping"]["emfac_beam_class_map"]
     class_map = read_table(class_map_path, dtype=None)
-    for column_name in ["group", "emfac", "beam"]:
+    for column_name in ["group", "emfac", "beamCategory"]:
         _require_column(class_map, column_name, "EMFAC BEAM class mapping file")
 
     prepared = class_map.copy()
     prepared["group_key"] = prepared["group"].apply(_normalize_lower)
-    prepared["beam_key"] = prepared["beam"].apply(_normalize_text)
+    prepared["beam_key"] = prepared["beamCategory"].apply(_normalize_text)
     matched = prepared[prepared["beam_key"].isin(["Bike", "MediumDutyPassenger"])].copy()
 
     bike_match = matched[(matched["group_key"] == "passenger") & (matched["beam_key"] == "Bike")]
@@ -194,7 +196,15 @@ def _select_best_emfac_candidate(
     matched["modelYearEnd"] = year_keys.apply(lambda key: key[1])
     matched["modelYearStart"] = year_keys.apply(lambda key: key[2])
     matched = matched.sort_values(
-        by=["population", "total_vmt", "modelYearTier", "modelYearEnd", "modelYearStart", "fuel", "vehicleCategory"],
+        by=[
+            "population_vehicles",
+            "total_vmt_vehicle_miles_per_year",
+            "modelYearTier",
+            "modelYearEnd",
+            "modelYearStart",
+            "fuel",
+            "vehicleCategory",
+        ],
         ascending=[False, False, False, False, False, True, True],
         kind="mergesort",
     )

@@ -14,7 +14,7 @@ from ..common import log_step_banner
 from ..common import log_substep_banner
 from ..common import read_table
 from ..common import read_vector
-from ..common import resolve_manifest_input_path
+from ..common import resolve_required_manifest_input
 from ..manifest.schema import PipelineConfig
 from . import _step_label
 
@@ -54,10 +54,15 @@ def _prepare_inmap_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 
 def _prepare_aermod_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    for col in ("PrimaryPM25", "BC", "NO2"):
-        if col not in gdf.columns:
-            raise ValueError(f"AERMOD concentrations must include '{col}'.")
+    if _AERMOD_SOURCE_ID_COLUMN not in gdf.columns:
+        raise ValueError(f"AERMOD concentrations must include '{_AERMOD_SOURCE_ID_COLUMN}'.")
     prepared = gdf.rename(columns={"PrimaryPM25": "aermod_PrimaryPM25", "BC": "aermod_BC", "NO2": "aermod_NO2"})
+    if "aermod_PrimaryPM25" not in prepared.columns:
+        prepared["aermod_PrimaryPM25"] = np.nan
+    if "aermod_BC" not in prepared.columns:
+        prepared["aermod_BC"] = np.nan
+    if "aermod_NO2" not in prepared.columns:
+        prepared["aermod_NO2"] = np.nan
     prepared["aermod_SecondaryPM25"] = 0.0  # AERMOD models primary dispersion only
     support_map = {
         "has_aermod_primarypm25": "has_aermod_primarypm25",
@@ -105,6 +110,18 @@ def _build_full_exposure_grid(
         result["has_aermod_primarypm25"] = False
         result["has_aermod_bc"] = False
         result["has_aermod_no2"] = False
+
+    for col, default in (
+        ("aermod_PrimaryPM25", np.nan),
+        ("aermod_SecondaryPM25", 0.0),
+        ("aermod_BC", np.nan),
+        ("aermod_NO2", np.nan),
+        ("has_aermod_primarypm25", False),
+        ("has_aermod_bc", False),
+        ("has_aermod_no2", False),
+    ):
+        if col not in result.columns:
+            result[col] = default
 
     for col in ("inmap_PrimaryPM25", "inmap_SecondaryPM25", "aermod_PrimaryPM25", "aermod_SecondaryPM25", "aermod_BC", "aermod_NO2"):
         if col in result.columns:
@@ -161,7 +178,16 @@ def _write_exposure_grid(
 
 
 def _load_population_table(entry: dict[str, Any], label: str) -> pd.DataFrame:
-    return read_table(resolve_manifest_input_path(entry, label=f"population_inputs.{label}"))
+    return read_table(resolve_required_manifest_input({label: entry}, key=label))
+
+
+def _normalize_identity_field(df: pd.DataFrame, *, field: str, label: str) -> pd.DataFrame:
+    result = df.copy()
+    if field not in result.columns and result.index.name == field:
+        result = result.reset_index()
+    if field not in result.columns:
+        raise ValueError(f"{label} table is missing required identity field: {field}")
+    return result
 
 
 def _prepare_population_table(
@@ -170,15 +196,16 @@ def _prepare_population_table(
     households_df: pd.DataFrame,
     target_epsg: int,
 ) -> gpd.GeoDataFrame:
-    missing_person_cols = [col for col in _PERSON_REQUIRED_COLUMNS if col not in persons_df.columns]
+    persons = _normalize_identity_field(persons_df, field="person_id", label="Persons")
+    persons = _normalize_identity_field(persons, field="household_id", label="Persons")
+    households = _normalize_identity_field(households_df, field="household_id", label="Households")
+
+    missing_person_cols = [col for col in _PERSON_REQUIRED_COLUMNS if col not in persons.columns]
     if missing_person_cols:
         raise ValueError(f"Persons table is missing required columns: {missing_person_cols}")
-    missing_household_cols = [col for col in _HOUSEHOLD_REQUIRED_COLUMNS if col not in households_df.columns]
+    missing_household_cols = [col for col in _HOUSEHOLD_REQUIRED_COLUMNS if col not in households.columns]
     if missing_household_cols:
         raise ValueError(f"Households table is missing required columns: {missing_household_cols}")
-
-    persons = persons_df.copy()
-    households = households_df.copy()
     if "Unnamed: 0" in persons.columns:
         persons = persons.drop(columns=["Unnamed: 0"])
     if "Unnamed: 0" in households.columns:

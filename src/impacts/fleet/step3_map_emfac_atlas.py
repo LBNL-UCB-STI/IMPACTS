@@ -66,7 +66,7 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
     activity = read_table(
         emfac_config["activity_file"],
         dtype=None,
-        columns=_EMFAC_KEY_COLUMNS + ["population", "total_vmt"],
+        columns=_EMFAC_KEY_COLUMNS + ["population_vehicles", "total_vmt_vehicle_miles_per_year"],
     )
     fleet = read_table(
         emfac_config["fleet_file"],
@@ -75,7 +75,9 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
     )[_EMFAC_KEY_COLUMNS].drop_duplicates()
 
     candidates = (
-        activity.groupby(_EMFAC_KEY_COLUMNS, dropna=False, as_index=False)[["population", "total_vmt"]]
+        activity.groupby(_EMFAC_KEY_COLUMNS, dropna=False, as_index=False)[
+            ["population_vehicles", "total_vmt_vehicle_miles_per_year"]
+        ]
         .sum()
         .merge(rates, on=_EMFAC_KEY_COLUMNS, how="inner")
         .merge(fleet, on=_EMFAC_KEY_COLUMNS, how="inner")
@@ -83,10 +85,14 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
     )
     if candidates.empty:
         raise ValueError("No valid EMFAC candidates remain after intersecting passenger rates, activity, and fleet inputs")
-    total_vmt = pd.to_numeric(candidates["total_vmt"], errors="coerce").fillna(0.0).sum()
+    total_vmt = pd.to_numeric(
+        candidates["total_vmt_vehicle_miles_per_year"], errors="coerce"
+    ).fillna(0.0).sum()
     if total_vmt <= 0:
-        raise ValueError("Passenger EMFAC candidates have zero total_vmt; cannot derive fleetShare")
-    candidates["fleetShare"] = pd.to_numeric(candidates["total_vmt"], errors="coerce").fillna(0.0) / total_vmt
+        raise ValueError("Passenger EMFAC candidates have zero total_vmt_vehicle_miles_per_year; cannot derive fleetShare")
+    candidates["fleetShare"] = (
+        pd.to_numeric(candidates["total_vmt_vehicle_miles_per_year"], errors="coerce").fillna(0.0) / total_vmt
+    )
     candidates["emfacId"] = candidates.apply(
         lambda row: _build_emfac_id(
             vehicle_category=row["vehicleCategory"],
@@ -101,15 +107,15 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
 def _load_passenger_class_weights(config: dict[str, Any]) -> pd.DataFrame:
     class_map = read_table(config["mapping"]["emfac_beam_class_map"], dtype=None)
     atlas_map = read_table(config["mapping"]["emfac_atlas_map"], dtype=None)
-    _require_column(class_map, "group", "EMFAC BEAM class mapping file")
     _require_column(class_map, "emfac", "EMFAC BEAM class mapping file")
-    _require_column(class_map, "beam", "EMFAC BEAM class mapping file")
-    _require_column(atlas_map, "bodytype", "ATLAS EMFAC crosswalk file")
+    _require_column(class_map, "beamCategory", "EMFAC BEAM class mapping file")
+    _require_column(atlas_map, "body_type", "ATLAS EMFAC crosswalk file")
 
+    atlas_emfac_columns = {column for column in atlas_map.columns if column != "body_type"}
     passenger_classes = (
         class_map[
-            (class_map["group"].apply(_normalize_lower) == "passenger")
-            & (class_map["beam"].apply(_normalize_text) == "Car")
+            (class_map["beamCategory"].apply(_normalize_text) == "Car")
+            & (class_map["emfac"].astype(str).isin(atlas_emfac_columns))
         ]["emfac"]
         .dropna()
         .astype(str)
@@ -125,10 +131,10 @@ def _load_passenger_class_weights(config: dict[str, Any]) -> pd.DataFrame:
             + "\n".join(missing)
         )
 
-    prepared = atlas_map[["bodytype"] + passenger_classes].copy()
-    prepared["bodytype"] = prepared["bodytype"].apply(_normalize_lower)
+    prepared = atlas_map[["body_type"] + passenger_classes].copy()
+    prepared["body_type"] = prepared["body_type"].apply(_normalize_lower)
     long = prepared.melt(
-        id_vars=["bodytype"],
+        id_vars=["body_type"],
         value_vars=passenger_classes,
         var_name="vehicleCategory",
         value_name="bodytypeWeight",
@@ -138,11 +144,10 @@ def _load_passenger_class_weights(config: dict[str, Any]) -> pd.DataFrame:
 
 
 def _load_bodytype_alternatives(config: dict[str, Any]) -> pd.DataFrame:
-    frame = read_table(config["mapping"]["beam_passenger_bodytype_alternatives_map"], dtype=None)
-    for column_name in ["group", "source", "target", "priority"]:
+    frame = read_table(config["mapping"]["atlas_bodytype_alternatives_map"], dtype=None)
+    for column_name in ["source", "target", "priority"]:
         _require_column(frame, column_name, "Passenger bodytype alternatives file")
     prepared = frame.copy()
-    prepared["group"] = prepared["group"].apply(_normalize_lower)
     prepared["source"] = prepared["source"].apply(_normalize_lower)
     prepared["target"] = prepared["target"].apply(_normalize_lower)
     prepared["priority"] = pd.to_numeric(prepared["priority"], errors="coerce").fillna(999)
@@ -162,11 +167,10 @@ def _load_emfac_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
 
 
 def _load_emfac_fuel_alternatives(config: dict[str, Any]) -> pd.DataFrame:
-    frame = read_table(config["mapping"]["emfac_beam_fuel_alternatives_map"], dtype=None)
-    for column_name in ["group", "source", "target", "priority"]:
+    frame = read_table(config["mapping"]["emfac_fuel_alternatives_map"], dtype=None)
+    for column_name in ["source", "target", "priority"]:
         _require_column(frame, column_name, "EMFAC BEAM fuel alternatives file")
     prepared = frame.copy()
-    prepared["group"] = prepared["group"].apply(_normalize_lower)
     prepared["source"] = prepared["source"].apply(_normalize_text)
     prepared["target"] = prepared["target"].apply(_normalize_text)
     prepared["priority"] = pd.to_numeric(prepared["priority"], errors="coerce").fillna(999)
@@ -182,18 +186,15 @@ def _extract_emfac_bodytype_candidates(
     bodytype_key = _normalize_lower(bodytype)
     weights: dict[str, float] = {}
 
-    direct = class_weights[class_weights["bodytype"] == bodytype_key]
+    direct = class_weights[class_weights["body_type"] == bodytype_key]
     for row in direct.itertuples(index=False):
         weights[str(row.vehicleCategory)] = max(weights.get(str(row.vehicleCategory), 0.0), float(row.bodytypeWeight))
     if weights:
         return weights
 
-    alternatives = bodytype_alternatives[
-        (bodytype_alternatives["group"] == "passenger")
-        & (bodytype_alternatives["source"] == bodytype_key)
-    ].sort_values("priority")
+    alternatives = bodytype_alternatives[bodytype_alternatives["source"] == bodytype_key].sort_values("priority")
     for row in alternatives.itertuples(index=False):
-        target_matches = class_weights[class_weights["bodytype"] == row.target]
+        target_matches = class_weights[class_weights["body_type"] == row.target]
         for target_row in target_matches.itertuples(index=False):
             penalty = 1.0 / (1.0 + float(row.priority))
             candidate_weight = float(target_row.bodytypeWeight) * penalty
@@ -230,10 +231,7 @@ def _extract_emfac_fuel_candidates(
         for row in generic_matches.itertuples(index=False):
             weights[str(row.emfac)] = max(weights.get(str(row.emfac), 0.0), 0.75)
 
-    alternatives = fuel_alternatives[
-        (fuel_alternatives["group"].isin(["any", "passenger"]))
-        & (fuel_alternatives["source"].isin(list(weights.keys())))
-    ].sort_values("priority")
+    alternatives = fuel_alternatives[fuel_alternatives["source"].isin(list(weights.keys()))].sort_values("priority")
     for row in alternatives.itertuples(index=False):
         source_weight = weights.get(str(row.source))
         if source_weight is None:
@@ -267,10 +265,7 @@ def _extract_secondary_fuel_fallback_candidates(
         for row in generic_matches.itertuples(index=False):
             weights[str(row.emfac)] = max(weights.get(str(row.emfac), 0.0), 0.375)
 
-    alternatives = fuel_alternatives[
-        (fuel_alternatives["group"].isin(["any", "passenger"]))
-        & (fuel_alternatives["source"].isin(list(weights.keys())))
-    ].sort_values("priority")
+    alternatives = fuel_alternatives[fuel_alternatives["source"].isin(list(weights.keys()))].sort_values("priority")
     for row in alternatives.itertuples(index=False):
         source_weight = weights.get(str(row.source))
         if source_weight is None:
@@ -613,7 +608,14 @@ def _build_passenger_emfac_candidates(
             f"vehicleTypeId={vehicle_type_id}"
         )
     matched = matched.sort_values(
-        by=["score", "total_vmt", "population", "vehicleCategory", "fuel", "modelYear"],
+        by=[
+            "score",
+            "total_vmt_vehicle_miles_per_year",
+            "population_vehicles",
+            "vehicleCategory",
+            "fuel",
+            "modelYear",
+        ],
         ascending=[False, False, False, True, True, True],
         kind="mergesort",
     ).reset_index(drop=True)

@@ -16,6 +16,7 @@ import shapely.wkb
 from ..common import log_step_banner
 from ..common import log_substep_banner
 from ..common import read_vector
+from ..common import resolve_required_manifest_input
 from ..common import write_vector
 from ..manifest.schema import PipelineConfig
 
@@ -141,67 +142,14 @@ def _resolve_source_row_col(df: pd.DataFrame) -> str:
     raise ValueError(f"Expected source row id column '{_SOURCE_ROW_ID}' in columns: {list(df.columns)}")
 
 
-def _resolve_staged_file(base: Path, names: tuple[str, ...], label: str) -> str:
-    for name in names:
-        candidate = base / name
-        if candidate.exists():
-            return str(candidate)
-    for name in names:
-        matches = sorted(path for path in base.rglob(name) if path.is_file()) if base.exists() else []
-        if matches:
-            return str(matches[0])
-    raise FileNotFoundError(f"Step 1 could not find any of {names} under staged {label} directory: {base}")
-
-
 def _resolve_mapped_network_path(input_root: Path) -> str:
     network_dir = input_root / "network"
     direct = network_dir / "beam_osm_mapped.parquet"
     if direct.exists():
         return str(direct)
-    matches = sorted(candidate for candidate in network_dir.rglob("beam_osm_mapped.parquet") if candidate.is_file())
-    if matches:
-        return str(matches[0])
     raise FileNotFoundError(
-        f"Step 3 could not find beam_osm_mapped.parquet under staged network directory: {network_dir}"
+        f"Step 3 expected the managed mapped network cache at {direct}"
     )
-
-
-def _resolve_county_path(input_root: Path) -> str:
-    return _resolve_staged_file(
-        input_root / "county",
-        ("county_boundaries.gpkg", "county_boundaries.parquet", "county_boundaries.geojson", "county_boundaries.shp"),
-        "county",
-    )
-
-
-def _resolve_staged_network_path(input_root: Path) -> str:
-    network_dir = input_root / "network"
-    if network_dir.exists():
-        return _resolve_staged_file(
-            network_dir,
-            ("network.parquet", "network.csv.gz", "network.csv"),
-            "network",
-        )
-    return _resolve_staged_file(
-        input_root,
-        ("network.parquet", "network.csv.gz", "network.csv"),
-        "network",
-    )
-
-
-def _resolve_staged_osm_path(input_root: Path) -> str:
-    osm_dir = input_root / "osm"
-    search_roots = [osm_dir] if osm_dir.exists() else []
-    search_roots.append(input_root)
-    for root in search_roots:
-        for name in ("network.osm.pbf", "sfbay-cbg5500-weakConn-network.osm.pbf"):
-            candidate = root / name
-            if candidate.exists():
-                return str(candidate)
-        matches = sorted(candidate for candidate in root.rglob("*.osm.pbf") if candidate.is_file())
-        if matches:
-            return str(matches[0])
-    raise FileNotFoundError(f"Step 3 could not find any staged .osm.pbf file under: {osm_dir}")
 
 
 def canonicalize_intersection_schema(df: pd.DataFrame) -> pd.DataFrame:
@@ -324,6 +272,7 @@ def run(
     pipeline: PipelineConfig,
     raw_dir: Path,
     input_root: Path,
+    manifest_inputs: Optional[dict[str, object]] = None,
 ) -> Tuple[str, Optional[gpd.GeoDataFrame]]:
     """Map staged BEAM network to OSM and intersect it with enabled dispersion grids and county boundaries."""
     from osm_chordify.osm.intersect import intersect_road_network_with_zones
@@ -338,8 +287,10 @@ def run(
     if Path(mapped_network_path).exists():
         logger.info("Step 3.1: reusing BEAM/OSM mapping %s", mapped_network_path)
     else:
-        staged_network = _resolve_staged_network_path(input_root)
-        staged_osm = _resolve_staged_osm_path(input_root)
+        if manifest_inputs is None:
+            raise ValueError("Step 3 requires manifest_inputs to resolve network and OSM inputs.")
+        staged_network = resolve_required_manifest_input(manifest_inputs, key="network")
+        staged_osm = resolve_required_manifest_input(manifest_inputs, key="osm_network")
         logger.info("Step 3.1: mapping BEAM network to OSM using %s", staged_osm)
         mapped_network = _map_beam_network_to_osm(
             osm_path=staged_osm,
@@ -390,7 +341,9 @@ def run(
 
     log_substep_banner("3.4", "intersect with county boundaries", logger=logger)
     county_setup_started = time.perf_counter()
-    county_path = _resolve_county_path(input_root)
+    if manifest_inputs is None:
+        raise ValueError("Step 3 requires manifest_inputs to resolve county boundaries.")
+    county_path = resolve_required_manifest_input(manifest_inputs, key="county_boundaries")
     county_gdf = read_vector(county_path)
     if county_gdf.crs is not None:
         county_gdf = county_gdf.to_crs(epsg=epsg)

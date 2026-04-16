@@ -9,7 +9,7 @@ from typing import List
 from typing import Optional
 
 from .defaults import pollutants as canonical_pollutants
-from ._coerce import _required_string, _optional_string, _required_int, _optional_int, _required_float, _optional_float, _required_bool, _coerce_string_list, _reject_unknown_keys
+from ._coerce import _required_string, _optional_string, _required_int, _optional_int, _required_float, _optional_float, _required_bool, _coerce_string_list, _reject_unknown_keys, _required_float_or_string
 
 
 def _coerce_string_map(value: Any) -> Dict[str, str]:
@@ -24,16 +24,50 @@ def _coerce_string_map(value: Any) -> Dict[str, str]:
     return resolved
 
 
-def _build_pollutants_map(value: Any) -> Dict[str, str]:
-    mapping = _coerce_string_map(value)
-    if not mapping:
-        raise ValueError("Missing required value: impacts.emissions.pollutants_map")
-    unknown = sorted(set(mapping.keys()) - set(canonical_pollutants))
-    if unknown:
+_POLLUTANT_SOURCE_ALIASES = {
+    "NH3": "NH3",
+    "NOX": "NOx",
+    "PM25": "PM2_5",
+    "PM2_5": "PM2_5",
+    "PM2.5": "PM2_5",
+    "SOX": "SOx",
+    "ROG": "ROG",
+    "BC": "BC",
+    "BCH": "BC",
+    "BCM": "BC",
+}
+
+
+def _canonical_pollutant_from_source(value: str) -> str:
+    token = str(value).strip()
+    if not token:
+        raise ValueError("Configured pollutant names must be non-empty strings.")
+    canonical = _POLLUTANT_SOURCE_ALIASES.get(token.upper())
+    if canonical is None:
         raise ValueError(
-            f"impacts.emissions.pollutants_map contains unsupported canonical pollutants: {unknown}. "
-            f"Expected only {canonical_pollutants}"
+            f"Unsupported pollutant '{token}' in impacts.emissions.pollutants. "
+            f"Expected one of {sorted(_POLLUTANT_SOURCE_ALIASES)}"
         )
+    return canonical
+
+
+def _build_source_pollutants(value: Any) -> List[str]:
+    pollutants = _coerce_string_list(value)
+    if not pollutants:
+        raise ValueError("Missing required value: impacts.emissions.pollutants")
+    return pollutants
+
+
+def build_pollutants_map_from_sources(source_pollutants: List[str]) -> Dict[str, str]:
+    mapping: Dict[str, str] = {}
+    for source_pollutant in source_pollutants:
+        canonical = _canonical_pollutant_from_source(source_pollutant)
+        if canonical in mapping and mapping[canonical] != source_pollutant:
+            raise ValueError(
+                f"Multiple source pollutants map to canonical pollutant '{canonical}': "
+                f"{mapping[canonical]!r}, {source_pollutant!r}"
+            )
+        mapping[canonical] = source_pollutant
     return mapping
 
 
@@ -210,10 +244,11 @@ class Dispersions:
 class Emissions:
     osm_network_folder: str
     emissions_rates_folder: str
-    annualization_days: int
+    annualization_days_or_file: float | str
     population_sample: float
-    pollutants_map: Dict[str, str]
+    source_pollutants: List[str]
     activity_totals_file: Optional[str] = None
+    inventory_file: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Emissions":
@@ -223,12 +258,15 @@ class Emissions:
                 "osm_network_folder",
                 "emissions_rates_folder",
                 "activity_totals_file",
-                "annualization_days",
+                "inventory_file",
+                "annualization_days_or_file",
                 "population_sample",
-                "pollutants_map",
+                "pollutants",
             },
             "impacts.emissions",
         )
+        source_pollutants = _build_source_pollutants(payload.get("pollutants"))
+        build_pollutants_map_from_sources(source_pollutants)
         return cls(
             osm_network_folder=_required_string(
                 payload.get("osm_network_folder"),
@@ -238,21 +276,27 @@ class Emissions:
                 payload.get("emissions_rates_folder"),
                 "impacts.emissions.emissions_rates_folder",
             ),
-            annualization_days=_required_int(
-                payload.get("annualization_days"),
-                "impacts.emissions.annualization_days",
+            annualization_days_or_file=_required_float_or_string(
+                payload.get("annualization_days_or_file"),
+                "impacts.emissions.annualization_days_or_file",
             ),
             population_sample=_required_float(
                 payload.get("population_sample"),
                 "impacts.emissions.population_sample",
             ),
-            pollutants_map=_build_pollutants_map(payload.get("pollutants_map")),
+            source_pollutants=source_pollutants,
             activity_totals_file=_optional_string(payload.get("activity_totals_file")),
+            inventory_file=_optional_string(payload.get("inventory_file")),
         )
 
     @property
     def pollutants(self) -> List[str]:
+        mapping = self.pollutants_map
         return [pollutant for pollutant in canonical_pollutants if pollutant in self.pollutants_map]
+
+    @property
+    def pollutants_map(self) -> Dict[str, str]:
+        return build_pollutants_map_from_sources(list(self.source_pollutants))
 
     @property
     def beam_osm_id_col(self) -> str:
@@ -270,8 +314,8 @@ class Emissions:
     def activity_totals_columns(self) -> Dict[str, str]:
         return {
             "county_fips": "countyfp",
-            "tot_vmt": "totVMT",
-            "tot_trips": "totTrips",
+            "tot_vmt": "tot_vmt_vehicle_miles_per_year",
+            "tot_trips": "tot_trips_per_year",
         }
 
     @property
@@ -366,9 +410,10 @@ class ImpactsSettings:
                     "osm_network_folder": self.impacts.emissions.osm_network_folder,
                     "emissions_rates_folder": self.impacts.emissions.emissions_rates_folder,
                     "activity_totals_file": self.impacts.emissions.activity_totals_file,
-                    "annualization_days": self.impacts.emissions.annualization_days,
+                    "inventory_file": self.impacts.emissions.inventory_file,
+                    "annualization_days_or_file": self.impacts.emissions.annualization_days_or_file,
                     "population_sample": self.impacts.emissions.population_sample,
-                    "pollutants_map": dict(self.impacts.emissions.pollutants_map),
+                    "pollutants": list(self.impacts.emissions.source_pollutants),
                 },
                 "dispersions": {
                     "inmap": {

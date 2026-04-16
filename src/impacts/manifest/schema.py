@@ -9,8 +9,9 @@ from typing import Dict
 from typing import List
 from typing import Optional
 
-from impacts.config.defaults import annualization_days as default_annualization_days
-from ..config._coerce import _required_string, _optional_string, _required_int, _optional_int, _required_float, _optional_float, _required_bool, _coerce_string_list, _reject_unknown_keys
+from impacts.config.defaults import representative_days_per_year as default_representative_days_per_year
+from impacts.config.settings import build_pollutants_map_from_sources
+from ..config._coerce import _required_string, _optional_string, _required_int, _optional_int, _required_float, _optional_float, _required_bool, _coerce_string_list, _reject_unknown_keys, _required_float_or_string
 
 
 def _required_dict(value: Any, label: str) -> Dict[str, Any]:
@@ -47,8 +48,8 @@ class PipelineConfig:
     activity_totals_columns: Dict[str, Any] = field(default_factory=dict)
     prepared_skims_group_cols: List[str] = field(default_factory=list)
     pollutants: List[str] = field(default_factory=list)
-    pollutants_map: Dict[str, str] = field(default_factory=dict)
-    annualization_days: float = default_annualization_days
+    source_pollutants: List[str] = field(default_factory=list)
+    annualization_days_or_file: float | str = default_representative_days_per_year
     population_sample: float = 1.0
 
     @classmethod
@@ -82,8 +83,8 @@ class PipelineConfig:
                 "activity_totals_columns",
                 "prepared_skims_group_cols",
                 "pollutants",
-                "pollutants_map",
-                "annualization_days",
+                "source_pollutants",
+                "annualization_days_or_file",
                 "population_sample",
             },
             "pipeline",
@@ -115,10 +116,14 @@ class PipelineConfig:
             activity_totals_columns=_required_dict(payload.get("activity_totals_columns"), "pipeline.activity_totals_columns"),
             prepared_skims_group_cols=_coerce_string_list(payload.get("prepared_skims_group_cols")),
             pollutants=_coerce_string_list(payload.get("pollutants")),
-            pollutants_map=_required_dict(payload.get("pollutants_map"), "pipeline.pollutants_map"),
-            annualization_days=_required_float(payload.get("annualization_days"), "pipeline.annualization_days"),
+            source_pollutants=_coerce_string_list(payload.get("source_pollutants")),
+            annualization_days_or_file=_required_float_or_string(payload.get("annualization_days_or_file"), "pipeline.annualization_days_or_file"),
             population_sample=_required_float(payload.get("population_sample"), "pipeline.population_sample"),
         )
+        if not result.source_pollutants:
+            raise ValueError("Missing required value: pipeline.source_pollutants")
+        if not result.pollutants:
+            raise ValueError("Missing required value: pipeline.pollutants")
         if result.inmap_enabled:
             if not result.inmap_grid_path:
                 raise ValueError("Missing required value: pipeline.inmap_grid_path")
@@ -139,6 +144,10 @@ class PipelineConfig:
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+    @property
+    def pollutants_map(self) -> Dict[str, str]:
+        return build_pollutants_map_from_sources(list(self.source_pollutants))
 
 
 @dataclass(frozen=True)
@@ -271,6 +280,7 @@ class PostprocessManifest:
     run_manifest_path: str
     output_dir: str
     canonical_artifact: Dict[str, Any]
+    analysis_outputs: Dict[str, Any]
     validation: Dict[str, Any]
     notes: List[str]
     postprocess_manifest_path: str
@@ -285,6 +295,7 @@ class PostprocessManifest:
                 "run_manifest_path",
                 "output_dir",
                 "canonical_artifact",
+                "analysis_outputs",
                 "validation",
                 "notes",
                 "postprocess_manifest_path",
@@ -300,6 +311,7 @@ class PostprocessManifest:
             run_manifest_path=_required_string(payload.get("run_manifest_path"), "run_manifest_path"),
             output_dir=_required_string(payload.get("output_dir"), "output_dir"),
             canonical_artifact=canonical_artifact,
+            analysis_outputs=_required_dict(payload.get("analysis_outputs"), "analysis_outputs"),
             validation=_required_dict(payload.get("validation"), "validation"),
             notes=_coerce_string_list(payload.get("notes")),
             postprocess_manifest_path=_required_string(

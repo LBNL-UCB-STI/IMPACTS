@@ -126,10 +126,41 @@ def _map_freight_beam_class(vehicle_type_id: object, vehicle_category: object, v
     )
 
 
+def _map_freight_beam_category(vehicle_type_id: object, vehicle_category: object, vehicle_class: object) -> str:
+    vehicle_category_token = _normalize_text(vehicle_category)
+    if vehicle_category_token in {
+        "Car",
+        "Bike",
+        "MediumDutyPassenger",
+        "Class2b3Vocational",
+        "Class456Vocational",
+        "Class78Vocational",
+        "Class78Tractor",
+    }:
+        return vehicle_category_token
+
+    freight_class = _map_freight_beam_class(vehicle_type_id, vehicle_category, vehicle_class)
+    beam_category_by_freight_class = {
+        "Class12aVocational": "Car",
+        "Class2b3Vocational": "Car",
+        "Class456Vocational": "Car",
+        "Class78Vocational": "Class78Vocational",
+        "Class78Tractor": "Class78Tractor",
+    }
+    return beam_category_by_freight_class.get(freight_class, freight_class)
+
+
 def _build_valid_freight_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
     class_map = read_table(config["mapping"]["emfac_beam_class_map"], dtype=None)
+    _require_column(class_map, "emfac", "EMFAC BEAM class mapping file")
+    _require_column(class_map, "beamCategory", "EMFAC BEAM class mapping file")
+    freight_beam_categories = {"Car", "Class456Vocational", "Class78Vocational", "Class78Tractor"}
     freight_emfac_categories = (
-        class_map[class_map["group"].map(_normalize_lower) == "freight"]["emfac"].dropna().astype(str).unique().tolist()
+        class_map[class_map["beamCategory"].map(_normalize_text).isin(freight_beam_categories)]["emfac"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
     )
     if not freight_emfac_categories:
         raise ValueError("EMFAC BEAM class mapping file has no freight mappings")
@@ -139,12 +170,14 @@ def _build_valid_freight_emfac_candidates(config: dict[str, Any]) -> pd.DataFram
     activity = read_table(
         emfac_config["activity_file"],
         dtype=None,
-        columns=_EMFAC_KEY_COLUMNS + ["population", "total_vmt"],
+        columns=_EMFAC_KEY_COLUMNS + ["population_vehicles", "total_vmt_vehicle_miles_per_year"],
     )
     fleet = read_table(emfac_config["fleet_file"], dtype=None, columns=_EMFAC_KEY_COLUMNS)[_EMFAC_KEY_COLUMNS].drop_duplicates()
 
     candidates = (
-        activity.groupby(_EMFAC_KEY_COLUMNS, dropna=False, as_index=False)[["population", "total_vmt"]]
+        activity.groupby(_EMFAC_KEY_COLUMNS, dropna=False, as_index=False)[
+            ["population_vehicles", "total_vmt_vehicle_miles_per_year"]
+        ]
         .sum()
         .merge(rates, on=_EMFAC_KEY_COLUMNS, how="inner")
         .merge(fleet, on=_EMFAC_KEY_COLUMNS, how="inner")
@@ -154,10 +187,14 @@ def _build_valid_freight_emfac_candidates(config: dict[str, Any]) -> pd.DataFram
     if candidates.empty:
         raise ValueError("No valid freight EMFAC candidates remain after intersecting rates, activity, and fleet inputs")
 
-    total_vmt = pd.to_numeric(candidates["total_vmt"], errors="coerce").fillna(0.0).sum()
+    total_vmt = pd.to_numeric(
+        candidates["total_vmt_vehicle_miles_per_year"], errors="coerce"
+    ).fillna(0.0).sum()
     if total_vmt <= 0:
-        raise ValueError("Freight EMFAC candidates have zero total_vmt; cannot derive fleetShare")
-    candidates["fleetShare"] = pd.to_numeric(candidates["total_vmt"], errors="coerce").fillna(0.0) / total_vmt
+        raise ValueError("Freight EMFAC candidates have zero total_vmt_vehicle_miles_per_year; cannot derive fleetShare")
+    candidates["fleetShare"] = (
+        pd.to_numeric(candidates["total_vmt_vehicle_miles_per_year"], errors="coerce").fillna(0.0) / total_vmt
+    )
     candidates["emfacId"] = candidates.apply(
         lambda row: _build_emfac_id(
             vehicle_category=row["vehicleCategory"],
@@ -171,23 +208,23 @@ def _build_valid_freight_emfac_candidates(config: dict[str, Any]) -> pd.DataFram
 
 def _load_freight_class_mapping(config: dict[str, Any]) -> pd.DataFrame:
     frame = read_table(config["mapping"]["emfac_beam_class_map"], dtype=None)
-    for column_name in ["group", "emfac", "beam"]:
+    for column_name in ["emfac", "beamCategory"]:
         _require_column(frame, column_name, "EMFAC BEAM class mapping file")
-    prepared = frame[frame["group"].map(_normalize_lower) == "freight"].copy()
-    prepared["beam"] = prepared["beam"].map(_normalize_text)
+    freight_beam_categories = {"Car", "Class456Vocational", "Class78Vocational", "Class78Tractor"}
+    prepared = frame[frame["beamCategory"].map(_normalize_text).isin(freight_beam_categories)].copy()
+    prepared["beamCategory"] = prepared["beamCategory"].map(_normalize_text)
     prepared["emfac"] = prepared["emfac"].map(_normalize_text)
-    return prepared[["beam", "emfac"]].drop_duplicates().reset_index(drop=True)
+    return prepared[["beamCategory", "emfac"]].drop_duplicates().reset_index(drop=True)
 
 
 def _load_freight_class_alternatives(config: dict[str, Any]) -> pd.DataFrame:
-    frame = read_table(config["mapping"]["beam_freight_class_alternatives_map"], dtype=None)
-    for column_name in ["group", "source", "target"]:
+    frame = read_table(config["mapping"]["beam_class_alternatives_map"], dtype=None)
+    for column_name in ["source", "target"]:
         _require_column(frame, column_name, "Freight class alternatives file")
     prepared = frame.copy()
-    prepared["group"] = prepared["group"].map(_normalize_lower)
     prepared["source"] = prepared["source"].map(_normalize_text)
     prepared["target"] = prepared["target"].map(_normalize_text)
-    return prepared[["group", "source", "target"]]
+    return prepared[["source", "target"]].drop_duplicates().reset_index(drop=True)
 
 
 def _load_freight_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
@@ -203,14 +240,13 @@ def _load_freight_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
 
 
 def _load_freight_fuel_alternatives(config: dict[str, Any]) -> pd.DataFrame:
-    frame = read_table(config["mapping"]["emfac_beam_fuel_alternatives_map"], dtype=None)
-    for column_name in ["group", "source", "target"]:
+    frame = read_table(config["mapping"]["emfac_fuel_alternatives_map"], dtype=None)
+    for column_name in ["source", "target"]:
         _require_column(frame, column_name, "EMFAC BEAM fuel alternatives file")
     prepared = frame.copy()
-    prepared["group"] = prepared["group"].map(_normalize_lower)
     prepared["source"] = prepared["source"].map(_normalize_text)
     prepared["target"] = prepared["target"].map(_normalize_text)
-    return prepared[["group", "source", "target"]]
+    return prepared[["source", "target"]]
 
 
 def _load_naics_sector_mapping(config: dict[str, Any]) -> pd.DataFrame:
@@ -712,17 +748,14 @@ def _extract_freight_class_candidates(
     class_mapping: pd.DataFrame,
     class_alternatives: pd.DataFrame,
 ) -> set[str]:
-    direct = class_mapping[class_mapping["beam"] == beam_class]
+    direct = class_mapping[class_mapping["beamCategory"] == beam_class]
     categories = {str(row.emfac) for row in direct.itertuples(index=False)}
     if categories:
         return categories
 
-    alternatives = class_alternatives[
-        (class_alternatives["group"] == "freight")
-        & (class_alternatives["source"] == beam_class)
-    ]
+    alternatives = class_alternatives[class_alternatives["source"] == beam_class]
     for row in alternatives.itertuples(index=False):
-        target_matches = class_mapping[class_mapping["beam"] == row.target]
+        target_matches = class_mapping[class_mapping["beamCategory"] == row.target]
         for target_row in target_matches.itertuples(index=False):
             categories.add(str(target_row.emfac))
     return categories
@@ -750,10 +783,7 @@ def _extract_freight_fuel_candidates(
     if not fuels:
         fuels = {str(row.emfac) for row in base_matches[base_matches["group"] != "freight"].itertuples(index=False)}
 
-    alternatives = fuel_alternatives[
-        (fuel_alternatives["group"].isin(["any", "freight"]))
-        & (fuel_alternatives["source"].isin(fuels))
-    ]
+    alternatives = fuel_alternatives[fuel_alternatives["source"].isin(fuels)]
     for row in alternatives.itertuples(index=False):
         fuels.add(str(row.target))
     return fuels
@@ -762,7 +792,7 @@ def _extract_freight_fuel_candidates(
 def _build_freight_emfac_candidates(
     *,
     vehicle_type_id: str,
-    beam_class: str,
+    beam_category: str,
     primary_fuel: object,
     secondary_fuel: object,
     emfac_candidates: pd.DataFrame,
@@ -782,13 +812,13 @@ def _build_freight_emfac_candidates(
     configured_port_classes: set[str] | None = None,
 ) -> pd.DataFrame:
     class_candidates = _extract_freight_class_candidates(
-        beam_class=beam_class,
+        beam_class=beam_category,
         class_mapping=class_mapping,
         class_alternatives=class_alternatives,
     )
     if not class_candidates:
         raise ValueError(
-            f"No freight EMFAC class candidates available for vehicleTypeId={vehicle_type_id}, beamClass={beam_class}"
+            f"No freight EMFAC class candidates available for vehicleTypeId={vehicle_type_id}, beamCategory={beam_category}"
         )
 
     fuel_candidates = _extract_freight_fuel_candidates(
@@ -811,7 +841,7 @@ def _build_freight_emfac_candidates(
     if matched.empty:
         raise ValueError(
             "No freight EMFAC candidates available after applying class/fuel hard filters for "
-            f"vehicleTypeId={vehicle_type_id}, beamClass={beam_class}, "
+            f"vehicleTypeId={vehicle_type_id}, beamCategory={beam_category}, "
             f"primaryFuelType={primary_fuel}, secondaryFuelType={secondary_fuel}"
         )
     matched = _filter_required_port_classes(
@@ -864,7 +894,14 @@ def _build_freight_emfac_candidates(
     )
     matched["score"] = np.exp(log_score - log_score.max())
     return matched.sort_values(
-        by=["score", "total_vmt", "population", "vehicleCategory", "fuel", "modelYear"],
+        by=[
+            "score",
+            "total_vmt_vehicle_miles_per_year",
+            "population_vehicles",
+            "vehicleCategory",
+            "fuel",
+            "modelYear",
+        ],
         ascending=[False, False, False, True, True, True],
         kind="mergesort",
     ).reset_index(drop=True)
@@ -877,7 +914,7 @@ def _normalize_written_freight_probabilities(frame: pd.DataFrame) -> pd.DataFram
         lambda value: f"{float(value):.6f}"
     )
     prepared["sampleProbabilityString"] = prepared["sampleProbabilityWithinCategory"].map(
-        lambda value: f"all | all:{float(value):.6f}"
+        lambda value: f"income | 0-999999:{float(value):.6f}"
     )
     return prepared
 
@@ -921,6 +958,10 @@ def _build_freight_vehicle_types_with_emfac(
     configured_port_classes = _load_configured_port_classes(config)
 
     prepared = freight_vehicle_types.copy()
+    prepared["beamCategory"] = prepared.apply(
+        lambda row: _map_freight_beam_category(row["vehicleTypeId"], row.get("vehicleCategory"), row.get("vehicleClass")),
+        axis=1,
+    )
     prepared["beamClass"] = prepared.apply(
         lambda row: _map_freight_beam_class(row["vehicleTypeId"], row.get("vehicleCategory"), row.get("vehicleClass")),
         axis=1,
@@ -931,7 +972,7 @@ def _build_freight_vehicle_types_with_emfac(
         median_mass_kg, heavy_mass_kg = payload_mass_thresholds.get(str(row.vehicleTypeId), (0.0, 0.0))
         candidates = _build_freight_emfac_candidates(
             vehicle_type_id=str(row.vehicleTypeId),
-            beam_class=str(row.beamClass),
+            beam_category=str(row.beamCategory),
             primary_fuel=row.primaryFuelType,
             secondary_fuel=row.secondaryFuelType,
             emfac_candidates=emfac_candidates,
@@ -959,7 +1000,7 @@ def _build_freight_vehicle_types_with_emfac(
             updated = dict(row_payload)
             updated["oldVehicleTypeId"] = str(row.vehicleTypeId)
             updated["emfacId"] = str(candidate.emfacId)
-            updated["vehicleCategory"] = str(candidate.vehicleCategory)
+            updated["emfacVehicleCategory"] = str(candidate.vehicleCategory)
             updated["vehicleTypeId"] = f"{candidate.emfacId}--{row.vehicleTypeId}"
             updated["sampleProbabilityWithinCategory"] = base_probability * share
             updated["sampleProbabilityString"] = ""
@@ -972,7 +1013,7 @@ def _build_freight_vehicle_types_with_emfac(
             "Freight Step 4.1 generated duplicate vehicleTypeId values:\n"
             + "\n".join(duplicate_vehicle_type_ids.astype(str).tolist())
         )
-    mapped = mapped.drop(columns=["beamClass"]).reset_index(drop=True)
+    mapped = mapped.drop(columns=["beamCategory", "beamClass"], errors="ignore").reset_index(drop=True)
     return _normalize_written_freight_probabilities(mapped)
 
 
@@ -980,17 +1021,19 @@ def _build_freight_sampling_table(mapped_freight_vehicle_types: pd.DataFrame) ->
     _require_column(mapped_freight_vehicle_types, "vehicleTypeId", "Mapped freight vehicle types file")
     _require_column(mapped_freight_vehicle_types, "oldVehicleTypeId", "Mapped freight vehicle types file")
     _require_column(mapped_freight_vehicle_types, "sampleProbabilityWithinCategory", "Mapped freight vehicle types file")
-    _require_column(mapped_freight_vehicle_types, "vehicleCategory", "Mapped freight vehicle types file")
+    _require_column(mapped_freight_vehicle_types, "emfacVehicleCategory", "Mapped freight vehicle types file")
 
     prepared = mapped_freight_vehicle_types[
-        ["vehicleTypeId", "oldVehicleTypeId", "vehicleCategory", "sampleProbabilityWithinCategory"]
+        ["vehicleTypeId", "oldVehicleTypeId", "emfacVehicleCategory", "sampleProbabilityWithinCategory"]
     ].copy()
     prepared["sampleProbabilityWithinCategory"] = pd.to_numeric(
         prepared["sampleProbabilityWithinCategory"], errors="coerce"
     ).fillna(0.0)
     sampling_groups: dict[str, pd.DataFrame] = {}
     for old_vehicle_type_id, group in prepared.groupby("oldVehicleTypeId", sort=False):
-        group_prepared = group[["vehicleTypeId", "vehicleCategory", "sampleProbabilityWithinCategory"]].reset_index(drop=True)
+        group_prepared = group.rename(columns={"emfacVehicleCategory": "vehicleCategory"})[
+            ["vehicleTypeId", "vehicleCategory", "sampleProbabilityWithinCategory"]
+        ].reset_index(drop=True)
         probability_sum = group_prepared["sampleProbabilityWithinCategory"].sum()
         if probability_sum <= 0:
             group_prepared["samplingProbability"] = 1.0 / len(group_prepared)
@@ -1092,9 +1135,7 @@ def run_step4(workflow: dict[str, Any]) -> dict[str, Any]:
     if not freight_vehicle_types_file:
         raise ValueError("Step 4 requires freight vehicle types from Step 1")
     freight_vehicle_types = read_table(str(freight_vehicle_types_file), dtype=None)
-    carriers = workflow.get("source_frism_carriers")
-    if carriers is None:
-        carriers = read_table(workflow["config"]["frism"]["carriers_file"], dtype=None)
+    carriers = read_table(workflow["config"]["frism"]["carriers_file"], dtype=None)
     payloads = workflow.get("source_frism_payloads")
     if payloads is None:
         payloads = read_table(workflow["config"]["frism"]["payloads_file"], dtype=None)
