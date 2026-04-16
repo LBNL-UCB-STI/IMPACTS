@@ -17,22 +17,6 @@ def _load_yaml_section(path: Path, section: str) -> dict:
     return (data or {}).get(section, data or {})
 
 
-def _resolve_path(path: Path) -> Path:
-    if path.exists():
-        return path
-    parent = path.parent
-    if parent.exists():
-        sibling = parent / path.name
-        if sibling.exists():
-            return sibling
-    grandparent = parent.parent
-    if grandparent.exists():
-        candidate = grandparent / path.name
-        if candidate.exists():
-            return candidate
-    return path
-
-
 def resolve_workflow_path(path_like: str | None) -> str:
     if path_like in (None, ""):
         raise ValueError("Expected a configured path value, got an empty value")
@@ -45,7 +29,7 @@ def resolve_workflow_path(path_like: str | None) -> str:
 def _expand_optional_path(value: str | None) -> str | None:
     if value in (None, ""):
         return value
-    return str(_resolve_path(Path(value).expanduser()))
+    return resolve_workflow_path(value)
 
 
 def _normalize_configured_path(
@@ -138,7 +122,7 @@ def _value_from_entry(value: object, key: str) -> str | None:
 def _find_matching_file(path: str | None, patterns: tuple[str, ...], *, required: bool = True) -> str | None:
     if path in (None, ""):
         return None
-    target = _resolve_path(Path(path).expanduser())
+    target = Path(resolve_workflow_path(path))
     if target.is_file():
         return str(target)
     if not target.exists():

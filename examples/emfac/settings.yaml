@@ -24,7 +24,7 @@ fleet:
     fastsim_frism_fuel_mapping_file: examples/emfac/fleet/mappings/fastsim_frism_fuel_mapping.csv
 
   emfac:
-    outputs: examples/emfac/fleet/emfac
+    outputs: examples/emfac/fleet/output/emfac
     region_label: SF
     calendar_year: 2018
     model_year_groups:
@@ -61,7 +61,7 @@ fleet:
             - folder: ~/Workspace/Models/emfac/raw/sfbay-emfac-moves-bc
             - pollutant: BCh
         - paved_road_dust:
-            - folder: ~/Workspace/Models/emfac/raw/road_dust/statewide-carb-road-dust
+            - folder: ~/Workspace/Models/emfac/raw/statewide-carb-road-dust
       emissions_inventory:
         - main: ~/Workspace/Models/emfac/raw/sfbay-emfac-emissions-inventory
         - fallback: ~/Workspace/Models/emfac/raw/statewide-emfac-emissions-inventory
