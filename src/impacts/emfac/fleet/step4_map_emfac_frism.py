@@ -165,7 +165,7 @@ def _build_valid_freight_emfac_candidates(config: dict[str, Any]) -> pd.DataFram
     if not freight_emfac_categories:
         raise ValueError("EMFAC BEAM class mapping file has no freight mappings")
 
-    emfac_config = config["emfac"]
+    emfac_config = config["activities"]
     rates = read_table(emfac_config["rates_file"], dtype=None, columns=_EMFAC_KEY_COLUMNS)[_EMFAC_KEY_COLUMNS].drop_duplicates()
     activity = read_table(
         emfac_config["activity_file"],

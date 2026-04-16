@@ -11,10 +11,71 @@ REPO_ROOT = CONFIG_DIR.parents[2]
 DEFAULT_CONFIG_PATH = CONFIG_DIR / "config.yaml"
 
 
-def _load_yaml_section(path: Path, section: str) -> dict:
+def _load_yaml_path(path: Path, *sections: str) -> dict:
     with path.open() as handle:
-        data = yaml.safe_load(handle)
-    return (data or {}).get(section, data or {})
+        data = yaml.safe_load(handle) or {}
+    current = data
+    for section in sections:
+        if not isinstance(current, dict):
+            return {}
+        current = current.get(section, {})
+    return current if isinstance(current, dict) else {}
+
+
+def _merge_dicts(base: dict[str, object], override: dict[str, object]) -> dict[str, object]:
+    merged = deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_dicts(merged[key], value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
+
+
+def _load_emfac_root(path: Path) -> dict[str, object]:
+    return _load_yaml_path(path, "emfac")
+
+
+def _build_activities_config_from_root(emfac_root: dict[str, object]) -> dict[str, object]:
+    activities = emfac_root.get("activities", {})
+    if not isinstance(activities, dict):
+        activities = {}
+    defaults: dict[str, object] = {}
+    root_region = emfac_root.get("region", {})
+    if isinstance(root_region, dict) and "label" in root_region:
+        defaults["region_label"] = deepcopy(root_region["label"])
+    root_scenario = emfac_root.get("scenario", {})
+    if isinstance(root_scenario, dict) and "year" in root_scenario:
+        defaults["calendar_year"] = deepcopy(root_scenario["year"])
+    if "output" in emfac_root:
+        defaults["outputs"] = deepcopy(emfac_root["output"])
+    return _merge_dicts(defaults, activities)
+
+
+def _build_fleet_config_from_root(emfac_root: dict[str, object]) -> dict[str, object]:
+    fleet = emfac_root.get("fleet", {})
+    if not isinstance(fleet, dict):
+        fleet = {}
+    defaults: dict[str, object] = {}
+    root_region = emfac_root.get("region", {})
+    root_scenario = emfac_root.get("scenario", {})
+    if isinstance(root_region, dict) and "name" in root_region:
+        defaults["region"] = deepcopy(root_region["name"])
+    if isinstance(root_scenario, dict):
+        if "year" in root_scenario:
+            defaults["year"] = deepcopy(root_scenario["year"])
+        if "name" in root_scenario:
+            defaults["scenario"] = deepcopy(root_scenario["name"])
+    for key in ("seed", "output"):
+        if key in emfac_root:
+            defaults[key] = deepcopy(emfac_root[key])
+    merged = _merge_dicts(defaults, fleet)
+    activities_defaults = _build_activities_config_from_root(emfac_root)
+    nested_activities = merged.get("activities", {})
+    if not isinstance(nested_activities, dict):
+        nested_activities = {}
+    merged["activities"] = _merge_dicts(activities_defaults, nested_activities)
+    return merged
 
 
 def resolve_workflow_path(path_like: str | None) -> str:
@@ -142,8 +203,9 @@ def _find_matching_file(path: str | None, patterns: tuple[str, ...], *, required
 
 
 def _normalize_pto_as_process(raw: dict) -> dict[str, object]:
-    inputs = _flatten_input_groups(raw.get("inputs", {}))
-    project_analysis = inputs.get("project_analysis", {})
+    project_analysis = raw.get("project_analysis", {})
+    if isinstance(project_analysis, list):
+        project_analysis = _flatten_input_groups({"project_analysis": project_analysis}).get("project_analysis", {})
     if isinstance(project_analysis, str):
         project_analysis = {"main": project_analysis}
     project_analysis_main = _mapping_from_entry(project_analysis.get("main")) or {}
@@ -157,9 +219,18 @@ def _normalize_pto_as_process(raw: dict) -> dict[str, object]:
 
 
 def _normalize_activities_inputs(raw: dict) -> dict:
-    inputs = _flatten_input_groups(raw.get("inputs", {}))
-    project_analysis = inputs.get("project_analysis", {})
-    emissions_inventory = inputs.get("emissions_inventory", {})
+    project_analysis = raw.get("project_analysis", {})
+    emissions_inventory = raw.get("emissions_inventory", {})
+
+    if isinstance(project_analysis, list) or isinstance(emissions_inventory, list):
+        flattened = _flatten_input_groups(
+            {
+                "project_analysis": project_analysis,
+                "emissions_inventory": emissions_inventory,
+            }
+        )
+        project_analysis = flattened.get("project_analysis", project_analysis)
+        emissions_inventory = flattened.get("emissions_inventory", emissions_inventory)
 
     if isinstance(project_analysis, str):
         project_analysis = {"main": project_analysis}
@@ -193,6 +264,7 @@ def _expand_activities_paths(raw: dict) -> dict:
     raw = deepcopy(raw)
     raw["pto_as_process"] = _normalize_pto_as_process(raw)
     raw["inputs"] = _normalize_activities_inputs(raw)
+    raw.update(raw["inputs"])
     outputs = raw["outputs"].format(calendar_year=raw["calendar_year"])
     raw["outputs"] = _expand_optional_path(outputs)
     return raw
@@ -213,16 +285,16 @@ def _validate_activities(raw: dict, source_path: Path) -> None:
         ("calendar_year",),
         ("outputs",),
         ("model_year_groups",),
-        ("inputs", "project_analysis_raw"),
-        ("inputs", "statewide_inventory_raw"),
-        ("inputs", "vmt_raw"),
-        ("inputs", "population_raw"),
-        ("inputs", "trips_raw"),
-        ("inputs", "emission_raw"),
-        ("inputs", "black_carbon_raw"),
-        ("inputs", "black_carbon_pollutant"),
-        ("inputs", "rainy_days_file"),
-        ("inputs", "silt_loading_file"),
+        ("project_analysis_raw",),
+        ("statewide_inventory_raw",),
+        ("vmt_raw",),
+        ("population_raw",),
+        ("trips_raw",),
+        ("emission_raw",),
+        ("black_carbon_raw",),
+        ("black_carbon_pollutant",),
+        ("rainy_days_file",),
+        ("silt_loading_file",),
     ]
     missing = [".".join(path) for path in required if _required(raw, path) in (None, "")]
     if missing:
@@ -247,6 +319,7 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
     year = int(raw["calendar_year"])
     region = str(raw["region_label"])
     outputs_root = Path(str(raw["outputs"])).expanduser()
+    activities_output_root = outputs_root / "activities"
     region_slug = region.lower()
     base_name = f"{region_slug}-emfac-{year}"
     final_name = f"{base_name}-project-analysis-final"
@@ -262,9 +335,26 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
             },
             "pto_as_process": raw["pto_as_process"],
         },
-        "inputs": raw["inputs"],
+        "inputs": {
+            key: raw[key]
+            for key in (
+                "project_analysis_raw",
+                "black_carbon_raw",
+                "black_carbon_pollutant",
+                "statewide_inventory_raw",
+                "population_raw",
+                "trips_raw",
+                "vmt_raw",
+                "emission_raw",
+                "ghg_raw",
+                "rainy_days_file",
+                "silt_loading_file",
+            )
+            if key in raw
+        },
         "paths": {
             "outputs_root": str(outputs_root),
+            "activities_output_root": str(activities_output_root),
             "trace_dir": str(outputs_root / "traces"),
             "project_analysis_source": str(outputs_root / f"{base_name}-project-analysis-source.parquet"),
             "project_analysis": str(outputs_root / f"{base_name}-project-analysis.parquet"),
@@ -274,7 +364,7 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
             "emissions_inventory": str(outputs_root / f"{base_name}-emissions-inventory-with-activity.parquet"),
             "statewide_inventory": str(outputs_root / f"statewide-emfac-{year}-emissions-inventory.parquet"),
             "final_output": str(outputs_root / f"{final_name}-rates.parquet"),
-            "final_activity_output": str(outputs_root / f"{final_name}-activity.parquet"),
+            "final_activity_output": str(activities_output_root / f"{final_name}-activity.parquet"),
             "final_fleet_output": str(outputs_root / f"{final_name}-fleet.parquet"),
         },
     }
@@ -282,7 +372,7 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
 
 def load_activities_workflow(config_path: str | Path | None = None) -> dict[str, object]:
     source_path = Path(config_path) if config_path is not None else DEFAULT_CONFIG_PATH
-    raw = _load_yaml_section(source_path, "emfac")
+    raw = _build_activities_config_from_root(_load_emfac_root(source_path))
     return _build_activities_workflow(raw, source_path)
 
 
@@ -347,8 +437,9 @@ def _derive_emfac_output_paths(emfac: dict[str, object]) -> dict[str, object]:
     region_slug = str(region_label).strip().lower()
     base_name = f"{region_slug}-emfac-{int(calendar_year)}-project-analysis-final"
     outputs_root = Path(str(outputs))
+    activities_output_root = outputs_root / "activities"
     emfac["rates_file"] = str((outputs_root / f"{base_name}-rates.parquet").resolve())
-    emfac["activity_file"] = str((outputs_root / f"{base_name}-activity.parquet").resolve())
+    emfac["activity_file"] = str((activities_output_root / f"{base_name}-activity.parquet").resolve())
     emfac["fleet_file"] = str((outputs_root / f"{base_name}-fleet.parquet").resolve())
     return emfac
 
@@ -380,14 +471,30 @@ def _ingest_fleet_sources(config: dict) -> dict:
         ):
             mapping[key] = _normalize_configured_path(mapping.get(key), path_label=f"mapping.{key}")
         config["mapping"] = mapping
-    emfac = config.get("emfac", {})
-    if isinstance(emfac, dict):
-        emfac["outputs"] = _normalize_configured_path(emfac.get("outputs"), path_label="emfac.outputs", must_exist=False)
-        emfac["rates_file"] = _normalize_configured_path(emfac.get("rates_file"), path_label="emfac.rates_file", must_exist=False)
-        emfac["activity_file"] = _normalize_configured_path(emfac.get("activity_file"), path_label="emfac.activity_file", must_exist=False)
-        emfac["fleet_file"] = _normalize_configured_path(emfac.get("fleet_file"), path_label="emfac.fleet_file", must_exist=False)
-        emfac = _derive_emfac_output_paths(emfac)
-        config["emfac"] = emfac
+    activities = config.get("activities", {})
+    if isinstance(activities, dict):
+        activities["outputs"] = _normalize_configured_path(
+            activities.get("outputs"),
+            path_label="activities.outputs",
+            must_exist=False,
+        )
+        activities["rates_file"] = _normalize_configured_path(
+            activities.get("rates_file"),
+            path_label="activities.rates_file",
+            must_exist=False,
+        )
+        activities["activity_file"] = _normalize_configured_path(
+            activities.get("activity_file"),
+            path_label="activities.activity_file",
+            must_exist=False,
+        )
+        activities["fleet_file"] = _normalize_configured_path(
+            activities.get("fleet_file"),
+            path_label="activities.fleet_file",
+            must_exist=False,
+        )
+        activities = _derive_emfac_output_paths(activities)
+        config["activities"] = activities
     frism = config.get("frism", {})
     if isinstance(frism, dict):
         for key in ("carriers_file", "payloads_file", "tours_file"):
@@ -484,12 +591,13 @@ def _validate_fleet(raw: dict, source_path: Path) -> None:
         ("mapping", "frism_atlas_map"),
         ("mapping", "fastsim_frism_bodytype_xwalk_file"),
         ("mapping", "fastsim_frism_fuel_mapping_file"),
-        ("emfac",),
-        ("emfac", "outputs"),
-        ("emfac", "region_label"),
-        ("emfac", "calendar_year"),
-        ("emfac", "model_year_groups"),
-        ("emfac", "inputs"),
+        ("activities",),
+        ("activities", "outputs"),
+        ("activities", "region_label"),
+        ("activities", "calendar_year"),
+        ("activities", "model_year_groups"),
+        ("activities", "project_analysis"),
+        ("activities", "emissions_inventory"),
         ("atlas",),
         ("atlas", "vehicles_file"),
         ("atlas", "households_file"),
@@ -515,7 +623,7 @@ def _validate_fleet(raw: dict, source_path: Path) -> None:
 
 def load_fleet_workflow(config_path: str | Path | None = None) -> dict:
     source_path = Path(config_path) if config_path is not None else DEFAULT_CONFIG_PATH
-    raw = _load_yaml_section(source_path, "fleet")
+    raw = _build_fleet_config_from_root(_load_emfac_root(source_path))
     _validate_fleet(raw, source_path)
     raw = _ingest_fleet_sources(raw)
     output_root = raw["output"]
@@ -523,7 +631,7 @@ def load_fleet_workflow(config_path: str | Path | None = None) -> dict:
         "seed": raw["seed"],
         "output": output_root,
         "mapping": raw["mapping"],
-        "emfac": raw["emfac"],
+        "activities": raw["activities"],
         "atlas": raw["atlas"],
         "frism": raw["frism"],
         "fastsim": raw["fastsim"],

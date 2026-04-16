@@ -164,7 +164,7 @@ def _write_rates_store(
 
 
 def _load_emfac_rates_with_ids(config: dict[str, Any]) -> pd.DataFrame:
-    rates = read_table(config["emfac"]["rates_file"], dtype=None)
+    rates = read_table(config["activities"]["rates_file"], dtype=None)
     for column_name in ["vehicleCategory", "fuel", "modelYear"]:
         if column_name not in rates.columns:
             raise ValueError(f"EMFAC rates file is missing required column '{column_name}'")

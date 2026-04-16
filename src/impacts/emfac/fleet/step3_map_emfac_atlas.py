@@ -57,7 +57,7 @@ def _build_emfac_id(*, vehicle_category: object, fuel: object, model_year: objec
 
 
 def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
-    emfac_config = config["emfac"]
+    emfac_config = config["activities"]
     rates = read_table(
         emfac_config["rates_file"],
         dtype=None,

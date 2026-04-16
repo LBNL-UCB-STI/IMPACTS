@@ -72,7 +72,7 @@ def _model_year_sort_key(model_year: object) -> tuple[int, int, int]:
 
 
 def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
-    emfac_config = config["emfac"]
+    emfac_config = config["activities"]
     rates = read_table(
         emfac_config["rates_file"],
         dtype=None,

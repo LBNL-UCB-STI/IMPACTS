@@ -44,52 +44,38 @@ def _run_step(workflow: dict[str, object], *, step_name: str, runner) -> dict[st
     return updated_workflow
 
 
-def _extract_activities_config(emfac: dict[str, object], *, activities_output_root: Path) -> dict[str, object] | None:
-    nested = emfac.get("activities")
-    if isinstance(nested, dict):
-        activities = deepcopy(nested)
-    else:
-        candidate_keys = ("region_label", "calendar_year", "model_year_groups", "inputs")
-        if not all(key in emfac for key in candidate_keys):
-            return None
-        activities = {key: deepcopy(emfac[key]) for key in candidate_keys}
+def _prepare_activities_config(activities: dict[str, object], *, activities_output_root: Path) -> dict[str, object]:
+    activities = deepcopy(activities)
     activities["outputs"] = str(activities_output_root)
     return activities
 
 
 def _bootstrap_emfac_outputs_if_needed(workflow: dict[str, object]) -> dict[str, object]:
-    emfac = workflow["config"]["emfac"]
+    activities = workflow["config"]["activities"]
     required_outputs = {
-        "rates_file": Path(str(emfac["rates_file"])),
-        "activity_file": Path(str(emfac["activity_file"])),
-        "fleet_file": Path(str(emfac["fleet_file"])),
+        "rates_file": Path(str(activities["rates_file"])),
+        "activity_file": Path(str(activities["activity_file"])),
+        "fleet_file": Path(str(activities["fleet_file"])),
     }
     missing = {label: path for label, path in required_outputs.items() if not path.exists()}
     if not missing:
         return workflow
 
-    activities_output_root = Path(str(emfac.get("outputs", Path(str(workflow["config"]["output"])) / "emfac")))
-    activities = _extract_activities_config(emfac, activities_output_root=activities_output_root)
-    if activities is None:
-        missing_paths = ", ".join(str(path) for path in missing.values())
-        raise FileNotFoundError(
-            "Fleet requires EMFAC rates/activity/fleet outputs before Step 5. "
-            f"Missing: {missing_paths}. Configure fleet.emfac with region_label, calendar_year, "
-            "model_year_groups, and inputs so it can bootstrap activities automatically."
-        )
+    activities_output_root = Path(str(activities["outputs"]))
+    activities_config = _prepare_activities_config(activities, activities_output_root=activities_output_root)
 
     print("Bootstrapping EMFAC activities because required fleet inputs are missing:")
     for path in missing.values():
         print(f"  missing: {path}")
     activities_workflow = load_activities_workflow_from_data(
-        activities,
-        source_label="<fleet.emfac>",
+        activities_config,
+        source_label="<emfac.activities>",
     )
     activities_workflow = run_activities_workflow(activities_workflow)
 
-    emfac["rates_file"] = str(Path(str(activities_workflow["paths"]["final_output"])).resolve())
-    emfac["activity_file"] = str(Path(str(activities_workflow["paths"]["final_activity_output"])).resolve())
-    emfac["fleet_file"] = str(Path(str(activities_workflow["paths"]["final_fleet_output"])).resolve())
+    activities["rates_file"] = str(Path(str(activities_workflow["paths"]["final_output"])).resolve())
+    activities["activity_file"] = str(Path(str(activities_workflow["paths"]["final_activity_output"])).resolve())
+    activities["fleet_file"] = str(Path(str(activities_workflow["paths"]["final_fleet_output"])).resolve())
     return workflow
 
 
