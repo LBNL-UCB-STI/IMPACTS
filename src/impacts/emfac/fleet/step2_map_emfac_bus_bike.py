@@ -111,22 +111,22 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
 
 
 def _load_emfac_class_targets(config: dict[str, Any]) -> dict[str, str]:
-    class_map_path = config["mapping"]["emfac_beam_class_map"]
+    class_map_path = config["mapping"]["emfac_beam_category_map"]
     class_map = read_table(class_map_path, dtype=None)
-    for column_name in ["group", "emfac", "beamCategory"]:
-        _require_column(class_map, column_name, "EMFAC BEAM class mapping file")
+    for column_name in ["group", "emfac", "beamVehicleCategory"]:
+        _require_column(class_map, column_name, "EMFAC BEAM category mapping file")
 
     prepared = class_map.copy()
     prepared["group_key"] = prepared["group"].apply(_normalize_lower)
-    prepared["beam_key"] = prepared["beamCategory"].apply(_normalize_text)
+    prepared["beam_key"] = prepared["beamVehicleCategory"].apply(_normalize_text)
     matched = prepared[prepared["beam_key"].isin(["Bike", "MediumDutyPassenger"])].copy()
 
     bike_match = matched[(matched["group_key"] == "passenger") & (matched["beam_key"] == "Bike")]
     bus_match = matched[(matched["group_key"] == "transit") & (matched["beam_key"] == "MediumDutyPassenger")]
     if bike_match.empty:
-        raise ValueError("EMFAC class mapping file is missing the passenger Bike mapping")
+        raise ValueError("EMFAC category mapping file is missing the passenger Bike mapping")
     if bus_match.empty:
-        raise ValueError("EMFAC class mapping file is missing the transit MediumDutyPassenger mapping")
+        raise ValueError("EMFAC category mapping file is missing the transit MediumDutyPassenger mapping")
 
     return {
         "bike": _normalize_text(bike_match.iloc[0]["emfac"]),
@@ -248,6 +248,7 @@ def _assign_emfac_ids_to_vehicle_types(
         assignments.append(str(selected["emfacId"]))
 
     prepared["emfacId"] = assignments
+    prepared["emfacVehicleCategory"] = str(emfac_vehicle_category)
     duplicate_vehicle_type_ids = prepared["vehicleTypeId"][prepared["vehicleTypeId"].duplicated()].drop_duplicates()
     if not duplicate_vehicle_type_ids.empty:
         raise ValueError(

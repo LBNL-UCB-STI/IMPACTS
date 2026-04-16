@@ -264,7 +264,7 @@ def _normalize_freight_vehicle_type_id(value: object) -> str:
     return "".join(token[:1].upper() + token[1:].lower() for token in tokens)
 
 
-def _map_freight_beam_class(vehicle_type_id: object, vehicle_category: object, vehicle_class: object) -> str:
+def _map_freight_beam_vehicle_category(vehicle_type_id: object, vehicle_category: object, vehicle_class: object) -> str:
     normalized_id = _normalize_freight_vehicle_type_id(vehicle_type_id)
     prefix_map = {
         "Ld1": "Class12aVocational",
@@ -273,9 +273,9 @@ def _map_freight_beam_class(vehicle_type_id: object, vehicle_category: object, v
         "Hdt": "Class78Tractor",
         "Hdv": "Class78Vocational",
     }
-    for prefix, beam_class in prefix_map.items():
+    for prefix, beam_vehicle_category in prefix_map.items():
         if normalized_id.startswith(prefix):
-            return beam_class
+            return beam_vehicle_category
 
     vehicle_category_token = _normalize_text(vehicle_category)
     if vehicle_category_token in {
@@ -299,7 +299,7 @@ def _map_freight_beam_class(vehicle_type_id: object, vehicle_category: object, v
     if mapped:
         return mapped
     raise ValueError(
-        "Could not determine freight BEAM class for vehicleTypeId="
+        "Could not determine freight BEAM vehicle category for vehicleTypeId="
         f"{vehicle_type_id}, vehicleCategory={vehicle_category}, vehicleClass={vehicle_class}"
     )
 
@@ -340,15 +340,15 @@ def _load_frism_atlas_bodytype_mapping(config: dict[str, Any]) -> pd.DataFrame:
     _require_column(frame, "body_type", "FRISM ATLAS bodytype crosswalk file")
     weight_columns = [column for column in frame.columns if column != "body_type"]
     if not weight_columns:
-        raise ValueError("FRISM ATLAS bodytype crosswalk file has no freight class columns")
+        raise ValueError("FRISM ATLAS bodytype crosswalk file has no freight vehicle-category columns")
     prepared = frame.melt(
         id_vars=["body_type"],
         value_vars=weight_columns,
-        var_name="beamClass",
+        var_name="beamVehicleCategory",
         value_name="weight",
     )
     prepared["body_type"] = prepared["body_type"].apply(_normalize_bodytype)
-    prepared["beamClass"] = prepared["beamClass"].astype(str)
+    prepared["beamVehicleCategory"] = prepared["beamVehicleCategory"].astype(str)
     prepared["weight"] = pd.to_numeric(prepared["weight"], errors="coerce").fillna(0.0)
     return prepared[prepared["weight"].gt(0)].reset_index(drop=True)
 
@@ -545,14 +545,16 @@ def _select_ldv_fastsim_energy_files(
 
 def _select_mhdv_fastsim_energy_files(
     *,
-    beam_class: str,
+    beam_vehicle_category: str,
     fuel_row: pd.Series,
     frism_bodytype_xwalk: pd.DataFrame,
     mhdv_lookup_index: pd.DataFrame,
 ) -> tuple[str, str]:
-    candidates = frism_bodytype_xwalk[frism_bodytype_xwalk["body_type"] == beam_class].copy()
+    candidates = frism_bodytype_xwalk[frism_bodytype_xwalk["body_type"] == beam_vehicle_category].copy()
     if candidates.empty:
-        raise ValueError(f"No MHDV FASTSim bodytype mapping found for beam class {beam_class}")
+        raise ValueError(
+            f"No MHDV FASTSim body_type mapping found for BEAM vehicle category {beam_vehicle_category}"
+        )
     representative_stems = set(candidates["representative_stem"].astype(str))
     primary_token = str(fuel_row["fastsim_primary_token"]).strip().lower()
     files = mhdv_lookup_index[
@@ -561,7 +563,7 @@ def _select_mhdv_fastsim_energy_files(
     ].copy()
     if files.empty:
         raise ValueError(
-            f"No MHDV FASTSim lookup file found for beam class={beam_class}, primary token={primary_token}"
+            f"No MHDV FASTSim lookup file found for beamVehicleCategory={beam_vehicle_category}, primary token={primary_token}"
         )
     files["modelyear"] = pd.to_numeric(files["modelyear"], errors="coerce")
     selected = files.sort_values(
@@ -587,12 +589,12 @@ def _assign_freight_fastsim_energy_files(
     primary_paths: list[str] = []
     secondary_paths: list[str] = []
     for row in prepared.itertuples(index=False):
-        beam_class = _map_freight_beam_class(
+        beam_vehicle_category = _map_freight_beam_vehicle_category(
             getattr(row, "vehicleTypeId"),
             getattr(row, "vehicleCategory", ""),
             getattr(row, "vehicleClass", ""),
         )
-        fastsim_source = "ldv" if beam_class in {"Class12aVocational", "Class2b3Vocational"} else "mhdv"
+        fastsim_source = "ldv" if beam_vehicle_category in {"Class12aVocational", "Class2b3Vocational"} else "mhdv"
         fuel_row = _select_freight_fastsim_fuel_mapping_row(
             fuel_mapping,
             fastsim_source=fastsim_source,
@@ -600,9 +602,11 @@ def _assign_freight_fastsim_energy_files(
             secondary_fuel=getattr(row, "secondaryFuelType", ""),
         )
         if fastsim_source == "ldv":
-            bodytype_candidates = frism_atlas_map[frism_atlas_map["beamClass"] == beam_class].copy()
+            bodytype_candidates = frism_atlas_map[frism_atlas_map["beamVehicleCategory"] == beam_vehicle_category].copy()
             if bodytype_candidates.empty:
-                raise ValueError(f"No FRISM ATLAS bodytype mapping found for beam class {beam_class}")
+                raise ValueError(
+                    f"No FRISM-ATLAS body_type mapping found for beamVehicleCategory={beam_vehicle_category}"
+                )
             selected_body_type = (
                 bodytype_candidates.sort_values(["weight", "body_type"], ascending=[False, True], kind="mergesort").iloc[0]["body_type"]
             )
@@ -614,7 +618,7 @@ def _assign_freight_fastsim_energy_files(
             )
         else:
             primary_path, secondary_path = _select_mhdv_fastsim_energy_files(
-                beam_class=beam_class,
+                beam_vehicle_category=beam_vehicle_category,
                 fuel_row=fuel_row,
                 frism_bodytype_xwalk=frism_bodytype_xwalk,
                 mhdv_lookup_index=mhdv_lookup_index,

@@ -1,0 +1,7 @@
+source,target,priority
+Class12aVocational,Class2b3Vocational,1
+Class2b3Vocational,Class12aVocational,1
+Class456Vocational,Class78Vocational,1
+Class78Vocational,Class78Tractor,1
+Class78Vocational,Class456Vocational,2
+Class78Tractor,Class78Vocational,1

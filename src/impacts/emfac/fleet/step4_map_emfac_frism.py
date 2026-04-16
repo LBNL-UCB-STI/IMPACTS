@@ -86,7 +86,7 @@ def _normalize_freight_vehicle_type_id(value: object) -> str:
     return "".join(part[:1].upper() + part[1:].lower() for part in parts)
 
 
-def _map_freight_beam_class(vehicle_type_id: object, vehicle_category: object, vehicle_class: object) -> str:
+def _map_freight_beam_vehicle_category(vehicle_type_id: object, vehicle_category: object, vehicle_class: object) -> str:
     normalized_id = _normalize_freight_vehicle_type_id(vehicle_type_id)
     prefix_map = {
         "Ld1": "Class12aVocational",
@@ -95,9 +95,9 @@ def _map_freight_beam_class(vehicle_type_id: object, vehicle_category: object, v
         "Hdt": "Class78Tractor",
         "Hdv": "Class78Vocational",
     }
-    for prefix, beam_class in prefix_map.items():
+    for prefix, beam_vehicle_category in prefix_map.items():
         if normalized_id.startswith(prefix):
-            return beam_class
+            return beam_vehicle_category
 
     vehicle_category_token = _normalize_text(vehicle_category)
     if vehicle_category_token in {
@@ -121,49 +121,33 @@ def _map_freight_beam_class(vehicle_type_id: object, vehicle_category: object, v
     if mapped:
         return mapped
     raise ValueError(
-        "Could not determine freight BEAM class for vehicleTypeId="
+        "Could not determine freight BEAM vehicle category for vehicleTypeId="
         f"{vehicle_type_id}, vehicleCategory={vehicle_category}, vehicleClass={vehicle_class}"
     )
 
 
-def _map_freight_beam_category(vehicle_type_id: object, vehicle_category: object, vehicle_class: object) -> str:
-    vehicle_category_token = _normalize_text(vehicle_category)
-    if vehicle_category_token in {
-        "Car",
-        "Bike",
-        "MediumDutyPassenger",
+def _build_valid_freight_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
+    category_map = read_table(config["mapping"]["emfac_beam_category_map"], dtype=None)
+    _require_column(category_map, "emfac", "EMFAC BEAM category mapping file")
+    _require_column(category_map, "beamVehicleCategory", "EMFAC BEAM category mapping file")
+    freight_vehicle_categories = {
+        "Class12aVocational",
         "Class2b3Vocational",
         "Class456Vocational",
         "Class78Vocational",
         "Class78Tractor",
-    }:
-        return vehicle_category_token
-
-    freight_class = _map_freight_beam_class(vehicle_type_id, vehicle_category, vehicle_class)
-    beam_category_by_freight_class = {
-        "Class12aVocational": "Car",
-        "Class2b3Vocational": "Car",
-        "Class456Vocational": "Car",
-        "Class78Vocational": "Class78Vocational",
-        "Class78Tractor": "Class78Tractor",
     }
-    return beam_category_by_freight_class.get(freight_class, freight_class)
-
-
-def _build_valid_freight_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
-    class_map = read_table(config["mapping"]["emfac_beam_class_map"], dtype=None)
-    _require_column(class_map, "emfac", "EMFAC BEAM class mapping file")
-    _require_column(class_map, "beamCategory", "EMFAC BEAM class mapping file")
-    freight_beam_categories = {"Car", "Class456Vocational", "Class78Vocational", "Class78Tractor"}
     freight_emfac_categories = (
-        class_map[class_map["beamCategory"].map(_normalize_text).isin(freight_beam_categories)]["emfac"]
+        category_map[
+            category_map["beamVehicleCategory"].map(_normalize_text).isin(freight_vehicle_categories)
+        ]["emfac"]
         .dropna()
         .astype(str)
         .unique()
         .tolist()
     )
     if not freight_emfac_categories:
-        raise ValueError("EMFAC BEAM class mapping file has no freight mappings")
+        raise ValueError("EMFAC BEAM category mapping file has no freight mappings")
 
     emfac_config = config["activities"]
     rates = read_table(emfac_config["rates_file"], dtype=None, columns=_EMFAC_KEY_COLUMNS)[_EMFAC_KEY_COLUMNS].drop_duplicates()
@@ -206,21 +190,29 @@ def _build_valid_freight_emfac_candidates(config: dict[str, Any]) -> pd.DataFram
     return candidates
 
 
-def _load_freight_class_mapping(config: dict[str, Any]) -> pd.DataFrame:
-    frame = read_table(config["mapping"]["emfac_beam_class_map"], dtype=None)
-    for column_name in ["emfac", "beamCategory"]:
-        _require_column(frame, column_name, "EMFAC BEAM class mapping file")
-    freight_beam_categories = {"Car", "Class456Vocational", "Class78Vocational", "Class78Tractor"}
-    prepared = frame[frame["beamCategory"].map(_normalize_text).isin(freight_beam_categories)].copy()
-    prepared["beamCategory"] = prepared["beamCategory"].map(_normalize_text)
+def _load_freight_category_mapping(config: dict[str, Any]) -> pd.DataFrame:
+    frame = read_table(config["mapping"]["emfac_beam_category_map"], dtype=None)
+    for column_name in ["emfac", "beamVehicleCategory"]:
+        _require_column(frame, column_name, "EMFAC BEAM category mapping file")
+    freight_vehicle_categories = {
+        "Class12aVocational",
+        "Class2b3Vocational",
+        "Class456Vocational",
+        "Class78Vocational",
+        "Class78Tractor",
+    }
+    prepared = frame[
+        frame["beamVehicleCategory"].map(_normalize_text).isin(freight_vehicle_categories)
+    ].copy()
+    prepared["beamVehicleCategory"] = prepared["beamVehicleCategory"].map(_normalize_text)
     prepared["emfac"] = prepared["emfac"].map(_normalize_text)
-    return prepared[["beamCategory", "emfac"]].drop_duplicates().reset_index(drop=True)
+    return prepared[["beamVehicleCategory", "emfac"]].drop_duplicates().reset_index(drop=True)
 
 
-def _load_freight_class_alternatives(config: dict[str, Any]) -> pd.DataFrame:
-    frame = read_table(config["mapping"]["beam_class_alternatives_map"], dtype=None)
+def _load_freight_category_alternatives(config: dict[str, Any]) -> pd.DataFrame:
+    frame = read_table(config["mapping"]["frism_class_alternatives_map"], dtype=None)
     for column_name in ["source", "target"]:
-        _require_column(frame, column_name, "Freight class alternatives file")
+        _require_column(frame, column_name, "Freight category alternatives file")
     prepared = frame.copy()
     prepared["source"] = prepared["source"].map(_normalize_text)
     prepared["target"] = prepared["target"].map(_normalize_text)
@@ -742,20 +734,20 @@ def _filter_required_port_classes(
     return matched.loc[~port_class_mask | matched["vehicleCategory"].isin(allowed_port_classes)].copy()
 
 
-def _extract_freight_class_candidates(
+def _extract_freight_category_candidates(
     *,
-    beam_class: str,
-    class_mapping: pd.DataFrame,
-    class_alternatives: pd.DataFrame,
+    freight_category: str,
+    category_mapping: pd.DataFrame,
+    category_alternatives: pd.DataFrame,
 ) -> set[str]:
-    direct = class_mapping[class_mapping["beamCategory"] == beam_class]
+    direct = category_mapping[category_mapping["beamVehicleCategory"] == freight_category]
     categories = {str(row.emfac) for row in direct.itertuples(index=False)}
     if categories:
         return categories
 
-    alternatives = class_alternatives[class_alternatives["source"] == beam_class]
+    alternatives = category_alternatives[category_alternatives["source"] == freight_category]
     for row in alternatives.itertuples(index=False):
-        target_matches = class_mapping[class_mapping["beamCategory"] == row.target]
+        target_matches = category_mapping[category_mapping["beamVehicleCategory"] == row.target]
         for target_row in target_matches.itertuples(index=False):
             categories.add(str(target_row.emfac))
     return categories
@@ -792,12 +784,12 @@ def _extract_freight_fuel_candidates(
 def _build_freight_emfac_candidates(
     *,
     vehicle_type_id: str,
-    beam_category: str,
+    beam_vehicle_category: str,
     primary_fuel: object,
     secondary_fuel: object,
     emfac_candidates: pd.DataFrame,
-    class_mapping: pd.DataFrame,
-    class_alternatives: pd.DataFrame,
+    category_mapping: pd.DataFrame,
+    category_alternatives: pd.DataFrame,
     fuel_mapping: pd.DataFrame,
     fuel_alternatives: pd.DataFrame,
     naics_sector_weights: dict[str, float],
@@ -811,14 +803,15 @@ def _build_freight_emfac_candidates(
     assignment_model: str = _DEFAULT_ASSIGNMENT_MODEL,
     configured_port_classes: set[str] | None = None,
 ) -> pd.DataFrame:
-    class_candidates = _extract_freight_class_candidates(
-        beam_class=beam_category,
-        class_mapping=class_mapping,
-        class_alternatives=class_alternatives,
+    category_candidates = _extract_freight_category_candidates(
+        freight_category=beam_vehicle_category,
+        category_mapping=category_mapping,
+        category_alternatives=category_alternatives,
     )
-    if not class_candidates:
+    if not category_candidates:
         raise ValueError(
-            f"No freight EMFAC class candidates available for vehicleTypeId={vehicle_type_id}, beamCategory={beam_category}"
+            "No freight EMFAC category candidates available for "
+            f"vehicleTypeId={vehicle_type_id}, beamVehicleCategory={beam_vehicle_category}"
         )
 
     fuel_candidates = _extract_freight_fuel_candidates(
@@ -835,13 +828,13 @@ def _build_freight_emfac_candidates(
 
     # Hard filters — eliminate physically impossible candidates before scoring.
     matched = emfac_candidates[
-        emfac_candidates["vehicleCategory"].isin(class_candidates)
+        emfac_candidates["vehicleCategory"].isin(category_candidates)
         & emfac_candidates["fuel"].isin(fuel_candidates)
     ].copy()
     if matched.empty:
         raise ValueError(
-            "No freight EMFAC candidates available after applying class/fuel hard filters for "
-            f"vehicleTypeId={vehicle_type_id}, beamCategory={beam_category}, "
+            "No freight EMFAC candidates available after applying category/fuel hard filters for "
+            f"vehicleTypeId={vehicle_type_id}, beamVehicleCategory={beam_vehicle_category}, "
             f"primaryFuelType={primary_fuel}, secondaryFuelType={secondary_fuel}"
         )
     matched = _filter_required_port_classes(
@@ -930,8 +923,8 @@ def _build_freight_vehicle_types_with_emfac(
         _require_column(freight_vehicle_types, column_name, "Freight vehicle types file")
 
     emfac_candidates = _build_valid_freight_emfac_candidates(config)
-    class_mapping = _load_freight_class_mapping(config)
-    class_alternatives = _load_freight_class_alternatives(config)
+    category_mapping = _load_freight_category_mapping(config)
+    category_alternatives = _load_freight_category_alternatives(config)
     fuel_mapping = _load_freight_fuel_mapping(config)
     fuel_alternatives = _load_freight_fuel_alternatives(config)
     naics_sector_mapping = _load_naics_sector_mapping(config)
@@ -958,12 +951,8 @@ def _build_freight_vehicle_types_with_emfac(
     configured_port_classes = _load_configured_port_classes(config)
 
     prepared = freight_vehicle_types.copy()
-    prepared["beamCategory"] = prepared.apply(
-        lambda row: _map_freight_beam_category(row["vehicleTypeId"], row.get("vehicleCategory"), row.get("vehicleClass")),
-        axis=1,
-    )
-    prepared["beamClass"] = prepared.apply(
-        lambda row: _map_freight_beam_class(row["vehicleTypeId"], row.get("vehicleCategory"), row.get("vehicleClass")),
+    prepared["beamVehicleCategory"] = prepared.apply(
+        lambda row: _map_freight_beam_vehicle_category(row["vehicleTypeId"], row.get("vehicleCategory"), row.get("vehicleClass")),
         axis=1,
     )
 
@@ -972,12 +961,12 @@ def _build_freight_vehicle_types_with_emfac(
         median_mass_kg, heavy_mass_kg = payload_mass_thresholds.get(str(row.vehicleTypeId), (0.0, 0.0))
         candidates = _build_freight_emfac_candidates(
             vehicle_type_id=str(row.vehicleTypeId),
-            beam_category=str(row.beamCategory),
+            beam_vehicle_category=str(row.beamVehicleCategory),
             primary_fuel=row.primaryFuelType,
             secondary_fuel=row.secondaryFuelType,
             emfac_candidates=emfac_candidates,
-            class_mapping=class_mapping,
-            class_alternatives=class_alternatives,
+            category_mapping=category_mapping,
+            category_alternatives=category_alternatives,
             fuel_mapping=fuel_mapping,
             fuel_alternatives=fuel_alternatives,
             naics_sector_weights=naics_sector_weight_lookup.get(str(row.vehicleTypeId), {}),
@@ -1013,7 +1002,7 @@ def _build_freight_vehicle_types_with_emfac(
             "Freight Step 4.1 generated duplicate vehicleTypeId values:\n"
             + "\n".join(duplicate_vehicle_type_ids.astype(str).tolist())
         )
-    mapped = mapped.drop(columns=["beamCategory", "beamClass"], errors="ignore").reset_index(drop=True)
+    mapped = mapped.drop(columns=["beamVehicleCategory"], errors="ignore").reset_index(drop=True)
     return _normalize_written_freight_probabilities(mapped)
 
 

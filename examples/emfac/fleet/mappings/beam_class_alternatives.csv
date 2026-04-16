@@ -1,7 +1,0 @@
-source,target,beamCategory,priority
-Class12aVocational,Class2b3Vocational,Car,1
-Class2b3Vocational,Class12aVocational,Car,1
-Class456Vocational,Class78Vocational,Class78Vocational,1
-Class78Vocational,Class78Tractor,Class78Tractor,1
-Class78Vocational,Class456Vocational,Class456Vocational,2
-Class78Tractor,Class78Vocational,Class78Vocational,1

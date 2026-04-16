@@ -55,10 +55,10 @@ emfac:
 
     mapping:
       emfac_atlas_map: examples/emfac/fleet/mappings/atlas_emfac_xwalk.csv
-      emfac_beam_class_map: examples/emfac/fleet/mappings/emfac_beam_class_mapping.csv
+      emfac_beam_category_map: examples/emfac/fleet/mappings/emfac_beam_category_mapping.csv
       emfac_beam_fuel_map: examples/emfac/fleet/mappings/emfac_beam_fuel_mappings.csv
       emfac_fuel_alternatives_map: examples/emfac/fleet/mappings/emfac_fuel_alternatives.csv
-      beam_class_alternatives_map: examples/emfac/fleet/mappings/beam_class_alternatives.csv
+      frism_class_alternatives_map: examples/emfac/fleet/mappings/frism_class_alternatives.csv
       atlas_bodytype_alternatives_map: examples/emfac/fleet/mappings/atlas_bodytype_alternatives.csv
       fastsim_atlas_bodytype_xwalk_file: examples/emfac/fleet/mappings/fastsim_atlas_bodytype_xwalk.csv
       fastsim_atlas_fuel_mapping_file: examples/emfac/fleet/mappings/fastsim_atlas_fuel_mapping.csv

@@ -286,6 +286,11 @@ def _attach_rates_to_vehicle_types(
     return prepared
 
 
+def _is_beam_passenger_car_vehicle_type(frame: pd.DataFrame) -> pd.Series:
+    _require_column(frame, "vehicleCategory", "Passenger vehicle types file")
+    return frame["vehicleCategory"].astype(str).eq("Car")
+
+
 def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
     """Step 5: build passenger and freight EMFAC rates stores and attach file paths."""
     config = workflow["config"]
@@ -318,7 +323,8 @@ def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
     passenger_vehicle_types_with_rates, passenger_id_mapping = _build_short_vehicle_type_ids(
         passenger_vehicle_types_with_rates,
         prefix="pax",
-        shorten_mask=passenger_vehicle_types_with_rates["vehicleCategory"].astype(str).eq("Car"),
+        # Only BEAM passenger car rows use the shortened id form.
+        shorten_mask=_is_beam_passenger_car_vehicle_type(passenger_vehicle_types_with_rates),
     )
     passenger_output_file = _write_vehicle_types(
         passenger_vehicle_types_with_rates,
