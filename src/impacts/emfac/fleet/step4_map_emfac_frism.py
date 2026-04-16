@@ -988,6 +988,7 @@ def _build_freight_vehicle_types_with_emfac(
             share = float(candidate.probabilityShare)
             updated = dict(row_payload)
             updated["oldVehicleTypeId"] = str(row.vehicleTypeId)
+            updated["vehicleCategory"] = str(row.beamVehicleCategory)
             updated["emfacId"] = str(candidate.emfacId)
             updated["emfacVehicleCategory"] = str(candidate.vehicleCategory)
             updated["vehicleTypeId"] = f"{candidate.emfacId}--{row.vehicleTypeId}"
