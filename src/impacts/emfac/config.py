@@ -257,7 +257,22 @@ def _normalize_activities_inputs(raw: dict) -> dict:
         "rainy_days_file": _find_matching_file(road_dust_root, ("rainy_days",), required=False),
         "silt_loading_file": _find_matching_file(road_dust_root, ("silt_loading",), required=False),
     }
-    return {key: _expand_optional_path(value) for key, value in normalized.items()}
+    path_keys = {
+        "project_analysis_raw",
+        "black_carbon_raw",
+        "statewide_inventory_raw",
+        "population_raw",
+        "trips_raw",
+        "vmt_raw",
+        "emission_raw",
+        "ghg_raw",
+        "rainy_days_file",
+        "silt_loading_file",
+    }
+    return {
+        key: _expand_optional_path(value) if key in path_keys else value
+        for key, value in normalized.items()
+    }
 
 
 def _expand_activities_paths(raw: dict) -> dict:
@@ -355,17 +370,17 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
         "paths": {
             "outputs_root": str(outputs_root),
             "activities_output_root": str(activities_output_root),
-            "trace_dir": str(outputs_root / "traces"),
-            "project_analysis_source": str(outputs_root / f"{base_name}-project-analysis-source.parquet"),
-            "project_analysis": str(outputs_root / f"{base_name}-project-analysis.parquet"),
-            "project_analysis_bc": str(outputs_root / f"{base_name}-project-analysis-bc.parquet"),
-            "project_analysis_prdust": str(outputs_root / f"{base_name}-project-analysis-prdust.parquet"),
-            "project_analysis_nh3_rates": str(outputs_root / f"{base_name}-project-analysis-nh3-rates.parquet"),
-            "emissions_inventory": str(outputs_root / f"{base_name}-emissions-inventory-with-activity.parquet"),
-            "statewide_inventory": str(outputs_root / f"statewide-emfac-{year}-emissions-inventory.parquet"),
-            "final_output": str(outputs_root / f"{final_name}-rates.parquet"),
+            "trace_dir": str(activities_output_root / "traces"),
+            "project_analysis_source": str(activities_output_root / f"{base_name}-project-analysis-source.parquet"),
+            "project_analysis": str(activities_output_root / f"{base_name}-project-analysis.parquet"),
+            "project_analysis_bc": str(activities_output_root / f"{base_name}-project-analysis-bc.parquet"),
+            "project_analysis_prdust": str(activities_output_root / f"{base_name}-project-analysis-prdust.parquet"),
+            "project_analysis_nh3_rates": str(activities_output_root / f"{base_name}-project-analysis-nh3-rates.parquet"),
+            "emissions_inventory": str(activities_output_root / f"{base_name}-emissions-inventory-with-activity.parquet"),
+            "statewide_inventory": str(activities_output_root / f"statewide-emfac-{year}-emissions-inventory.parquet"),
+            "final_output": str(activities_output_root / f"{final_name}-rates.parquet"),
             "final_activity_output": str(activities_output_root / f"{final_name}-activity.parquet"),
-            "final_fleet_output": str(outputs_root / f"{final_name}-fleet.parquet"),
+            "final_fleet_output": str(activities_output_root / f"{final_name}-fleet.parquet"),
         },
     }
 
@@ -438,9 +453,9 @@ def _derive_emfac_output_paths(emfac: dict[str, object]) -> dict[str, object]:
     base_name = f"{region_slug}-emfac-{int(calendar_year)}-project-analysis-final"
     outputs_root = Path(str(outputs))
     activities_output_root = outputs_root / "activities"
-    emfac["rates_file"] = str((outputs_root / f"{base_name}-rates.parquet").resolve())
+    emfac["rates_file"] = str((activities_output_root / f"{base_name}-rates.parquet").resolve())
     emfac["activity_file"] = str((activities_output_root / f"{base_name}-activity.parquet").resolve())
-    emfac["fleet_file"] = str((outputs_root / f"{base_name}-fleet.parquet").resolve())
+    emfac["fleet_file"] = str((activities_output_root / f"{base_name}-fleet.parquet").resolve())
     return emfac
 
 
@@ -476,21 +491,6 @@ def _ingest_fleet_sources(config: dict) -> dict:
         activities["outputs"] = _normalize_configured_path(
             activities.get("outputs"),
             path_label="activities.outputs",
-            must_exist=False,
-        )
-        activities["rates_file"] = _normalize_configured_path(
-            activities.get("rates_file"),
-            path_label="activities.rates_file",
-            must_exist=False,
-        )
-        activities["activity_file"] = _normalize_configured_path(
-            activities.get("activity_file"),
-            path_label="activities.activity_file",
-            must_exist=False,
-        )
-        activities["fleet_file"] = _normalize_configured_path(
-            activities.get("fleet_file"),
-            path_label="activities.fleet_file",
             must_exist=False,
         )
         activities = _derive_emfac_output_paths(activities)

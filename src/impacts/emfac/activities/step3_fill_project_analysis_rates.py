@@ -27,6 +27,7 @@ POLLUTANT_COLUMNS = [
     "sox_gram",
     "tog_gram",
 ]
+GROUP_RATE_KEYS = ["county", "vehicleCategory", "fuel", "modelYear", "process"]
 CLASS_FUEL_ALTERNATIVES = {
     ("T6 Instate Tractor Class 6", "NG"): ("T6 Instate Other Class 6", "NG"),
     ("T6 Utility Class 5", "NG"): ("T6 Public Class 5", "NG"),
@@ -73,6 +74,41 @@ def _all_zero_pollutant_row_mask(frame: pd.DataFrame) -> pd.Series:
     return has_any_value & ~has_any_nonzero
 
 
+def _group_rate_keys(frame: pd.DataFrame) -> list[str]:
+    return [column for column in GROUP_RATE_KEYS if column in frame.columns]
+
+
+def _rows_with_any_real_rate_mask(frame: pd.DataFrame) -> pd.Series:
+    pollutant_columns = _available_pollutant_columns(frame)
+    if not pollutant_columns:
+        return pd.Series(False, index=frame.index)
+
+    numeric = frame[pollutant_columns].apply(pd.to_numeric, errors="coerce")
+    return numeric.fillna(0.0).ne(0.0).any(axis=1)
+
+
+def _missing_rate_groups(frame: pd.DataFrame) -> pd.DataFrame:
+    group_keys = _group_rate_keys(frame)
+    if not group_keys:
+        return pd.DataFrame(columns=GROUP_RATE_KEYS + ["rows"])
+
+    group_frame = frame[group_keys].copy()
+    group_frame["_has_real_rate"] = _rows_with_any_real_rate_mask(frame).to_numpy()
+    summary = (
+        group_frame.groupby(group_keys, dropna=False)["_has_real_rate"]
+        .agg(rows="size", has_real_rate="any")
+        .reset_index()
+    )
+    return summary.loc[~summary["has_real_rate"]].drop(columns="has_real_rate")
+
+
+def _missing_rate_group_examples(frame: pd.DataFrame, *, limit: int = 10) -> list[dict[str, object]]:
+    missing_groups = _missing_rate_groups(frame)
+    if missing_groups.empty:
+        return []
+    return missing_groups.head(limit).to_dict(orient="records")
+
+
 def _zero_row_examples(frame: pd.DataFrame, *, limit: int = 10) -> list[dict[str, object]]:
     mask = _all_zero_pollutant_row_mask(frame)
     if not mask.any():
@@ -97,35 +133,45 @@ def _replace_all_zero_pollutant_rows_with_missing(
 
     result = frame.copy()
     zero_mask = _all_zero_pollutant_row_mask(result)
+    missing_groups = _missing_rate_groups(result)
     if not zero_mask.any():
-        return result, {"label": label, "rows": 0, "examples": []}
+        return result, {
+            "label": label,
+            "rows": 0,
+            "examples": [],
+            "missing_group_count": int(len(missing_groups)),
+            "missing_group_examples": _missing_rate_group_examples(result),
+        }
 
     result.loc[zero_mask, pollutant_columns] = pd.NA
     summary = {
         "label": label,
         "rows": int(zero_mask.sum()),
         "examples": _zero_row_examples(frame),
+        "missing_group_count": int(len(missing_groups)),
+        "missing_group_examples": missing_groups.head(10).to_dict(orient="records"),
     }
-    print(
-        f"      Warning: treating {summary['rows']:,} all-zero pollutant row(s) as unresolved coverage in {label}."
-    )
-    for example in summary["examples"][:5]:
-        print(f"        Example: {example}")
+    if summary["missing_group_count"] > 0:
+        print(
+            f"      Error: found {summary['missing_group_count']:,} county/vehicle/fuel/modelYear/process group(s) "
+            f"with no real pollutant rates in {label}."
+        )
+        for example in summary["missing_group_examples"][:5]:
+            print(f"        Example group: {example}")
     return result, summary
 
 
 def _assert_no_all_zero_pollutant_rows(frame: pd.DataFrame, *, label: str) -> None:
-    zero_mask = _all_zero_pollutant_row_mask(frame)
-    if not zero_mask.any():
+    missing_groups = _missing_rate_groups(frame)
+    if missing_groups.empty:
         return
 
-    examples = _zero_row_examples(frame)
+    examples = missing_groups.head(10).to_dict(orient="records")
     raise ValueError(
-        f"{label} still contains {int(zero_mask.sum()):,} all-zero pollutant row(s). "
-        "This means matching EMFAC rate rows were found but every pollutant rate stayed zero, "
-        "so the fill pipeline could not recover valid coverage. Check the source project-analysis "
-        "rates and inventory rows for these keys, especially processes like IDLEX. "
-        f"Example rows: {examples}"
+        f"{label} still contains {int(len(missing_groups)):,} county/vehicle/fuel/modelYear/process group(s) "
+        "with no real pollutant rates. This means the fill pipeline could not recover any positive "
+        "pollutant coverage anywhere within those groups. Check the source project-analysis rates and "
+        f"inventory rows for these keys. Example groups: {examples}"
     )
 
 

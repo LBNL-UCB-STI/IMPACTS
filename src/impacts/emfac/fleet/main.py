@@ -44,10 +44,8 @@ def _run_step(workflow: dict[str, object], *, step_name: str, runner) -> dict[st
     return updated_workflow
 
 
-def _prepare_activities_config(activities: dict[str, object], *, activities_output_root: Path) -> dict[str, object]:
-    activities = deepcopy(activities)
-    activities["outputs"] = str(activities_output_root)
-    return activities
+def _prepare_activities_config(activities: dict[str, object]) -> dict[str, object]:
+    return deepcopy(activities)
 
 
 def _bootstrap_emfac_outputs_if_needed(workflow: dict[str, object]) -> dict[str, object]:
@@ -61,8 +59,7 @@ def _bootstrap_emfac_outputs_if_needed(workflow: dict[str, object]) -> dict[str,
     if not missing:
         return workflow
 
-    activities_output_root = Path(str(activities["outputs"]))
-    activities_config = _prepare_activities_config(activities, activities_output_root=activities_output_root)
+    activities_config = _prepare_activities_config(activities)
 
     print("Bootstrapping EMFAC activities because required fleet inputs are missing:")
     for path in missing.values():
