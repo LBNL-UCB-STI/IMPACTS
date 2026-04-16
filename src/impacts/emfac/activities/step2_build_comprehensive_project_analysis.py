@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from impacts.emfac.common import frame_summary
-from impacts.emfac.common import write_trace
+from impacts.emfac.activities.common import frame_summary
+from impacts.emfac.activities.common import write_trace
 
 ACTIVITY_COLUMN = "speedMph_timeMin"
 SPEED_PROCESSES = ["RUNEX", "PMBW", "PTOEX"]

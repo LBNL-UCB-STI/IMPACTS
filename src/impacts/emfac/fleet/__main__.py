@@ -1,8 +1,10 @@
+"""Package entrypoint for `python -m impacts.emfac.fleet`."""
+
 from __future__ import annotations
 
 import sys
 
-from impacts.emfac.activities.main import main
+from impacts.emfac.fleet.main import main
 
 
 if __name__ == "__main__":

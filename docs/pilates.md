@@ -64,7 +64,7 @@ impacts:
     osm_network_folder: r5/sfbay-cbg5500-weakConn-network
     emissions_rates_folder: vehicle-tech/emissions/2018-Baseline
     activity_totals_file: vehicle-tech/emissions/SFBay_2018_Annual_activity_totals.parquet
-    annualization_days_or_file: src/impacts/emfac/vehicle_operation_days_per_year.csv
+    annualization_days_or_file: src/impacts/emfac/activities/vehicle_operation_days_per_year.csv
     population_sample: 0.1
     pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
   dispersions:

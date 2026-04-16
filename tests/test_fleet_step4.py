@@ -6,17 +6,17 @@ from pathlib import Path
 
 import pandas as pd
 
-from impacts.fleet.step4_map_emfac_frism import _build_dag_log_score
-from impacts.fleet.step4_map_emfac_frism import _build_freight_naics_sector_weight_lookup
-from impacts.fleet.step4_map_emfac_frism import _build_payload_mass_thresholds
-from impacts.fleet.step4_map_emfac_frism import _filter_required_port_classes
-from impacts.fleet.step4_map_emfac_frism import _build_freight_port_weight_lookup
-from impacts.fleet.step4_map_emfac_frism import _build_tour_port_weight_lookup
-from impacts.fleet.step4_map_emfac_frism import _load_configured_port_classes
-from impacts.fleet.step4_map_emfac_frism import _load_vehicle_type_assignment_table
-from impacts.fleet.step4_map_emfac_frism import _load_port_zone_mapping
-from impacts.fleet.step4_map_emfac_frism import _port_category_weight
-from impacts.fleet.step4_map_emfac_frism import _normalize_zone_id
+from impacts.emfac.fleet.step4_map_emfac_frism import _build_dag_log_score
+from impacts.emfac.fleet.step4_map_emfac_frism import _build_freight_naics_sector_weight_lookup
+from impacts.emfac.fleet.step4_map_emfac_frism import _build_payload_mass_thresholds
+from impacts.emfac.fleet.step4_map_emfac_frism import _filter_required_port_classes
+from impacts.emfac.fleet.step4_map_emfac_frism import _build_freight_port_weight_lookup
+from impacts.emfac.fleet.step4_map_emfac_frism import _build_tour_port_weight_lookup
+from impacts.emfac.fleet.step4_map_emfac_frism import _load_configured_port_classes
+from impacts.emfac.fleet.step4_map_emfac_frism import _load_vehicle_type_assignment_table
+from impacts.emfac.fleet.step4_map_emfac_frism import _load_port_zone_mapping
+from impacts.emfac.fleet.step4_map_emfac_frism import _port_category_weight
+from impacts.emfac.fleet.step4_map_emfac_frism import _normalize_zone_id
 
 
 def _write_model_file(tmp_path: Path, *, port_rows: list[str] | None = None) -> dict[str, dict[str, str]]:

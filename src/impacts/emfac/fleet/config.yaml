@@ -1,14 +1,8 @@
 fleet:
   region: sfbay
-  year: 2018
-  scenario: Baseline
+  scenario: 2018-Baseline
   seed: 0
   output: examples/fleet/output
-
-  # Single standardized Bayesian/DAG model input.
-  # It contains the DAG structure, weights, category families, constraints,
-  # and all embedded evidence tables.
-  vehicle_type_assignment_model_settings: examples/fleet/vehicle_type_assignment_model.yaml
 
   mapping:
     emfac_atlas_map: examples/fleet/mappings/atlas_emfac_xwalk.csv
@@ -78,6 +72,10 @@ fleet:
     carriers_file: ~/Workspace/Simulation/sfbay/beam-ft/20250730/2018-Baseline/carriers--2018-Baseline.parquet
     payloads_file: ~/Workspace/Simulation/sfbay/beam-ft/20250730/2018-Baseline/payloads--2018-Baseline.parquet
     tours_file: ~/Workspace/Simulation/sfbay/beam-ft/20250730/2018-Baseline/tours--2018-Baseline.parquet
+
+  vehicle_type_assignment:
+    model_file: examples/fleet/vehicle_type_assignment_model.yaml
+
 
   fastsim:
     passenger_vehicle_types_file: ~/Workspace/Simulation/sfbay/vehicle-tech/vehicleTypes_inventory.csv

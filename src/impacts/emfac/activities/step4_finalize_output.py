@@ -5,10 +5,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from impacts.emfac.step3_fill_project_analysis_rates import ACTIVITY_COLUMN
-from impacts.emfac.step3_fill_project_analysis_rates import POLLUTANT_COLUMNS
-from impacts.emfac.common import frame_summary
-from impacts.emfac.common import write_trace
+from impacts.emfac.activities.step3_fill_project_analysis_rates import ACTIVITY_COLUMN
+from impacts.emfac.activities.step3_fill_project_analysis_rates import POLLUTANT_COLUMNS
+from impacts.emfac.activities.common import frame_summary
+from impacts.emfac.activities.common import write_trace
 
 ACTIVITY_JOIN_COLUMNS = ["county", "vehicleCategory", "fuel", "modelYear"]
 PTO_PROCESS_NAME = "PTOEX"

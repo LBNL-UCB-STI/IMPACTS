@@ -3,15 +3,15 @@
 from pathlib import Path
 import sys
 
-from impacts.emfac.config import load_default_workflow
-from impacts.emfac.config import load_workflow
-from impacts.emfac.step1_prepare_emissions_and_activities_tables import run_step1
-from impacts.emfac.step2_build_comprehensive_project_analysis import run_step2
-from impacts.emfac.step3_fill_project_analysis_rates import run_step3
-from impacts.emfac.step4_finalize_output import run_step4
-from impacts.emfac.common import raise_runtime_error
-from impacts.emfac.common import write_failure_trace
-from impacts.emfac.common import write_trace
+from impacts.emfac.activities.config import load_default_workflow
+from impacts.emfac.activities.config import load_workflow
+from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import run_step1
+from impacts.emfac.activities.step2_build_comprehensive_project_analysis import run_step2
+from impacts.emfac.activities.step3_fill_project_analysis_rates import run_step3
+from impacts.emfac.activities.step4_finalize_output import run_step4
+from impacts.emfac.activities.common import raise_runtime_error
+from impacts.emfac.activities.common import write_failure_trace
+from impacts.emfac.activities.common import write_trace
 
 
 def _configure_run(config_path: str | Path | None = None) -> dict[str, object]:
@@ -41,11 +41,7 @@ def _run_step(workflow: dict[str, object], *, step_name: str, runner) -> dict[st
     return updated_workflow
 
 
-def run_all_steps(config_path: str | Path | None = None) -> None:
-    try:
-        workflow = _configure_run(config_path)
-    except Exception as error:
-        raise_runtime_error("config_load", error)
+def run_workflow(workflow: dict[str, object]) -> dict[str, object]:
     _print_run_banner(workflow)
     write_trace(
         workflow,
@@ -67,6 +63,15 @@ def run_all_steps(config_path: str | Path | None = None) -> None:
         raise
     write_trace(workflow, "workflow_success", {"status": "completed"})
     print("  DONE")
+    return workflow
+
+
+def run_all_steps(config_path: str | Path | None = None) -> None:
+    try:
+        workflow = _configure_run(config_path)
+    except Exception as error:
+        raise_runtime_error("config_load", error)
+    run_workflow(workflow)
 
 
 def main(config_path: str | Path | None = None) -> None:

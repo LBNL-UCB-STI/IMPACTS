@@ -214,9 +214,8 @@ def _validate(raw: dict, source_path: Path) -> None:
         )
 
 
-def load_workflow(config_path: str | Path | None = None) -> dict[str, object]:
-    source_path = Path(config_path) if config_path is not None else DEFAULT_CONFIG_PATH
-    raw = _expand_paths(_load_yaml(source_path))
+def _build_workflow(raw: dict[str, object], source_path: Path) -> dict[str, object]:
+    raw = _expand_paths(raw)
     _validate(raw, source_path)
 
     year = int(raw["calendar_year"])
@@ -257,6 +256,16 @@ def load_workflow(config_path: str | Path | None = None) -> dict[str, object]:
             "final_fleet_output": str(outputs_root / f"{final_name}-fleet.parquet"),
         },
     }
+
+
+def load_workflow(config_path: str | Path | None = None) -> dict[str, object]:
+    source_path = Path(config_path) if config_path is not None else DEFAULT_CONFIG_PATH
+    raw = _load_yaml(source_path)
+    return _build_workflow(raw, source_path)
+
+
+def load_workflow_from_data(raw: dict[str, object], *, source_label: str = "<in-memory>") -> dict[str, object]:
+    return _build_workflow(deepcopy(raw), Path(source_label))
 
 
 def load_default_workflow() -> dict[str, object]:

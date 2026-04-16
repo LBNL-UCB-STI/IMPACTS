@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from impacts.fleet.config import _normalize_model_spec_path
+from impacts.emfac.fleet.config import _normalize_model_spec_path
 
 
 def _write_required_model_file(model_file: Path) -> None:

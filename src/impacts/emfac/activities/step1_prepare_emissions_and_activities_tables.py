@@ -8,8 +8,8 @@ from functools import lru_cache
 
 import pandas as pd
 
-from impacts.emfac.common import frame_summary
-from impacts.emfac.common import write_trace
+from impacts.emfac.activities.common import frame_summary
+from impacts.emfac.activities.common import write_trace
 
 GRAMS_PER_SHORT_TON = 907_184.74
 METRIC_TONS_PER_SHORT_TON = 0.90718474
