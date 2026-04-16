@@ -167,7 +167,7 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
         encoding="utf-8",
     )
 
-    overlay = Path(__file__).resolve().parents[1] / "src" / "impacts" / "adapters" / "pilates_overlay.yaml"
+    overlay = Path(__file__).resolve().parents[1] / "src" / "impacts" / "pipeline" / "adapters" / "pilates_overlay.yaml"
     config = build_settings_from_pilates(pilates_settings=pilates_settings, impacts_overlay=overlay)
 
     assert config.run.region == "sfbay"

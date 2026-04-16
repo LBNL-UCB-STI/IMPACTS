@@ -215,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "derive_settings_from_pilates":
-        from impacts.adapters.pilates import derive_settings_from_pilates
+        from impacts.pipeline.adapters.pilates import derive_settings_from_pilates
 
         derive_settings_from_pilates(
             pilates_settings_path=args.pilates_settings,

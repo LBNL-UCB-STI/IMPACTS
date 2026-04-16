@@ -23,7 +23,7 @@ Meaning:
 The example uses one user-managed settings file:
 
 - `examples/pipeline/pilates/settings.yaml`
-- `src/impacts/pipeline/settings.yaml` is the maintained starting template for the impacts overlay inside PILATES settings.
+- `src/impacts/config/settings.yaml` is the maintained starting template for the impacts overlay inside PILATES settings.
 
 That file is a thin impacts overlay kept with the example tree.
 

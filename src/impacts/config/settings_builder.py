@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 from typing import Dict
 
-from impacts.adapters.pilates import build_settings_payload_from_pilates
+from impacts.pipeline.adapters.pilates import build_settings_payload_from_pilates
 from impacts.manifest.file_ops import load_structured_file
 from impacts.manifest.file_ops import write_structured_file
 from impacts.config.settings import ImpactsSettings
