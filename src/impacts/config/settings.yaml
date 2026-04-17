@@ -31,7 +31,7 @@ impacts:
     emissions_rates_folder: vehicle-tech/emissions/2018-Baseline
     activity_totals_file: vehicle-tech/emissions/SFBay_2018_Annual_activity_totals.parquet
     inventory_file: beam/production/sfbay/vehicle-tech/emissions/sf-emfac-2018-emissions-inventory-with-activity.parquet
-    annualization_days_or_file: src/impacts/emfac/activities/vehicle_operation_days_per_year.csv
+    annualization_days_or_file: examples/emfac/2018_mappings/vehicle_operation_days_per_year.csv
     population_sample: 0.1
     pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
   dispersions:
