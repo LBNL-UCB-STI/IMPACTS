@@ -410,6 +410,92 @@ def fill_project_analysis_rates(
     return statewide_surface
 
 
+def _run_step3_substep_load_fill_inputs(
+    workflow: dict[str, object],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    return (
+        _load_parquet(workflow["paths"]["project_analysis_source"]),
+        _load_parquet(workflow["paths"]["project_analysis_nh3_rates"]),
+        _load_parquet(workflow["paths"]["project_analysis_bc"]),
+        _load_parquet(workflow["paths"]["project_analysis_prdust"]),
+        _load_parquet(workflow["paths"]["emissions_inventory"]),
+        _load_parquet(workflow["paths"]["statewide_inventory"]),
+    )
+
+
+def _run_step3_substep_fill_group(
+    *,
+    workflow: dict[str, object],
+    group_name: str,
+    project_analysis_source: pd.DataFrame,
+    project_analysis_nh3_rates: pd.DataFrame,
+    project_analysis_bc: pd.DataFrame,
+    project_analysis_prdust: pd.DataFrame,
+    emissions_inventory: pd.DataFrame,
+    statewide_inventory: pd.DataFrame,
+) -> dict[str, object]:
+    comprehensive_surface = _load_parquet(workflow["paths"][f"project_analysis_{group_name}"])
+    filled = fill_project_analysis_rates(
+        comprehensive_surface,
+        project_analysis_source=project_analysis_source,
+        project_analysis_nh3_rates=project_analysis_nh3_rates,
+        project_analysis_bc=project_analysis_bc,
+        project_analysis_prdust=project_analysis_prdust,
+        emissions_inventory=emissions_inventory,
+        statewide_inventory=statewide_inventory,
+    )
+    grouped_missing_summaries: list[dict[str, object]] = []
+    grouped_missing_summaries.append(
+        {"label": "initial fill", **_print_missing_rate_group_summary(filled, label=f"{group_name} initial fill")}
+    )
+    zero_row_cleanups: list[dict[str, object]] = []
+    print("    3.2 Apply EMFAC rate donor mapping for unresolved rows and refill")
+    filled = _fill_with_emfac_rate_donors(
+        filled,
+        project_analysis_source=project_analysis_source,
+        project_analysis_nh3_rates=project_analysis_nh3_rates,
+        project_analysis_bc=project_analysis_bc,
+        project_analysis_prdust=project_analysis_prdust,
+        emissions_inventory=emissions_inventory,
+        statewide_inventory=statewide_inventory,
+    )
+    filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label=f"{group_name} EMFAC rate donor refill")
+    zero_row_cleanups.append(zero_summary)
+    grouped_missing_summaries.append(
+        {"label": "EMFAC rate donor refill", **_print_missing_rate_group_summary(filled, label=f"{group_name} EMFAC rate donor refill")}
+    )
+    print("    3.3 Apply speed fallback for unresolved rows and refill")
+    filled = _fill_with_speed_fallback(
+        filled,
+        reference_rates=project_analysis_source,
+        project_analysis_source=project_analysis_source,
+        project_analysis_nh3_rates=project_analysis_nh3_rates,
+        project_analysis_bc=project_analysis_bc,
+        project_analysis_prdust=project_analysis_prdust,
+        emissions_inventory=emissions_inventory,
+        statewide_inventory=statewide_inventory,
+    )
+    filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label=f"{group_name} speed fallback refill")
+    zero_row_cleanups.append(zero_summary)
+    grouped_missing_summaries.append(
+        {"label": "speed fallback refill", **_print_missing_rate_group_summary(filled, label=f"{group_name} speed fallback refill")}
+    )
+    filled, source_filter_summary = _filter_unresolved_rows_without_source_coverage(
+        filled,
+        project_analysis_source=project_analysis_source,
+    )
+    _assert_no_missing_rate_groups(filled, label=f"Filled {group_name} project-analysis rates")
+    _write_parquet(filled, workflow["paths"][f"project_analysis_{group_name}"])
+    return {
+        f"{group_name}_comprehensive_surface": frame_summary(comprehensive_surface, name=f"comprehensive_project_analysis_{group_name}"),
+        f"{group_name}_filled_surface": frame_summary(filled, name=f"filled_project_analysis_{group_name}"),
+        f"{group_name}_filled_surface_missing_rates": _missing_rate_summary(filled),
+        f"{group_name}_zero_row_cleanups": zero_row_cleanups,
+        f"{group_name}_grouped_missing_rate_summaries": grouped_missing_summaries,
+        f"{group_name}_source_coverage_filter": source_filter_summary,
+    }
+
+
 def _filter_unresolved_rows_without_source_coverage(
     surface: pd.DataFrame,
     *,
@@ -552,7 +638,7 @@ def _filter_unresolved_rows_without_source_coverage(
     }
 
 
-def _fill_with_class_fuel_alternatives(
+def _fill_with_emfac_rate_donors(
     surface: pd.DataFrame,
     *,
     project_analysis_source: pd.DataFrame,
@@ -672,93 +758,6 @@ def _fill_with_speed_fallback(
     return filled
 
 
-def _select_nearest_floor_model_year_candidate(requested_model_year: int, available_model_years: tuple[int, ...] | None) -> int | None:
-    if not available_model_years:
-        return None
-    years = sorted(int(year) for year in available_model_years)
-    older_or_equal = [year for year in years if year <= requested_model_year]
-    if older_or_equal:
-        return max(older_or_equal)
-    return min(years)
-
-
-def _fill_with_model_year_donors(
-    surface: pd.DataFrame,
-    *,
-    project_analysis_source: pd.DataFrame,
-    project_analysis_nh3_rates: pd.DataFrame,
-    project_analysis_bc: pd.DataFrame,
-    project_analysis_prdust: pd.DataFrame,
-    emissions_inventory: pd.DataFrame,
-    statewide_inventory: pd.DataFrame,
-) -> pd.DataFrame:
-    unresolved_mask = ~surface[POLLUTANT_COLUMNS].notna().any(axis=1)
-    if not unresolved_mask.any():
-        return surface
-
-    donor_surface = surface.loc[unresolved_mask].copy()
-    donor_surface["_surface_index"] = donor_surface.index
-    available_rates = _normalize_activity_column(project_analysis_source)
-    available_rates = available_rates.loc[available_rates[ACTIVITY_COLUMN].notna()].copy()
-    if available_rates.empty:
-        return surface
-
-    available_rates["modelYear"] = pd.to_numeric(available_rates["modelYear"], errors="raise").astype(int)
-    available_years = (
-        available_rates[["county", "vehicleCategory", "fuel", "process", ACTIVITY_COLUMN, "modelYear"]]
-        .drop_duplicates()
-        .groupby(["county", "vehicleCategory", "fuel", "process", ACTIVITY_COLUMN], dropna=False)["modelYear"]
-        .apply(lambda years: tuple(sorted(int(year) for year in years.dropna())))
-        .rename("available_model_years")
-        .reset_index()
-    )
-
-    candidates = donor_surface[
-        ["county", "vehicleCategory", "fuel", "process", ACTIVITY_COLUMN, "modelYear", "_surface_index"]
-    ].copy()
-    candidates["modelYear"] = pd.to_numeric(candidates["modelYear"], errors="raise").astype(int)
-    candidates = candidates.merge(
-        available_years,
-        on=["county", "vehicleCategory", "fuel", "process", ACTIVITY_COLUMN],
-        how="left",
-    )
-    candidates["candidate_model_year"] = [
-        _select_nearest_floor_model_year_candidate(int(model_year), available_model_years)
-        if isinstance(available_model_years, tuple)
-        else None
-        for model_year, available_model_years in zip(candidates["modelYear"], candidates["available_model_years"])
-    ]
-    matched = candidates["candidate_model_year"].notna()
-    if not matched.any():
-        return surface
-
-    donor_surface = donor_surface.set_index("_surface_index")
-    donor_surface.loc[candidates.loc[matched, "_surface_index"], "modelYear"] = (
-        candidates.loc[matched, "candidate_model_year"].astype(int).to_numpy()
-    )
-    donor_surface = donor_surface.reset_index()
-
-    donor_filled = fill_project_analysis_rates(
-        donor_surface.drop(columns="_surface_index"),
-        project_analysis_source=project_analysis_source,
-        project_analysis_nh3_rates=project_analysis_nh3_rates,
-        project_analysis_bc=project_analysis_bc,
-        project_analysis_prdust=project_analysis_prdust,
-        emissions_inventory=emissions_inventory,
-        statewide_inventory=statewide_inventory,
-    )
-    donor_filled["_surface_index"] = donor_surface["_surface_index"].to_numpy()
-
-    result = surface.copy()
-    for column in POLLUTANT_COLUMNS:
-        if column not in donor_filled.columns:
-            continue
-        refill = donor_filled.set_index("_surface_index")[column]
-        target_index = refill.index.intersection(result.index)
-        result.loc[target_index, column] = refill.loc[target_index].combine_first(result.loc[target_index, column])
-    return result
-
-
 def _write_parquet(frame: pd.DataFrame, path: str) -> str:
     target = Path(path).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -771,111 +770,38 @@ def _write_parquet(frame: pd.DataFrame, path: str) -> str:
 def run_step3(workflow: dict[str, object]) -> dict[str, object]:
     print("  Step 3. Fill Project Analysis Rates")
     print("    3.1 Fill rates from project analysis, study-area inventory, and statewide inventory")
-    comprehensive_surface = _load_parquet(workflow["paths"]["project_analysis"])
-    project_analysis_source = _load_parquet(workflow["paths"]["project_analysis_source"])
-    project_analysis_nh3_rates = _load_parquet(workflow["paths"]["project_analysis_nh3_rates"])
-    project_analysis_bc = _load_parquet(workflow["paths"]["project_analysis_bc"])
-    project_analysis_prdust = _load_parquet(workflow["paths"]["project_analysis_prdust"])
-    emissions_inventory = _load_parquet(workflow["paths"]["emissions_inventory"])
-    statewide_inventory = _load_parquet(workflow["paths"]["statewide_inventory"])
-    filled = fill_project_analysis_rates(
-        comprehensive_surface,
-        project_analysis_source=project_analysis_source,
-        project_analysis_nh3_rates=project_analysis_nh3_rates,
-        project_analysis_bc=project_analysis_bc,
-        project_analysis_prdust=project_analysis_prdust,
-        emissions_inventory=emissions_inventory,
-        statewide_inventory=statewide_inventory,
-    )
-    grouped_missing_summaries: list[dict[str, object]] = []
-    grouped_missing_summaries.append(
-        {"label": "initial fill", **_print_missing_rate_group_summary(filled, label="initial fill")}
-    )
-    zero_row_cleanups: list[dict[str, object]] = []
-    print("    3.2 Apply class-fuel donor mapping for unresolved rows and refill")
-    filled = _fill_with_class_fuel_alternatives(
-        filled,
-        project_analysis_source=project_analysis_source,
-        project_analysis_nh3_rates=project_analysis_nh3_rates,
-        project_analysis_bc=project_analysis_bc,
-        project_analysis_prdust=project_analysis_prdust,
-        emissions_inventory=emissions_inventory,
-        statewide_inventory=statewide_inventory,
-    )
-    filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label="class-fuel donor refill")
-    zero_row_cleanups.append(zero_summary)
-    grouped_missing_summaries.append(
-        {"label": "class-fuel donor refill", **_print_missing_rate_group_summary(filled, label="class-fuel donor refill")}
-    )
-    print("    3.3 Apply speed fallback for unresolved rows and refill")
-    filled = _fill_with_speed_fallback(
-        filled,
-        reference_rates=project_analysis_source,
-        project_analysis_source=project_analysis_source,
-        project_analysis_nh3_rates=project_analysis_nh3_rates,
-        project_analysis_bc=project_analysis_bc,
-        project_analysis_prdust=project_analysis_prdust,
-        emissions_inventory=emissions_inventory,
-        statewide_inventory=statewide_inventory,
-    )
-    filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label="speed fallback refill")
-    zero_row_cleanups.append(zero_summary)
-    grouped_missing_summaries.append(
-        {"label": "speed fallback refill", **_print_missing_rate_group_summary(filled, label="speed fallback refill")}
-    )
-    print("    3.4 Apply model-year donor fallback for unresolved rows and refill")
-    filled = _fill_with_model_year_donors(
-        filled,
-        project_analysis_source=project_analysis_source,
-        project_analysis_nh3_rates=project_analysis_nh3_rates,
-        project_analysis_bc=project_analysis_bc,
-        project_analysis_prdust=project_analysis_prdust,
-        emissions_inventory=emissions_inventory,
-        statewide_inventory=statewide_inventory,
-    )
-    filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label="model-year donor refill")
-    zero_row_cleanups.append(zero_summary)
-    grouped_missing_summaries.append(
-        {"label": "model-year donor refill", **_print_missing_rate_group_summary(filled, label="model-year donor refill")}
-    )
-    print("    3.5 Apply final speed fallback for unresolved rows and refill")
-    filled = _fill_with_speed_fallback(
-        filled,
-        reference_rates=project_analysis_source,
-        project_analysis_source=project_analysis_source,
-        project_analysis_nh3_rates=project_analysis_nh3_rates,
-        project_analysis_bc=project_analysis_bc,
-        project_analysis_prdust=project_analysis_prdust,
-        emissions_inventory=emissions_inventory,
-        statewide_inventory=statewide_inventory,
-    )
-    filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label="final speed fallback refill")
-    zero_row_cleanups.append(zero_summary)
-    grouped_missing_summaries.append(
-        {"label": "final speed fallback refill", **_print_missing_rate_group_summary(filled, label="final speed fallback refill")}
-    )
-    filled, source_filter_summary = _filter_unresolved_rows_without_source_coverage(
-        filled,
-        project_analysis_source=project_analysis_source,
-    )
-    _assert_no_missing_rate_groups(filled, label="Filled project-analysis rates")
-    _write_parquet(filled, workflow["paths"]["project_analysis"])
+    (
+        project_analysis_source,
+        project_analysis_nh3_rates,
+        project_analysis_bc,
+        project_analysis_prdust,
+        emissions_inventory,
+        statewide_inventory,
+    ) = _run_step3_substep_load_fill_inputs(workflow)
+    trace_payload: dict[str, object] = {
+        "project_analysis_source": frame_summary(project_analysis_source, name="project_analysis_source"),
+        "project_analysis_nh3_rates": frame_summary(project_analysis_nh3_rates, name="project_analysis_nh3_rates"),
+        "project_analysis_bc": frame_summary(project_analysis_bc, name="project_analysis_bc"),
+        "project_analysis_prdust": frame_summary(project_analysis_prdust, name="project_analysis_prdust"),
+        "emissions_inventory": frame_summary(emissions_inventory, name="emissions_inventory"),
+        "statewide_inventory": frame_summary(statewide_inventory, name="statewide_inventory"),
+    }
+    for group_name in ("passenger", "freight"):
+        trace_payload.update(
+            _run_step3_substep_fill_group(
+                workflow=workflow,
+                group_name=group_name,
+                project_analysis_source=project_analysis_source,
+                project_analysis_nh3_rates=project_analysis_nh3_rates,
+                project_analysis_bc=project_analysis_bc,
+                project_analysis_prdust=project_analysis_prdust,
+                emissions_inventory=emissions_inventory,
+                statewide_inventory=statewide_inventory,
+            )
+        )
     write_trace(
         workflow,
         "step3_fill_project_analysis_rates",
-        {
-            "comprehensive_surface": frame_summary(comprehensive_surface, name="comprehensive_project_analysis"),
-            "project_analysis_source": frame_summary(project_analysis_source, name="project_analysis_source"),
-            "project_analysis_nh3_rates": frame_summary(project_analysis_nh3_rates, name="project_analysis_nh3_rates"),
-            "project_analysis_bc": frame_summary(project_analysis_bc, name="project_analysis_bc"),
-            "project_analysis_prdust": frame_summary(project_analysis_prdust, name="project_analysis_prdust"),
-            "emissions_inventory": frame_summary(emissions_inventory, name="emissions_inventory"),
-            "statewide_inventory": frame_summary(statewide_inventory, name="statewide_inventory"),
-            "filled_surface": frame_summary(filled, name="filled_project_analysis"),
-            "filled_surface_missing_rates": _missing_rate_summary(filled),
-            "zero_row_cleanups": zero_row_cleanups,
-            "grouped_missing_rate_summaries": grouped_missing_summaries,
-            "source_coverage_filter": source_filter_summary,
-        },
+        trace_payload,
     )
     return workflow

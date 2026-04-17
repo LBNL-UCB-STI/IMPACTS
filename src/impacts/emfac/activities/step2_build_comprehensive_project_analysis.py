@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from impacts.emfac.common import frame_summary
+from impacts.emfac.config import read_table
 from impacts.emfac.common import write_trace
 
 ACTIVITY_COLUMN = "speedMph_timeMin"
@@ -68,14 +69,21 @@ def build_comprehensive_project_analysis(
     *,
     project_analysis_prdust: pd.DataFrame,
     emissions_inventory: pd.DataFrame,
+    emfac_category_fuel_mapping: pd.DataFrame,
     pollutant_columns: list[str] | None = None,
 ) -> pd.DataFrame:
+    supported_emfac_combinations = (
+        emfac_category_fuel_mapping[["emfac_vehicle_category", "emfac_fuel"]]
+        .rename(columns={"emfac_vehicle_category": "vehicleCategory", "emfac_fuel": "fuel"})
+        .drop_duplicates()
+        .reset_index(drop=True)
+    )
     base_rates = (
-        project_analysis[["county", "vehicleCategory", "fuel", "modelYear"]]
+        emissions_inventory[["county", "vehicleCategory", "fuel", "modelYear"]]
         .drop_duplicates()
         .merge(
-            emissions_inventory[["county", "vehicleCategory", "fuel", "modelYear"]].drop_duplicates(),
-            on=["county", "vehicleCategory", "fuel", "modelYear"],
+            supported_emfac_combinations,
+            on=["vehicleCategory", "fuel"],
             how="inner",
         )
         .reset_index(drop=True)
@@ -178,19 +186,59 @@ def _write_parquet(frame: pd.DataFrame, path: str) -> str:
     return str(target)
 
 
-def run_step2(workflow: dict[str, object]) -> dict[str, object]:
-    print("  Step 2. Build Comprehensive Project Analysis")
-    print("    2.1 Build comprehensive output surface")
-    project_analysis = pd.read_parquet(Path(workflow["paths"]["project_analysis_source"]).expanduser().resolve())
-    project_analysis_prdust = pd.read_parquet(Path(workflow["paths"]["project_analysis_prdust"]).expanduser().resolve())
-    emissions_inventory = pd.read_parquet(Path(workflow["paths"]["emissions_inventory"]).expanduser().resolve())
-    comprehensive = build_comprehensive_project_analysis(
+def _run_step2_substep_load_inputs(workflow: dict[str, object]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    return (
+        pd.read_parquet(Path(workflow["paths"]["project_analysis_source"]).expanduser().resolve()),
+        pd.read_parquet(Path(workflow["paths"]["project_analysis_prdust"]).expanduser().resolve()),
+        pd.read_parquet(Path(workflow["paths"]["emissions_inventory"]).expanduser().resolve()),
+        read_table(
+            workflow["inputs"]["emfac_category_fuel_mapping_file"],
+            dtype=None,
+            columns=["group", "emfac_vehicle_category", "emfac_fuel"],
+        ),
+    )
+
+
+def _run_step2_substep_build_group_surface(
+    *,
+    group_name: str,
+    project_analysis: pd.DataFrame,
+    project_analysis_prdust: pd.DataFrame,
+    emissions_inventory: pd.DataFrame,
+    emfac_category_fuel_mapping: pd.DataFrame,
+) -> pd.DataFrame:
+    group_mapping = emfac_category_fuel_mapping[
+        emfac_category_fuel_mapping["group"].astype(str).str.lower().eq(group_name)
+    ].copy()
+    return build_comprehensive_project_analysis(
         project_analysis,
         project_analysis_prdust=project_analysis_prdust,
         emissions_inventory=emissions_inventory,
+        emfac_category_fuel_mapping=group_mapping,
         pollutant_columns=POLLUTANT_COLUMNS,
     )
-    _write_parquet(comprehensive, workflow["paths"]["project_analysis"])
+
+
+def run_step2(workflow: dict[str, object]) -> dict[str, object]:
+    print("  Step 2. Build Comprehensive Project Analysis")
+    print("    2.1 Build comprehensive output surface")
+    project_analysis, project_analysis_prdust, emissions_inventory, emfac_category_fuel_mapping = _run_step2_substep_load_inputs(workflow)
+    passenger_comprehensive = _run_step2_substep_build_group_surface(
+        group_name="passenger",
+        project_analysis=project_analysis,
+        project_analysis_prdust=project_analysis_prdust,
+        emissions_inventory=emissions_inventory,
+        emfac_category_fuel_mapping=emfac_category_fuel_mapping,
+    )
+    freight_comprehensive = _run_step2_substep_build_group_surface(
+        group_name="freight",
+        project_analysis=project_analysis,
+        project_analysis_prdust=project_analysis_prdust,
+        emissions_inventory=emissions_inventory,
+        emfac_category_fuel_mapping=emfac_category_fuel_mapping,
+    )
+    _write_parquet(passenger_comprehensive, workflow["paths"]["project_analysis_passenger"])
+    _write_parquet(freight_comprehensive, workflow["paths"]["project_analysis_freight"])
     write_trace(
         workflow,
         "step2_build_comprehensive_project_analysis",
@@ -198,7 +246,9 @@ def run_step2(workflow: dict[str, object]) -> dict[str, object]:
             "project_analysis": frame_summary(project_analysis, name="project_analysis_source"),
             "project_analysis_prdust": frame_summary(project_analysis_prdust, name="project_analysis_prdust"),
             "emissions_inventory": frame_summary(emissions_inventory, name="emissions_inventory"),
-            "output": frame_summary(comprehensive, name="comprehensive_project_analysis"),
+            "emfac_category_fuel_mapping": frame_summary(emfac_category_fuel_mapping, name="emfac_category_fuel_mapping"),
+            "passenger_output": frame_summary(passenger_comprehensive, name="comprehensive_project_analysis_passenger"),
+            "freight_output": frame_summary(freight_comprehensive, name="comprehensive_project_analysis_freight"),
         },
     )
     return workflow

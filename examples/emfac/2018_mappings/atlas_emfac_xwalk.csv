@@ -1,0 +1,7 @@
+passenger_beam_category,body_type,LDA,LDT1,LDT2,MDV,cec_equivalent
+Car,car,1,0,0,0,"Car-Subcompact, Car-Compact, Car-Midsize, Car-Large, Car-Sport"
+Car,suv,0.25,0.25,0.25,0.25,"Cross/Ut-Small-Car, Cross/Ut-Small-Trk, Cross/Ut-Midsize, Sport/Ut-Compact, Sport/Ut-Midsize, Sport/Ut-Large"
+Car,truck,0,0,0.5,0.5,"Pickup-Compact, Pickup-Std, Pickup-Heavy"
+Car,pickup,0,0,0.5,0.5,"Pickup-Compact, Pickup-Std, Pickup-Heavy"
+Car,van,0,0,0,1,"Van-Std, Van-Heavy"
+Car,minvan,0,0.14,0.79,0.07,Van-Compact

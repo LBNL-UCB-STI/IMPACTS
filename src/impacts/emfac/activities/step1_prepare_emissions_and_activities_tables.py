@@ -15,7 +15,6 @@ GRAMS_PER_SHORT_TON = 907_184.74
 METRIC_TONS_PER_SHORT_TON = 0.90718474
 EMFAC_DAYS_PER_YEAR = 365.0
 PTO_PROCESS_NAME = "PTOEX"
-OPERATION_DAYS_CSV = Path(__file__).with_name("vehicle_operation_days_per_year.csv")
 FUEL_LABEL_MAP = {
     "Diesel": "Dsl",
     "Electricity": "Elec",
@@ -363,9 +362,7 @@ def build_nh3_inventory_rows(
     return pd.concat(rates, ignore_index=True).drop_duplicates().reset_index(drop=True)
 
 
-def run_step1(workflow: dict[str, object]) -> dict[str, object]:
-    print("  Step 1. Prepare Emissions And Activities Tables")
-    print("    1.1 Clean raw project-analysis and write cleaned long-form source")
+def _run_step1_substep_prepare_project_analysis(workflow: dict[str, object]) -> tuple[str, pd.DataFrame]:
     project_analysis_path = clean_emfac_to_parquet(
         input_path=workflow["inputs"]["project_analysis_raw"],
         output_path=workflow["paths"]["project_analysis_source"],
@@ -381,7 +378,10 @@ def run_step1(workflow: dict[str, object]) -> dict[str, object]:
     )
     project_analysis = _pivot_project_analysis(project_analysis)
     project_analysis.to_parquet(project_analysis_path, index=False)
-    print("    1.2 Build study-area and statewide emissions inventories")
+    return project_analysis_path, project_analysis
+
+
+def _run_step1_substep_prepare_emissions_inventory(workflow: dict[str, object]) -> tuple[str, pd.DataFrame]:
     emissions_inventory_path = process_emissions_inventory(
         vmt_input=workflow["inputs"]["vmt_raw"],
         population_input=workflow["inputs"]["population_raw"],
@@ -392,17 +392,16 @@ def run_step1(workflow: dict[str, object]) -> dict[str, object]:
         region_label=workflow["run"]["region_label"],
         year=workflow["run"]["calendar_year"],
         pto_config=workflow["run"].get("pto_as_process"),
+        operation_days_path=str(workflow["inputs"]["vehicle_operation_days_file"]),
     )
-    emissions_inventory_frame = pd.read_parquet(emissions_inventory_path)
-    write_trace(
-        workflow,
-        "step1_2_emissions_inventory",
-        {
-            "output_path": str(emissions_inventory_path),
-            "summary": frame_summary(emissions_inventory_frame, name="emissions_inventory"),
-        },
-    )
-    print("    1.3 Build PRDUST rates in project-analysis structure")
+    return emissions_inventory_path, pd.read_parquet(emissions_inventory_path)
+
+
+def _run_step1_substep_prepare_prdust(
+    workflow: dict[str, object],
+    *,
+    project_analysis: pd.DataFrame,
+) -> tuple[Path, pd.DataFrame]:
     project_analysis_prdust = build_road_dust_rows(
         project_analysis,
         rainy_days_file=workflow["inputs"]["rainy_days_file"],
@@ -423,7 +422,10 @@ def run_step1(workflow: dict[str, object]) -> dict[str, object]:
     )
     prdust_support_path = Path(workflow["paths"]["project_analysis_prdust"]).expanduser().resolve()
     project_analysis_prdust.to_parquet(prdust_support_path, index=False)
-    print("    1.4 Build BC rates in project-analysis structure")
+    return prdust_support_path, project_analysis_prdust
+
+
+def _run_step1_substep_prepare_bc(workflow: dict[str, object]) -> tuple[Path, pd.DataFrame]:
     project_analysis_bc = build_black_carbon_rows(
         workflow["inputs"]["black_carbon_raw"],
         region_label=workflow["run"]["region_label"],
@@ -433,7 +435,14 @@ def run_step1(workflow: dict[str, object]) -> dict[str, object]:
     project_analysis_bc = _pivot_project_analysis(project_analysis_bc)
     bc_path = Path(workflow["paths"]["project_analysis_bc"]).expanduser().resolve()
     project_analysis_bc.to_parquet(bc_path, index=False)
-    print("    1.5 Build NH3 rates in project-analysis structure")
+    return bc_path, project_analysis_bc
+
+
+def _run_step1_substep_prepare_nh3(
+    workflow: dict[str, object],
+    *,
+    emissions_inventory_frame: pd.DataFrame,
+) -> tuple[Path, pd.DataFrame]:
     project_analysis_nh3_rates = build_nh3_inventory_rows(
         emissions_inventory_frame,
         pto_config=workflow["run"].get("pto_as_process"),
@@ -441,6 +450,35 @@ def run_step1(workflow: dict[str, object]) -> dict[str, object]:
     project_analysis_nh3_rates = _pivot_project_analysis(project_analysis_nh3_rates)
     nh3_rates_path = Path(workflow["paths"]["project_analysis_nh3_rates"]).expanduser().resolve()
     project_analysis_nh3_rates.to_parquet(nh3_rates_path, index=False)
+    return nh3_rates_path, project_analysis_nh3_rates
+
+
+def run_step1(workflow: dict[str, object]) -> dict[str, object]:
+    print("  Step 1. Prepare Emissions And Activities Tables")
+    print("    1.1 Clean raw project-analysis and write cleaned long-form source")
+    project_analysis_path, project_analysis = _run_step1_substep_prepare_project_analysis(workflow)
+    print("    1.2 Build study-area and statewide emissions inventories")
+    emissions_inventory_path, emissions_inventory_frame = _run_step1_substep_prepare_emissions_inventory(workflow)
+    write_trace(
+        workflow,
+        "step1_2_emissions_inventory",
+        {
+            "output_path": str(emissions_inventory_path),
+            "summary": frame_summary(emissions_inventory_frame, name="emissions_inventory"),
+        },
+    )
+    print("    1.3 Build PRDUST rates in project-analysis structure")
+    prdust_support_path, project_analysis_prdust = _run_step1_substep_prepare_prdust(
+        workflow,
+        project_analysis=project_analysis,
+    )
+    print("    1.4 Build BC rates in project-analysis structure")
+    bc_path, project_analysis_bc = _run_step1_substep_prepare_bc(workflow)
+    print("    1.5 Build NH3 rates in project-analysis structure")
+    nh3_rates_path, project_analysis_nh3_rates = _run_step1_substep_prepare_nh3(
+        workflow,
+        emissions_inventory_frame=emissions_inventory_frame,
+    )
     write_trace(
         workflow,
         "step1_1_project_analysis",
@@ -766,9 +804,9 @@ def _annualize_daily_series(series: pd.Series) -> pd.Series:
     return pd.to_numeric(series, errors="coerce") * EMFAC_DAYS_PER_YEAR
 
 
-@lru_cache(maxsize=1)
-def _load_operation_days_lookup() -> dict[str, float]:
-    frame = pd.read_csv(OPERATION_DAYS_CSV)
+@lru_cache(maxsize=None)
+def _load_operation_days_lookup(operation_days_path: str) -> dict[str, float]:
+    frame = pd.read_csv(Path(operation_days_path).expanduser().resolve())
     _require_columns(frame, {"vehicleCategory", "operation_days_per_year"}, "Vehicle operation days CSV")
     result: dict[str, float] = {}
     for row in frame.itertuples(index=False):
@@ -776,11 +814,16 @@ def _load_operation_days_lookup() -> dict[str, float]:
     return result
 
 
-def _operation_days_for_vehicle_categories(frame: pd.DataFrame, *, vehicle_category_column: str = "vehicleCategory") -> pd.Series:
+def _operation_days_for_vehicle_categories(
+    frame: pd.DataFrame,
+    *,
+    operation_days_path: str,
+    vehicle_category_column: str = "vehicleCategory",
+) -> pd.Series:
     if vehicle_category_column not in frame.columns:
         raise ValueError(f"Expected vehicle category column '{vehicle_category_column}' for operation-day annualization.")
     categories = frame[vehicle_category_column].astype(str).str.strip()
-    operation_days = categories.map(_load_operation_days_lookup())
+    operation_days = categories.map(_load_operation_days_lookup(operation_days_path))
     if operation_days.isna().any():
         missing = sorted(categories.loc[operation_days.isna()].drop_duplicates().tolist())
         raise ValueError(
@@ -793,6 +836,7 @@ def _operation_days_for_vehicle_categories(frame: pd.DataFrame, *, vehicle_categ
 def _annualize_daily_values_by_vehicle_category(
     frame: pd.DataFrame,
     *,
+    operation_days_path: str,
     source_column: str,
     vehicle_category_column: str = "vehicleCategory",
     output_unit: str = "same",
@@ -800,6 +844,7 @@ def _annualize_daily_values_by_vehicle_category(
     values = pd.to_numeric(frame[source_column], errors="coerce")
     annualized = values * _operation_days_for_vehicle_categories(
         frame,
+        operation_days_path=operation_days_path,
         vehicle_category_column=vehicle_category_column,
     )
     if output_unit == "metric_tons_per_year":
@@ -861,7 +906,7 @@ def _pivot_emission_inventory(frame: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def _pivot_ghg_inventory(frame: pd.DataFrame) -> pd.DataFrame:
+def _pivot_ghg_inventory(frame: pd.DataFrame, *, operation_days_path: str) -> pd.DataFrame:
     def _metric_name(row: pd.Series) -> str:
         pollutant = _normalize_metric_label(row["pollutant"])
         process = _normalize_metric_label(row["process"])
@@ -876,12 +921,14 @@ def _pivot_ghg_inventory(frame: pd.DataFrame) -> pd.DataFrame:
     working = frame.copy()
     working["annualized_output_value"] = _annualize_daily_values_by_vehicle_category(
         working,
+        operation_days_path=operation_days_path,
         source_column="emission",
     )
     co2e_mask = working["pollutant"].astype(str).str.strip().str.lower().eq("co2e")
     if co2e_mask.any():
         working.loc[co2e_mask, "annualized_output_value"] = _annualize_daily_values_by_vehicle_category(
             working.loc[co2e_mask].copy(),
+            operation_days_path=operation_days_path,
             source_column="emission",
             output_unit="metric_tons_per_year",
         ).to_numpy()
@@ -903,6 +950,7 @@ def process_emissions_inventory(
     region_label: str,
     year: int,
     pto_config: dict[str, object] | None,
+    operation_days_path: str,
 ) -> Path:
     with TemporaryDirectory(prefix="emfac_merge_activity_") as temp_dir:
         temp_root = Path(temp_dir)
@@ -959,6 +1007,7 @@ def process_emissions_inventory(
         }.items():
             emissions[output_column] = _annualize_daily_values_by_vehicle_category(
                 emissions,
+                operation_days_path=operation_days_path,
                 source_column=source_column,
             )
         emissions = emissions.drop(columns=["total_vmt", "cvmt", "evmt"])
@@ -990,6 +1039,7 @@ def process_emissions_inventory(
             trips[["county", "vehicleCategory", "fuel", "modelYear", "trips"]].assign(
                 trips_per_year=lambda df: _annualize_daily_values_by_vehicle_category(
                     df,
+                    operation_days_path=operation_days_path,
                     source_column="trips",
                 )
             )[["county", "vehicleCategory", "fuel", "modelYear", "trips_per_year"]],
@@ -1007,7 +1057,7 @@ def process_emissions_inventory(
         if ghg_clean_path.exists():
             ghg = _read_parquet(ghg_clean_path)
             result = result.merge(
-                _pivot_ghg_inventory(ghg),
+                _pivot_ghg_inventory(ghg, operation_days_path=operation_days_path),
                 on=["county", "vehicleCategory", "fuel", "modelYear", "speed"],
                 how="left",
                 validate="one_to_one",

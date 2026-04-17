@@ -47,9 +47,12 @@ def _run_step(workflow: dict[str, object], *, step_name: str, runner) -> dict[st
 def _bootstrap_emfac_outputs_if_needed(workflow: dict[str, object]) -> dict[str, object]:
     activities = workflow["config"]["activities"]
     required_outputs = {
-        "rates_file": Path(str(activities["rates_file"])),
-        "activity_file": Path(str(activities["activity_file"])),
-        "fleet_file": Path(str(activities["fleet_file"])),
+        "passenger_rates_file": Path(str(activities["passenger_rates_file"])),
+        "passenger_activity_file": Path(str(activities["passenger_activity_file"])),
+        "passenger_fleet_file": Path(str(activities["passenger_fleet_file"])),
+        "freight_rates_file": Path(str(activities["freight_rates_file"])),
+        "freight_activity_file": Path(str(activities["freight_activity_file"])),
+        "freight_fleet_file": Path(str(activities["freight_fleet_file"])),
     }
     missing = {label: path for label, path in required_outputs.items() if not path.exists()}
     if not missing:
@@ -66,9 +69,12 @@ def _bootstrap_emfac_outputs_if_needed(workflow: dict[str, object]) -> dict[str,
     )
     activities_workflow = run_activities_workflow(activities_workflow)
 
-    activities["rates_file"] = str(Path(str(activities_workflow["paths"]["final_output"])).resolve())
-    activities["activity_file"] = str(Path(str(activities_workflow["paths"]["final_activity_output"])).resolve())
-    activities["fleet_file"] = str(Path(str(activities_workflow["paths"]["final_fleet_output"])).resolve())
+    activities["passenger_rates_file"] = str(Path(str(activities_workflow["paths"]["final_output_passenger"])).resolve())
+    activities["passenger_activity_file"] = str(Path(str(activities_workflow["paths"]["final_activity_output_passenger"])).resolve())
+    activities["passenger_fleet_file"] = str(Path(str(activities_workflow["paths"]["final_fleet_output_passenger"])).resolve())
+    activities["freight_rates_file"] = str(Path(str(activities_workflow["paths"]["final_output_freight"])).resolve())
+    activities["freight_activity_file"] = str(Path(str(activities_workflow["paths"]["final_activity_output_freight"])).resolve())
+    activities["freight_fleet_file"] = str(Path(str(activities_workflow["paths"]["final_fleet_output_freight"])).resolve())
     return workflow
 
 

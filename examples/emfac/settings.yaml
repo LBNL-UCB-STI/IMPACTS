@@ -7,6 +7,12 @@ emfac:
     name: Baseline
   seed: 0
   output: examples/emfac/output
+  mappings:
+    atlas_emfac_xwalk_file: examples/emfac/2018_mappings/atlas_emfac_xwalk.csv
+    emfac_category_fuel_mapping_file: examples/emfac/2018_mappings/emfac_category_fuel_mapping.csv
+    fastsim_category_fuel_mapping_file: examples/emfac/2018_mappings/fastsim_category_fuel_mapping.csv
+    atlas_frism_xwalk_file: examples/emfac/2018_mappings/atlas_frism_xwalk.csv
+    vehicle_operation_days_file: examples/emfac/2018_mappings/vehicle_operation_days_per_year.csv
 
   activities:
     model_year_groups:
@@ -52,19 +58,6 @@ emfac:
     # It contains the DAG structure, weights, category families, constraints,
     # and all embedded evidence tables.
     vehicle_type_assignment_model_settings: examples/emfac/fleet/vehicle_type_assignment_model.yaml
-
-    mapping:
-      emfac_atlas_map: examples/emfac/fleet/mappings/atlas_emfac_xwalk.csv
-      emfac_beam_category_map: examples/emfac/fleet/mappings/emfac_beam_category_mapping.csv
-      emfac_beam_fuel_map: examples/emfac/fleet/mappings/emfac_beam_fuel_mappings.csv
-      emfac_fuel_alternatives_map: examples/emfac/fleet/mappings/emfac_fuel_alternatives.csv
-      frism_class_alternatives_map: examples/emfac/fleet/mappings/frism_class_alternatives.csv
-      atlas_bodytype_alternatives_map: examples/emfac/fleet/mappings/atlas_bodytype_alternatives.csv
-      fastsim_atlas_bodytype_xwalk_file: examples/emfac/fleet/mappings/fastsim_atlas_bodytype_xwalk.csv
-      fastsim_atlas_fuel_mapping_file: examples/emfac/fleet/mappings/fastsim_atlas_fuel_mapping.csv
-      frism_atlas_map: examples/emfac/fleet/mappings/atlas_frism_xwalk.csv
-      fastsim_frism_bodytype_xwalk_file: examples/emfac/fleet/mappings/fastsim_frism_bodytype_xwalk.csv
-      fastsim_frism_fuel_mapping_file: examples/emfac/fleet/mappings/fastsim_frism_fuel_mapping.csv
 
     atlas:
       year: 2019

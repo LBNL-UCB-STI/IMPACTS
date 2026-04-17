@@ -24,9 +24,12 @@ def _print_run_banner(workflow: dict[str, object]) -> None:
     run = workflow["run"]
     print(f"\n{'='*50}")
     print(f"  EMFAC TABLE ASSEMBLY - {run['region_label']} {run['calendar_year']}")
-    print(f"  Output: {workflow['paths']['final_output']}")
-    print(f"  Activity Output: {workflow['paths']['final_activity_output']}")
-    print(f"  Fleet Output: {workflow['paths']['final_fleet_output']}")
+    print(f"  Passenger Rates Output: {workflow['paths']['final_output_passenger']}")
+    print(f"  Passenger Activity Output: {workflow['paths']['final_activity_output_passenger']}")
+    print(f"  Passenger Fleet Output: {workflow['paths']['final_fleet_output_passenger']}")
+    print(f"  Freight Rates Output: {workflow['paths']['final_output_freight']}")
+    print(f"  Freight Activity Output: {workflow['paths']['final_activity_output_freight']}")
+    print(f"  Freight Fleet Output: {workflow['paths']['final_fleet_output_freight']}")
     print(f"{'='*50}\n")
 
 

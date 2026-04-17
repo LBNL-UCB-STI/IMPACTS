@@ -110,67 +110,99 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
     return candidates
 
 
-def _load_emfac_class_targets(config: dict[str, Any]) -> dict[str, str]:
-    class_map_path = config["mapping"]["emfac_beam_category_map"]
-    class_map = read_table(class_map_path, dtype=None)
-    for column_name in ["group", "emfac", "beamVehicleCategory"]:
-        _require_column(class_map, column_name, "EMFAC BEAM category mapping file")
-
-    prepared = class_map.copy()
-    prepared["group_key"] = prepared["group"].apply(_normalize_lower)
-    prepared["beam_key"] = prepared["beamVehicleCategory"].apply(_normalize_text)
-    matched = prepared[prepared["beam_key"].isin(["Bike", "MediumDutyPassenger"])].copy()
-
-    bike_match = matched[(matched["group_key"] == "passenger") & (matched["beam_key"] == "Bike")]
-    bus_match = matched[(matched["group_key"] == "transit") & (matched["beam_key"] == "MediumDutyPassenger")]
-    if bike_match.empty:
-        raise ValueError("EMFAC category mapping file is missing the passenger Bike mapping")
-    if bus_match.empty:
-        raise ValueError("EMFAC category mapping file is missing the transit MediumDutyPassenger mapping")
-
-    return {
-        "bike": _normalize_text(bike_match.iloc[0]["emfac"]),
-        "bus": _normalize_text(bus_match.iloc[0]["emfac"]),
-    }
-
-
-def _load_emfac_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
-    fuel_map_path = config["mapping"]["emfac_beam_fuel_map"]
-    fuel_map = read_table(fuel_map_path, dtype=None)
-    for column_name in ["group", "emfac", "beam_primary", "beam_secondary"]:
-        _require_column(fuel_map, column_name, "EMFAC BEAM fuel mapping file")
-
-    prepared = fuel_map.copy()
-    prepared["group_key"] = prepared["group"].apply(_normalize_lower)
-    prepared["beam_primary_key"] = prepared["beam_primary"].apply(_normalize_lower)
-    prepared["beam_secondary_key"] = prepared["beam_secondary"].apply(_normalize_lower)
-    prepared["emfac_fuel"] = prepared["emfac"].apply(_normalize_text)
+def _load_emfac_category_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
+    frame = read_table(config["mappings"]["emfac_category_fuel_mapping_file"], dtype=None)
+    for column_name in [
+        "group",
+        "emfac_vehicle_category",
+        "emfac_fuel",
+        "beam_category",
+        "adopt_fuel",
+    ]:
+        _require_column(frame, column_name, "EMFAC category fuel mapping file")
+    prepared = frame.copy()
+    prepared["group"] = prepared["group"].apply(_normalize_lower)
+    prepared["emfac_vehicle_category"] = prepared["emfac_vehicle_category"].apply(_normalize_text)
+    prepared["emfac_fuel"] = prepared["emfac_fuel"].apply(_normalize_text)
+    prepared["beam_category"] = prepared["beam_category"].apply(_normalize_text)
+    prepared["adopt_fuel_key"] = prepared["adopt_fuel"].apply(_normalize_lower)
     return prepared
+
+
+def _load_step2_emfac_mapping_slice(
+    *,
+    config: dict[str, Any],
+    beam_category: str,
+    label: str,
+) -> tuple[str, pd.DataFrame]:
+    mapping = _load_emfac_category_fuel_mapping(config)
+    mapping = mapping[
+        (mapping["group"] == "passenger")
+        & (mapping["beam_category"] == str(beam_category))
+    ].copy()
+    if mapping.empty:
+        raise ValueError(
+            "EMFAC category fuel mapping file is missing the "
+            f"{label} passenger mapping slice for beam_category={beam_category}"
+        )
+
+    emfac_categories = mapping["emfac_vehicle_category"].drop_duplicates().astype(str).tolist()
+    if len(emfac_categories) != 1:
+        raise ValueError(
+            "EMFAC category fuel mapping file defines multiple passenger EMFAC categories for "
+            f"{label} beam_category={beam_category}: {emfac_categories}"
+        )
+
+    return emfac_categories[0], mapping
+
+
+def _normalize_to_fastsim_adopt_fuel(*, fuel_domain: str, adopt_fuel: object) -> str:
+    token = _normalize_lower(adopt_fuel)
+    if fuel_domain == "ldv":
+        mapping = {
+            "gasoline": "conv",
+            "diesel": "conv",
+            "biodiesel": "conv",
+            "cng": "conv",
+            "naturalgas": "conv",
+            "electricity": "ev",
+            "hydrogen": "fuelcell",
+            "electricity+gasoline": "phev",
+            "electricity+diesel": "phev",
+        }
+        return mapping.get(token, token)
+    mapping = {
+        "diesel": "diesel",
+        "gasoline": "gasoline",
+        "biodiesel": "diesel",
+        "cng": "naturalgas",
+        "naturalgas": "naturalgas",
+        "electricity": "electricity",
+        "hydrogen": "hydrogen",
+        "electricity+gasoline": "electricity",
+        "electricity+diesel": "electricity",
+    }
+    return mapping.get(token, token)
 
 
 def _matched_emfac_fuels(
     *,
-    beam_group: str,
-    primary_fuel: object,
-    secondary_fuel: object,
-    fuel_map: pd.DataFrame,
+    fuel_domain: str,
+    emfac_vehicle_category: str,
+    adopt_fuel: object,
+    category_fuel_map: pd.DataFrame,
 ) -> list[str]:
-    group_key = _normalize_lower(beam_group)
-    primary_key = _normalize_lower(primary_fuel)
-    secondary_key = _normalize_lower(secondary_fuel)
-
-    candidates = fuel_map[
-        (fuel_map["group_key"] == group_key)
-        & (fuel_map["beam_primary_key"] == primary_key)
+    adopt_fuel_key = _normalize_to_fastsim_adopt_fuel(
+        fuel_domain=_normalize_lower(fuel_domain),
+        adopt_fuel=adopt_fuel,
+    )
+    candidates = category_fuel_map[
+        (category_fuel_map["emfac_vehicle_category"] == str(emfac_vehicle_category))
+        & (category_fuel_map["adopt_fuel_key"] == adopt_fuel_key)
     ].copy()
     if candidates.empty:
         return []
-
-    matched = candidates[
-        (candidates["beam_secondary_key"] == "")
-        | (candidates["beam_secondary_key"] == "any")
-        | (candidates["beam_secondary_key"] == secondary_key)
-    ]["emfac_fuel"].drop_duplicates()
+    matched = candidates["emfac_fuel"].drop_duplicates()
     return sorted(matched.astype(str).tolist())
 
 
@@ -214,30 +246,28 @@ def _select_best_emfac_candidate(
 def _assign_emfac_ids_to_vehicle_types(
     *,
     vehicle_types: pd.DataFrame,
-    beam_group: str,
+    fuel_domain: str,
     emfac_vehicle_category: str,
-    fuel_map: pd.DataFrame,
+    category_fuel_map: pd.DataFrame,
     emfac_candidates: pd.DataFrame,
 ) -> pd.DataFrame:
     _require_column(vehicle_types, "vehicleTypeId", "Passenger vehicle types")
-    _require_column(vehicle_types, "primaryFuelType", "Passenger vehicle types")
-    _require_column(vehicle_types, "secondaryFuelType", "Passenger vehicle types")
+    _require_column(vehicle_types, "adopt_fuel", "Passenger vehicle types")
 
     prepared = vehicle_types.copy()
     assignments: list[str] = []
     for row in prepared.itertuples(index=False):
         emfac_fuels = _matched_emfac_fuels(
-            beam_group=beam_group,
-            primary_fuel=getattr(row, "primaryFuelType"),
-            secondary_fuel=getattr(row, "secondaryFuelType"),
-            fuel_map=fuel_map,
+            fuel_domain=fuel_domain,
+            emfac_vehicle_category=emfac_vehicle_category,
+            adopt_fuel=getattr(row, "adopt_fuel"),
+            category_fuel_map=category_fuel_map,
         )
         if not emfac_fuels:
             raise ValueError(
                 "No EMFAC fuel mapping available for "
                 f"vehicleTypeId={getattr(row, 'vehicleTypeId')}, "
-                f"primaryFuelType={getattr(row, 'primaryFuelType')}, "
-                f"secondaryFuelType={getattr(row, 'secondaryFuelType')}"
+                f"adopt_fuel={getattr(row, 'adopt_fuel')}"
             )
         selected = _select_best_emfac_candidate(
             vehicle_type_id=str(getattr(row, "vehicleTypeId")),
@@ -271,13 +301,63 @@ def _ensure_empty_emfac_id_column(vehicle_types: pd.DataFrame) -> pd.DataFrame:
     return prepared
 
 
+def _run_step2_substep_assign_bus(
+    *,
+    bus_file: str,
+    emfac_candidates: pd.DataFrame,
+    bus_emfac_category: str,
+    bus_category_fuel_map: pd.DataFrame,
+) -> tuple[pd.DataFrame, str]:
+    bus_vehicle_types = read_table(str(bus_file), dtype=None)
+    bus_with_emfac = _assign_emfac_ids_to_vehicle_types(
+        vehicle_types=bus_vehicle_types,
+        fuel_domain="mhdv",
+        emfac_vehicle_category=bus_emfac_category,
+        category_fuel_map=bus_category_fuel_map,
+        emfac_candidates=emfac_candidates,
+    )
+    return bus_with_emfac, _write_vehicle_types(bus_with_emfac, str(bus_file))
+
+
+def _run_step2_substep_assign_bike(
+    *,
+    bike_file: str,
+    emfac_candidates: pd.DataFrame,
+    bike_emfac_category: str,
+    bike_category_fuel_map: pd.DataFrame,
+) -> tuple[pd.DataFrame, str]:
+    bike_vehicle_types = read_table(str(bike_file), dtype=None)
+    bike_with_emfac = _assign_emfac_ids_to_vehicle_types(
+        vehicle_types=bike_vehicle_types,
+        fuel_domain="ldv",
+        emfac_vehicle_category=bike_emfac_category,
+        category_fuel_map=bike_category_fuel_map,
+        emfac_candidates=emfac_candidates,
+    )
+    return bike_with_emfac, _write_vehicle_types(bike_with_emfac, str(bike_file))
+
+
+def _run_step2_substep_prepare_other(*, other_file: str) -> tuple[pd.DataFrame, str]:
+    other_vehicle_types = read_table(str(other_file), dtype=None)
+    other_with_emfac = _ensure_empty_emfac_id_column(other_vehicle_types)
+    return other_with_emfac, _write_vehicle_types(other_with_emfac, str(other_file))
+
+
 def run_step2(workflow: dict[str, Any]) -> dict[str, Any]:
     """Step 2: assign EMFAC ids to passenger bus and bike vehicle types."""
     config = workflow["config"]
 
     emfac_candidates = _build_valid_emfac_candidates(config)
-    emfac_class_targets = _load_emfac_class_targets(config)
-    emfac_fuel_map = _load_emfac_fuel_mapping(config)
+    bus_emfac_category, bus_category_fuel_map = _load_step2_emfac_mapping_slice(
+        config=config,
+        beam_category="MediumDutyPassenger",
+        label="bus",
+    )
+    bike_emfac_category, bike_category_fuel_map = _load_step2_emfac_mapping_slice(
+        config=config,
+        beam_category="Bike",
+        label="bike",
+    )
 
     bus_file = workflow.get("built_passenger_bus_vehicle_types_file")
     bike_file = workflow.get("built_passenger_bike_vehicle_types_file")
@@ -286,31 +366,23 @@ def run_step2(workflow: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Step 2 requires passenger bus, bike, and other vehicle-type files from Step 1")
 
     print("=== Step 2.1: assign emfacId to passenger bus vehicle types ===")
-    bus_vehicle_types = read_table(str(bus_file), dtype=None)
-    bus_with_emfac = _assign_emfac_ids_to_vehicle_types(
-        vehicle_types=bus_vehicle_types,
-        beam_group="transit",
-        emfac_vehicle_category=emfac_class_targets["bus"],
-        fuel_map=emfac_fuel_map,
+    bus_with_emfac, bus_output_file = _run_step2_substep_assign_bus(
+        bus_file=str(bus_file),
         emfac_candidates=emfac_candidates,
+        bus_emfac_category=bus_emfac_category,
+        bus_category_fuel_map=bus_category_fuel_map,
     )
-    bus_output_file = _write_vehicle_types(bus_with_emfac, str(bus_file))
 
     print("=== Step 2.2: assign emfacId to passenger bike vehicle types ===")
-    bike_vehicle_types = read_table(str(bike_file), dtype=None)
-    bike_with_emfac = _assign_emfac_ids_to_vehicle_types(
-        vehicle_types=bike_vehicle_types,
-        beam_group="passenger",
-        emfac_vehicle_category=emfac_class_targets["bike"],
-        fuel_map=emfac_fuel_map,
+    bike_with_emfac, bike_output_file = _run_step2_substep_assign_bike(
+        bike_file=str(bike_file),
         emfac_candidates=emfac_candidates,
+        bike_emfac_category=bike_emfac_category,
+        bike_category_fuel_map=bike_category_fuel_map,
     )
-    bike_output_file = _write_vehicle_types(bike_with_emfac, str(bike_file))
 
     print("=== Step 2.3: add empty emfacId to passenger other vehicle types ===")
-    other_vehicle_types = read_table(str(other_file), dtype=None)
-    other_with_emfac = _ensure_empty_emfac_id_column(other_vehicle_types)
-    other_output_file = _write_vehicle_types(other_with_emfac, str(other_file))
+    other_with_emfac, other_output_file = _run_step2_substep_prepare_other(other_file=str(other_file))
 
     workflow["emfac_passenger_candidates"] = emfac_candidates
     workflow["built_passenger_bus_vehicle_types"] = bus_with_emfac

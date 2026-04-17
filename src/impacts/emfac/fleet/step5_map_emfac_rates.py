@@ -169,7 +169,9 @@ def _write_rates_store(
 
 
 def _load_emfac_rates_with_ids(config: dict[str, Any]) -> pd.DataFrame:
-    rates = read_table(config["activities"]["rates_file"], dtype=None)
+    passenger_rates = read_table(config["activities"]["passenger_rates_file"], dtype=None)
+    freight_rates = read_table(config["activities"]["freight_rates_file"], dtype=None)
+    rates = pd.concat([passenger_rates, freight_rates], ignore_index=True, sort=False)
     for column_name in ["vehicleCategory", "fuel", "modelYear"]:
         if column_name not in rates.columns:
             raise ValueError(f"EMFAC rates file is missing required column '{column_name}'")
@@ -296,8 +298,9 @@ def _is_beam_passenger_car_vehicle_type(frame: pd.DataFrame) -> pd.Series:
     return frame["vehicleCategory"].astype(str).eq("Car")
 
 
-def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
-    """Step 5: build passenger and freight EMFAC rates stores and attach file paths."""
+def _run_step5_substep_prepare_rates_store(
+    workflow: dict[str, Any],
+) -> tuple[dict[str, str], pd.DataFrame, pd.DataFrame]:
     config = workflow["config"]
     output_root = Path(str(config["output"])).expanduser().resolve()
     emissions_rates = _load_emfac_rates_with_ids(config)
@@ -311,7 +314,6 @@ def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
     )
     shared_emfac_ids = sorted(set(passenger_emfac_ids) | set(freight_emfac_ids))
     frism_year = workflow["config"]["frism"]["year"]
-    atlas_year = workflow["config"]["atlas"]["year"]
     scenario_name = str(workflow["scenario"])
     shared_rates_store = _write_rates_store(
         emissions_rates=emissions_rates,
@@ -319,8 +321,19 @@ def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
         output_root=output_root,
         scenario_token=_build_year_scenario_token(year=frism_year, scenario=scenario_name),
     )
+    return shared_rates_store, passenger_vehicle_types, freight_vehicle_types
 
-    print("=== Step 5.1: attach emfac rates to passenger vehicle types ===")
+
+def _run_step5_substep_attach_passenger_rates(
+    *,
+    workflow: dict[str, Any],
+    shared_rates_store: dict[str, str],
+    passenger_vehicle_types: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, str], str]:
+    config = workflow["config"]
+    output_root = Path(str(config["output"])).expanduser().resolve()
+    atlas_year = workflow["config"]["atlas"]["year"]
+    scenario_name = str(workflow["scenario"])
     passenger_vehicle_types_with_rates = _attach_rates_to_vehicle_types(
         vehicle_types=passenger_vehicle_types,
         relative_paths=shared_rates_store["relative_paths"],
@@ -328,7 +341,6 @@ def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
     passenger_vehicle_types_with_rates, passenger_id_mapping = _build_short_vehicle_type_ids(
         passenger_vehicle_types_with_rates,
         prefix="pax",
-        # Only BEAM passenger car rows use the shortened id form.
         shorten_mask=_is_beam_passenger_car_vehicle_type(passenger_vehicle_types_with_rates),
     )
     passenger_output_file = _write_vehicle_types(
@@ -342,8 +354,19 @@ def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
             )
         ),
     )
+    return passenger_vehicle_types_with_rates, passenger_id_mapping, passenger_output_file
 
-    print("=== Step 5.2: attach emfac rates to freight vehicle types ===")
+
+def _run_step5_substep_attach_freight_rates(
+    *,
+    workflow: dict[str, Any],
+    shared_rates_store: dict[str, str],
+    freight_vehicle_types: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, str], str]:
+    config = workflow["config"]
+    output_root = Path(str(config["output"])).expanduser().resolve()
+    frism_year = workflow["config"]["frism"]["year"]
+    scenario_name = str(workflow["scenario"])
     freight_vehicle_types_with_rates = _attach_rates_to_vehicle_types(
         vehicle_types=freight_vehicle_types,
         relative_paths=shared_rates_store["relative_paths"],
@@ -363,7 +386,15 @@ def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
             )
         ),
     )
+    return freight_vehicle_types_with_rates, freight_id_mapping, freight_output_file
 
+
+def _run_step5_substep_write_mapped_entities(
+    *,
+    workflow: dict[str, Any],
+    passenger_id_mapping: dict[str, str],
+    freight_id_mapping: dict[str, str],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     mapped_passenger_vehicles = _remap_output_vehicle_ids(
         workflow["mapped_passenger_vehicles"],
         id_mapping=passenger_id_mapping,
@@ -380,6 +411,32 @@ def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
     _write_parquet(
         mapped_freight_carriers,
         workflow["mapped_freight_carriers_file"],
+    )
+    return mapped_passenger_vehicles, mapped_freight_carriers
+
+
+def run_step5(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Step 5: build passenger and freight EMFAC rates stores and attach file paths."""
+    shared_rates_store, passenger_vehicle_types, freight_vehicle_types = _run_step5_substep_prepare_rates_store(workflow)
+
+    print("=== Step 5.1: attach emfac rates to passenger vehicle types ===")
+    passenger_vehicle_types_with_rates, passenger_id_mapping, passenger_output_file = _run_step5_substep_attach_passenger_rates(
+        workflow=workflow,
+        shared_rates_store=shared_rates_store,
+        passenger_vehicle_types=passenger_vehicle_types,
+    )
+
+    print("=== Step 5.2: attach emfac rates to freight vehicle types ===")
+    freight_vehicle_types_with_rates, freight_id_mapping, freight_output_file = _run_step5_substep_attach_freight_rates(
+        workflow=workflow,
+        shared_rates_store=shared_rates_store,
+        freight_vehicle_types=freight_vehicle_types,
+    )
+
+    mapped_passenger_vehicles, mapped_freight_carriers = _run_step5_substep_write_mapped_entities(
+        workflow=workflow,
+        passenger_id_mapping=passenger_id_mapping,
+        freight_id_mapping=freight_id_mapping,
     )
 
     workflow["passenger_vehicle_types_with_rates"] = passenger_vehicle_types_with_rates

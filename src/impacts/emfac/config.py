@@ -49,6 +49,12 @@ def _build_activities_config_from_root(emfac_root: dict[str, object]) -> dict[st
         defaults["calendar_year"] = deepcopy(root_scenario["year"])
     if "output" in emfac_root:
         defaults["outputs"] = deepcopy(emfac_root["output"])
+    mappings = emfac_root.get("mappings", {})
+    if isinstance(mappings, dict):
+        if "emfac_category_fuel_mapping_file" in mappings:
+            defaults["emfac_category_fuel_mapping_file"] = deepcopy(mappings["emfac_category_fuel_mapping_file"])
+        if "vehicle_operation_days_file" in mappings:
+            defaults["vehicle_operation_days_file"] = deepcopy(mappings["vehicle_operation_days_file"])
     return _merge_dicts(defaults, activities)
 
 
@@ -69,6 +75,17 @@ def _build_fleet_config_from_root(emfac_root: dict[str, object]) -> dict[str, ob
     for key in ("seed", "output"):
         if key in emfac_root:
             defaults[key] = deepcopy(emfac_root[key])
+    mappings = emfac_root.get("mappings", {})
+    if isinstance(mappings, dict):
+        for key in (
+            "atlas_emfac_xwalk_file",
+            "emfac_category_fuel_mapping_file",
+            "fastsim_category_fuel_mapping_file",
+            "atlas_frism_xwalk_file",
+            "vehicle_operation_days_file",
+        ):
+            if key in mappings:
+                defaults[key] = deepcopy(mappings[key])
     merged = _merge_dicts(defaults, fleet)
     activities_defaults = _build_activities_config_from_root(emfac_root)
     nested_activities = merged.get("activities", {})
@@ -248,6 +265,8 @@ def _normalize_activities_inputs(raw: dict) -> dict:
         "project_analysis_raw": project_analysis_root,
         "black_carbon_raw": _find_matching_file(black_carbon_root, ("bc",), required=False),
         "black_carbon_pollutant": black_carbon_pollutant,
+        "emfac_category_fuel_mapping_file": _expand_optional_path(raw.get("emfac_category_fuel_mapping_file")),
+        "vehicle_operation_days_file": _expand_optional_path(raw.get("vehicle_operation_days_file")),
         "statewide_inventory_raw": _find_matching_file(emissions_inventory_fallback, ("statewide",), required=False),
         "population_raw": _find_matching_file(emissions_inventory_main, ("population",), required=False),
         "trips_raw": _find_matching_file(emissions_inventory_main, ("trips",), required=False),
@@ -301,6 +320,8 @@ def _validate_activities(raw: dict, source_path: Path) -> None:
         ("outputs",),
         ("model_year_groups",),
         ("project_analysis_raw",),
+        ("emfac_category_fuel_mapping_file",),
+        ("vehicle_operation_days_file",),
         ("statewide_inventory_raw",),
         ("vmt_raw",),
         ("population_raw",),
@@ -354,6 +375,8 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
             key: raw[key]
             for key in (
                 "project_analysis_raw",
+                "emfac_category_fuel_mapping_file",
+                "vehicle_operation_days_file",
                 "black_carbon_raw",
                 "black_carbon_pollutant",
                 "statewide_inventory_raw",
@@ -372,15 +395,19 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
             "activities_output_root": str(activities_output_root),
             "trace_dir": str(activities_output_root / "traces"),
             "project_analysis_source": str(activities_output_root / f"{base_name}-project-analysis-source.parquet"),
-            "project_analysis": str(activities_output_root / f"{base_name}-project-analysis.parquet"),
+            "project_analysis_passenger": str(activities_output_root / f"{base_name}-project-analysis-passenger.parquet"),
+            "project_analysis_freight": str(activities_output_root / f"{base_name}-project-analysis-freight.parquet"),
             "project_analysis_bc": str(activities_output_root / f"{base_name}-project-analysis-bc.parquet"),
             "project_analysis_prdust": str(activities_output_root / f"{base_name}-project-analysis-prdust.parquet"),
             "project_analysis_nh3_rates": str(activities_output_root / f"{base_name}-project-analysis-nh3-rates.parquet"),
             "emissions_inventory": str(activities_output_root / f"{base_name}-emissions-inventory-with-activity.parquet"),
             "statewide_inventory": str(activities_output_root / f"statewide-emfac-{year}-emissions-inventory.parquet"),
-            "final_output": str(activities_output_root / f"{final_name}-rates.parquet"),
-            "final_activity_output": str(activities_output_root / f"{final_name}-activity.parquet"),
-            "final_fleet_output": str(activities_output_root / f"{final_name}-fleet.parquet"),
+            "final_output_passenger": str(activities_output_root / f"{final_name}-passenger-rates.parquet"),
+            "final_activity_output_passenger": str(activities_output_root / f"{final_name}-passenger-activity.parquet"),
+            "final_fleet_output_passenger": str(activities_output_root / f"{final_name}-passenger-fleet.parquet"),
+            "final_output_freight": str(activities_output_root / f"{final_name}-freight-rates.parquet"),
+            "final_activity_output_freight": str(activities_output_root / f"{final_name}-freight-activity.parquet"),
+            "final_fleet_output_freight": str(activities_output_root / f"{final_name}-freight-fleet.parquet"),
         },
     }
 
@@ -456,6 +483,12 @@ def _derive_emfac_output_paths(emfac: dict[str, object]) -> dict[str, object]:
     emfac["rates_file"] = str((activities_output_root / f"{base_name}-rates.parquet").resolve())
     emfac["activity_file"] = str((activities_output_root / f"{base_name}-activity.parquet").resolve())
     emfac["fleet_file"] = str((activities_output_root / f"{base_name}-fleet.parquet").resolve())
+    emfac["passenger_rates_file"] = str((activities_output_root / f"{base_name}-passenger-rates.parquet").resolve())
+    emfac["passenger_activity_file"] = str((activities_output_root / f"{base_name}-passenger-activity.parquet").resolve())
+    emfac["passenger_fleet_file"] = str((activities_output_root / f"{base_name}-passenger-fleet.parquet").resolve())
+    emfac["freight_rates_file"] = str((activities_output_root / f"{base_name}-freight-rates.parquet").resolve())
+    emfac["freight_activity_file"] = str((activities_output_root / f"{base_name}-freight-activity.parquet").resolve())
+    emfac["freight_fleet_file"] = str((activities_output_root / f"{base_name}-freight-fleet.parquet").resolve())
     return emfac
 
 
@@ -469,23 +502,17 @@ def _ingest_fleet_sources(config: dict) -> dict:
         vta["model_file"] = flat_model_file
         config["vehicle_type_assignment"] = vta
     config["output"] = _normalize_configured_path(config.get("output"), path_label="output", must_exist=False)
-    mapping = config.get("mapping", {})
-    if isinstance(mapping, dict):
+    mappings = config.get("mappings", {})
+    if isinstance(mappings, dict):
         for key in (
-            "emfac_atlas_map",
-            "emfac_beam_category_map",
-            "emfac_beam_fuel_map",
-            "emfac_fuel_alternatives_map",
-            "frism_class_alternatives_map",
-            "atlas_bodytype_alternatives_map",
-            "fastsim_atlas_bodytype_xwalk_file",
-            "fastsim_atlas_fuel_mapping_file",
-            "frism_atlas_map",
-            "fastsim_frism_bodytype_xwalk_file",
-            "fastsim_frism_fuel_mapping_file",
+            "atlas_emfac_xwalk_file",
+            "emfac_category_fuel_mapping_file",
+            "fastsim_category_fuel_mapping_file",
+            "atlas_frism_xwalk_file",
+            "vehicle_operation_days_file",
         ):
-            mapping[key] = _normalize_configured_path(mapping.get(key), path_label=f"mapping.{key}")
-        config["mapping"] = mapping
+            mappings[key] = _normalize_configured_path(mappings.get(key), path_label=f"mappings.{key}")
+        config["mappings"] = mappings
     activities = config.get("activities", {})
     if isinstance(activities, dict):
         activities["outputs"] = _normalize_configured_path(
@@ -578,19 +605,13 @@ def _validate_fleet(raw: dict, source_path: Path) -> None:
         ("scenario",),
         ("seed",),
         ("output",),
-        ("mapping",),
-        ("mapping", "emfac_atlas_map"),
-        ("mapping", "emfac_beam_category_map"),
-        ("mapping", "emfac_beam_fuel_map"),
-        ("mapping", "emfac_fuel_alternatives_map"),
-        ("mapping", "frism_class_alternatives_map"),
+        ("mappings",),
+        ("mappings", "atlas_emfac_xwalk_file"),
+        ("mappings", "emfac_category_fuel_mapping_file"),
         ("vehicle_type_assignment_model_settings",),
-        ("mapping", "atlas_bodytype_alternatives_map"),
-        ("mapping", "fastsim_atlas_bodytype_xwalk_file"),
-        ("mapping", "fastsim_atlas_fuel_mapping_file"),
-        ("mapping", "frism_atlas_map"),
-        ("mapping", "fastsim_frism_bodytype_xwalk_file"),
-        ("mapping", "fastsim_frism_fuel_mapping_file"),
+        ("mappings", "fastsim_category_fuel_mapping_file"),
+        ("mappings", "atlas_frism_xwalk_file"),
+        ("mappings", "vehicle_operation_days_file"),
         ("activities",),
         ("activities", "outputs"),
         ("activities", "region_label"),
@@ -630,7 +651,16 @@ def load_fleet_workflow(config_path: str | Path | None = None) -> dict:
     config = {
         "seed": raw["seed"],
         "output": output_root,
-        "mapping": raw["mapping"],
+        "mappings": {
+            key: raw[key]
+            for key in (
+                "atlas_emfac_xwalk_file",
+                "emfac_category_fuel_mapping_file",
+                "fastsim_category_fuel_mapping_file",
+                "atlas_frism_xwalk_file",
+                "vehicle_operation_days_file",
+            )
+        },
         "activities": raw["activities"],
         "atlas": raw["atlas"],
         "frism": raw["frism"],

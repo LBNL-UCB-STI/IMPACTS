@@ -1,8 +1,0 @@
-atlas_adopt_fuel,fastsim_primary_fuel,fastsim_secondary_fuel,weight
-cng,gasoline,,1.0
-conv,gasoline,,1.0
-ev,electricity,,1.0
-fuelcell,hydrogen,,1.0
-hybrid,electricity,gasoline,0.9
-hybrid,gasoline,,0.1
-phev,electricity,gasoline,1.0

@@ -110,6 +110,20 @@ def _normalize_energy_file_columns(frame: pd.DataFrame) -> pd.DataFrame:
     return prepared
 
 
+def _attach_adopt_fuel_column(frame: pd.DataFrame) -> pd.DataFrame:
+    prepared = frame.copy()
+    _require_column(prepared, "primaryFuelType", "Vehicle types file")
+    _require_column(prepared, "secondaryFuelType", "Vehicle types file")
+    prepared["adopt_fuel"] = [
+        _compose_adopt_fuel(primary_fuel, secondary_fuel)
+        for primary_fuel, secondary_fuel in zip(
+            prepared["primaryFuelType"],
+            prepared["secondaryFuelType"],
+        )
+    ]
+    return prepared
+
+
 def _write_new_vehicle_types_file(frame: pd.DataFrame, output_dir: str) -> str:
     target = _step1_tmp_dir(output_dir) / "vehicleTypes--passenger-car.csv"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -336,7 +350,7 @@ def _build_freight_vehicle_types_from_population(
 
 
 def _load_frism_atlas_bodytype_mapping(config: dict[str, Any]) -> pd.DataFrame:
-    frame = _read_csv(config["mapping"]["frism_atlas_map"])
+    frame = _read_csv(config["mappings"]["atlas_frism_xwalk_file"])
     _require_column(frame, "body_type", "FRISM ATLAS bodytype crosswalk file")
     weight_columns = [column for column in frame.columns if column != "body_type"]
     if not weight_columns:
@@ -344,16 +358,160 @@ def _load_frism_atlas_bodytype_mapping(config: dict[str, Any]) -> pd.DataFrame:
     prepared = frame.melt(
         id_vars=["body_type"],
         value_vars=weight_columns,
-        var_name="beamVehicleCategory",
+        var_name="freight_beam_category",
         value_name="weight",
     )
     prepared["body_type"] = prepared["body_type"].apply(_normalize_bodytype)
-    prepared["beamVehicleCategory"] = prepared["beamVehicleCategory"].astype(str)
+    prepared["freight_beam_category"] = prepared["freight_beam_category"].astype(str)
     prepared["weight"] = pd.to_numeric(prepared["weight"], errors="coerce").fillna(0.0)
     return prepared[prepared["weight"].gt(0)].reset_index(drop=True)
 
 
-def _build_ldv_fastsim_lookup_index(fastsim_data_folder: str) -> pd.DataFrame:
+def _load_atlas_passenger_category_mapping(config: dict[str, Any]) -> pd.DataFrame:
+    frame = _read_csv(config["mappings"]["atlas_emfac_xwalk_file"])
+    _require_column(frame, "body_type", "ATLAS EMFAC crosswalk file")
+    _require_column(frame, "passenger_beam_category", "ATLAS EMFAC crosswalk file")
+    prepared = frame[["body_type", "passenger_beam_category"]].drop_duplicates().copy()
+    prepared["body_type"] = prepared["body_type"].apply(_normalize_bodytype)
+    prepared["passenger_beam_category"] = prepared["passenger_beam_category"].apply(_normalize_bodytype)
+    prepared = prepared[prepared["body_type"].ne("") & prepared["passenger_beam_category"].ne("")]
+    conflicting = (
+        prepared.groupby("body_type", dropna=False)["passenger_beam_category"]
+        .nunique()
+        .reset_index(name="passenger_category_count")
+    )
+    conflicting = conflicting[conflicting["passenger_category_count"].gt(1)]["body_type"]
+    if not conflicting.empty:
+        raise ValueError(
+            "ATLAS EMFAC crosswalk file maps one body_type to multiple passenger BEAM categories:\n"
+            + "\n".join(conflicting.astype(str).tolist())
+        )
+    return prepared.drop_duplicates(subset=["body_type"], keep="first").reset_index(drop=True)
+
+
+def _load_fastsim_registry(config: dict[str, Any]) -> pd.DataFrame:
+    frame = _read_csv(config["mappings"]["fastsim_category_fuel_mapping_file"])
+    for column_name in [
+        "passenger_beam_category",
+        "freight_beam_category",
+        "atlas_fuel",
+        "frism_fuel",
+        "fastsim_relative_path",
+        "fastsim_fuel_type",
+        "msrp_usd",
+    ]:
+        _require_column(frame, column_name, "FASTSim category fuel mapping file")
+    prepared = frame.copy()
+    prepared["passenger_beam_category"] = prepared["passenger_beam_category"].fillna("").astype(str).str.strip()
+    prepared["freight_beam_category"] = prepared["freight_beam_category"].fillna("").astype(str).str.strip()
+    prepared["atlas_fuel"] = prepared["atlas_fuel"].fillna("").astype(str).str.strip().str.lower()
+    prepared["frism_fuel"] = prepared["frism_fuel"].fillna("").astype(str).str.strip().str.lower()
+    prepared["fastsim_relative_path"] = prepared["fastsim_relative_path"].map(_normalize_energy_file_path)
+    prepared["fastsim_fuel_type"] = prepared["fastsim_fuel_type"].astype(str).str.strip()
+    prepared["msrp_usd"] = pd.to_numeric(prepared["msrp_usd"], errors="coerce")
+    return prepared
+
+
+def _build_adopt_fuel_keys(fuel_values: pd.Series) -> pd.Series:
+    return fuel_values.str.split("|").map(
+        lambda parts: ",".join([part.strip() for part in parts[1:] if str(part).strip()])
+    )
+
+
+def _expand_passenger_fastsim_mapping_rows(fastsim_registry: pd.DataFrame) -> pd.DataFrame:
+    passenger_rows = fastsim_registry[fastsim_registry["passenger_beam_category"].ne("")].copy()
+    passenger_rows["lookup_domain"] = "ldv"
+    passenger_rows["vehicle_category"] = passenger_rows["passenger_beam_category"].map(_normalize_bodytype)
+    passenger_rows["adopt_fuel"] = (
+        passenger_rows["atlas_fuel"].str.split("|").str[0].fillna("").astype(str).str.strip()
+    )
+    passenger_rows["adopt_fuel_keys"] = _build_adopt_fuel_keys(passenger_rows["atlas_fuel"])
+    return passenger_rows
+
+
+def _expand_freight_fastsim_mapping_rows(fastsim_registry: pd.DataFrame) -> pd.DataFrame:
+    freight_rows = fastsim_registry[fastsim_registry["freight_beam_category"].ne("")].copy()
+    freight_rows["lookup_domain"] = np.where(
+        freight_rows["freight_beam_category"].isin(["Class12aVocational", "Class2b3Vocational"]),
+        "ldv",
+        "mhdv",
+    )
+    freight_rows["vehicle_category"] = freight_rows["freight_beam_category"]
+    freight_rows["adopt_fuel"] = (
+        freight_rows["frism_fuel"].str.split("|").str[0].fillna("").astype(str).str.strip()
+    )
+    freight_rows["adopt_fuel_keys"] = _build_adopt_fuel_keys(freight_rows["frism_fuel"])
+    return freight_rows
+
+
+def _load_fastsim_category_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
+    fastsim_registry = _load_fastsim_registry(config)
+    passenger_rows = _expand_passenger_fastsim_mapping_rows(fastsim_registry)
+    freight_rows = _expand_freight_fastsim_mapping_rows(fastsim_registry)
+    combined = pd.concat([passenger_rows, freight_rows], ignore_index=True, sort=False)
+    return combined[
+        [
+            "lookup_domain",
+            "passenger_beam_category",
+            "freight_beam_category",
+            "atlas_fuel",
+            "frism_fuel",
+            "vehicle_category",
+            "adopt_fuel",
+            "adopt_fuel_keys",
+            "fastsim_relative_path",
+            "fastsim_fuel_type",
+            "msrp_usd",
+        ]
+    ].drop_duplicates().reset_index(drop=True)
+
+
+def _build_fastsim_lookup_indexes(
+    config: dict[str, Any],
+    category_fuel_mapping: pd.DataFrame,
+) -> dict[str, pd.DataFrame]:
+    return {
+        "ldv": _build_ldv_fastsim_lookup_index(
+            config["fastsim"]["ldv_fastsim_data_folder"],
+            category_fuel_mapping,
+        ),
+        "mhdv": _build_mhdv_fastsim_lookup_index(
+            config["fastsim"]["mhdv_fastsim_data_folder"],
+            category_fuel_mapping,
+        ),
+    }
+
+
+def _attach_fastsim_fuel_types(
+    lookup_index: pd.DataFrame,
+    *,
+    lookup_domain: str,
+    category_fuel_mapping: pd.DataFrame,
+    frame_name: str,
+) -> pd.DataFrame:
+    scoped_ids = category_fuel_mapping[
+        category_fuel_mapping["lookup_domain"] == lookup_domain
+    ][
+        [
+            "fastsim_relative_path",
+            "fastsim_fuel_type",
+            "vehicle_category",
+            "adopt_fuel",
+            "adopt_fuel_keys",
+            "msrp_usd",
+        ]
+    ].drop_duplicates().copy()
+    prepared = lookup_index.merge(scoped_ids, on="fastsim_relative_path", how="left")
+    prepared = prepared[prepared["fastsim_fuel_type"].notna()].copy()
+    if prepared.empty:
+        raise ValueError(
+            f"{frame_name} has no rows that match the configured FASTSim category fuel mapping"
+        )
+    prepared["fastsim_fuel_type"] = prepared["fastsim_fuel_type"].astype(str)
+    return prepared
+
+
+def _build_ldv_fastsim_lookup_index(fastsim_data_folder: str, category_fuel_mapping: pd.DataFrame) -> pd.DataFrame:
     folder = Path(resolve_workflow_path(fastsim_data_folder))
     rows: list[dict[str, str]] = []
     for path in sorted(folder.rglob("*")):
@@ -362,14 +520,19 @@ def _build_ldv_fastsim_lookup_index(fastsim_data_folder: str) -> pd.DataFrame:
         parsed = _parse_fastsim_lookup_filename(path)
         if parsed is None:
             continue
-        parsed["relative_path"] = f"{folder.name}/{path.name}"
+        parsed["fastsim_relative_path"] = _normalize_energy_file_path(f"{folder.name}/{path.name}")
         rows.append(parsed)
     if not rows:
         raise ValueError(f"No LDV FASTSim lookup files were found under {folder}")
-    return pd.DataFrame(rows)
+    return _attach_fastsim_fuel_types(
+        pd.DataFrame(rows),
+        lookup_domain="ldv",
+        category_fuel_mapping=category_fuel_mapping,
+        frame_name="LDV FASTSim lookup index",
+    )
 
 
-def _build_mhdv_fastsim_lookup_index(fastsim_data_folder: str) -> pd.DataFrame:
+def _build_mhdv_fastsim_lookup_index(fastsim_data_folder: str, category_fuel_mapping: pd.DataFrame) -> pd.DataFrame:
     folder = Path(resolve_workflow_path(fastsim_data_folder))
     rows: list[dict[str, str]] = []
     for path in sorted(folder.rglob("*")):
@@ -382,134 +545,92 @@ def _build_mhdv_fastsim_lookup_index(fastsim_data_folder: str) -> pd.DataFrame:
         rows.append(
             {
                 "representative_stem": match.group("representative"),
-                "fastsim_token": match.group("token").strip().lower(),
                 "modelyear": match.group("year"),
-                "relative_path": f"{folder.name}/{path.name}",
+                "file_name": path.name,
+                "fastsim_relative_path": _normalize_energy_file_path(f"{folder.name}/{path.name}"),
             }
         )
     if not rows:
         raise ValueError(f"No MHDV FASTSim lookup files were found under {folder}")
-    return pd.DataFrame(rows)
+    return _attach_fastsim_fuel_types(
+        pd.DataFrame(rows),
+        lookup_domain="mhdv",
+        category_fuel_mapping=category_fuel_mapping,
+        frame_name="MHDV FASTSim lookup index",
+    )
 
 
-def _load_freight_fastsim_bodytype_xwalk(config: dict[str, Any]) -> pd.DataFrame:
-    frame = _read_csv(config["mapping"]["fastsim_frism_bodytype_xwalk_file"])
-    for column_name in ["fastsim_id", "body_type"]:
-        _require_column(frame, column_name, "FRISM FASTSim bodytype xwalk file")
-    prepared = frame.copy()
-    prepared["fastsim_id"] = prepared["fastsim_id"].astype(str)
-    prepared["body_type"] = prepared["body_type"].astype(str)
-    prepared["representative_stem"] = prepared["fastsim_id"].map(lambda value: str(value).split("_(", 1)[0])
-    return prepared
+def _compose_adopt_fuel(primary_fuel: object, secondary_fuel: object) -> str:
+    primary = _normalize_lower(primary_fuel)
+    secondary = _normalize_lower(secondary_fuel)
+    if secondary:
+        return f"{primary}+{secondary}"
+    return primary
 
 
-def _load_freight_fastsim_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
-    frame = _read_csv(config["mapping"]["fastsim_frism_fuel_mapping_file"])
-    for column_name in [
-        "fastsim_source",
-        "beam_primary_fuel",
-        "beam_secondary_fuel",
-        "fastsim_primary_token",
-        "fastsim_secondary_token",
-    ]:
-        _require_column(frame, column_name, "FRISM FASTSim fuel mapping file")
-    prepared = frame.copy()
-    for column_name in [
-        "fastsim_source",
-        "beam_primary_fuel",
-        "beam_secondary_fuel",
-        "fastsim_primary_token",
-        "fastsim_secondary_token",
-    ]:
-        prepared[column_name] = prepared[column_name].fillna("").astype(str).str.strip().str.lower()
-    return prepared
+def _adopt_fuel_matches(frame: pd.DataFrame, adopt_fuel: str) -> pd.Series:
+    primary = frame["adopt_fuel"].astype(str).str.strip().str.lower()
+    alternative = frame["adopt_fuel_keys"].fillna("").astype(str).str.strip().str.lower()
+    target = str(adopt_fuel).strip().lower()
+    alt_match = alternative.ne("") & alternative.str.split(",").map(lambda parts: target in [part.strip() for part in parts])
+    return primary.eq(target) | alt_match
 
 
-def _select_freight_fastsim_fuel_mapping_row(
-    fuel_mapping: pd.DataFrame,
+def _select_freight_fastsim_adopt_fuel(
+    category_fuel_mapping: pd.DataFrame,
     *,
-    fastsim_source: str,
+    lookup_domain: str,
+    beam_vehicle_category: str,
     primary_fuel: object,
     secondary_fuel: object,
-) -> pd.Series:
-    primary_key = _normalize_lower(primary_fuel)
-    secondary_key = _normalize_lower(secondary_fuel)
-    candidates = fuel_mapping[
-        (fuel_mapping["fastsim_source"] == fastsim_source)
-        & (fuel_mapping["beam_primary_fuel"] == primary_key)
+) -> str:
+    frism_adopt_fuel = _compose_adopt_fuel(primary_fuel, secondary_fuel)
+    candidates = category_fuel_mapping[
+        (category_fuel_mapping["lookup_domain"] == lookup_domain)
+        & (category_fuel_mapping["vehicle_category"] == beam_vehicle_category)
     ].copy()
+    candidates = candidates[_adopt_fuel_matches(candidates, frism_adopt_fuel)].copy()
     if candidates.empty:
         raise ValueError(
-            "No FRISM FASTSim fuel mapping row found for "
-            f"fastsim_source={fastsim_source}, primaryFuelType={primary_fuel}, secondaryFuelType={secondary_fuel}"
+            "No FRISM FASTSim category fuel mapping row found for "
+            f"lookup_domain={lookup_domain}, vehicle_category={beam_vehicle_category}, adopt_fuel={frism_adopt_fuel}, "
+            f"primaryFuelType={primary_fuel}, secondaryFuelType={secondary_fuel}"
         )
-
-    def _secondary_match_score(value: str) -> float:
-        token = str(value).strip().lower()
-        if token == secondary_key:
-            return 2.0
-        if token == "any":
-            return 1.0
-        if token == "" and secondary_key == "":
-            return 0.5
-        return -1.0
-
-    candidates["matchScore"] = candidates["beam_secondary_fuel"].map(_secondary_match_score)
-    candidates = candidates[candidates["matchScore"].ge(0)].copy()
-    if candidates.empty:
-        raise ValueError(
-            "No FRISM FASTSim fuel mapping row matched secondary fuel for "
-            f"fastsim_source={fastsim_source}, primaryFuelType={primary_fuel}, secondaryFuelType={secondary_fuel}"
-        )
-    return candidates.sort_values(
-        ["matchScore", "fastsim_secondary_token"],
-        ascending=[False, True],
-        kind="mergesort",
-    ).iloc[0]
+    if lookup_domain == "ldv":
+        atlas_fuel = str(candidates.iloc[0]["atlas_fuel"]).strip().lower()
+        if not atlas_fuel:
+            raise ValueError(
+                "Matched FRISM LDV FASTSim mapping row has no atlas_fuel for "
+                f"vehicle_category={beam_vehicle_category}, adopt_fuel={frism_adopt_fuel}"
+            )
+        return atlas_fuel.split("|")[0].strip()
+    return frism_adopt_fuel
 
 
 def _select_ldv_fastsim_energy_files(
     *,
     body_type: str,
-    fuel_row: pd.Series,
-    atlas_bodytype_xwalk: pd.DataFrame,
+    adopt_fuel: str,
     ldv_lookup_index: pd.DataFrame,
 ) -> tuple[str, str]:
-    _require_column(atlas_bodytype_xwalk, "fastsim_id", "FASTSim ATLAS bodytype xwalk file")
-    _require_column(atlas_bodytype_xwalk, "body_type", "FASTSim ATLAS bodytype xwalk file")
-    atlas_xwalk = atlas_bodytype_xwalk.copy()
-    atlas_xwalk["body_type"] = atlas_xwalk["body_type"].apply(_normalize_bodytype)
-    atlas_xwalk["fastsim_id"] = atlas_xwalk["fastsim_id"].astype(str)
-    atlas_xwalk["vehicleTypeId"] = atlas_xwalk["fastsim_id"].apply(_vehicle_type_id_from_fastsim_token)
-
-    candidates = atlas_xwalk[atlas_xwalk["body_type"] == body_type].copy()
+    candidates = ldv_lookup_index[
+        ldv_lookup_index["vehicle_category"].astype(str).map(_normalize_bodytype).eq(body_type)
+    ].copy()
+    candidates = candidates[_adopt_fuel_matches(candidates, adopt_fuel)].copy()
     if candidates.empty:
-        raise ValueError(f"No LDV FASTSim bodytype mapping found for body_type={body_type}")
+        raise ValueError(f"No LDV FASTSim category mapping found for body_type={body_type}")
 
-    candidate_ids = set(candidates["vehicleTypeId"].astype(str))
-    primary_token = str(fuel_row["fastsim_primary_token"]).strip().lower()
-    secondary_token = str(fuel_row["fastsim_secondary_token"]).strip().lower()
-
-    if secondary_token:
-        primary_files = ldv_lookup_index[
-            (ldv_lookup_index["vehicleTypeId"].astype(str).isin(candidate_ids))
-            & (ldv_lookup_index["fuel"].astype(str).str.lower() == primary_token)
-            & (ldv_lookup_index["charge_mode"] == "Charge_Depleting")
-        ].copy()
-        secondary_files = ldv_lookup_index[
-            (ldv_lookup_index["vehicleTypeId"].astype(str).isin(candidate_ids))
-            & (ldv_lookup_index["fuel"].astype(str).str.lower() == secondary_token)
-            & (ldv_lookup_index["charge_mode"] == "Charge_Sustaining")
-        ].copy()
+    if str(adopt_fuel).strip().lower() == "phev":
+        primary_files = candidates[candidates["charge_mode"].astype(str).eq("Charge_Depleting")].copy()
+        secondary_files = candidates[candidates["charge_mode"].astype(str).eq("Charge_Sustaining")].copy()
         if primary_files.empty or secondary_files.empty:
             raise ValueError(
-                f"No LDV FASTSim hybrid lookup pair found for body_type={body_type}, "
-                f"primary token={primary_token}, secondary token={secondary_token}"
+                f"No LDV FASTSim PHEV lookup pair found for body_type={body_type}, adopt_fuel={adopt_fuel}"
             )
         primary_files["modelyear"] = pd.to_numeric(primary_files["modelyear"], errors="coerce")
         secondary_files["modelyear"] = pd.to_numeric(secondary_files["modelyear"], errors="coerce")
         paired = primary_files.merge(
-            secondary_files[["vehicleTypeId", "modelyear", "relative_path"]],
+            secondary_files[["vehicleTypeId", "modelyear", "fastsim_relative_path"]],
             on="vehicleTypeId",
             how="inner",
             suffixes=("_primary", "_secondary"),
@@ -523,16 +644,12 @@ def _select_ldv_fastsim_energy_files(
             ascending=[False, True],
             kind="mergesort",
         ).iloc[0]
-        return str(selected["relative_path_primary"]), str(selected["relative_path_secondary"])
+        return str(selected["fastsim_relative_path_primary"]), str(selected["fastsim_relative_path_secondary"])
 
-    files = ldv_lookup_index[
-        (ldv_lookup_index["vehicleTypeId"].astype(str).isin(candidate_ids))
-        & (ldv_lookup_index["fuel"].astype(str).str.lower() == primary_token)
-        & (ldv_lookup_index["charge_mode"] == "")
-    ].copy()
+    files = candidates[candidates["charge_mode"].astype(str).eq("")].copy()
     if files.empty:
         raise ValueError(
-            f"No LDV FASTSim lookup file found for body_type={body_type}, primary token={primary_token}"
+            f"No LDV FASTSim lookup file found for body_type={body_type}, adopt_fuel={adopt_fuel}"
         )
     files["modelyear"] = pd.to_numeric(files["modelyear"], errors="coerce")
     selected = files.sort_values(
@@ -540,30 +657,35 @@ def _select_ldv_fastsim_energy_files(
         ascending=[False, True],
         kind="mergesort",
     ).iloc[0]
-    return str(selected["relative_path"]), ""
+    return str(selected["fastsim_relative_path"]), ""
 
 
 def _select_mhdv_fastsim_energy_files(
     *,
     beam_vehicle_category: str,
-    fuel_row: pd.Series,
-    frism_bodytype_xwalk: pd.DataFrame,
+    adopt_fuel: str,
     mhdv_lookup_index: pd.DataFrame,
 ) -> tuple[str, str]:
-    candidates = frism_bodytype_xwalk[frism_bodytype_xwalk["body_type"] == beam_vehicle_category].copy()
+    candidates = mhdv_lookup_index[
+        mhdv_lookup_index["vehicle_category"].astype(str).eq(beam_vehicle_category)
+    ].copy()
     if candidates.empty:
         raise ValueError(
-            f"No MHDV FASTSim body_type mapping found for BEAM vehicle category {beam_vehicle_category}"
+            f"No MHDV FASTSim category mapping found for vehicle_category={beam_vehicle_category}"
+        )
+    candidates = candidates[_adopt_fuel_matches(candidates, adopt_fuel)].copy()
+    if candidates.empty:
+        raise ValueError(
+            f"No MHDV FASTSim lookup file found for vehicle_category={beam_vehicle_category}, adopt_fuel={adopt_fuel}"
         )
     representative_stems = set(candidates["representative_stem"].astype(str))
-    primary_token = str(fuel_row["fastsim_primary_token"]).strip().lower()
     files = mhdv_lookup_index[
         (mhdv_lookup_index["representative_stem"].astype(str).isin(representative_stems))
-        & (mhdv_lookup_index["fastsim_token"].astype(str).str.lower() == primary_token)
+        & _adopt_fuel_matches(mhdv_lookup_index, adopt_fuel)
     ].copy()
     if files.empty:
         raise ValueError(
-            f"No MHDV FASTSim lookup file found for beamVehicleCategory={beam_vehicle_category}, primary token={primary_token}"
+            f"No MHDV FASTSim lookup file found for vehicle_category={beam_vehicle_category}, adopt_fuel={adopt_fuel}"
         )
     files["modelyear"] = pd.to_numeric(files["modelyear"], errors="coerce")
     selected = files.sort_values(
@@ -571,20 +693,31 @@ def _select_mhdv_fastsim_energy_files(
         ascending=[False, True],
         kind="mergesort",
     ).iloc[0]
-    return str(selected["relative_path"]), ""
+    return str(selected["fastsim_relative_path"]), ""
 
 
 def _assign_freight_fastsim_energy_files(
     freight_vehicle_types: pd.DataFrame,
     config: dict[str, Any],
-    atlas_bodytype_xwalk: pd.DataFrame,
+    *,
+    category_fuel_mapping: pd.DataFrame | None = None,
+    lookup_indexes: dict[str, pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
     prepared = freight_vehicle_types.copy()
     frism_atlas_map = _load_frism_atlas_bodytype_mapping(config)
-    frism_bodytype_xwalk = _load_freight_fastsim_bodytype_xwalk(config)
-    fuel_mapping = _load_freight_fastsim_fuel_mapping(config)
-    ldv_lookup_index = _build_ldv_fastsim_lookup_index(config["fastsim"]["ldv_fastsim_data_folder"])
-    mhdv_lookup_index = _build_mhdv_fastsim_lookup_index(config["fastsim"]["mhdv_fastsim_data_folder"])
+    atlas_passenger_category_mapping = _load_atlas_passenger_category_mapping(config)
+    atlas_passenger_category_lookup = dict(
+        zip(
+            atlas_passenger_category_mapping["body_type"].astype(str).map(_normalize_bodytype),
+            atlas_passenger_category_mapping["passenger_beam_category"].astype(str).map(_normalize_bodytype),
+        )
+    )
+    if category_fuel_mapping is None:
+        category_fuel_mapping = _load_fastsim_category_fuel_mapping(config)
+    if lookup_indexes is None:
+        lookup_indexes = _build_fastsim_lookup_indexes(config, category_fuel_mapping)
+    ldv_lookup_index = lookup_indexes["ldv"]
+    mhdv_lookup_index = lookup_indexes["mhdv"]
 
     primary_paths: list[str] = []
     secondary_paths: list[str] = []
@@ -594,33 +727,38 @@ def _assign_freight_fastsim_energy_files(
             getattr(row, "vehicleCategory", ""),
             getattr(row, "vehicleClass", ""),
         )
-        fastsim_source = "ldv" if beam_vehicle_category in {"Class12aVocational", "Class2b3Vocational"} else "mhdv"
-        fuel_row = _select_freight_fastsim_fuel_mapping_row(
-            fuel_mapping,
-            fastsim_source=fastsim_source,
+        lookup_domain = "ldv" if beam_vehicle_category in {"Class12aVocational", "Class2b3Vocational"} else "mhdv"
+        adopt_fuel = _select_freight_fastsim_adopt_fuel(
+            category_fuel_mapping,
+            lookup_domain=lookup_domain,
+            beam_vehicle_category=beam_vehicle_category,
             primary_fuel=getattr(row, "primaryFuelType", ""),
             secondary_fuel=getattr(row, "secondaryFuelType", ""),
         )
-        if fastsim_source == "ldv":
-            bodytype_candidates = frism_atlas_map[frism_atlas_map["beamVehicleCategory"] == beam_vehicle_category].copy()
+        if lookup_domain == "ldv":
+            bodytype_candidates = frism_atlas_map[
+                frism_atlas_map["freight_beam_category"] == beam_vehicle_category
+            ].copy()
             if bodytype_candidates.empty:
                 raise ValueError(
-                    f"No FRISM-ATLAS body_type mapping found for beamVehicleCategory={beam_vehicle_category}"
+                    f"No FRISM-ATLAS body_type mapping found for freight_beam_category={beam_vehicle_category}"
                 )
             selected_body_type = (
                 bodytype_candidates.sort_values(["weight", "body_type"], ascending=[False, True], kind="mergesort").iloc[0]["body_type"]
             )
+            selected_body_type = atlas_passenger_category_lookup.get(
+                _normalize_bodytype(selected_body_type),
+                _normalize_bodytype(selected_body_type),
+            )
             primary_path, secondary_path = _select_ldv_fastsim_energy_files(
                 body_type=str(selected_body_type),
-                fuel_row=fuel_row,
-                atlas_bodytype_xwalk=atlas_bodytype_xwalk,
+                adopt_fuel=adopt_fuel,
                 ldv_lookup_index=ldv_lookup_index,
             )
         else:
             primary_path, secondary_path = _select_mhdv_fastsim_energy_files(
                 beam_vehicle_category=beam_vehicle_category,
-                fuel_row=fuel_row,
-                frism_bodytype_xwalk=frism_bodytype_xwalk,
+                adopt_fuel=adopt_fuel,
                 mhdv_lookup_index=mhdv_lookup_index,
             )
         primary_paths.append(_normalize_energy_file_path(primary_path))
@@ -815,29 +953,51 @@ def _build_vehicle_type_atlas_crosswalk(
     built_vehicle_types: pd.DataFrame,
     vehicle_type_mapping: pd.DataFrame,
     atlas_vehicle_type_targets: pd.DataFrame,
-    fuel_mapping: pd.DataFrame,
+    atlas_passenger_category_mapping: pd.DataFrame,
+    category_fuel_mapping: pd.DataFrame,
     rng: np.random.Generator,
 ) -> pd.DataFrame:
     _require_column(built_vehicle_types, "vehicleTypeId", "Built vehicle types")
     _require_column(vehicle_type_mapping, "vehicleTypeId", "Vehicle type mapping file")
     _require_column(vehicle_type_mapping, "body_type", "Vehicle type mapping file")
     _require_column(vehicle_type_mapping, "modelyear", "Vehicle type mapping file")
-    _require_column(vehicle_type_mapping, "primaryFuelType", "Vehicle type mapping file")
-    _require_column(vehicle_type_mapping, "secondaryFuelType", "Vehicle type mapping file")
+    _require_column(vehicle_type_mapping, "primaryVehicleEnergyFile", "Vehicle type mapping file")
+    _require_column(vehicle_type_mapping, "secondaryVehicleEnergyFile", "Vehicle type mapping file")
     _require_column(vehicle_type_mapping, "msrp_usd", "Vehicle type mapping file")
-    _require_column(fuel_mapping, "atlas_adopt_fuel", "FASTSim ATLAS fuel mapping file")
-    _require_column(fuel_mapping, "fastsim_primary_fuel", "FASTSim ATLAS fuel mapping file")
-    _require_column(fuel_mapping, "fastsim_secondary_fuel", "FASTSim ATLAS fuel mapping file")
-    _require_column(fuel_mapping, "weight", "FASTSim ATLAS fuel mapping file")
+    _require_column(category_fuel_mapping, "lookup_domain", "FASTSim category fuel mapping file")
+    _require_column(category_fuel_mapping, "vehicle_category", "FASTSim category fuel mapping file")
+    _require_column(category_fuel_mapping, "adopt_fuel", "FASTSim category fuel mapping file")
+    _require_column(category_fuel_mapping, "fastsim_relative_path", "FASTSim category fuel mapping file")
+    _require_column(category_fuel_mapping, "fastsim_fuel_type", "FASTSim category fuel mapping file")
 
     prepared_mapping = vehicle_type_mapping[
-        ["vehicleTypeId", "body_type", "modelyear", "primaryFuelType", "secondaryFuelType", "msrp_usd"]
+        [
+            "vehicleTypeId",
+            "body_type",
+            "modelyear",
+            "primaryVehicleEnergyFile",
+            "secondaryVehicleEnergyFile",
+            "msrp_usd",
+        ]
     ].copy()
     prepared_mapping["vehicleTypeId"] = prepared_mapping["vehicleTypeId"].astype(str)
     prepared_mapping["modelyear"] = pd.to_numeric(prepared_mapping["modelyear"], errors="coerce")
     prepared_mapping["bodytype_norm"] = prepared_mapping["body_type"].apply(_normalize_bodytype)
-    prepared_mapping["primaryFuelType"] = prepared_mapping["primaryFuelType"].astype(str).str.lower()
-    prepared_mapping["secondaryFuelType"] = prepared_mapping["secondaryFuelType"].fillna("").astype(str).str.lower()
+    prepared_mapping["primaryVehicleEnergyFile"] = prepared_mapping["primaryVehicleEnergyFile"].map(_normalize_energy_file_path)
+    prepared_mapping["secondaryVehicleEnergyFile"] = prepared_mapping["secondaryVehicleEnergyFile"].map(_normalize_energy_file_path)
+
+    fuel_type_lookup = category_fuel_mapping[["fastsim_relative_path", "fastsim_fuel_type"]].drop_duplicates().copy()
+    fuel_type_lookup["fastsim_relative_path"] = fuel_type_lookup["fastsim_relative_path"].astype(str)
+    fuel_type_lookup["fastsim_fuel_type"] = fuel_type_lookup["fastsim_fuel_type"].astype(str)
+    primary_lookup = fuel_type_lookup.rename(
+        columns={"fastsim_relative_path": "primaryVehicleEnergyFile", "fastsim_fuel_type": "primaryFuelTypeId"}
+    )
+    secondary_lookup = fuel_type_lookup.rename(
+        columns={"fastsim_relative_path": "secondaryVehicleEnergyFile", "fastsim_fuel_type": "secondaryFuelTypeId"}
+    )
+    prepared_mapping = prepared_mapping.merge(primary_lookup, on="primaryVehicleEnergyFile", how="left")
+    prepared_mapping = prepared_mapping.merge(secondary_lookup, on="secondaryVehicleEnergyFile", how="left")
+    prepared_mapping["secondaryFuelTypeId"] = prepared_mapping["secondaryFuelTypeId"].fillna("")
 
     prepared_built_vehicle_types = built_vehicle_types[["vehicleTypeId"]].copy()
     prepared_built_vehicle_types["vehicleTypeId"] = prepared_built_vehicle_types["vehicleTypeId"].astype(str)
@@ -845,8 +1005,7 @@ def _build_vehicle_type_atlas_crosswalk(
     built_mapping = prepared_built_vehicle_types.merge(prepared_mapping, on="vehicleTypeId", how="left")
     missing = built_mapping[
         built_mapping["body_type"].isna()
-        | built_mapping["primaryFuelType"].isna()
-        | built_mapping["secondaryFuelType"].isna()
+        | built_mapping["primaryFuelTypeId"].isna()
         | built_mapping["modelyear"].isna()
     ][
         "vehicleTypeId"
@@ -860,17 +1019,39 @@ def _build_vehicle_type_atlas_crosswalk(
     atlas_keys = atlas_vehicle_type_targets.copy()
     atlas_keys["modelyear"] = pd.to_numeric(atlas_keys["modelyear"], errors="coerce")
     atlas_keys["bodytype_norm"] = atlas_keys["bodytype"].apply(_normalize_bodytype)
+    atlas_category_mapping = atlas_passenger_category_mapping.copy()
+    atlas_category_mapping["body_type"] = atlas_category_mapping["body_type"].apply(_normalize_bodytype)
+    atlas_category_mapping["passenger_beam_category"] = atlas_category_mapping["passenger_beam_category"].apply(
+        _normalize_bodytype
+    )
+    atlas_keys = atlas_keys.merge(
+        atlas_category_mapping.rename(
+            columns={
+                "body_type": "bodytype_norm",
+                "passenger_beam_category": "passenger_bodytype_norm",
+            }
+        ),
+        on="bodytype_norm",
+        how="left",
+    )
+    missing_bodytype_mapping = atlas_keys[atlas_keys["passenger_bodytype_norm"].isna()]["bodytype_norm"].drop_duplicates()
+    if not missing_bodytype_mapping.empty:
+        raise ValueError(
+            "ATLAS body types are missing passenger BEAM category mappings:\n"
+            + "\n".join(missing_bodytype_mapping.astype(str).tolist())
+        )
     atlas_keys["representativeIncomeK"] = pd.to_numeric(
         atlas_keys["representativeIncomeK"],
         errors="coerce",
     )
-    prepared_fuel_mapping = fuel_mapping[
-        ["atlas_adopt_fuel", "fastsim_primary_fuel", "fastsim_secondary_fuel", "weight"]
-    ].copy()
-    prepared_fuel_mapping["atlas_adopt_fuel"] = prepared_fuel_mapping["atlas_adopt_fuel"].astype(str)
-    prepared_fuel_mapping["fastsim_primary_fuel"] = prepared_fuel_mapping["fastsim_primary_fuel"].astype(str).str.lower()
-    prepared_fuel_mapping["fastsim_secondary_fuel"] = prepared_fuel_mapping["fastsim_secondary_fuel"].fillna("").astype(str).str.lower()
-    prepared_fuel_mapping["weight"] = pd.to_numeric(prepared_fuel_mapping["weight"], errors="coerce").fillna(0.0)
+    prepared_category_mapping = category_fuel_mapping[
+        ["lookup_domain", "vehicle_category", "adopt_fuel", "adopt_fuel_keys", "fastsim_fuel_type"]
+    ].drop_duplicates().copy()
+    prepared_category_mapping["lookup_domain"] = prepared_category_mapping["lookup_domain"].astype(str).str.lower()
+    prepared_category_mapping["vehicle_category"] = prepared_category_mapping["vehicle_category"].astype(str)
+    prepared_category_mapping["adopt_fuel"] = prepared_category_mapping["adopt_fuel"].astype(str).str.lower()
+    prepared_category_mapping["adopt_fuel_keys"] = prepared_category_mapping["adopt_fuel_keys"].fillna("").astype(str).str.lower()
+    prepared_category_mapping["fastsim_fuel_type"] = prepared_category_mapping["fastsim_fuel_type"].astype(str).str.lower()
 
     crosswalk_rows: list[pd.DataFrame] = []
     for atlas_vehicle_type_id, atlas_group in atlas_keys.groupby("atlasVehicleTypeId", sort=True, dropna=False):
@@ -880,22 +1061,24 @@ def _build_vehicle_type_atlas_crosswalk(
         candidate_frames: list[pd.DataFrame] = []
 
         for row in atlas_group.itertuples(index=False):
-            row_fuel_mapping = prepared_fuel_mapping[
-                prepared_fuel_mapping["atlas_adopt_fuel"] == str(row.adopt_fuel)
+            row_fuel_mapping = prepared_category_mapping[
+                (prepared_category_mapping["lookup_domain"] == "ldv")
+                & (prepared_category_mapping["vehicle_category"] == row.passenger_bodytype_norm)
             ].copy()
+            row_fuel_mapping = row_fuel_mapping[_adopt_fuel_matches(row_fuel_mapping, str(row.adopt_fuel).lower())].copy()
             if row_fuel_mapping.empty:
                 raise ValueError(
-                    "No FASTSim fuel mapping configured for atlas adopt_fuel "
-                    f"{row.adopt_fuel}"
+                    "No FASTSim category fuel mapping configured for atlas "
+                    f"bodytype={row.bodytype_norm}, adopt_fuel={row.adopt_fuel}"
                 )
 
             candidates = built_mapping[
-                built_mapping["bodytype_norm"] == row.bodytype_norm
+                built_mapping["bodytype_norm"] == row.passenger_bodytype_norm
             ].copy()
             candidates = candidates.merge(
                 row_fuel_mapping,
-                left_on=["primaryFuelType", "secondaryFuelType"],
-                right_on=["fastsim_primary_fuel", "fastsim_secondary_fuel"],
+                left_on=["primaryFuelTypeId"],
+                right_on=["fastsim_fuel_type"],
                 how="inner",
             )
             if candidates.empty:
@@ -907,8 +1090,7 @@ def _build_vehicle_type_atlas_crosswalk(
                 lambda value: _affordability_weight(value, row.representativeIncomeK)
             )
             candidates["candidateWeight"] = (
-                pd.to_numeric(candidates["weight"], errors="coerce").fillna(0.0)
-                * pd.to_numeric(candidates["yearWeight"], errors="coerce").fillna(0.0)
+                pd.to_numeric(candidates["yearWeight"], errors="coerce").fillna(0.0)
                 * pd.to_numeric(candidates["affordabilityWeight"], errors="coerce").fillna(0.0)
                 * float(row.vehicleCount)
             )
@@ -1108,34 +1290,90 @@ def _vehicle_type_id_from_fastsim_token(token: object) -> str:
 
 def _build_fastsim_vehicle_type_mapping(
     built_vehicle_types: pd.DataFrame,
-    fastsim_bodytype_xwalk: pd.DataFrame,
+    category_fuel_mapping: pd.DataFrame,
 ) -> pd.DataFrame:
-    _require_column(fastsim_bodytype_xwalk, "body_type", "FASTSim bodytype xwalk file")
-    _require_column(fastsim_bodytype_xwalk, "fastsim_id", "FASTSim bodytype xwalk file")
-    _require_column(fastsim_bodytype_xwalk, "msrp_usd", "FASTSim bodytype xwalk file")
-
-    bodytypes = fastsim_bodytype_xwalk[["fastsim_id", "body_type", "msrp_usd"]].copy()
-    bodytypes["vehicleTypeId"] = bodytypes["fastsim_id"].apply(_vehicle_type_id_from_fastsim_token)
-    bodytypes["body_type"] = bodytypes["body_type"].astype(str)
-    bodytypes["msrp_usd"] = pd.to_numeric(bodytypes["msrp_usd"], errors="coerce")
-    bodytypes = bodytypes[["vehicleTypeId", "body_type", "msrp_usd"]].drop_duplicates()
+    _require_column(category_fuel_mapping, "lookup_domain", "FASTSim category fuel mapping file")
+    _require_column(category_fuel_mapping, "vehicle_category", "FASTSim category fuel mapping file")
+    _require_column(category_fuel_mapping, "fastsim_relative_path", "FASTSim category fuel mapping file")
+    _require_column(category_fuel_mapping, "msrp_usd", "FASTSim category fuel mapping file")
 
     _require_column(built_vehicle_types, "vehicleTypeId", "Built vehicle types")
     _require_column(built_vehicle_types, "primaryFuelType", "Built vehicle types")
     _require_column(built_vehicle_types, "secondaryFuelType", "Built vehicle types")
+    _require_column(built_vehicle_types, "primaryVehicleEnergyFile", "Built vehicle types")
+    _require_column(built_vehicle_types, "secondaryVehicleEnergyFile", "Built vehicle types")
 
-    fuels = built_vehicle_types[["vehicleTypeId", "primaryFuelType", "secondaryFuelType"]].copy()
+    fuels = built_vehicle_types[
+        [
+            "vehicleTypeId",
+            "primaryFuelType",
+            "secondaryFuelType",
+            "primaryVehicleEnergyFile",
+            "secondaryVehicleEnergyFile",
+        ]
+    ].copy()
     fuels["vehicleTypeId"] = fuels["vehicleTypeId"].astype(str)
     fuels["primaryFuelType"] = fuels["primaryFuelType"].astype(str).str.lower()
     fuels["secondaryFuelType"] = fuels["secondaryFuelType"].fillna("").astype(str).str.lower()
+    fuels["primaryVehicleEnergyFile"] = fuels["primaryVehicleEnergyFile"].map(_normalize_energy_file_path)
+    fuels["secondaryVehicleEnergyFile"] = fuels["secondaryVehicleEnergyFile"].map(_normalize_energy_file_path)
     fuels = fuels.drop_duplicates()
 
-    mapping = bodytypes.merge(fuels, on="vehicleTypeId", how="inner")
+    bodytypes = category_fuel_mapping[
+        category_fuel_mapping["passenger_beam_category"].astype(str).str.strip().ne("")
+    ][["fastsim_relative_path", "passenger_beam_category", "msrp_usd"]].drop_duplicates().copy()
+    bodytypes["passenger_beam_category"] = bodytypes["passenger_beam_category"].astype(str).map(_normalize_bodytype)
+    bodytypes["msrp_usd"] = pd.to_numeric(bodytypes["msrp_usd"], errors="coerce")
+
+    mapping = fuels.merge(
+        bodytypes,
+        left_on="primaryVehicleEnergyFile",
+        right_on="fastsim_relative_path",
+        how="inner",
+    )
     mapping["modelyear"] = _extract_model_year_from_vehicle_type_id(mapping["vehicleTypeId"])
     mapping = mapping[
-        ["vehicleTypeId", "body_type", "modelyear", "primaryFuelType", "secondaryFuelType", "msrp_usd"]
+        [
+            "vehicleTypeId",
+            "passenger_beam_category",
+            "modelyear",
+            "primaryFuelType",
+            "secondaryFuelType",
+            "primaryVehicleEnergyFile",
+            "secondaryVehicleEnergyFile",
+            "msrp_usd",
+        ]
     ].drop_duplicates()
+    mapping = mapping.rename(columns={"passenger_beam_category": "body_type"})
     return mapping.sort_values(["vehicleTypeId", "body_type", "primaryFuelType", "secondaryFuelType"]).reset_index(drop=True)
+
+
+def _build_passenger_fastsim_mapping_context(
+    prepared_vehicle_types: pd.DataFrame,
+    config: dict[str, Any],
+) -> dict[str, pd.DataFrame]:
+    fastsim_registry = _load_fastsim_registry(config)
+    category_fuel_mapping = _load_fastsim_category_fuel_mapping(config)
+    atlas_passenger_category_mapping = _load_atlas_passenger_category_mapping(config)
+    vehicle_type_mapping = _build_fastsim_vehicle_type_mapping(
+        prepared_vehicle_types,
+        category_fuel_mapping,
+    )
+    return {
+        "fastsim_registry": fastsim_registry,
+        "fastsim_category_fuel_mapping": category_fuel_mapping,
+        "atlas_passenger_category_mapping": atlas_passenger_category_mapping,
+        "vehicle_type_mapping": vehicle_type_mapping,
+    }
+
+
+def _build_freight_fastsim_mapping_context(config: dict[str, Any]) -> dict[str, Any]:
+    category_fuel_mapping = _load_fastsim_category_fuel_mapping(config)
+    lookup_indexes = _build_fastsim_lookup_indexes(config, category_fuel_mapping)
+    return {
+        "fastsim_category_fuel_mapping": category_fuel_mapping,
+        "fastsim_lookup_indexes": lookup_indexes,
+    }
 
 
 def _normalize_primary_fuel(token: str) -> str:
@@ -1249,15 +1487,12 @@ def _build_vehicle_types_from_fastsim_folder(
     return prepared
 
 
-def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
-    """Step 1: build BEAM vehicle types for the target ATLAS year."""
-    config = workflow["config"]
-    rng = np.random.default_rng(int(config["seed"]))
-    _remove_stale_step1_output_files(config["output"])
-
+def _run_step1_passenger_substeps(
+    *,
+    config: dict[str, Any],
+    rng: np.random.Generator,
+) -> dict[str, Any]:
     fastsim_config = config["fastsim"]
-    mapping_config = config["mapping"]
-
     print("=== Step 1.1: build vehicle types for atlas.year from FASTSim passenger inputs ===")
     vehicle_types = _read_csv(
         fastsim_config["passenger_vehicle_types_file"],
@@ -1307,11 +1542,15 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
         )
         prepared_vehicle_types["modelyear"] = _extract_model_year_from_vehicle_type_id(prepared_vehicle_types["vehicleTypeId"])
 
-    fastsim_bodytype_xwalk = _read_csv(mapping_config["fastsim_atlas_bodytype_xwalk_file"])
-    vehicle_type_mapping = _build_fastsim_vehicle_type_mapping(
+    print("=== Step 1.1a: load FASTSim registry and build passenger match context ===")
+    passenger_fastsim_context = _build_passenger_fastsim_mapping_context(
         prepared_vehicle_types,
-        fastsim_bodytype_xwalk,
+        config,
     )
+    fastsim_registry = passenger_fastsim_context["fastsim_registry"]
+    fastsim_category_fuel_mapping = passenger_fastsim_context["fastsim_category_fuel_mapping"]
+    atlas_passenger_category_mapping = passenger_fastsim_context["atlas_passenger_category_mapping"]
+    vehicle_type_mapping = passenger_fastsim_context["vehicle_type_mapping"]
 
     print("=== Step 1.2: load atlas vehicles, households, and persons and calculate fleetShare by income bin ===")
     atlas_vehicles = _read_csv(
@@ -1345,13 +1584,14 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
         atlas_vehicle_type_targets["incomeProbability"],
         errors="coerce",
     ).fillna(0.0)
+
     print("=== Step 1.3: create fastsim-to-atlas crosswalk file ===")
-    fastsim_atlas_fuel_mapping = _read_csv(mapping_config["fastsim_atlas_fuel_mapping_file"])
     vehicle_type_atlas_crosswalk = _build_vehicle_type_atlas_crosswalk(
         prepared_vehicle_types,
         vehicle_type_mapping,
         atlas_vehicle_type_targets,
-        fastsim_atlas_fuel_mapping,
+        atlas_passenger_category_mapping,
+        fastsim_category_fuel_mapping,
         rng,
     )
     vehicle_type_atlas_crosswalk = _round_fleet_share(vehicle_type_atlas_crosswalk)
@@ -1371,45 +1611,14 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
         frame_name="Built passenger vehicle types",
     )
     prepared_vehicle_types = _normalize_energy_file_columns(prepared_vehicle_types)
+    prepared_vehicle_types = _attach_adopt_fuel_column(prepared_vehicle_types)
     prepared_vehicle_types_file = _write_new_vehicle_types_file(prepared_vehicle_types, config["output"])
     vehicle_type_atlas_crosswalk_file = _write_vehicle_type_crosswalk_file(
         vehicle_type_atlas_crosswalk,
         config["output"],
     )
-    print("=== Step 1.4: build freight vehicle-type population from FRISM carriers and tours ===")
-    frism_carriers = _read_csv(
-        config["frism"]["carriers_file"],
-        columns=["tourId", "vehicleTypeId"],
-    )
-    frism_tours = _read_csv(
-        config["frism"]["tours_file"],
-        columns=["tourId"],
-    )
-    freight_vehicle_type_population = _build_freight_vehicle_type_population(
-        frism_carriers,
-        frism_tours,
-    )
-    print("=== Step 1.5: filter freight vehicle types to the freight population and calculate probabilities ===")
-    freight_vehicle_types = _read_csv(
-        fastsim_config["freight_vehicle_types_file"],
-    )
-    freight_vehicle_type_population = _round_fleet_share(freight_vehicle_type_population)
-    built_freight_vehicle_types = _build_freight_vehicle_types_from_population(
-        freight_vehicle_types,
-        freight_vehicle_type_population,
-    )
-    print("=== Step 1.6: assign FASTSim energy files to freight vehicle types ===")
-    built_freight_vehicle_types = _assign_freight_fastsim_energy_files(
-        built_freight_vehicle_types,
-        config,
-        fastsim_bodytype_xwalk,
-    )
-    built_freight_vehicle_types = _normalize_energy_file_columns(built_freight_vehicle_types)
-    built_freight_vehicle_types_file = _write_new_freight_vehicle_types_file(
-        built_freight_vehicle_types,
-        config["output"],
-    )
-    print("=== Step 1.7: extract non-car passenger vehicle types from the source passenger vehicle-types file ===")
+
+    print("=== Step 1.4: extract non-car passenger vehicle types from the source passenger vehicle-types file ===")
     passenger_vehicle_type_sections = _split_passenger_vehicle_types(vehicle_types)
     built_passenger_bus_vehicle_types = _align_vehicle_types_to_source_schema(
         passenger_vehicle_type_sections["bus"],
@@ -1417,18 +1626,21 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
         frame_name="Built passenger bus vehicle types",
     )
     built_passenger_bus_vehicle_types = _normalize_energy_file_columns(built_passenger_bus_vehicle_types)
+    built_passenger_bus_vehicle_types = _attach_adopt_fuel_column(built_passenger_bus_vehicle_types)
     built_passenger_bike_vehicle_types = _align_vehicle_types_to_source_schema(
         passenger_vehicle_type_sections["bike"],
         list(vehicle_types.columns),
         frame_name="Built passenger bike vehicle types",
     )
     built_passenger_bike_vehicle_types = _normalize_energy_file_columns(built_passenger_bike_vehicle_types)
+    built_passenger_bike_vehicle_types = _attach_adopt_fuel_column(built_passenger_bike_vehicle_types)
     built_passenger_other_vehicle_types = _align_vehicle_types_to_source_schema(
         passenger_vehicle_type_sections["other"],
         list(vehicle_types.columns),
         frame_name="Built passenger other vehicle types",
     )
     built_passenger_other_vehicle_types = _normalize_energy_file_columns(built_passenger_other_vehicle_types)
+    built_passenger_other_vehicle_types = _attach_adopt_fuel_column(built_passenger_other_vehicle_types)
     built_passenger_bus_vehicle_types_file = _write_passenger_section_vehicle_types_file(
         "bus",
         built_passenger_bus_vehicle_types,
@@ -1445,30 +1657,91 @@ def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
         config["output"],
     )
 
-    workflow["source_fastsim_passenger_vehicle_types"] = vehicle_types
-    workflow["source_atlas_vehicles"] = atlas_vehicles
-    workflow["source_atlas_households"] = atlas_households
-    workflow["source_atlas_persons"] = atlas_persons
-    workflow["source_fastsim_passenger_bodytype_xwalk"] = fastsim_bodytype_xwalk
-    workflow["source_fastsim_passenger_fuel_mapping"] = fastsim_atlas_fuel_mapping
-    workflow["source_fastsim_passenger_vehicle_type_mapping"] = vehicle_type_mapping
-    workflow["built_vehicle_types"] = prepared_vehicle_types
-    workflow["built_vehicle_types_file"] = prepared_vehicle_types_file
-    workflow["atlas_vehicle_type_targets"] = atlas_vehicle_type_targets
-    workflow["atlas_income_bin_targets"] = atlas_income_bin_targets
-    workflow["vehicle_type_atlas_crosswalk"] = vehicle_type_atlas_crosswalk
-    workflow["vehicle_type_atlas_crosswalk_file"] = vehicle_type_atlas_crosswalk_file
-    workflow["source_frism_carriers"] = frism_carriers
-    workflow["source_frism_tours"] = frism_tours
-    workflow["freight_vehicle_type_population"] = freight_vehicle_type_population
-    workflow["source_fastsim_freight_vehicle_types"] = freight_vehicle_types
-    workflow["built_freight_vehicle_types"] = built_freight_vehicle_types
-    workflow["built_freight_vehicle_types_file"] = built_freight_vehicle_types_file
-    workflow["passenger_vehicle_type_sections"] = passenger_vehicle_type_sections
-    workflow["built_passenger_bus_vehicle_types"] = built_passenger_bus_vehicle_types
-    workflow["built_passenger_bus_vehicle_types_file"] = built_passenger_bus_vehicle_types_file
-    workflow["built_passenger_bike_vehicle_types"] = built_passenger_bike_vehicle_types
-    workflow["built_passenger_bike_vehicle_types_file"] = built_passenger_bike_vehicle_types_file
-    workflow["built_passenger_other_vehicle_types"] = built_passenger_other_vehicle_types
-    workflow["built_passenger_other_vehicle_types_file"] = built_passenger_other_vehicle_types_file
+    return {
+        "source_fastsim_passenger_vehicle_types": vehicle_types,
+        "source_atlas_vehicles": atlas_vehicles,
+        "source_atlas_households": atlas_households,
+        "source_atlas_persons": atlas_persons,
+        "source_fastsim_registry": fastsim_registry,
+        "source_fastsim_category_fuel_mapping": fastsim_category_fuel_mapping,
+        "source_fastsim_passenger_vehicle_type_mapping": vehicle_type_mapping,
+        "built_vehicle_types": prepared_vehicle_types,
+        "built_vehicle_types_file": prepared_vehicle_types_file,
+        "atlas_vehicle_type_targets": atlas_vehicle_type_targets,
+        "atlas_income_bin_targets": atlas_income_bin_targets,
+        "vehicle_type_atlas_crosswalk": vehicle_type_atlas_crosswalk,
+        "vehicle_type_atlas_crosswalk_file": vehicle_type_atlas_crosswalk_file,
+        "passenger_vehicle_type_sections": passenger_vehicle_type_sections,
+        "built_passenger_bus_vehicle_types": built_passenger_bus_vehicle_types,
+        "built_passenger_bus_vehicle_types_file": built_passenger_bus_vehicle_types_file,
+        "built_passenger_bike_vehicle_types": built_passenger_bike_vehicle_types,
+        "built_passenger_bike_vehicle_types_file": built_passenger_bike_vehicle_types_file,
+        "built_passenger_other_vehicle_types": built_passenger_other_vehicle_types,
+        "built_passenger_other_vehicle_types_file": built_passenger_other_vehicle_types_file,
+    }
+
+
+def _run_step1_freight_substeps(
+    *,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    fastsim_config = config["fastsim"]
+    print("=== Step 1.5: build freight vehicle-type population from FRISM carriers and tours ===")
+    frism_carriers = _read_csv(
+        config["frism"]["carriers_file"],
+        columns=["tourId", "vehicleTypeId"],
+    )
+    frism_tours = _read_csv(
+        config["frism"]["tours_file"],
+        columns=["tourId"],
+    )
+    freight_vehicle_type_population = _build_freight_vehicle_type_population(
+        frism_carriers,
+        frism_tours,
+    )
+
+    print("=== Step 1.6: filter freight vehicle types to the freight population and calculate probabilities ===")
+    freight_vehicle_types = _read_csv(
+        fastsim_config["freight_vehicle_types_file"],
+    )
+    freight_vehicle_type_population = _round_fleet_share(freight_vehicle_type_population)
+    built_freight_vehicle_types = _build_freight_vehicle_types_from_population(
+        freight_vehicle_types,
+        freight_vehicle_type_population,
+    )
+
+    print("=== Step 1.7: assign FASTSim energy files to freight vehicle types ===")
+    print("=== Step 1.7a: load FASTSim registry and build freight lookup context ===")
+    freight_fastsim_context = _build_freight_fastsim_mapping_context(config)
+    built_freight_vehicle_types = _assign_freight_fastsim_energy_files(
+        built_freight_vehicle_types,
+        config,
+        category_fuel_mapping=freight_fastsim_context["fastsim_category_fuel_mapping"],
+        lookup_indexes=freight_fastsim_context["fastsim_lookup_indexes"],
+    )
+    built_freight_vehicle_types = _normalize_energy_file_columns(built_freight_vehicle_types)
+    built_freight_vehicle_types = _attach_adopt_fuel_column(built_freight_vehicle_types)
+    built_freight_vehicle_types_file = _write_new_freight_vehicle_types_file(
+        built_freight_vehicle_types,
+        config["output"],
+    )
+
+    return {
+        "source_frism_carriers": frism_carriers,
+        "source_frism_tours": frism_tours,
+        "freight_vehicle_type_population": freight_vehicle_type_population,
+        "source_fastsim_freight_vehicle_types": freight_vehicle_types,
+        "source_freight_fastsim_category_fuel_mapping": freight_fastsim_context["fastsim_category_fuel_mapping"],
+        "built_freight_vehicle_types": built_freight_vehicle_types,
+        "built_freight_vehicle_types_file": built_freight_vehicle_types_file,
+    }
+
+
+def run_step1(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Step 1: build BEAM vehicle types for the target ATLAS year."""
+    config = workflow["config"]
+    rng = np.random.default_rng(int(config["seed"]))
+    _remove_stale_step1_output_files(config["output"])
+    workflow.update(_run_step1_passenger_substeps(config=config, rng=rng))
+    workflow.update(_run_step1_freight_substeps(config=config))
     return workflow
