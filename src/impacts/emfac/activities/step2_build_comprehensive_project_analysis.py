@@ -42,6 +42,21 @@ def _format_numeric_series(values: pd.Series) -> pd.Series:
     return values.map(lambda value: f"{float(value):g}" if pd.notna(value) else pd.NA)
 
 
+def _summarize_category_fuel_pairs(frame: pd.DataFrame) -> dict[str, object]:
+    if not {"vehicleCategory", "fuel"}.issubset(frame.columns):
+        return {"pair_count": 0, "category_count": 0, "fuel_count": 0, "sample_pairs": []}
+    pairs = frame[["vehicleCategory", "fuel"]].drop_duplicates().copy()
+    pairs["vehicleCategory"] = pairs["vehicleCategory"].astype(str)
+    pairs["fuel"] = pairs["fuel"].astype(str)
+    pairs = pairs.sort_values(["vehicleCategory", "fuel"], kind="mergesort")
+    return {
+        "pair_count": int(len(pairs)),
+        "category_count": int(pairs["vehicleCategory"].nunique()),
+        "fuel_count": int(pairs["fuel"].nunique()),
+        "sample_pairs": pairs.head(10).to_dict(orient="records"),
+    }
+
+
 def _filter_to_supported_process_groups(
     rates: pd.DataFrame,
     *,
@@ -147,6 +162,11 @@ def build_comprehensive_project_analysis(
         [speed_rates, pto_rates, time_rates, prdust_rates, other_rates],
         ignore_index=True,
         sort=False,
+    )
+    rates = rates.merge(
+        supported_emfac_combinations,
+        on=["vehicleCategory", "fuel"],
+        how="inner",
     )
     if "speed_time" in rates.columns:
         speed_time = rates.pop("speed_time")

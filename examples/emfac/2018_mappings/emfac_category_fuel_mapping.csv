@@ -1,15 +1,19 @@
 group,emfac_vehicle_category,emfac_fuel,beam_category,adopt_fuel
 passenger,LDA,Elec,Car,ev
+passenger,LDA,Elec,Car,fuelcell
 passenger,LDA,Gas,Car,conv
 passenger,LDA,Phe,Car,phev
 passenger,LDT1,Elec,Car,ev
+passenger,LDT1,Elec,Car,fuelcell
 passenger,LDT1,Gas,Car,conv
 passenger,LDT1,Phe,Car,phev
 passenger,LDT2,Elec,Car,ev
+passenger,LDT2,Elec,Car,fuelcell
 passenger,LDT2,Gas,Car,conv
 passenger,LDT2,Phe,Car,phev
 passenger,MCY,Gas,Bike,conv
 passenger,MDV,Elec,Car,ev
+passenger,MDV,Elec,Car,fuelcell
 passenger,MDV,Gas,Car,conv
 passenger,MDV,Phe,Car,phev
 passenger,UBUS,Dsl,MediumDutyPassenger,diesel
@@ -31,7 +35,6 @@ freight,LHD2,Gas,Class2b3Vocational,gasoline
 freight,MDV,Dsl,Class12aVocational,diesel
 freight,MDV,Elec,Class12aVocational,electricity
 freight,MDV,Gas,Class12aVocational,gasoline
-freight,PTO,Dsl,Class78Tractor,diesel
 freight,T6 CAIRP Class 4,Dsl,Class456Vocational,diesel
 freight,T6 CAIRP Class 5,Dsl,Class456Vocational,diesel
 freight,T6 CAIRP Class 6,Dsl,Class456Vocational,diesel
@@ -68,6 +71,7 @@ freight,T7IS,Gas,Class78Tractor,gasoline
 ,MH,Gas,,
 ,Motor Coach,Dsl,,
 ,OBUS,Gas,,
+,PTO,Dsl,,
 ,SBUS,Dsl,,
 ,SBUS,Gas,,
 ,SBUS,NG,,
