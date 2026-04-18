@@ -74,17 +74,17 @@ def _model_year_sort_key(model_year: object) -> tuple[int, int, int]:
 def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
     emfac_config = config["activities"]
     rates = read_table(
-        emfac_config["rates_file"],
+        emfac_config["passenger_rates_file"],
         dtype=None,
         columns=_EMFAC_KEY_COLUMNS,
     )[_EMFAC_KEY_COLUMNS].drop_duplicates()
     activity = read_table(
-        emfac_config["activity_file"],
+        emfac_config["passenger_activity_file"],
         dtype=None,
         columns=_EMFAC_KEY_COLUMNS + ["population_vehicles", "total_vmt_vehicle_miles_per_year"],
     )
     fleet = read_table(
-        emfac_config["fleet_file"],
+        emfac_config["passenger_fleet_file"],
         dtype=None,
         columns=_EMFAC_KEY_COLUMNS,
     )[_EMFAC_KEY_COLUMNS].drop_duplicates()

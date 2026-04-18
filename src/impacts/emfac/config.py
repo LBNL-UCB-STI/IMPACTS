@@ -480,9 +480,6 @@ def _derive_emfac_output_paths(emfac: dict[str, object]) -> dict[str, object]:
     base_name = f"{region_slug}-emfac-{int(calendar_year)}-project-analysis-final"
     outputs_root = Path(str(outputs))
     activities_output_root = outputs_root / "activities"
-    emfac["rates_file"] = str((activities_output_root / f"{base_name}-rates.parquet").resolve())
-    emfac["activity_file"] = str((activities_output_root / f"{base_name}-activity.parquet").resolve())
-    emfac["fleet_file"] = str((activities_output_root / f"{base_name}-fleet.parquet").resolve())
     emfac["passenger_rates_file"] = str((activities_output_root / f"{base_name}-passenger-rates.parquet").resolve())
     emfac["passenger_activity_file"] = str((activities_output_root / f"{base_name}-passenger-activity.parquet").resolve())
     emfac["passenger_fleet_file"] = str((activities_output_root / f"{base_name}-passenger-fleet.parquet").resolve())
