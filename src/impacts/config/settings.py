@@ -247,6 +247,7 @@ class Emissions:
     annualization_days_or_file: float | str
     population_sample: float
     source_pollutants: List[str]
+    transit_sample: float = 1.0
     activity_totals_file: Optional[str] = None
     inventory_file: Optional[str] = None
 
@@ -261,6 +262,7 @@ class Emissions:
                 "inventory_file",
                 "annualization_days_or_file",
                 "population_sample",
+                "transit_sample",
                 "pollutants",
             },
             "impacts.emissions",
@@ -283,6 +285,11 @@ class Emissions:
             population_sample=_required_float(
                 payload.get("population_sample"),
                 "impacts.emissions.population_sample",
+            ),
+            transit_sample=(
+                _optional_float(payload.get("transit_sample"))
+                if payload.get("transit_sample") is not None
+                else 1.0
             ),
             source_pollutants=source_pollutants,
             activity_totals_file=_optional_string(payload.get("activity_totals_file")),
@@ -413,6 +420,7 @@ class ImpactsSettings:
                     "inventory_file": self.impacts.emissions.inventory_file,
                     "annualization_days_or_file": self.impacts.emissions.annualization_days_or_file,
                     "population_sample": self.impacts.emissions.population_sample,
+                    "transit_sample": self.impacts.emissions.transit_sample,
                     "pollutants": list(self.impacts.emissions.source_pollutants),
                 },
                 "dispersions": {

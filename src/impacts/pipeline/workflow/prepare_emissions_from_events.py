@@ -47,6 +47,7 @@ from ...common import prepared_table_target
 from ...common import read_table
 from ...common import resolve_required_manifest_input
 from ...common import normalize_county_fips
+from .annualization import _build_skims_scale_factors
 from .annualization import resolve_skims_annualization_factors
 
 logger = logging.getLogger(__name__)
@@ -271,6 +272,7 @@ def _calculate_emissions(
     annualization_days_or_file: float | str,
     vehicle_types_path: Optional[str],
     population_sample: float,
+    transit_sample: float,
 ) -> pd.DataFrame:
     """Join emission rates onto zone-expanded skims and add tons_per_year_{pollutant}_{zone}_allocated columns.
 
@@ -280,7 +282,8 @@ def _calculate_emissions(
         rates_folder: directory of emission rate CSV/parquet files.
         pollutants_map: canonical_pollutant → rate_file_pollutant_name mapping.
         annualization_days_or_file: representative days per year or a CSV path.
-        population_sample: simulation sample fraction; emissions scaled by 1/population_sample.
+        population_sample: simulation sample fraction for non-transit rows.
+        transit_sample: simulation sample fraction for BUS vehicle types.
     """
     from ..tools.beam.events_to_skims_emissions import read_rates_directory
 
@@ -316,7 +319,15 @@ def _calculate_emissions(
         annualization_days_or_file=annualization_days_or_file,
         vehicle_types_path=vehicle_types_path,
     )
-    scale = annualization_factors / population_sample / grams_per_short_ton
+    scale = (
+        annualization_factors
+        * _build_skims_scale_factors(
+            skims,
+            population_sample=population_sample,
+            transit_sample=transit_sample,
+        )
+        / grams_per_short_ton
+    )
     is_parked = skims["process"].isin(set(parked_processes))
 
     result = skims.copy()
@@ -425,6 +436,7 @@ def build_skims_from_events(
     annualization_days_or_file: Optional[float | str] = None,
     vehicle_types_path: Optional[str] = None,
     population_sample: Optional[float] = None,
+    transit_sample: Optional[float] = None,
 ) -> pd.DataFrame:
     """Parse PathTraversal events and return a skims DataFrame.
     """
@@ -456,7 +468,13 @@ def build_skims_from_events(
         before, len(skims),
     )
 
-    if rates_folder and pollutants_map and annualization_days_or_file is not None and population_sample is not None:
+    if (
+        rates_folder
+        and pollutants_map
+        and annualization_days_or_file is not None
+        and population_sample is not None
+        and transit_sample is not None
+    ):
         skims = _calculate_emissions(
             skims,
             rates_folder=rates_folder,
@@ -464,6 +482,7 @@ def build_skims_from_events(
             annualization_days_or_file=annualization_days_or_file,
             vehicle_types_path=vehicle_types_path,
             population_sample=population_sample,
+            transit_sample=transit_sample,
         )
 
     return skims
@@ -534,6 +553,7 @@ def prepare_events_inputs(
     pollutants_map: Dict[str, str],
     annualization_days_or_file: float | str,
     population_sample: float,
+    transit_sample: float,
 ) -> Optional[Dict[str, Any]]:
     """Build prepared skims/activity tables from registered BEAM events."""
     events_path = find_staged_events_path(manifest_inputs)
@@ -583,6 +603,7 @@ def prepare_events_inputs(
         pollutants_map=dict(pollutants_map),
         annualization_days_or_file=annualization_days_or_file,
         population_sample=float(population_sample),
+        transit_sample=float(transit_sample),
     )
     prepared_skims_path = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
 

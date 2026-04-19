@@ -154,6 +154,7 @@ def build_inputs_manifest(
             "activity_totals_columns": dict(emissions.activity_totals_columns),
             "annualization_days_or_file": staged_annualization_days_or_file,
             "population_sample": float(emissions.population_sample),
+            "transit_sample": float(emissions.transit_sample),
         },
         "pilates_contract": {
             "stage": "terminal_postprocessing",

@@ -322,6 +322,7 @@ def prepare_staged_skims_for_processing(
     pollutants_map: Dict[str, str],
     annualization_days_or_file: float | str,
     population_sample: float,
+    transit_sample: float,
 ) -> pd.DataFrame:
     prepared_grouped_skims_path = prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
     prepare_skims_for_grid_allocation(
@@ -342,6 +343,7 @@ def prepare_staged_skims_for_processing(
         annualization_days_or_file=annualization_days_or_file,
         vehicle_types_path=vehicle_types_path,
         population_sample=float(population_sample),
+        transit_sample=float(transit_sample),
     )
     return read_table(prepared_skims_path)
 
@@ -356,6 +358,7 @@ def load_or_prepare_skims_df(
     pollutants_map: Dict[str, str],
     annualization_days_or_file: float | str,
     population_sample: float,
+    transit_sample: float,
     manifest_inputs: Optional[Dict[str, Any]] = None,
 ) -> pd.DataFrame:
     prepared_path = resolve_prepared_skims_path(input_root)
@@ -385,6 +388,7 @@ def load_or_prepare_skims_df(
             pollutants_map=pollutants_map,
             annualization_days_or_file=annualization_days_or_file,
             population_sample=population_sample,
+            transit_sample=transit_sample,
         )
 
     from .prepare_emissions_from_events import build_staged_skims_from_events
@@ -413,6 +417,7 @@ def load_or_prepare_skims_df(
         pollutants_map=pollutants_map,
         annualization_days_or_file=annualization_days_or_file,
         population_sample=population_sample,
+        transit_sample=transit_sample,
     )
 
 
@@ -451,6 +456,7 @@ def prepare_skims_inputs(
             pollutants_map=dict(processing.pollutants_map),
             annualization_days_or_file=processing.annualization_days_or_file,
             population_sample=float(processing.population_sample),
+            transit_sample=float(processing.transit_sample),
         )
         if event_inputs is None:
             raise FileNotFoundError(
@@ -492,6 +498,7 @@ def prepare_skims_inputs(
         annualization_days_or_file=processing.annualization_days_or_file,
         vehicle_types_path=vehicle_types_path,
         population_sample=float(processing.population_sample),
+        transit_sample=float(processing.transit_sample),
     )
     manifest_inputs["prepared_skims_grouped"] = file_entry(
         kind="local",

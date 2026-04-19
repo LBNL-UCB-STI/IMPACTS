@@ -320,6 +320,7 @@ def run(
         pollutants_map=dict(pipeline.pollutants_map),
         annualization_days_or_file=pipeline.annualization_days_or_file,
         population_sample=float(pipeline.population_sample),
+        transit_sample=float(pipeline.transit_sample),
         manifest_inputs=manifest_inputs,
     )
 

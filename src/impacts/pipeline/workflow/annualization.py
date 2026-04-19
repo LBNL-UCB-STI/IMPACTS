@@ -24,6 +24,38 @@ _SKIMS_DIMENSION_COLS = {
 }
 
 
+_TRANSIT_VEHICLETYPE_PATTERN = re.compile(r"(^|[-_])BUS($|[-_])", re.IGNORECASE)
+
+
+def _is_transit_vehicle_type(vehicle_type_id: object) -> bool:
+    token = str("" if pd.isna(vehicle_type_id) else vehicle_type_id).strip()
+    return bool(token) and bool(_TRANSIT_VEHICLETYPE_PATTERN.search(token))
+
+
+def _build_skims_scale_factors(
+    prepared: pd.DataFrame,
+    *,
+    population_sample: float,
+    transit_sample: float,
+) -> pd.Series:
+    if not 0 < population_sample <= 1:
+        raise ValueError(f"population_sample must be in the interval (0, 1], got {population_sample}")
+    if not 0 < transit_sample <= 1:
+        raise ValueError(f"transit_sample must be in the interval (0, 1], got {transit_sample}")
+
+    scale_factors = pd.Series(
+        np.full(len(prepared), 1.0 / population_sample, dtype=float),
+        index=prepared.index,
+    )
+    if "vehicleTypeId" not in prepared.columns:
+        return scale_factors
+
+    transit_mask = prepared["vehicleTypeId"].map(_is_transit_vehicle_type)
+    if transit_mask.any():
+        scale_factors.loc[transit_mask] = 1.0 / transit_sample
+    return scale_factors
+
+
 def annualize_prepared_skims_for_grid_allocation(
     prepared_skims_path: str,
     output_path: str,
@@ -35,10 +67,8 @@ def annualize_prepared_skims_for_grid_allocation(
     annualization_days_or_file: float | str = default_representative_days_per_year,
     vehicle_types_path: Optional[str] = None,
     population_sample: float = 1.0,
+    transit_sample: float = 1.0,
 ) -> pd.DataFrame:
-    if not 0 < population_sample <= 1:
-        raise ValueError(f"population_sample must be in the interval (0, 1], got {population_sample}")
-
     prepared = read_table(prepared_skims_path)
     link_lengths = read_table(network_path)
     prepared_group_cols = group_cols or ["linkId", "vehicleTypeId", "process"]
@@ -60,7 +90,11 @@ def annualize_prepared_skims_for_grid_allocation(
     prepared[beam_length_col] = pd.to_numeric(prepared[beam_length_col], errors="coerce").fillna(0.0)
     if "attributeOrigType" in prepared.columns:
         prepared = prepared.rename(columns={"attributeOrigType": "roadCategory"})
-    scale_factor = 1.0 / population_sample
+    scale_factors = _build_skims_scale_factors(
+        prepared,
+        population_sample=population_sample,
+        transit_sample=transit_sample,
+    )
     annualization_factors = resolve_skims_annualization_factors(
         prepared,
         annualization_days_or_file=annualization_days_or_file,
@@ -70,7 +104,7 @@ def annualize_prepared_skims_for_grid_allocation(
     retained_dim_cols = [col for col in prepared.columns if col in _SKIMS_DIMENSION_COLS and col not in prepared_group_cols]
     out = prepared[prepared_group_cols + retained_dim_cols].copy()
     prepared_observations = pd.to_numeric(prepared.get("observations", 0.0), errors="coerce").fillna(0.0)
-    out["totTrips"] = prepared_observations * scale_factor * annualization_factors
+    out["totTrips"] = prepared_observations * scale_factors * annualization_factors
     out["totVMT"] = out["totTrips"] * prepared[beam_length_col] / _METERS_PER_MILE
     out = out.drop(columns=[col for col in [beam_length_col] if col in out.columns], errors="ignore")
     for pollutant in required:
@@ -79,7 +113,7 @@ def annualize_prepared_skims_for_grid_allocation(
             if pollutant in prepared.columns
             else pd.Series(np.zeros(len(prepared), dtype=float), index=prepared.index)
         )
-        out[f"tons_per_year_{pollutant}"] = values * scale_factor * annualization_factors / grams_per_short_ton
+        out[f"tons_per_year_{pollutant}"] = values * scale_factors * annualization_factors / grams_per_short_ton
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)

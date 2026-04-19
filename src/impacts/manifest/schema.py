@@ -51,6 +51,7 @@ class PipelineConfig:
     source_pollutants: List[str] = field(default_factory=list)
     annualization_days_or_file: float | str = default_representative_days_per_year
     population_sample: float = 1.0
+    transit_sample: float = 1.0
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PipelineConfig":
@@ -86,6 +87,7 @@ class PipelineConfig:
                 "source_pollutants",
                 "annualization_days_or_file",
                 "population_sample",
+                "transit_sample",
             },
             "pipeline",
         )
@@ -119,6 +121,11 @@ class PipelineConfig:
             source_pollutants=_coerce_string_list(payload.get("source_pollutants")),
             annualization_days_or_file=_required_float_or_string(payload.get("annualization_days_or_file"), "pipeline.annualization_days_or_file"),
             population_sample=_required_float(payload.get("population_sample"), "pipeline.population_sample"),
+            transit_sample=(
+                _optional_float(payload.get("transit_sample"))
+                if payload.get("transit_sample") is not None
+                else 1.0
+            ),
         )
         if not result.source_pollutants:
             raise ValueError("Missing required value: pipeline.source_pollutants")
