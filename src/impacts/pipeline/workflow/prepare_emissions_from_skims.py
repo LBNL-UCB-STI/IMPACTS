@@ -28,16 +28,22 @@ logger = logging.getLogger(__name__)
 _PASSENGER_CATEGORY_TOKENS = {
     "car",
     "bike",
+    "body",
     "body-type-default",
     "body type default",
+    "mediumdutypassenger",
     "rail-default",
     "rail default",
     "ferry-default",
     "ferry default",
     "tram-sf",
     "tram sf",
+    "obus",
+    "sbus",
+    "ubus",
+    "mcy",
+    "motor coach",
 }
-_PASSENGER_CATEGORY_SUBSTRINGS = ("bus", "tram", "rail", "ferry", "bike")
 _FREIGHT_CATEGORY_PATTERN = re.compile(r"^(class\d|class\d+[a-z]?|mdv|ldt\d|hdt|t\d)", re.IGNORECASE)
 _FREIGHT_CATEGORY_SUBSTRINGS = ("vocational", "tractor")
 
@@ -69,6 +75,10 @@ def _normalize_vehicle_type_token(value: object) -> str:
 
 
 def _classify_vehicle_type_assignment(row: pd.Series, *, source_name: str) -> Optional[str]:
+    explicit_assignment = _normalize_vehicle_type_token(row.get("assignment_group")).lower()
+    if explicit_assignment in {"passenger", "freight"}:
+        return explicit_assignment
+
     source_lower = source_name.lower()
     if "vehicletypes--atlas--" in source_lower or "vehicletypes--passenger" in source_lower:
         return "passenger"
@@ -87,9 +97,14 @@ def _classify_vehicle_type_assignment(row: pd.Series, *, source_name: str) -> Op
         return "freight"
 
     vehicle_category = _normalize_vehicle_type_token(row.get("vehicleCategory")).lower()
-    if vehicle_category in _PASSENGER_CATEGORY_TOKENS:
+    emfac_vehicle_category = _normalize_vehicle_type_token(row.get("emfacVehicleCategory")).lower()
+    if emfac_vehicle_category in _PASSENGER_CATEGORY_TOKENS:
         return "passenger"
-    if any(token in vehicle_category for token in _PASSENGER_CATEGORY_SUBSTRINGS):
+    if _FREIGHT_CATEGORY_PATTERN.match(emfac_vehicle_category) or any(
+        token in emfac_vehicle_category for token in _FREIGHT_CATEGORY_SUBSTRINGS
+    ):
+        return "freight"
+    if vehicle_category in _PASSENGER_CATEGORY_TOKENS:
         return "passenger"
     if _FREIGHT_CATEGORY_PATTERN.match(vehicle_category) or any(
         token in vehicle_category for token in _FREIGHT_CATEGORY_SUBSTRINGS
@@ -251,6 +266,7 @@ def _reuse_existing_outputs(raw_dir: Path) -> Optional[Dict[str, Optional[str]]]
     outputs = {
         "beam_activity_totals": _existing_output(raw_dir / "beam_activity_totals.parquet"),
         "beam_activity_correction_factors": _existing_output(raw_dir / "beam_activity_correction_factors.parquet"),
+        "beam_emissions_by_county_process": _existing_output(raw_dir / "beam_emissions_by_county_process.parquet"),
         "beam_emissions_for_aermod": _existing_output(raw_dir / "beam_emissions_for_aermod.parquet"),
         "beam_emissions_for_inmap": beam_emissions_for_inmap,
     }
@@ -430,6 +446,14 @@ def _build_combined_allocated_table(
     finally:
         con.close()
 
+    if allocated.empty:
+        return None
+
+    allocated["vehicleTypeId"] = allocated["vehicleTypeId"].map(_normalize_vehicle_type_token)
+    allocated["process"] = allocated["process"].map(_normalize_vehicle_type_token)
+    allocated = allocated.loc[
+        allocated["vehicleTypeId"].ne("") & allocated["process"].ne("")
+    ].copy()
     if allocated.empty:
         return None
 

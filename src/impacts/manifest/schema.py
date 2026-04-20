@@ -48,7 +48,12 @@ class PipelineConfig:
     start_year: Optional[int] = None
     county_state_fips: Optional[str] = None
     county_fips_codes: List[str] = field(default_factory=list)
-    inventory_file: Optional[str] = None
+    passenger_inventory_file: Optional[str] = None
+    freight_inventory_file: Optional[str] = None
+    enable_passenger_inventory_activity_correction: bool = True
+    enable_freight_inventory_activity_correction: bool = True
+    passenger_vehicle_types_file: Optional[str] = None
+    freight_vehicle_types_file: Optional[str] = None
     prepared_skims_group_cols: List[str] = field(default_factory=list)
     pollutants: List[str] = field(default_factory=list)
     source_pollutants: List[str] = field(default_factory=list)
@@ -89,7 +94,12 @@ class PipelineConfig:
                 "start_year",
                 "county_state_fips",
                 "county_fips_codes",
-                "inventory_file",
+                "passenger_inventory_file",
+                "freight_inventory_file",
+                "enable_passenger_inventory_activity_correction",
+                "enable_freight_inventory_activity_correction",
+                "passenger_vehicle_types_file",
+                "freight_vehicle_types_file",
                 "prepared_skims_group_cols",
                 "pollutants",
                 "source_pollutants",
@@ -136,7 +146,38 @@ class PipelineConfig:
             start_year=_required_int(payload.get("start_year"), "pipeline.start_year"),
             county_state_fips=_required_string(payload.get("county_state_fips"), "pipeline.county_state_fips"),
             county_fips_codes=_coerce_string_list(payload.get("county_fips_codes")),
-            inventory_file=_required_string(payload.get("inventory_file"), "pipeline.inventory_file"),
+            passenger_inventory_file=_required_string(
+                payload.get("passenger_inventory_file"),
+                "pipeline.passenger_inventory_file",
+            ),
+            freight_inventory_file=_required_string(
+                payload.get("freight_inventory_file"),
+                "pipeline.freight_inventory_file",
+            ),
+            enable_passenger_inventory_activity_correction=(
+                _required_bool(
+                    payload.get("enable_passenger_inventory_activity_correction"),
+                    "pipeline.enable_passenger_inventory_activity_correction",
+                )
+                if payload.get("enable_passenger_inventory_activity_correction") is not None
+                else True
+            ),
+            enable_freight_inventory_activity_correction=(
+                _required_bool(
+                    payload.get("enable_freight_inventory_activity_correction"),
+                    "pipeline.enable_freight_inventory_activity_correction",
+                )
+                if payload.get("enable_freight_inventory_activity_correction") is not None
+                else True
+            ),
+            passenger_vehicle_types_file=_required_string(
+                payload.get("passenger_vehicle_types_file"),
+                "pipeline.passenger_vehicle_types_file",
+            ),
+            freight_vehicle_types_file=_required_string(
+                payload.get("freight_vehicle_types_file"),
+                "pipeline.freight_vehicle_types_file",
+            ),
             prepared_skims_group_cols=_coerce_string_list(payload.get("prepared_skims_group_cols")),
             pollutants=_coerce_string_list(payload.get("pollutants")),
             source_pollutants=_coerce_string_list(payload.get("source_pollutants")),

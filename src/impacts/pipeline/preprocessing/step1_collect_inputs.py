@@ -6,27 +6,29 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
+import pandas as pd
+
 from ...common import find_preferred_file
 from ...common import log_step_banner
 from ...common import log_substep_banner
+from ...common import read_table
 from ...common import required_local_path
 from ...common import resolve_beam_network_local_path
-from ...common import resolve_beam_vehicle_types_local_path
 from ...common import resolve_emissions_skims_local_path
 from ...common import resolve_latest_events_local_path
 from ...common import resolve_osm_pbf_local_path
 from ...common import register_managed_input
-from ..consist_artifacts import BEAM_EVENTS_PREFIX
-from ..consist_artifacts import BEAM_HOUSEHOLDS_PREFIX
-from ..consist_artifacts import BEAM_NETWORK_PREFIX
-from ..consist_artifacts import BEAM_POPULATION_PREFIX
-from ..consist_artifacts import BEAM_R5_OSM_FILE_KEY
-from ..consist_artifacts import find_beam_r5_osm_reference
-from ..consist_artifacts import find_latest_beam_events_reference
-from ..consist_artifacts import find_latest_beam_households_reference
-from ..consist_artifacts import find_latest_beam_network_reference
-from ..consist_artifacts import find_latest_beam_population_reference
-from ..consist_artifacts import resolve_logged_path
+from ...consist_artifacts import BEAM_EVENTS_PREFIX
+from ...consist_artifacts import BEAM_HOUSEHOLDS_PREFIX
+from ...consist_artifacts import BEAM_NETWORK_PREFIX
+from ...consist_artifacts import BEAM_POPULATION_PREFIX
+from ...consist_artifacts import BEAM_R5_OSM_FILE_KEY
+from ...consist_artifacts import find_beam_r5_osm_reference
+from ...consist_artifacts import find_latest_beam_events_reference
+from ...consist_artifacts import find_latest_beam_households_reference
+from ...consist_artifacts import find_latest_beam_network_reference
+from ...consist_artifacts import find_latest_beam_population_reference
+from ...consist_artifacts import resolve_logged_path
 from ...manifest.file_ops import resolve_path
 
 logger = logging.getLogger(__name__)
@@ -65,6 +67,36 @@ def _locate_exchange_file(folder: Path, stem: str) -> Optional[str]:
     return find_preferred_file(str(folder), [f"{stem}.csv.gz", f"{stem}.csv", f"{stem}.parquet"])
 
 
+def _resolve_region_or_absolute_path(raw_path: str, *, region_input_root: Path, config_path: Path) -> str:
+    raw = str(raw_path).strip()
+    if raw.startswith("~") or Path(raw).is_absolute():
+        return resolve_path(raw, config_path) or raw
+    return str((region_input_root / raw).resolve())
+
+
+def _build_combined_vehicle_types_input(
+    *,
+    passenger_vehicle_types_source: str,
+    freight_vehicle_types_source: str,
+    input_root: Path,
+) -> str:
+    passenger = read_table(passenger_vehicle_types_source).copy()
+    passenger["assignment_group"] = "passenger"
+    freight = read_table(freight_vehicle_types_source).copy()
+    freight["assignment_group"] = "freight"
+    combined = pd.concat([passenger, freight], ignore_index=True, sort=False)
+    duplicate_ids = combined.loc[combined["vehicleTypeId"].duplicated(), "vehicleTypeId"].drop_duplicates().tolist()
+    if duplicate_ids:
+        raise ValueError(
+            "Configured passenger and freight vehicle types files contain duplicate vehicleTypeId values: "
+            f"{duplicate_ids[:10]}"
+        )
+    output_path = input_root / "vehicle_types_input" / "vehicleTypes--combined--EM.csv"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    combined.to_csv(output_path, index=False)
+    return str(output_path)
+
+
 def run(
     *,
     manifest_inputs: Dict[str, Any],
@@ -75,6 +107,7 @@ def run(
     log_step_banner("Preprocess Step 1", "Collect Inputs", logger=logger)
     beam = settings.beam
     impacts = settings.impacts
+    beam_processing = impacts.beam
     emissions = impacts.emissions
     inmap = impacts.dispersions.inmap
     aermod = impacts.dispersions.aermod
@@ -120,19 +153,6 @@ def run(
         optional=True,
     )
 
-    staged_vehicle_types = None
-    vehicle_types_source = resolve_beam_vehicle_types_local_path(beam_output_root)
-    if vehicle_types_source:
-        staged_vehicle_types = _register_manifest_input(
-            manifest_inputs,
-            input_root=input_root,
-            key="vehicle_types_input",
-            source_path=vehicle_types_source,
-            relative_target=Path(vehicle_types_source).name,
-            metadata={"artifact_family": "vehicle_types_input"},
-            optional=True,
-        )
-
     events_entry = find_latest_beam_events_reference(optional=True)
     staged_events = None
     if events_entry:
@@ -156,10 +176,15 @@ def run(
     if osm_entry:
         staged_osm = _use_existing_reference(manifest_inputs, "osm_network", osm_entry)
     else:
+        resolved_osm_root = _resolve_region_or_absolute_path(
+            emissions.osm_network_folder,
+            region_input_root=region_input_root,
+            config_path=config_path,
+        )
         osm_source = resolve_osm_pbf_local_path(
-            str((region_input_root / emissions.osm_network_folder).resolve()),
+            resolved_osm_root,
         ) or required_local_path(
-            str((region_input_root / emissions.osm_network_folder).resolve()),
+            resolved_osm_root,
             "impacts.emissions.osm_network_folder",
         )
         staged_osm = _register_manifest_input(
@@ -172,7 +197,11 @@ def run(
             metadata={"artifact_family": BEAM_R5_OSM_FILE_KEY},
         )
     emissions_rates_source = required_local_path(
-        str((region_input_root / emissions.emissions_rates_folder).resolve()),
+        _resolve_region_or_absolute_path(
+            emissions.emissions_rates_folder,
+            region_input_root=region_input_root,
+            config_path=config_path,
+        ),
         "impacts.emissions.emissions_rates_folder",
     )
     _register_manifest_input(
@@ -183,17 +212,82 @@ def run(
         relative_target=emissions.emissions_rates_folder,
         metadata={"artifact_family": "emissions_rates_folder"},
     )
-    inventory_source = required_local_path(
-        str((region_input_root / emissions.inventory_file).resolve()),
-        "impacts.emissions.inventory_file",
+    passenger_inventory_source = required_local_path(
+        _resolve_region_or_absolute_path(
+            emissions.inventory.passenger_file,
+            region_input_root=region_input_root,
+            config_path=config_path,
+        ),
+        "impacts.emissions.inventory.passenger_file",
     )
-    staged_inventory_file = _register_manifest_input(
+    staged_passenger_inventory_file = _register_manifest_input(
         manifest_inputs,
         input_root=input_root,
-        key="inventory_file",
-        source_path=inventory_source,
-        relative_target=str(emissions.inventory_file),
-        metadata={"artifact_family": "inventory_file"},
+        key="passenger_inventory_file",
+        source_path=passenger_inventory_source,
+        relative_target=str(emissions.inventory.passenger_file),
+        metadata={"artifact_family": "passenger_inventory_file"},
+    )
+    freight_inventory_source = required_local_path(
+        _resolve_region_or_absolute_path(
+            emissions.inventory.freight_file,
+            region_input_root=region_input_root,
+            config_path=config_path,
+        ),
+        "impacts.emissions.inventory.freight_file",
+    )
+    staged_freight_inventory_file = _register_manifest_input(
+        manifest_inputs,
+        input_root=input_root,
+        key="freight_inventory_file",
+        source_path=freight_inventory_source,
+        relative_target=str(emissions.inventory.freight_file),
+        metadata={"artifact_family": "freight_inventory_file"},
+    )
+    passenger_vehicle_types_source = required_local_path(
+        _resolve_region_or_absolute_path(
+            beam_processing.passenger_vehicle_types_file,
+            region_input_root=region_input_root,
+            config_path=config_path,
+        ),
+        "impacts.beam.passenger_vehicle_types_file",
+    )
+    _register_manifest_input(
+        manifest_inputs,
+        input_root=input_root,
+        key="passenger_vehicle_types_input",
+        source_path=passenger_vehicle_types_source,
+        relative_target=str(beam_processing.passenger_vehicle_types_file),
+        metadata={"artifact_family": "passenger_vehicle_types_input"},
+    )
+    freight_vehicle_types_source = required_local_path(
+        _resolve_region_or_absolute_path(
+            beam_processing.freight_vehicle_types_file,
+            region_input_root=region_input_root,
+            config_path=config_path,
+        ),
+        "impacts.beam.freight_vehicle_types_file",
+    )
+    _register_manifest_input(
+        manifest_inputs,
+        input_root=input_root,
+        key="freight_vehicle_types_input",
+        source_path=freight_vehicle_types_source,
+        relative_target=str(beam_processing.freight_vehicle_types_file),
+        metadata={"artifact_family": "freight_vehicle_types_input"},
+    )
+    combined_vehicle_types_source = _build_combined_vehicle_types_input(
+        passenger_vehicle_types_source=passenger_vehicle_types_source,
+        freight_vehicle_types_source=freight_vehicle_types_source,
+        input_root=input_root,
+    )
+    _register_manifest_input(
+        manifest_inputs,
+        input_root=input_root,
+        key="vehicle_types_input",
+        source_path=combined_vehicle_types_source,
+        relative_target=Path(combined_vehicle_types_source).name,
+        metadata={"artifact_family": "vehicle_types_input"},
     )
     staged_annualization_days_or_file = emissions.annualization_days_or_file
     if isinstance(emissions.annualization_days_or_file, str):
@@ -303,7 +397,8 @@ def run(
         "staged_vehicle_types": staged_vehicle_types,
         "staged_events": staged_events,
         "staged_inmap_grid": staged_inmap_grid,
-        "staged_inventory_file": staged_inventory_file,
+        "staged_passenger_inventory_file": staged_passenger_inventory_file,
+        "staged_freight_inventory_file": staged_freight_inventory_file,
         "staged_annualization_days_or_file": staged_annualization_days_or_file,
         "staged_isrm": staged_isrm,
         "staged_isrm_nox_to_no2_ratios_file": staged_isrm_nox_to_no2_ratios_file,

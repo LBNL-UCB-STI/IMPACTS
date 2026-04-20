@@ -89,7 +89,7 @@ def _build_atlas_vehicle_type_ids(
 
 
 def _step1_tmp_dir(output_dir: str) -> Path:
-    return Path(resolve_workflow_path(output_dir)) / "tmp"
+    return Path(resolve_workflow_path(output_dir)) / "_tmp"
 
 
 def _normalize_energy_file_path(value: Any) -> str:

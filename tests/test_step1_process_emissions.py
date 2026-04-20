@@ -5,11 +5,11 @@ from pathlib import Path
 import pandas as pd
 
 from impacts.pipeline.workflow.step1_process_emissions import _derive_county_correction_factors
-from impacts.pipeline.workflow.step1_process_emissions import _derive_inventory_activity_targets
+from impacts.pipeline.workflow.step1_process_emissions import _derive_inventory_activity_targets_for_assignment
 
 
-def test_inventory_targets_split_shared_categories_and_dedup_trips(tmp_path: Path) -> None:
-    inventory = pd.DataFrame(
+def test_inventory_targets_per_assignment_dedup_trips(tmp_path: Path) -> None:
+    passenger_inventory = pd.DataFrame(
         [
             {
                 "county": "Alameda",
@@ -29,6 +29,13 @@ def test_inventory_targets_split_shared_categories_and_dedup_trips(tmp_path: Pat
                 "total_vmt_vehicle_miles_per_year": 50.0,
                 "trips_per_year": 20.0,
             },
+        ]
+    )
+    passenger_inventory_path = tmp_path / "passenger_inventory.parquet"
+    passenger_inventory.to_parquet(passenger_inventory_path, index=False)
+
+    freight_inventory = pd.DataFrame(
+        [
             {
                 "county": "Alameda",
                 "vehicleCategory": "T7 Tractor Class 8",
@@ -40,44 +47,28 @@ def test_inventory_targets_split_shared_categories_and_dedup_trips(tmp_path: Pat
             },
         ]
     )
-    inventory_path = tmp_path / "inventory.parquet"
-    inventory.to_parquet(inventory_path, index=False)
+    freight_inventory_path = tmp_path / "freight_inventory.parquet"
+    freight_inventory.to_parquet(freight_inventory_path, index=False)
 
-    beam_activity_details = pd.DataFrame(
-        [
-            {
-                "countyfp": "001",
-                "assignment_group": "passenger",
-                "emfacVehicleCategory": "LDA",
-                "totVMT": 30.0,
-                "totTrips": 9.0,
-            },
-            {
-                "countyfp": "001",
-                "assignment_group": "freight",
-                "emfacVehicleCategory": "LDA",
-                "totVMT": 10.0,
-                "totTrips": 1.0,
-            },
-            {
-                "countyfp": "001",
-                "assignment_group": "freight",
-                "emfacVehicleCategory": "T7 Tractor Class 8",
-                "totVMT": 20.0,
-                "totTrips": 2.0,
-            },
-        ]
+    passenger_targets = _derive_inventory_activity_targets_for_assignment(
+        inventory_path=str(passenger_inventory_path),
+        county_name_lookup={"Alameda": "001"},
+        assignment_group="passenger",
+    )
+    freight_targets = _derive_inventory_activity_targets_for_assignment(
+        inventory_path=str(freight_inventory_path),
+        county_name_lookup={"Alameda": "001"},
+        assignment_group="freight",
+    )
+    targets = (
+        pd.concat([passenger_targets, freight_targets], ignore_index=True)
+        .sort_values(["countyfp", "assignment_group"])
+        .reset_index(drop=True)
     )
 
-    targets = _derive_inventory_activity_targets(
-        inventory_path=str(inventory_path),
-        county_name_lookup={"Alameda": "001"},
-        beam_activity_details=beam_activity_details,
-    ).sort_values(["countyfp", "assignment_group"]).reset_index(drop=True)
-
     assert targets.to_dict("records") == [
-        {"countyfp": "001", "assignment_group": "freight", "totVMT": 77.5, "totTrips": 6.0},
-        {"countyfp": "001", "assignment_group": "passenger", "totVMT": 112.5, "totTrips": 18.0},
+        {"countyfp": "001", "assignment_group": "freight", "totVMT": 40.0, "totTrips": 4.0},
+        {"countyfp": "001", "assignment_group": "passenger", "totVMT": 150.0, "totTrips": 20.0},
     ]
 
     beam_group_totals = pd.DataFrame(
@@ -94,13 +85,13 @@ def test_inventory_targets_split_shared_categories_and_dedup_trips(tmp_path: Pat
         {
             "countyfp": "001",
             "assignment_group": "freight",
-            "factor_totVMT": 77.5 / 30.0,
-            "factor_totTrips": 2.0,
+            "factor_totVMT": 40.0 / 30.0,
+            "factor_totTrips": 4.0 / 3.0,
         },
         {
             "countyfp": "001",
             "assignment_group": "passenger",
-            "factor_totVMT": 112.5 / 90.0,
-            "factor_totTrips": 2.0,
+            "factor_totVMT": 150.0 / 90.0,
+            "factor_totTrips": 20.0 / 9.0,
         },
     ]

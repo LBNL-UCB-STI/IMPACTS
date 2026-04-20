@@ -70,10 +70,10 @@ def _bootstrap_emfac_outputs_if_needed(workflow: dict[str, object]) -> dict[str,
     activities_workflow = run_activities_workflow(activities_workflow)
 
     activities["passenger_rates_file"] = str(Path(str(activities_workflow["paths"]["final_output_passenger"])).resolve())
-    activities["passenger_activity_file"] = str(Path(str(activities_workflow["paths"]["final_activity_output_passenger"])).resolve())
+    activities["passenger_activity_file"] = str(Path(str(activities_workflow["paths"]["matching_activity_output_passenger"])).resolve())
     activities["passenger_fleet_file"] = str(Path(str(activities_workflow["paths"]["final_fleet_output_passenger"])).resolve())
     activities["freight_rates_file"] = str(Path(str(activities_workflow["paths"]["final_output_freight"])).resolve())
-    activities["freight_activity_file"] = str(Path(str(activities_workflow["paths"]["final_activity_output_freight"])).resolve())
+    activities["freight_activity_file"] = str(Path(str(activities_workflow["paths"]["matching_activity_output_freight"])).resolve())
     activities["freight_fleet_file"] = str(Path(str(activities_workflow["paths"]["final_fleet_output_freight"])).resolve())
     return workflow
 

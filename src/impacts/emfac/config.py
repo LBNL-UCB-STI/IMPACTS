@@ -356,9 +356,12 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
     region = str(raw["region_label"])
     outputs_root = Path(str(raw["outputs"])).expanduser()
     activities_output_root = outputs_root / "activities"
+    tmp_root = outputs_root / "_tmp"
+    trace_dir = tmp_root / "traces"
     region_slug = region.lower()
     base_name = f"{region_slug}-emfac-{year}"
     final_name = f"{base_name}-project-analysis-final"
+    inventory_final_name = f"{base_name}-inventory-final"
 
     return {
         "run": {
@@ -393,21 +396,24 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
         "paths": {
             "outputs_root": str(outputs_root),
             "activities_output_root": str(activities_output_root),
-            "trace_dir": str(activities_output_root / "traces"),
-            "project_analysis_source": str(activities_output_root / f"{base_name}-project-analysis-source.parquet"),
-            "project_analysis_passenger": str(activities_output_root / f"{base_name}-project-analysis-passenger.parquet"),
-            "project_analysis_freight": str(activities_output_root / f"{base_name}-project-analysis-freight.parquet"),
-            "project_analysis_bc": str(activities_output_root / f"{base_name}-project-analysis-bc.parquet"),
-            "project_analysis_prdust": str(activities_output_root / f"{base_name}-project-analysis-prdust.parquet"),
-            "project_analysis_nh3_rates": str(activities_output_root / f"{base_name}-project-analysis-nh3-rates.parquet"),
-            "emissions_inventory": str(activities_output_root / f"{base_name}-emissions-inventory-with-activity.parquet"),
-            "statewide_inventory": str(activities_output_root / f"statewide-emfac-{year}-emissions-inventory.parquet"),
+            "tmp_root": str(tmp_root),
+            "trace_dir": str(trace_dir),
+            "project_analysis_source": str(tmp_root / f"{base_name}-project-analysis-source.parquet"),
+            "project_analysis_passenger": str(tmp_root / f"{base_name}-project-analysis-passenger.parquet"),
+            "project_analysis_freight": str(tmp_root / f"{base_name}-project-analysis-freight.parquet"),
+            "project_analysis_bc": str(tmp_root / f"{base_name}-project-analysis-bc.parquet"),
+            "project_analysis_prdust": str(tmp_root / f"{base_name}-project-analysis-prdust.parquet"),
+            "project_analysis_nh3_rates": str(tmp_root / f"{base_name}-project-analysis-nh3-rates.parquet"),
+            "emissions_inventory": str(tmp_root / f"{base_name}-inventory-intermediate-with-activity.parquet"),
+            "statewide_inventory": str(tmp_root / f"statewide-emfac-{year}-emissions-inventory.parquet"),
+            "matching_activity_output_passenger": str(tmp_root / f"{base_name}-inventory-matching-passenger-activity.parquet"),
+            "matching_activity_output_freight": str(tmp_root / f"{base_name}-inventory-matching-freight-activity.parquet"),
             "final_output_passenger": str(activities_output_root / f"{final_name}-passenger-rates.parquet"),
-            "final_activity_output_passenger": str(activities_output_root / f"{final_name}-passenger-activity.parquet"),
-            "final_fleet_output_passenger": str(activities_output_root / f"{final_name}-passenger-fleet.parquet"),
+            "final_activity_output_passenger": str(activities_output_root / f"{inventory_final_name}-passenger-activity.parquet"),
+            "final_fleet_output_passenger": str(activities_output_root / f"{inventory_final_name}-passenger-fleet.parquet"),
             "final_output_freight": str(activities_output_root / f"{final_name}-freight-rates.parquet"),
-            "final_activity_output_freight": str(activities_output_root / f"{final_name}-freight-activity.parquet"),
-            "final_fleet_output_freight": str(activities_output_root / f"{final_name}-freight-fleet.parquet"),
+            "final_activity_output_freight": str(activities_output_root / f"{inventory_final_name}-freight-activity.parquet"),
+            "final_fleet_output_freight": str(activities_output_root / f"{inventory_final_name}-freight-fleet.parquet"),
         },
     }
 
@@ -477,15 +483,18 @@ def _derive_emfac_output_paths(emfac: dict[str, object]) -> dict[str, object]:
     if outputs in (None, "") or region_label in (None, "") or calendar_year in (None, ""):
         return emfac
     region_slug = str(region_label).strip().lower()
-    base_name = f"{region_slug}-emfac-{int(calendar_year)}-project-analysis-final"
+    project_analysis_name = f"{region_slug}-emfac-{int(calendar_year)}-project-analysis-final"
+    inventory_final_name = f"{region_slug}-emfac-{int(calendar_year)}-inventory-final"
+    inventory_matching_name = f"{region_slug}-emfac-{int(calendar_year)}-inventory-matching"
     outputs_root = Path(str(outputs))
     activities_output_root = outputs_root / "activities"
-    emfac["passenger_rates_file"] = str((activities_output_root / f"{base_name}-passenger-rates.parquet").resolve())
-    emfac["passenger_activity_file"] = str((activities_output_root / f"{base_name}-passenger-activity.parquet").resolve())
-    emfac["passenger_fleet_file"] = str((activities_output_root / f"{base_name}-passenger-fleet.parquet").resolve())
-    emfac["freight_rates_file"] = str((activities_output_root / f"{base_name}-freight-rates.parquet").resolve())
-    emfac["freight_activity_file"] = str((activities_output_root / f"{base_name}-freight-activity.parquet").resolve())
-    emfac["freight_fleet_file"] = str((activities_output_root / f"{base_name}-freight-fleet.parquet").resolve())
+    tmp_root = outputs_root / "_tmp"
+    emfac["passenger_rates_file"] = str((activities_output_root / f"{project_analysis_name}-passenger-rates.parquet").resolve())
+    emfac["passenger_activity_file"] = str((tmp_root / f"{inventory_matching_name}-passenger-activity.parquet").resolve())
+    emfac["passenger_fleet_file"] = str((activities_output_root / f"{inventory_final_name}-passenger-fleet.parquet").resolve())
+    emfac["freight_rates_file"] = str((activities_output_root / f"{project_analysis_name}-freight-rates.parquet").resolve())
+    emfac["freight_activity_file"] = str((tmp_root / f"{inventory_matching_name}-freight-activity.parquet").resolve())
+    emfac["freight_fleet_file"] = str((activities_output_root / f"{inventory_final_name}-freight-fleet.parquet").resolve())
     return emfac
 
 
@@ -666,7 +675,7 @@ def load_fleet_workflow(config_path: str | Path | None = None) -> dict:
         "scenario": raw["scenario"],
         "config": config,
         "paths": {
-            "trace_dir": str(Path(str(output_root)).expanduser() / "traces"),
+            "trace_dir": str(Path(str(output_root)).expanduser() / "_tmp" / "traces"),
         },
     }
 

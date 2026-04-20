@@ -45,7 +45,12 @@ def _pipeline_payload(tmp_path: Path) -> dict:
         "start_year": 2017,
         "county_state_fips": "06",
         "county_fips_codes": ["001", "013"],
-        "inventory_file": str(tmp_path / "inventory.parquet"),
+        "passenger_inventory_file": str(tmp_path / "passenger_inventory.parquet"),
+        "freight_inventory_file": str(tmp_path / "freight_inventory.parquet"),
+        "enable_passenger_inventory_activity_correction": True,
+        "enable_freight_inventory_activity_correction": True,
+        "passenger_vehicle_types_file": str(tmp_path / "vehicleTypes--atlas.csv"),
+        "freight_vehicle_types_file": str(tmp_path / "vehicleTypes--frism.csv"),
         "prepared_skims_group_cols": ["hour", "linkId"],
         "pollutants": ["NOx", "PM2_5"],
         "source_pollutants": ["NOx", "PM2_5"],
@@ -97,8 +102,10 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.dispersions.aermod.default_temporal == "CITYSTREET"
     assert config.impacts.exposure.enabled is True
     assert config.impacts.exposure.population_folder == "urbansim/atlas-2019"
-    assert config.impacts.emissions.include_passenger is True
-    assert config.impacts.emissions.include_freight is True
+    assert config.impacts.beam.include_passenger is True
+    assert config.impacts.beam.include_freight is True
+    assert config.impacts.beam.passenger_vehicle_types_file == "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
+    assert config.impacts.beam.freight_vehicle_types_file == "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
     assert len(config.impacts.analysis.sector_targets) == 6
     assert config.impacts.analysis.sector_targets[0].source == "mobile_onroad"
     assert config.impacts.analysis.sector_targets[0].sector == "passenger_cars"
@@ -134,14 +141,21 @@ def test_settings_and_pipeline_allow_annualization_days_or_file_csv_path(tmp_pat
                 "impacts:",
                 "  local_input_folder: impacts/input/",
                 "  local_output_folder: impacts/impacts_output/",
-                "  emissions:",
-                "    osm_network_folder: r5/network",
-                "    emissions_rates_folder: vehicle-tech/emissions/2018-Baseline",
-                "    inventory_file: beam/production/sfbay/vehicle-tech/emissions/inventory.parquet",
-                f"    annualization_days_or_file: {days_csv.name}",
+                "  beam:",
+                "    passenger_vehicle_types_file: vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv",
+                "    freight_vehicle_types_file: vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv",
                 "    population_sample: 0.1",
                 "    include_passenger: false",
                 "    include_freight: true",
+                "  emissions:",
+                "    osm_network_folder: r5/network",
+                "    emissions_rates_folder: vehicle-tech/emissions/2018-Baseline",
+                "    inventory:",
+                "      passenger_file: beam/production/sfbay/vehicle-tech/emissions/passenger_inventory.parquet",
+                "      freight_file: beam/production/sfbay/vehicle-tech/emissions/freight_inventory.parquet",
+                "      enable_passenger_activity_correction: true",
+                "      enable_freight_activity_correction: false",
+                f"    annualization_days_or_file: {days_csv.name}",
                 "    pollutants: [NOx, PM25]",
                 "  dispersions:",
                 "    inmap:",
@@ -156,8 +170,14 @@ def test_settings_and_pipeline_allow_annualization_days_or_file_csv_path(tmp_pat
     )
     config = load_settings_from_yaml(settings_yaml)
     assert config.impacts.emissions.annualization_days_or_file == days_csv.name
-    assert config.impacts.emissions.include_passenger is False
-    assert config.impacts.emissions.include_freight is True
+    assert config.impacts.emissions.inventory.passenger_file.endswith("passenger_inventory.parquet")
+    assert config.impacts.emissions.inventory.freight_file.endswith("freight_inventory.parquet")
+    assert config.impacts.emissions.inventory.enable_passenger_activity_correction is True
+    assert config.impacts.emissions.inventory.enable_freight_activity_correction is False
+    assert config.impacts.beam.include_passenger is False
+    assert config.impacts.beam.include_freight is True
+    assert config.impacts.beam.passenger_vehicle_types_file.endswith("vehicleTypes--atlas--2019-Baseline--EM.csv")
+    assert config.impacts.beam.freight_vehicle_types_file.endswith("vehicleTypes--frism--2018-Baseline--EM.csv")
 
     payload = _pipeline_payload(tmp_path)
     payload["annualization_days_or_file"] = str(days_csv)
@@ -210,8 +230,10 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
     assert config.impacts.dispersions.aermod.default_site == "LIVERMORE_2015"
     assert config.impacts.dispersions.aermod.default_temporal == "CITYSTREET"
     assert config.impacts.exposure.population_folder == "urbansim/2018"
-    assert config.impacts.emissions.include_passenger is True
-    assert config.impacts.emissions.include_freight is True
+    assert config.impacts.beam.include_passenger is True
+    assert config.impacts.beam.include_freight is True
+    assert config.impacts.beam.passenger_vehicle_types_file == "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
+    assert config.impacts.beam.freight_vehicle_types_file == "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
     assert len(config.impacts.analysis.sector_targets) == 6
     assert config.impacts.analysis.targets == []
 
@@ -311,7 +333,8 @@ def test_run_from_input_manifest_uses_current_step_name(monkeypatch, tmp_path: P
         step1_process_emissions,
         "run",
         lambda pipeline, raw_dir, input_root, grid_intersection_path, intersection_df=None, manifest_inputs=None: {
-            "beam_emissions_for_inmap": str(tmp_path / "beam_emissions_for_inmap.parquet")
+            "beam_emissions_by_county_process": str(tmp_path / "beam_emissions_by_county_process.parquet"),
+            "beam_emissions_for_inmap": str(tmp_path / "beam_emissions_for_inmap.parquet"),
         },
     )
     monkeypatch.setattr(
@@ -436,7 +459,7 @@ def test_analysis_runner_resolves_modeled_emissions_from_run_manifest(monkeypatc
     from impacts.analysis import runner as analysis_runner
 
     output_root = tmp_path / "impacts"
-    emissions_path = output_root / "beam_emissions_for_inmap.parquet"
+    emissions_path = output_root / "beam_emissions_by_county_process.parquet"
     emissions_path.parent.mkdir(parents=True, exist_ok=True)
     emissions_path.write_text("", encoding="utf-8")
     run_manifest_path = output_root / "run_manifest.yaml"
@@ -450,7 +473,7 @@ def test_analysis_runner_resolves_modeled_emissions_from_run_manifest(monkeypatc
                 "outputs_dir": str(output_root),
                 "command": "python -m impacts run",
                 "image": "unknown",
-                "outputs": {"beam_emissions_for_inmap": str(emissions_path)},
+                "outputs": {"beam_emissions_by_county_process": str(emissions_path)},
                 "pipeline": _pipeline_payload(tmp_path),
                 "population_inputs": {},
                 "deterministic_contract": {},
@@ -467,14 +490,23 @@ def test_analysis_runner_resolves_modeled_emissions_from_run_manifest(monkeypatc
             local_input_folder = str(tmp_path / "input")
 
             class emissions:
-                inventory_file = str(tmp_path / "inventory.parquet")
+                passenger_inventory_file = str(tmp_path / "passenger_inventory.parquet")
+                freight_inventory_file = str(tmp_path / "freight_inventory.parquet")
+                enable_passenger_inventory_activity_correction = True
+                enable_freight_inventory_activity_correction = True
 
         class shared:
             class geography:
                 class fips:
                     counties = []
 
-    monkeypatch.setattr(analysis_runner, "load_settings_from_yaml", lambda _: _Settings())
+    class _AnalysisSettings(_Settings):
+        class impacts(_Settings.impacts):
+            class analysis:
+                sector_targets = []
+                targets = []
+
+    monkeypatch.setattr(analysis_runner, "load_settings_from_yaml", lambda _: _AnalysisSettings())
     monkeypatch.setattr(analysis_runner, "resolve_path", lambda path, _: path)
     monkeypatch.setattr(
         analysis_runner.RunManifest,
@@ -549,7 +581,10 @@ def test_analysis_runner_resolves_county_boundaries_from_input_manifest(monkeypa
             local_input_folder = str(input_root)
 
             class emissions:
-                inventory_file = str(tmp_path / "inventory.parquet")
+                passenger_inventory_file = str(tmp_path / "passenger_inventory.parquet")
+                freight_inventory_file = str(tmp_path / "freight_inventory.parquet")
+                enable_passenger_inventory_activity_correction = True
+                enable_freight_inventory_activity_correction = True
 
         class shared:
             class geography:

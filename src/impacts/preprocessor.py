@@ -11,6 +11,7 @@ from .manifest.schema import InputsManifest
 from .common import infer_vector_epsg
 from .common import parse_epsg
 from .common import register_local_input
+from .common import resolve_required_manifest_input
 
 
 CONTRACT_VERSION = "1"
@@ -37,6 +38,7 @@ def build_inputs_manifest(
     settings = load_settings_from_yaml(config_path)
     geography = settings.shared.geography
     emissions = settings.impacts.emissions
+    beam_processing = settings.impacts.beam
     inmap = settings.impacts.dispersions.inmap
     aermod = settings.impacts.dispersions.aermod
 
@@ -52,8 +54,8 @@ def build_inputs_manifest(
         key="settings",
         source_path=str(config_path),
     )
-    from .preprocessing.step1_collect_inputs import run as preprocess_step1
-    from .preprocessing.step2_prepare_grids import run as preprocess_step2
+    from .pipeline.preprocessing.step1_collect_inputs import run as preprocess_step1
+    from .pipeline.preprocessing.step2_prepare_grids import run as preprocess_step2
     local_output_epsg = parse_epsg(geography.local_crs)
     step1_outputs = preprocess_step1(
         manifest_inputs=manifest_inputs,
@@ -61,7 +63,8 @@ def build_inputs_manifest(
         input_root=input_root,
         config_path=config_path,
     )
-    staged_inventory_file = step1_outputs["staged_inventory_file"]
+    staged_passenger_inventory_file = step1_outputs["staged_passenger_inventory_file"]
+    staged_freight_inventory_file = step1_outputs["staged_freight_inventory_file"]
     staged_annualization_days_or_file = step1_outputs["staged_annualization_days_or_file"]
     staged_isrm = step1_outputs["staged_isrm"]
     staged_isrm_nox_to_no2_ratios_file = step1_outputs["staged_isrm_nox_to_no2_ratios_file"]
@@ -154,12 +157,17 @@ def build_inputs_manifest(
             "prepared_skims_group_cols": list(emissions.prepared_skims_group_cols),
             "pollutants": list(emissions.pollutants),
             "source_pollutants": list(emissions.source_pollutants),
-            "inventory_file": staged_inventory_file,
+            "passenger_inventory_file": staged_passenger_inventory_file,
+            "freight_inventory_file": staged_freight_inventory_file,
+            "enable_passenger_inventory_activity_correction": bool(emissions.inventory.enable_passenger_activity_correction),
+            "enable_freight_inventory_activity_correction": bool(emissions.inventory.enable_freight_activity_correction),
+            "passenger_vehicle_types_file": resolve_required_manifest_input(manifest_inputs, key="passenger_vehicle_types_input"),
+            "freight_vehicle_types_file": resolve_required_manifest_input(manifest_inputs, key="freight_vehicle_types_input"),
             "annualization_days_or_file": staged_annualization_days_or_file,
-            "population_sample": float(emissions.population_sample),
-            "transit_sample": float(emissions.transit_sample),
-            "include_passenger": bool(emissions.include_passenger),
-            "include_freight": bool(emissions.include_freight),
+            "population_sample": float(beam_processing.population_sample),
+            "transit_sample": float(beam_processing.transit_sample),
+            "include_passenger": bool(beam_processing.include_passenger),
+            "include_freight": bool(beam_processing.include_freight),
         },
         "pilates_contract": {
             "stage": "terminal_postprocessing",

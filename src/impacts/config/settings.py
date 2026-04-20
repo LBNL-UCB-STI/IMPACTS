@@ -271,16 +271,59 @@ class Dispersions:
 
 
 @dataclass(frozen=True)
+class EmissionsInventory:
+    passenger_file: str
+    freight_file: str
+    enable_passenger_activity_correction: bool = True
+    enable_freight_activity_correction: bool = True
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "EmissionsInventory":
+        _reject_unknown_keys(
+            payload,
+            {
+                "passenger_file",
+                "freight_file",
+                "enable_passenger_activity_correction",
+                "enable_freight_activity_correction",
+            },
+            "impacts.emissions.inventory",
+        )
+        return cls(
+            passenger_file=_required_string(
+                payload.get("passenger_file"),
+                "impacts.emissions.inventory.passenger_file",
+            ),
+            freight_file=_required_string(
+                payload.get("freight_file"),
+                "impacts.emissions.inventory.freight_file",
+            ),
+            enable_passenger_activity_correction=(
+                _required_bool(
+                    payload.get("enable_passenger_activity_correction"),
+                    "impacts.emissions.inventory.enable_passenger_activity_correction",
+                )
+                if payload.get("enable_passenger_activity_correction") is not None
+                else True
+            ),
+            enable_freight_activity_correction=(
+                _required_bool(
+                    payload.get("enable_freight_activity_correction"),
+                    "impacts.emissions.inventory.enable_freight_activity_correction",
+                )
+                if payload.get("enable_freight_activity_correction") is not None
+                else True
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class Emissions:
     osm_network_folder: str
     emissions_rates_folder: str
-    inventory_file: str
+    inventory: EmissionsInventory
     annualization_days_or_file: float | str
-    population_sample: float
     source_pollutants: List[str]
-    transit_sample: float = 1.0
-    include_passenger: bool = True
-    include_freight: bool = True
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Emissions":
@@ -289,12 +332,8 @@ class Emissions:
             {
                 "osm_network_folder",
                 "emissions_rates_folder",
-                "inventory_file",
+                "inventory",
                 "annualization_days_or_file",
-                "population_sample",
-                "transit_sample",
-                "include_passenger",
-                "include_freight",
                 "pollutants",
             },
             "impacts.emissions",
@@ -310,32 +349,12 @@ class Emissions:
                 payload.get("emissions_rates_folder"),
                 "impacts.emissions.emissions_rates_folder",
             ),
-            inventory_file=_required_string(
-                payload.get("inventory_file"),
-                "impacts.emissions.inventory_file",
+            inventory=EmissionsInventory.from_dict(
+                dict(payload.get("inventory", {}) or {})
             ),
             annualization_days_or_file=_required_float_or_string(
                 payload.get("annualization_days_or_file"),
                 "impacts.emissions.annualization_days_or_file",
-            ),
-            population_sample=_required_float(
-                payload.get("population_sample"),
-                "impacts.emissions.population_sample",
-            ),
-            transit_sample=(
-                _optional_float(payload.get("transit_sample"))
-                if payload.get("transit_sample") is not None
-                else 1.0
-            ),
-            include_passenger=(
-                _required_bool(payload.get("include_passenger"), "impacts.emissions.include_passenger")
-                if payload.get("include_passenger") is not None
-                else True
-            ),
-            include_freight=(
-                _required_bool(payload.get("include_freight"), "impacts.emissions.include_freight")
-                if payload.get("include_freight") is not None
-                else True
             ),
             source_pollutants=source_pollutants,
         )
@@ -367,6 +386,60 @@ class Emissions:
             "link_id": "edge_linkId",
             "proportion": "zone_edge_proportion",
         }
+
+
+@dataclass(frozen=True)
+class ImpactsBeamProcessing:
+    passenger_vehicle_types_file: str
+    freight_vehicle_types_file: str
+    population_sample: float
+    transit_sample: float = 1.0
+    include_passenger: bool = True
+    include_freight: bool = True
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "ImpactsBeamProcessing":
+        _reject_unknown_keys(
+            payload,
+            {
+                "passenger_vehicle_types_file",
+                "freight_vehicle_types_file",
+                "population_sample",
+                "transit_sample",
+                "include_passenger",
+                "include_freight",
+            },
+            "impacts.beam",
+        )
+        return cls(
+            passenger_vehicle_types_file=_required_string(
+                payload.get("passenger_vehicle_types_file"),
+                "impacts.beam.passenger_vehicle_types_file",
+            ),
+            freight_vehicle_types_file=_required_string(
+                payload.get("freight_vehicle_types_file"),
+                "impacts.beam.freight_vehicle_types_file",
+            ),
+            population_sample=_required_float(
+                payload.get("population_sample"),
+                "impacts.beam.population_sample",
+            ),
+            transit_sample=(
+                _optional_float(payload.get("transit_sample"))
+                if payload.get("transit_sample") is not None
+                else 1.0
+            ),
+            include_passenger=(
+                _required_bool(payload.get("include_passenger"), "impacts.beam.include_passenger")
+                if payload.get("include_passenger") is not None
+                else True
+            ),
+            include_freight=(
+                _required_bool(payload.get("include_freight"), "impacts.beam.include_freight")
+                if payload.get("include_freight") is not None
+                else True
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -523,6 +596,7 @@ class Analysis:
 class Impacts:
     local_input_folder: str
     local_output_folder: str
+    beam: ImpactsBeamProcessing
     emissions: Emissions
     dispersions: Dispersions
     exposure: "Exposure"
@@ -532,12 +606,13 @@ class Impacts:
     def from_dict(cls, payload: Dict[str, Any]) -> "Impacts":
         _reject_unknown_keys(
             payload,
-            {"local_input_folder", "local_output_folder", "emissions", "dispersions", "exposure", "analysis"},
+            {"local_input_folder", "local_output_folder", "beam", "emissions", "dispersions", "exposure", "analysis"},
             "impacts",
         )
         return cls(
             local_input_folder=_required_string(payload.get("local_input_folder"), "impacts.local_input_folder"),
             local_output_folder=_required_string(payload.get("local_output_folder"), "impacts.local_output_folder"),
+            beam=ImpactsBeamProcessing.from_dict(dict(payload.get("beam", {}) or {})),
             emissions=Emissions.from_dict(dict(payload.get("emissions", {}) or {})),
             dispersions=Dispersions.from_dict(dict(payload.get("dispersions", {}) or {})),
             exposure=Exposure.from_dict(dict(payload.get("exposure", {}) or {})),
@@ -602,15 +677,24 @@ class ImpactsSettings:
             "impacts": {
                 "local_input_folder": self.impacts.local_input_folder,
                 "local_output_folder": self.impacts.local_output_folder,
+                "beam": {
+                    "passenger_vehicle_types_file": self.impacts.beam.passenger_vehicle_types_file,
+                    "freight_vehicle_types_file": self.impacts.beam.freight_vehicle_types_file,
+                    "population_sample": self.impacts.beam.population_sample,
+                    "transit_sample": self.impacts.beam.transit_sample,
+                    "include_passenger": self.impacts.beam.include_passenger,
+                    "include_freight": self.impacts.beam.include_freight,
+                },
                 "emissions": {
                     "osm_network_folder": self.impacts.emissions.osm_network_folder,
                     "emissions_rates_folder": self.impacts.emissions.emissions_rates_folder,
-                    "inventory_file": self.impacts.emissions.inventory_file,
+                    "inventory": {
+                        "passenger_file": self.impacts.emissions.inventory.passenger_file,
+                        "freight_file": self.impacts.emissions.inventory.freight_file,
+                        "enable_passenger_activity_correction": self.impacts.emissions.inventory.enable_passenger_activity_correction,
+                        "enable_freight_activity_correction": self.impacts.emissions.inventory.enable_freight_activity_correction,
+                    },
                     "annualization_days_or_file": self.impacts.emissions.annualization_days_or_file,
-                    "population_sample": self.impacts.emissions.population_sample,
-                    "transit_sample": self.impacts.emissions.transit_sample,
-                    "include_passenger": self.impacts.emissions.include_passenger,
-                    "include_freight": self.impacts.emissions.include_freight,
                     "pollutants": list(self.impacts.emissions.source_pollutants),
                 },
                 "dispersions": {

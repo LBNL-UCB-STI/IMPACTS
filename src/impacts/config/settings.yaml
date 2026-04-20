@@ -26,15 +26,22 @@ beam:
 impacts:
   local_input_folder: impacts/input/
   local_output_folder: impacts/impacts_output/
-  emissions:
-    osm_network_folder: r5/sfbay-cbg5500-weakConn-network
-    emissions_rates_folder: vehicle-tech/emissions/2018-Baseline
-    inventory_file: beam/production/sfbay/vehicle-tech/emissions/sf-emfac-2018-emissions-inventory-with-activity.parquet
-    annualization_days_or_file: examples/emfac/2018_mappings/vehicle_operation_days_per_year.csv
+  beam:
+    passenger_vehicle_types_file: vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv
+    freight_vehicle_types_file: vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv
     population_sample: 0.1
     transit_sample: 1.0
     include_passenger: true
     include_freight: true
+  emissions:
+    osm_network_folder: r5/sfbay-cbg5500-weakConn-network
+    emissions_rates_folder: vehicle-tech/emissions/2018-Baseline
+    inventory:
+      passenger_file: beam/production/sfbay/vehicle-tech/emissions/sf-emfac-2018-inventory-final-passenger-activity.parquet
+      freight_file: beam/production/sfbay/vehicle-tech/emissions/sf-emfac-2018-inventory-final-freight-activity.parquet
+      enable_passenger_activity_correction: true
+      enable_freight_activity_correction: true
+    annualization_days_or_file: vehicle-tech/emissions/vehicle_operation_days_per_year.csv
     pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
   dispersions:
     inmap:

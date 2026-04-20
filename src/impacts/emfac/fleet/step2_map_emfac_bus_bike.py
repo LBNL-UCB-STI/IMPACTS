@@ -93,7 +93,7 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
         activity.groupby(_EMFAC_KEY_COLUMNS, dropna=False, as_index=False)[
             ["population_vehicles", "total_vmt_vehicle_miles_per_year"]
         ]
-        .sum()
+        .max()
     )
     valid_keys = rates.merge(fleet, on=_EMFAC_KEY_COLUMNS, how="inner")
     candidates = activity_agg.merge(valid_keys, on=_EMFAC_KEY_COLUMNS, how="inner")

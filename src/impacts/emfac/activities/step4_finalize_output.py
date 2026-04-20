@@ -131,16 +131,52 @@ def _build_study_area_wide_fleet(activity_weights: pd.DataFrame, model_year_grou
     return fleet.drop(columns=["total_vmt_vehicle_miles_per_year"])
 
 
-def _build_aggregated_activity_table(
+def _prepare_surface_keys(surface: pd.DataFrame, model_year_groups: dict[str, list[dict[str, object]]]) -> pd.DataFrame:
+    keys = surface[["county", "vehicleCategory", "fuel", "modelYear", "process"]].drop_duplicates().copy()
+    keys["county"] = keys["county"].astype(str)
+    keys["vehicleCategory"] = keys["vehicleCategory"].astype(str)
+    keys["fuel"] = keys["fuel"].astype(str)
+    keys["modelYear"] = pd.to_numeric(keys["modelYear"], errors="raise").astype(int)
+    return _assign_model_year_groups(keys, model_year_groups).drop_duplicates()
+
+
+def _build_matching_activity_table(
     activity_weights: pd.DataFrame,
     model_year_groups: dict[str, list[dict[str, object]]],
 ) -> pd.DataFrame:
     grouped = _assign_model_year_groups(activity_weights.copy(), model_year_groups)
-    return (
-        grouped.groupby(["county", "vehicleCategory", "fuel", "modelYear"], dropna=False)[ACTIVITY_COLUMNS]
+    aggregated = (
+        grouped.groupby(["vehicleCategory", "fuel", "modelYear"], dropna=False)[ACTIVITY_COLUMNS]
         .sum(min_count=1)
         .reset_index()
     )
+    return aggregated[["vehicleCategory", "fuel", "modelYear", *ACTIVITY_COLUMNS]]
+
+
+def _build_aggregated_activity_table(
+    activity_weights: pd.DataFrame,
+    surface: pd.DataFrame,
+    model_year_groups: dict[str, list[dict[str, object]]],
+) -> pd.DataFrame:
+    grouped = _assign_model_year_groups(activity_weights.copy(), model_year_groups)
+    aggregated = (
+        grouped.groupby(["county", "modelYear"], dropna=False)[ACTIVITY_COLUMNS]
+        .sum(min_count=1)
+        .reset_index()
+    )
+    process_keys = _prepare_surface_keys(surface, model_year_groups)[["county", "modelYear", "process"]].drop_duplicates()
+    return aggregated.merge(process_keys, on=["county", "modelYear"], how="inner")[
+        ["county", "modelYear", "process", *ACTIVITY_COLUMNS]
+    ].drop_duplicates()
+
+
+def _build_inventory_final_fleet_table(
+    activity_weights: pd.DataFrame,
+    model_year_groups: dict[str, list[dict[str, object]]],
+) -> pd.DataFrame:
+    return _build_study_area_wide_fleet(activity_weights, model_year_groups)[
+        ["vehicleCategory", "fuel", "modelYear", "vmtShare"]
+    ].drop_duplicates()
 
 
 def _aggregation_weight_for_process(process: pd.Series, frame: pd.DataFrame) -> pd.Series:
@@ -289,6 +325,10 @@ def _run_step4_substep_finalize_group(
 ) -> tuple[tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame], dict[str, object]]:
     surface = _load_surface(workflow["paths"][f"project_analysis_{group_name}"])
     group_activity_weights = _filter_activity_weights_to_surface(activity_weights, surface)
+    matching_activity = _build_matching_activity_table(
+        group_activity_weights,
+        workflow["run"]["model_year_groups"],
+    )
     final_rates = _build_final_rate_table(
         surface,
         group_activity_weights,
@@ -296,29 +336,34 @@ def _run_step4_substep_finalize_group(
     )
     aggregated_activity = _build_aggregated_activity_table(
         group_activity_weights,
+        surface,
         workflow["run"]["model_year_groups"],
     )
-    fleet = _build_study_area_wide_fleet(group_activity_weights, workflow["run"]["model_year_groups"])
+    fleet = _build_inventory_final_fleet_table(
+        group_activity_weights,
+        workflow["run"]["model_year_groups"],
+    )
     trace_payload = {
         f"{group_name}_filled_surface": frame_summary(surface, name=f"filled_project_analysis_{group_name}"),
         f"{group_name}_activity_weights": frame_summary(group_activity_weights, name=f"activity_weights_{group_name}"),
+        f"{group_name}_matching_activity": frame_summary(matching_activity, name=f"inventory_matching_activity_{group_name}"),
         f"{group_name}_final_rates": frame_summary(final_rates, name=f"final_horizontal_rates_{group_name}"),
         f"{group_name}_final_rates_missing": _missing_rate_summary(final_rates),
-        f"{group_name}_aggregated_activity": frame_summary(aggregated_activity, name=f"aggregated_activity_{group_name}"),
-        f"{group_name}_fleet": frame_summary(fleet, name=f"study_area_fleet_{group_name}"),
+        f"{group_name}_aggregated_activity": frame_summary(aggregated_activity, name=f"inventory_final_activity_{group_name}"),
+        f"{group_name}_fleet": frame_summary(fleet, name=f"inventory_final_fleet_{group_name}"),
     }
-    return (final_rates, aggregated_activity, fleet), trace_payload
+    return (final_rates, matching_activity, aggregated_activity, fleet), trace_payload
 
 
 def run_step4(workflow: dict[str, object]) -> dict[str, object]:
     print("  Step 4. Finalize Output")
     print("    4.1 Load filled project analysis surface and activity weights")
     activity_weights = _build_activity_weights(workflow["paths"]["emissions_inventory"])
-    print("    4.2 Aggregate final horizontal rates, activity table, and fleet shares")
+    print("    4.2 Aggregate final horizontal rates, inventory-final activity table, and inventory-final fleet shares")
     trace_payload = {
         "activity_weights": frame_summary(activity_weights, name="activity_weights"),
     }
-    outputs: dict[str, tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]] = {}
+    outputs: dict[str, tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]] = {}
     for group_name in ("passenger", "freight"):
         outputs[group_name], group_trace_payload = _run_step4_substep_finalize_group(
             workflow=workflow,
@@ -327,8 +372,9 @@ def run_step4(workflow: dict[str, object]) -> dict[str, object]:
         )
         trace_payload.update(group_trace_payload)
     print("    4.3 Write final outputs")
-    for group_name, (final_rates, aggregated_activity, fleet) in outputs.items():
+    for group_name, (final_rates, matching_activity, aggregated_activity, fleet) in outputs.items():
         _write_parquet(final_rates, workflow["paths"][f"final_output_{group_name}"])
+        _write_parquet(matching_activity, workflow["paths"][f"matching_activity_output_{group_name}"])
         _write_parquet(aggregated_activity, workflow["paths"][f"final_activity_output_{group_name}"])
         _write_parquet(fleet, workflow["paths"][f"final_fleet_output_{group_name}"])
         _print_model_year_group_stats(final_rates, aggregated_activity, fleet)

@@ -6,19 +6,21 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Polygon
 
-from impacts.analysis.step1_compare_emissions_inventory import run
+from impacts.analysis.step2_compare_emissions_inventory import run
 
 
 def test_analysis_step1_writes_comparison_table_and_plots(tmp_path: Path) -> None:
     modeled = pd.DataFrame(
         {
             "countyfp": ["001", "001", "013"],
-            "tons_per_year_PM2_5_inmap_allocated": [1.0, 2.0, 4.0],
-            "tons_per_year_NOx_inmap_allocated": [3.0, 4.0, 5.0],
-            "tons_per_year_BC_inmap_allocated": [0.5, 0.25, 0.75],
+            "vehicleTypeId": ["vt-1", "vt-2", "vt-3"],
+            "process": ["RUNEX", "PMBW", "RUNEX"],
+            "tons_per_year_PM2_5_county_allocated": [1.0, 2.0, 4.0],
+            "tons_per_year_NOx_county_allocated": [3.0, 4.0, 5.0],
+            "tons_per_year_BC_county_allocated": [0.5, 0.25, 0.75],
         }
     )
-    modeled_path = tmp_path / "beam_emissions_for_inmap.parquet"
+    modeled_path = tmp_path / "beam_emissions_by_county_process.parquet"
     modeled.to_parquet(modeled_path, index=False)
 
     inventory = pd.DataFrame(
@@ -98,10 +100,12 @@ def test_analysis_step1_can_compare_road_dust_pm25_only(tmp_path: Path) -> None:
     modeled = pd.DataFrame(
         {
             "countyfp": ["001"],
-            "tons_per_year_PM2_5_inmap_allocated": [1.0],
+            "vehicleTypeId": ["vt-1"],
+            "process": ["PRDUST"],
+            "tons_per_year_PM2_5_county_allocated": [1.0],
         }
     )
-    modeled_path = tmp_path / "beam_emissions_for_inmap.parquet"
+    modeled_path = tmp_path / "beam_emissions_by_county_process.parquet"
     modeled.to_parquet(modeled_path, index=False)
 
     inventory = pd.DataFrame(

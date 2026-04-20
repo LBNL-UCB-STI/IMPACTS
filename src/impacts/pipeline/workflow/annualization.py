@@ -186,8 +186,11 @@ def _load_vehicle_type_category_lookup(
     for candidate in ("emfacVehicleCategory", "vehicleCategory"):
         if candidate not in prepared.columns:
             continue
+        prepared[candidate] = prepared[candidate].where(prepared[candidate].notna(), "")
         prepared[candidate] = prepared[candidate].astype(str).str.strip()
-        category_rows = prepared.loc[prepared[candidate].ne("")].copy()
+        category_rows = prepared.loc[
+            prepared[candidate].ne("") & ~prepared[candidate].str.lower().eq("nan")
+        ].copy()
         if category_rows.empty:
             continue
         missing_categories = sorted(set(category_rows[candidate]) - set(category_lookup))
