@@ -549,33 +549,31 @@ def _ingest_fleet_sources(config: dict) -> dict:
         config["fastsim"] = fastsim
     vta = config.get("vehicle_type_assignment", {})
     if isinstance(vta, dict):
-        raw_model = vta.get("model")
-        if raw_model is not None:
-            model = str(raw_model).strip().lower()
-            if model != "dag":
-                raise ValueError(f"vehicle_type_assignment.model must be 'dag', got {raw_model}")
-            vta["model"] = model
         model_file = _normalize_model_spec_path(vta.get("model_file"), path_label="vehicle_type_assignment.model_file")
         if model_file is not None:
             vta["model_file"] = model_file
             model_spec = _load_model_spec(model_file)
             scoring = model_spec.get("model", {}).get("scoring", {})
-            raw_floor = scoring.get("likelihood_floor", vta.get("likelihood_floor"))
-            if raw_floor is not None:
-                floor_value = float(raw_floor)
-                if not (0.0 < floor_value < 1.0):
-                    raise ValueError(
-                        f"vehicle_type_assignment likelihood_floor must be between 0 and 1 exclusive, got {floor_value}"
-                    )
-                vta["likelihood_floor"] = floor_value
+            if "likelihood_floor" not in scoring:
+                raise ValueError("vehicle_type_assignment.model_file must define model.scoring.likelihood_floor")
+            floor_value = float(scoring["likelihood_floor"])
+            if not (0.0 < floor_value < 1.0):
+                raise ValueError(
+                    f"vehicle_type_assignment likelihood_floor must be between 0 and 1 exclusive, got {floor_value}"
+                )
+            vta["likelihood_floor"] = floor_value
             weights = scoring.get("weights", {})
+            missing_weights = [key for key in ("prior_vmt_share", "naics_sector", "port_location") if key not in weights]
+            if missing_weights:
+                raise ValueError(
+                    "vehicle_type_assignment.model_file must define model.scoring.weights for: "
+                    + ", ".join(missing_weights)
+                )
             for key in ("prior_vmt_share", "naics_sector", "port_location"):
-                raw_value = weights.get(key)
-                if raw_value is not None:
-                    value = float(raw_value)
-                    if value < 0.0:
-                        raise ValueError(f"vehicle_type_assignment {key} weight must be non-negative, got {value}")
-                    vta[key] = value
+                value = float(weights[key])
+                if value < 0.0:
+                    raise ValueError(f"vehicle_type_assignment {key} weight must be non-negative, got {value}")
+                vta[key] = value
         config["vehicle_type_assignment"] = vta
     atlas = config.get("atlas", {})
     if isinstance(atlas, dict):

@@ -25,10 +25,6 @@ from . import _step_label
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SITE = "LIVERMORE_2015"
-_DEFAULT_URBAN_CLASS = 0
-_DEFAULT_TEMPORAL = "CITYSTREET"
-_DEFAULT_HEIGHT = 1.0
 _AERMOD_SOURCE_ID_COLUMN = "aermod_cell_id"
 _SOURCE_POPULATION_COLUMN = "source_population"
 _SOURCE_TEMPORAL_COLUMN = "source_temporal_class"
@@ -60,6 +56,13 @@ class _Kernel(TypedDict):
     dix: np.ndarray
     diy: np.ndarray
     response_per_ton: np.ndarray
+
+
+class _AermodPatternDefaults(TypedDict):
+    site: str
+    urban_class: int
+    temporal: str
+    release_height: float
 
 
 def _trace_frame(step: str, label: str, df: pd.DataFrame, *, key_cols: Optional[list[str]] = None) -> None:
@@ -116,15 +119,30 @@ def _geometry_midpoints(geometry: gpd.GeoSeries) -> tuple[np.ndarray, np.ndarray
     return x, y
 
 
+def _pattern_defaults(pipeline: PipelineConfig) -> _AermodPatternDefaults:
+    if not pipeline.aermod_default_site:
+        raise ValueError("pipeline.aermod_default_site must be configured before running AERMOD concentrations.")
+    if not pipeline.aermod_default_temporal:
+        raise ValueError("pipeline.aermod_default_temporal must be configured before running AERMOD concentrations.")
+    return {
+        "site": str(pipeline.aermod_default_site),
+        "urban_class": int(pipeline.aermod_default_urban_class),
+        "temporal": str(pipeline.aermod_default_temporal),
+        "release_height": float(pipeline.aermod_default_release_height),
+    }
+
+
 def _prepare_source_emissions(
     *,
     emissions_gdf: gpd.GeoDataFrame,
+    pipeline: PipelineConfig,
     source_id_col: str,
     emissions_cols: list[str],
     grid_size_meters: float,
     origin_x: float,
     origin_y: float,
 ) -> pd.DataFrame:
+    defaults = _pattern_defaults(pipeline)
     source = emissions_gdf.copy()
     if source.geometry.isna().any():
         raise ValueError("AERMOD emissions input contains missing geometry.")
@@ -138,7 +156,7 @@ def _prepare_source_emissions(
     if temporal_col:
         source_frame["source_temporal_class"] = source[temporal_col].astype("string").fillna("").to_numpy()
     if height_col:
-        source_frame["source_release_height"] = pd.to_numeric(source[height_col], errors="coerce").fillna(_DEFAULT_HEIGHT).to_numpy(dtype=np.float64)
+        source_frame["source_release_height"] = pd.to_numeric(source[height_col], errors="coerce").fillna(defaults["release_height"]).to_numpy(dtype=np.float64)
     for col in emissions_cols:
         source_frame[col] = pd.to_numeric(source[col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
     aggregation_select = ", ".join(
@@ -169,7 +187,7 @@ def _prepare_source_emissions(
     if "source_temporal_class" in source.columns:
         source["source_temporal_class"] = source["source_temporal_class"].astype("string").str.strip().replace("", pd.NA)
     if "source_release_height" in source.columns:
-        source["source_release_height"] = pd.to_numeric(source["source_release_height"], errors="coerce").fillna(_DEFAULT_HEIGHT)
+        source["source_release_height"] = pd.to_numeric(source["source_release_height"], errors="coerce").fillna(defaults["release_height"])
     return source
 
 
@@ -288,8 +306,8 @@ def _load_vector_subset(path: str, *, columns: Optional[list[str]] = None) -> gp
     return gdf[keep].copy()
 
 
-def _build_default_pattern_key() -> str:
-    return f"{_DEFAULT_SITE}__{_DEFAULT_URBAN_CLASS}__{_DEFAULT_TEMPORAL}__{_DEFAULT_HEIGHT:g}"
+def _build_default_pattern_key(defaults: _AermodPatternDefaults) -> str:
+    return f"{defaults['site']}__{defaults['urban_class']}__{defaults['temporal']}__{defaults['release_height']:g}"
 
 
 def _pattern_keys_from_raw_frame(patterns_df: pd.DataFrame) -> pd.Series:
@@ -421,9 +439,11 @@ def _resolve_site_reference(patterns_df: pd.DataFrame) -> pd.DataFrame:
 def _assign_source_pattern_keys(
     *,
     source_df: pd.DataFrame,
+    pipeline: PipelineConfig,
     site_reference: pd.DataFrame,
     available_pattern_keys: set[str],
 ) -> pd.DataFrame:
+    defaults = _pattern_defaults(pipeline)
     result = source_df.copy()
     site_x = site_reference["site_xm"].to_numpy(dtype=np.float64)
     site_y = site_reference["site_ym"].to_numpy(dtype=np.float64)
@@ -434,16 +454,16 @@ def _assign_source_pattern_keys(
     if "source_population" in result.columns:
         result["selected_urban"] = _classify_urban(result["source_population"])
     else:
-        result["selected_urban"] = _DEFAULT_URBAN_CLASS
+        result["selected_urban"] = defaults["urban_class"]
     if "source_temporal_class" in result.columns:
-        temporal = result["source_temporal_class"].fillna(_DEFAULT_TEMPORAL).astype(str).str.strip()
-        result["selected_temporal"] = temporal.where(temporal != "", _DEFAULT_TEMPORAL)
+        temporal = result["source_temporal_class"].fillna(defaults["temporal"]).astype(str).str.strip()
+        result["selected_temporal"] = temporal.where(temporal != "", defaults["temporal"])
     else:
-        result["selected_temporal"] = _DEFAULT_TEMPORAL
+        result["selected_temporal"] = defaults["temporal"]
     if "source_release_height" in result.columns:
-        result["selected_height"] = pd.to_numeric(result["source_release_height"], errors="coerce").fillna(_DEFAULT_HEIGHT)
+        result["selected_height"] = pd.to_numeric(result["source_release_height"], errors="coerce").fillna(defaults["release_height"])
     else:
-        result["selected_height"] = _DEFAULT_HEIGHT
+        result["selected_height"] = defaults["release_height"]
     result["pattern_key_raw"] = (
         result["nearest_site"].astype(str)
         + "__"
@@ -458,13 +478,13 @@ def _assign_source_pattern_keys(
     same_site_default = (
         result["nearest_site"].astype(str)
         + "__"
-        + str(_DEFAULT_URBAN_CLASS)
+        + str(defaults["urban_class"])
         + "__"
-        + _DEFAULT_TEMPORAL
+        + defaults["temporal"]
         + "__"
-        + f"{_DEFAULT_HEIGHT:g}"
+        + f"{defaults['release_height']:g}"
     )
-    default_pattern = _build_default_pattern_key()
+    default_pattern = _build_default_pattern_key(defaults)
 
     missing_mask = ~result["pattern_key"].isin(available_pattern_keys)
     result.loc[missing_mask, "pattern_key"] = same_site_default.loc[missing_mask]
@@ -837,6 +857,7 @@ def run(
     )
     source_df = _prepare_source_emissions(
         emissions_gdf=emissions_gdf,
+        pipeline=pipeline,
         source_id_col=source_id_col,
         emissions_cols=emissions_cols,
         grid_size_meters=grid_size_meters,
@@ -864,6 +885,7 @@ def run(
     available_pattern_keys = set(projected_patterns_df["pattern_key"].dropna().astype(str).tolist())
     source_df = _assign_source_pattern_keys(
         source_df=source_df,
+        pipeline=pipeline,
         site_reference=site_reference,
         available_pattern_keys=available_pattern_keys,
     )

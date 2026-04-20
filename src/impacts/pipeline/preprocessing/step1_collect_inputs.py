@@ -9,7 +9,6 @@ from typing import Optional
 from ...common import find_preferred_file
 from ...common import log_step_banner
 from ...common import log_substep_banner
-from ...common import optional_local_path
 from ...common import required_local_path
 from ...common import resolve_beam_network_local_path
 from ...common import resolve_beam_vehicle_types_local_path
@@ -184,18 +183,18 @@ def run(
         relative_target=emissions.emissions_rates_folder,
         metadata={"artifact_family": "emissions_rates_folder"},
     )
-    activity_totals_source = optional_local_path(str((region_input_root / str(emissions.activity_totals_file)).resolve())) if emissions.activity_totals_file else None
-    staged_activity_totals = None
-    if activity_totals_source:
-        staged_activity_totals = _register_manifest_input(
-            manifest_inputs,
-            input_root=input_root,
-            key="activity_totals_file",
-            source_path=activity_totals_source,
-            relative_target=str(emissions.activity_totals_file),
-            metadata={"artifact_family": "activity_totals_file"},
-            optional=True,
-        )
+    inventory_source = required_local_path(
+        str((region_input_root / emissions.inventory_file).resolve()),
+        "impacts.emissions.inventory_file",
+    )
+    staged_inventory_file = _register_manifest_input(
+        manifest_inputs,
+        input_root=input_root,
+        key="inventory_file",
+        source_path=inventory_source,
+        relative_target=str(emissions.inventory_file),
+        metadata={"artifact_family": "inventory_file"},
+    )
     staged_annualization_days_or_file = emissions.annualization_days_or_file
     if isinstance(emissions.annualization_days_or_file, str):
         annualization_days_source = required_local_path(
@@ -304,7 +303,7 @@ def run(
         "staged_vehicle_types": staged_vehicle_types,
         "staged_events": staged_events,
         "staged_inmap_grid": staged_inmap_grid,
-        "staged_activity_totals": staged_activity_totals,
+        "staged_inventory_file": staged_inventory_file,
         "staged_annualization_days_or_file": staged_annualization_days_or_file,
         "staged_isrm": staged_isrm,
         "staged_isrm_nox_to_no2_ratios_file": staged_isrm_nox_to_no2_ratios_file,

@@ -363,6 +363,7 @@ def build_nh3_inventory_rows(
 
 
 def _run_step1_substep_prepare_project_analysis(workflow: dict[str, object]) -> tuple[str, pd.DataFrame]:
+    pto_config = workflow["run"]["pto_as_process"]
     project_analysis_path = clean_emfac_to_parquet(
         input_path=workflow["inputs"]["project_analysis_raw"],
         output_path=workflow["paths"]["project_analysis_source"],
@@ -373,7 +374,7 @@ def _run_step1_substep_prepare_project_analysis(workflow: dict[str, object]) -> 
     project_analysis = _normalize_project_analysis_activity(pd.read_parquet(project_analysis_path))
     project_analysis = expand_pto_vehicle_category(
         project_analysis,
-        workflow["run"].get("pto_as_process"),
+        pto_config,
         process_column="process",
     )
     project_analysis = _pivot_project_analysis(project_analysis)
@@ -382,6 +383,7 @@ def _run_step1_substep_prepare_project_analysis(workflow: dict[str, object]) -> 
 
 
 def _run_step1_substep_prepare_emissions_inventory(workflow: dict[str, object]) -> tuple[str, pd.DataFrame]:
+    pto_config = workflow["run"]["pto_as_process"]
     emissions_inventory_path = process_emissions_inventory(
         vmt_input=workflow["inputs"]["vmt_raw"],
         population_input=workflow["inputs"]["population_raw"],
@@ -391,7 +393,7 @@ def _run_step1_substep_prepare_emissions_inventory(workflow: dict[str, object]) 
         output_path=workflow["paths"]["emissions_inventory"],
         region_label=workflow["run"]["region_label"],
         year=workflow["run"]["calendar_year"],
-        pto_config=workflow["run"].get("pto_as_process"),
+        pto_config=pto_config,
         operation_days_path=str(workflow["inputs"]["vehicle_operation_days_file"]),
     )
     return emissions_inventory_path, pd.read_parquet(emissions_inventory_path)
@@ -426,11 +428,12 @@ def _run_step1_substep_prepare_prdust(
 
 
 def _run_step1_substep_prepare_bc(workflow: dict[str, object]) -> tuple[Path, pd.DataFrame]:
+    pto_config = workflow["run"]["pto_as_process"]
     project_analysis_bc = build_black_carbon_rows(
         workflow["inputs"]["black_carbon_raw"],
         region_label=workflow["run"]["region_label"],
         source_pollutant=str(workflow["inputs"]["black_carbon_pollutant"]),
-        pto_config=workflow["run"].get("pto_as_process"),
+        pto_config=pto_config,
     )
     project_analysis_bc = _pivot_project_analysis(project_analysis_bc)
     bc_path = Path(workflow["paths"]["project_analysis_bc"]).expanduser().resolve()
@@ -443,9 +446,10 @@ def _run_step1_substep_prepare_nh3(
     *,
     emissions_inventory_frame: pd.DataFrame,
 ) -> tuple[Path, pd.DataFrame]:
+    pto_config = workflow["run"]["pto_as_process"]
     project_analysis_nh3_rates = build_nh3_inventory_rows(
         emissions_inventory_frame,
-        pto_config=workflow["run"].get("pto_as_process"),
+        pto_config=pto_config,
     )
     project_analysis_nh3_rates = _pivot_project_analysis(project_analysis_nh3_rates)
     nh3_rates_path = Path(workflow["paths"]["project_analysis_nh3_rates"]).expanduser().resolve()

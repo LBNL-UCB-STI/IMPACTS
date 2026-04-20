@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+from decimal import InvalidOperation
 from pathlib import Path
 import re
 from typing import Any
@@ -22,6 +24,12 @@ def _require_column(frame: pd.DataFrame, column_name: str, frame_name: str) -> N
         raise ValueError(f"{frame_name} is missing required column '{column_name}'")
 
 
+def _require_non_null_column(frame: pd.DataFrame, column_name: str, frame_name: str) -> None:
+    _require_column(frame, column_name, frame_name)
+    if frame[column_name].isna().any():
+        raise ValueError(f"{frame_name} contains null values in required column '{column_name}'")
+
+
 def _normalize_text(value: object) -> str:
     if pd.isna(value):
         return ""
@@ -30,6 +38,21 @@ def _normalize_text(value: object) -> str:
 
 def _normalize_lower(value: object) -> str:
     return _normalize_text(value).lower()
+
+
+def _normalize_beam_identifier_text(value: object) -> str:
+    text = _normalize_text(value)
+    if text == "":
+        return ""
+    try:
+        decimal_value = Decimal(text)
+    except InvalidOperation:
+        return text
+    if not decimal_value.is_finite():
+        return text
+    if decimal_value == decimal_value.to_integral_value():
+        return format(decimal_value.quantize(Decimal("1")), "f")
+    return text
 
 
 def _sanitize_emfac_component(value: object) -> str:
@@ -488,6 +511,43 @@ def _sample_passenger_vehicle_type_ids_for_vehicles(
     return prepared.drop(columns=["income_in_thousands", "incomeBin", "atlasVehicleTypeToken"])
 
 
+def _prepare_mapped_passenger_vehicles_output(vehicles: pd.DataFrame) -> pd.DataFrame:
+    frame_name = "Mapped passenger vehicles"
+    prepared = vehicles.copy()
+    for column_name in ("household_id", "vehicle_id", "vehicleTypeId"):
+        _require_non_null_column(prepared, column_name, frame_name)
+
+    household_id = prepared["household_id"].astype(str)
+    vehicle_id = prepared["vehicle_id"].astype(str)
+    vehicle_type_id = prepared["vehicleTypeId"].astype(str)
+    household_id_alias = prepared["household_id"].map(_normalize_beam_identifier_text)
+    vehicle_id_alias = prepared["vehicle_id"].map(_normalize_beam_identifier_text)
+    if household_id.str.strip().eq("").any():
+        raise ValueError(f"{frame_name} contains blank values in required column 'household_id'")
+    if vehicle_id.str.strip().eq("").any():
+        raise ValueError(f"{frame_name} contains blank values in required column 'vehicle_id'")
+    if vehicle_type_id.str.strip().eq("").any():
+        raise ValueError(f"{frame_name} contains blank values in required column 'vehicleTypeId'")
+    if household_id_alias.str.strip().eq("").any():
+        raise ValueError(f"{frame_name} produced blank values in required alias column 'householdId'")
+    if vehicle_id_alias.str.strip().eq("").any():
+        raise ValueError(f"{frame_name} produced blank values in required alias component 'vehicle_id'")
+
+    result = pd.DataFrame(
+        {
+            "household_id": household_id,
+            "vehicle_id": vehicle_id,
+            "householdId": household_id_alias,
+            "vehicleId": household_id_alias + "-" + vehicle_id_alias,
+            "vehicleTypeId": vehicle_type_id,
+            "initialSoc": pd.Series(pd.NA, index=prepared.index, dtype="Float64"),
+        }
+    )
+    if result["vehicleId"].duplicated().any():
+        raise ValueError(f"{frame_name} produced duplicate BEAM vehicleId values")
+    return result
+
+
 def _build_passenger_emfac_candidates(
     *,
     vehicle_type_id: str,
@@ -704,6 +764,7 @@ def _run_step3_substep_sample_atlas_vehicles(
         income_bins=atlas_config.get("income_bins"),
         seed=int(config["seed"]),
     )
+    vehicles_with_em = _prepare_mapped_passenger_vehicles_output(vehicles_with_em)
     vehicles_output_name = f"vehicles--{_build_year_scenario_token(year=atlas_config['year'], scenario=workflow['scenario'])}--EM.parquet"
     vehicles_output_file = _write_parquet(
         vehicles_with_em,

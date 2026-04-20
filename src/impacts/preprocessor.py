@@ -61,7 +61,7 @@ def build_inputs_manifest(
         input_root=input_root,
         config_path=config_path,
     )
-    staged_activity_totals = step1_outputs["staged_activity_totals"]
+    staged_inventory_file = step1_outputs["staged_inventory_file"]
     staged_annualization_days_or_file = step1_outputs["staged_annualization_days_or_file"]
     staged_isrm = step1_outputs["staged_isrm"]
     staged_isrm_nox_to_no2_ratios_file = step1_outputs["staged_isrm_nox_to_no2_ratios_file"]
@@ -135,6 +135,10 @@ def build_inputs_manifest(
             "asrv_nox_to_no2_ratios_file": aermod.asrv_nox_to_no2_ratios_file,
             "asrv_patterns_file": staged_asrv_patterns_file,
             "asrv_patterns_epsg": int(asrv_patterns_epsg) if asrv_patterns_epsg is not None else None,
+            "aermod_default_site": aermod.default_site,
+            "aermod_default_urban_class": int(aermod.default_urban_class),
+            "aermod_default_temporal": aermod.default_temporal,
+            "aermod_default_release_height": float(aermod.default_release_height),
             "grid_size_meters": float(aermod.grid_size_meters) if aermod.grid_size_meters is not None else None,
             "beam_osm_id_col": emissions.beam_osm_id_col,
             "beam_length_col": emissions.beam_length_col,
@@ -150,11 +154,12 @@ def build_inputs_manifest(
             "prepared_skims_group_cols": list(emissions.prepared_skims_group_cols),
             "pollutants": list(emissions.pollutants),
             "source_pollutants": list(emissions.source_pollutants),
-            "activity_totals_file": staged_activity_totals,
-            "activity_totals_columns": dict(emissions.activity_totals_columns),
+            "inventory_file": staged_inventory_file,
             "annualization_days_or_file": staged_annualization_days_or_file,
             "population_sample": float(emissions.population_sample),
             "transit_sample": float(emissions.transit_sample),
+            "include_passenger": bool(emissions.include_passenger),
+            "include_freight": bool(emissions.include_freight),
         },
         "pilates_contract": {
             "stage": "terminal_postprocessing",

@@ -35,6 +35,10 @@ class PipelineConfig:
     isrm_nox_to_no2_ratios_file: Optional[str] = None
     asrv_patterns_file: Optional[str] = None
     asrv_patterns_epsg: Optional[int] = None
+    aermod_default_site: Optional[str] = None
+    aermod_default_urban_class: int = 0
+    aermod_default_temporal: Optional[str] = None
+    aermod_default_release_height: float = 1.0
     aermod_full_grid_path: Optional[str] = None
     aermod_grid_path: Optional[str] = None
     aermod_grid_epsg: Optional[int] = None
@@ -44,14 +48,15 @@ class PipelineConfig:
     start_year: Optional[int] = None
     county_state_fips: Optional[str] = None
     county_fips_codes: List[str] = field(default_factory=list)
-    activity_totals_file: Optional[str] = None
-    activity_totals_columns: Dict[str, Any] = field(default_factory=dict)
+    inventory_file: Optional[str] = None
     prepared_skims_group_cols: List[str] = field(default_factory=list)
     pollutants: List[str] = field(default_factory=list)
     source_pollutants: List[str] = field(default_factory=list)
     annualization_days_or_file: float | str = default_representative_days_per_year
     population_sample: float = 1.0
     transit_sample: float = 1.0
+    include_passenger: bool = True
+    include_freight: bool = True
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PipelineConfig":
@@ -70,6 +75,10 @@ class PipelineConfig:
                 "isrm_nox_to_no2_ratios_file",
                 "asrv_patterns_file",
                 "asrv_patterns_epsg",
+                "aermod_default_site",
+                "aermod_default_urban_class",
+                "aermod_default_temporal",
+                "aermod_default_release_height",
                 "grid_size_meters",
                 "aermod_full_grid_path",
                 "aermod_grid_path",
@@ -80,14 +89,15 @@ class PipelineConfig:
                 "start_year",
                 "county_state_fips",
                 "county_fips_codes",
-                "activity_totals_file",
-                "activity_totals_columns",
+                "inventory_file",
                 "prepared_skims_group_cols",
                 "pollutants",
                 "source_pollutants",
                 "annualization_days_or_file",
                 "population_sample",
                 "transit_sample",
+                "include_passenger",
+                "include_freight",
             },
             "pipeline",
         )
@@ -105,6 +115,18 @@ class PipelineConfig:
             isrm_nox_to_no2_ratios_file=_optional_string(payload.get("isrm_nox_to_no2_ratios_file")),
             asrv_patterns_file=_optional_string(payload.get("asrv_patterns_file")),
             asrv_patterns_epsg=_optional_int(payload.get("asrv_patterns_epsg")),
+            aermod_default_site=_optional_string(payload.get("aermod_default_site")),
+            aermod_default_urban_class=(
+                _optional_int(payload.get("aermod_default_urban_class"))
+                if payload.get("aermod_default_urban_class") is not None
+                else 0
+            ),
+            aermod_default_temporal=_optional_string(payload.get("aermod_default_temporal")),
+            aermod_default_release_height=(
+                _optional_float(payload.get("aermod_default_release_height"))
+                if payload.get("aermod_default_release_height") is not None
+                else 1.0
+            ),
             aermod_full_grid_path=_optional_string(payload.get("aermod_full_grid_path")),
             aermod_grid_path=_optional_string(payload.get("aermod_grid_path")),
             aermod_grid_epsg=_optional_int(payload.get("aermod_grid_epsg")),
@@ -114,8 +136,7 @@ class PipelineConfig:
             start_year=_required_int(payload.get("start_year"), "pipeline.start_year"),
             county_state_fips=_required_string(payload.get("county_state_fips"), "pipeline.county_state_fips"),
             county_fips_codes=_coerce_string_list(payload.get("county_fips_codes")),
-            activity_totals_file=_optional_string(payload.get("activity_totals_file")),
-            activity_totals_columns=_required_dict(payload.get("activity_totals_columns"), "pipeline.activity_totals_columns"),
+            inventory_file=_required_string(payload.get("inventory_file"), "pipeline.inventory_file"),
             prepared_skims_group_cols=_coerce_string_list(payload.get("prepared_skims_group_cols")),
             pollutants=_coerce_string_list(payload.get("pollutants")),
             source_pollutants=_coerce_string_list(payload.get("source_pollutants")),
@@ -125,6 +146,16 @@ class PipelineConfig:
                 _optional_float(payload.get("transit_sample"))
                 if payload.get("transit_sample") is not None
                 else 1.0
+            ),
+            include_passenger=(
+                _required_bool(payload.get("include_passenger"), "pipeline.include_passenger")
+                if payload.get("include_passenger") is not None
+                else True
+            ),
+            include_freight=(
+                _required_bool(payload.get("include_freight"), "pipeline.include_freight")
+                if payload.get("include_freight") is not None
+                else True
             ),
         )
         if not result.source_pollutants:
@@ -147,6 +178,10 @@ class PipelineConfig:
                 raise ValueError("Missing required value: pipeline.aermod_grid_path")
             if not result.asrv_patterns_file:
                 raise ValueError("Missing required value: pipeline.asrv_patterns_file")
+            if not result.aermod_default_site:
+                raise ValueError("Missing required value: pipeline.aermod_default_site")
+            if not result.aermod_default_temporal:
+                raise ValueError("Missing required value: pipeline.aermod_default_temporal")
         return result
 
     def to_dict(self) -> Dict[str, Any]:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import re
 from typing import Any
 from typing import Dict
 from typing import List
@@ -23,6 +24,22 @@ from . import _step_label
 from .annualization import annualize_prepared_skims_for_grid_allocation
 
 logger = logging.getLogger(__name__)
+
+_PASSENGER_CATEGORY_TOKENS = {
+    "car",
+    "bike",
+    "body-type-default",
+    "body type default",
+    "rail-default",
+    "rail default",
+    "ferry-default",
+    "ferry default",
+    "tram-sf",
+    "tram sf",
+}
+_PASSENGER_CATEGORY_SUBSTRINGS = ("bus", "tram", "rail", "ferry", "bike")
+_FREIGHT_CATEGORY_PATTERN = re.compile(r"^(class\d|class\d+[a-z]?|mdv|ldt\d|hdt|t\d)", re.IGNORECASE)
+_FREIGHT_CATEGORY_SUBSTRINGS = ("vocational", "tractor")
 
 
 # ---------------------------------------------------------------------------
@@ -45,6 +62,181 @@ def _load_intersection_subset_or_df(
     if intersection_df is not None:
         return intersection_df[columns].copy()
     return _load_intersection_subset(path, columns)
+
+
+def _normalize_vehicle_type_token(value: object) -> str:
+    return str("" if pd.isna(value) else value).strip()
+
+
+def _classify_vehicle_type_assignment(row: pd.Series, *, source_name: str) -> Optional[str]:
+    source_lower = source_name.lower()
+    if "vehicletypes--atlas--" in source_lower or "vehicletypes--passenger" in source_lower:
+        return "passenger"
+    if "vehicletypes--frism--" in source_lower or "vehicletypes--freight" in source_lower:
+        return "freight"
+
+    vehicle_type_id = _normalize_vehicle_type_token(row.get("vehicleTypeId"))
+    if vehicle_type_id.startswith("pax-"):
+        return "passenger"
+    if vehicle_type_id.startswith("ft-"):
+        return "freight"
+
+    vehicle_use = _normalize_vehicle_type_token(row.get("vehicleUse"))
+    vehicle_class = _normalize_vehicle_type_token(row.get("vehicleClass"))
+    if vehicle_use or vehicle_class:
+        return "freight"
+
+    vehicle_category = _normalize_vehicle_type_token(row.get("vehicleCategory")).lower()
+    if vehicle_category in _PASSENGER_CATEGORY_TOKENS:
+        return "passenger"
+    if any(token in vehicle_category for token in _PASSENGER_CATEGORY_SUBSTRINGS):
+        return "passenger"
+    if _FREIGHT_CATEGORY_PATTERN.match(vehicle_category) or any(
+        token in vehicle_category for token in _FREIGHT_CATEGORY_SUBSTRINGS
+    ):
+        return "freight"
+    return None
+
+
+def _load_vehicle_type_assignments(vehicle_types_path: str) -> pd.DataFrame:
+    vehicle_types = read_table(vehicle_types_path)
+    if "vehicleTypeId" not in vehicle_types.columns:
+        raise ValueError("Vehicle types input must include vehicleTypeId for passenger/freight skims filtering.")
+
+    prepared = vehicle_types.copy()
+    prepared["vehicleTypeId"] = prepared["vehicleTypeId"].map(_normalize_vehicle_type_token)
+    prepared = prepared.loc[prepared["vehicleTypeId"].ne("")].copy()
+    prepared["assignment_group"] = prepared.apply(
+        lambda row: _classify_vehicle_type_assignment(row, source_name=Path(vehicle_types_path).name),
+        axis=1,
+    )
+    assignments = (
+        prepared[["vehicleTypeId", "assignment_group"]]
+        .drop_duplicates(subset=["vehicleTypeId"], keep="first")
+        .reset_index(drop=True)
+    )
+    duplicate_conflicts = (
+        prepared[["vehicleTypeId", "assignment_group"]]
+        .dropna(subset=["assignment_group"])
+        .drop_duplicates()
+        .groupby("vehicleTypeId", dropna=False)["assignment_group"]
+        .nunique()
+    )
+    conflicting_ids = duplicate_conflicts[duplicate_conflicts.gt(1)].index.tolist()
+    if conflicting_ids:
+        raise ValueError(
+            "Vehicle types input assigns the same vehicleTypeId to both passenger and freight: "
+            f"{conflicting_ids[:10]}"
+        )
+    return assignments
+
+
+def _load_vehicle_type_activity_lookup(vehicle_types_path: str) -> pd.DataFrame:
+    vehicle_types = read_table(vehicle_types_path)
+    if "vehicleTypeId" not in vehicle_types.columns:
+        raise ValueError("Vehicle types input must include vehicleTypeId for activity correction lookup.")
+    if "emfacVehicleCategory" not in vehicle_types.columns:
+        raise ValueError(
+            "Vehicle types input must include emfacVehicleCategory for inventory-based activity correction."
+        )
+
+    prepared = vehicle_types.copy()
+    prepared["vehicleTypeId"] = prepared["vehicleTypeId"].map(_normalize_vehicle_type_token)
+    prepared = prepared.loc[prepared["vehicleTypeId"].ne("")].copy()
+    prepared["assignment_group"] = prepared.apply(
+        lambda row: _classify_vehicle_type_assignment(row, source_name=Path(vehicle_types_path).name),
+        axis=1,
+    )
+    prepared["emfacVehicleCategory"] = prepared["emfacVehicleCategory"].map(_normalize_vehicle_type_token)
+    prepared = prepared.loc[
+        prepared["assignment_group"].notna() & prepared["emfacVehicleCategory"].ne("")
+    ].copy()
+    duplicate_conflicts = (
+        prepared[["vehicleTypeId", "assignment_group", "emfacVehicleCategory"]]
+        .drop_duplicates()
+        .groupby("vehicleTypeId", dropna=False)
+        .agg(
+            assignment_group_count=("assignment_group", "nunique"),
+            emfac_category_count=("emfacVehicleCategory", "nunique"),
+        )
+    )
+    conflicting_ids = duplicate_conflicts.loc[
+        duplicate_conflicts["assignment_group_count"].gt(1)
+        | duplicate_conflicts["emfac_category_count"].gt(1)
+    ].index.tolist()
+    if conflicting_ids:
+        raise ValueError(
+            "Vehicle types input has conflicting assignment or EMFAC category rows for vehicleTypeId values: "
+            f"{conflicting_ids[:10]}"
+        )
+    return (
+        prepared[["vehicleTypeId", "assignment_group", "emfacVehicleCategory"]]
+        .drop_duplicates(subset=["vehicleTypeId"], keep="first")
+        .reset_index(drop=True)
+    )
+
+
+def _write_frame(frame: pd.DataFrame, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix.lower() == ".parquet":
+        frame.to_parquet(path, index=False)
+        return
+    if path.name.lower().endswith(".csv.gz"):
+        frame.to_csv(path, index=False, compression="gzip")
+        return
+    raise ValueError(f"Unsupported table output format: {path}")
+
+
+def _filter_prepared_skims_by_assignment(
+    prepared: pd.DataFrame,
+    *,
+    vehicle_types_path: Optional[str],
+    include_passenger: bool,
+    include_freight: bool,
+) -> pd.DataFrame:
+    if include_passenger and include_freight:
+        return prepared
+    if not include_passenger and not include_freight:
+        raise ValueError("At least one of include_passenger or include_freight must be true.")
+    if not vehicle_types_path:
+        raise ValueError(
+            "Vehicle types input is required to filter prepared skims by passenger/freight assignment."
+        )
+    if "vehicleTypeId" not in prepared.columns:
+        raise ValueError("Prepared skims must include vehicleTypeId for passenger/freight filtering.")
+
+    assignments = _load_vehicle_type_assignments(vehicle_types_path)
+    allowed_groups = set()
+    if include_passenger:
+        allowed_groups.add("passenger")
+    if include_freight:
+        allowed_groups.add("freight")
+    allowed_ids = set(assignments.loc[assignments["assignment_group"].isin(allowed_groups), "vehicleTypeId"].tolist())
+    if not allowed_ids:
+        raise ValueError(
+            "No vehicleTypeId values in the vehicle types input match the requested passenger/freight filter."
+        )
+
+    result = prepared.copy()
+    result["vehicleTypeId"] = result["vehicleTypeId"].map(_normalize_vehicle_type_token)
+    observed_ids = set(result["vehicleTypeId"].dropna().tolist())
+    missing_ids = sorted(observed_ids - set(assignments["vehicleTypeId"].tolist()))
+    if missing_ids:
+        raise ValueError(
+            "Could not assign some skim vehicleTypeId values to passenger or freight using "
+            f"{vehicle_types_path}: sample={missing_ids[:10]}"
+        )
+
+    filtered = result.loc[result["vehicleTypeId"].isin(allowed_ids)].copy()
+    logger.info(
+        "%s filtered prepared skims by assignment (include_passenger=%s, include_freight=%s): %d -> %d rows",
+        _step_label("1.0"),
+        include_passenger,
+        include_freight,
+        len(result),
+        len(filtered),
+    )
+    return filtered
 
 
 # ---------------------------------------------------------------------------
@@ -245,30 +437,6 @@ def _build_combined_allocated_table(
     return allocated
 
 
-# ---------------------------------------------------------------------------
-# substep 1.3 — aggregate beam activity totals by county
-# ---------------------------------------------------------------------------
-
-def _build_beam_activity_totals(
-    allocated_df: pd.DataFrame,
-    *,
-    county_col: str,
-) -> pd.DataFrame:
-    county_activity = allocated_df[[county_col, "totVMT_county_allocated", "totTrips_county_allocated"]].copy()
-    county_activity["_fips_norm"] = normalize_county_fips(county_activity[county_col])
-    county_activity["totVMT_county_allocated"] = pd.to_numeric(county_activity["totVMT_county_allocated"], errors="coerce").fillna(0.0)
-    county_activity["totTrips_county_allocated"] = pd.to_numeric(county_activity["totTrips_county_allocated"], errors="coerce").fillna(0.0)
-    grouped = county_activity.groupby("_fips_norm", dropna=False).agg(
-        totVMT=("totVMT_county_allocated", "sum"),
-        totTrips=("totTrips_county_allocated", "sum"),
-    ).reset_index()
-    grouped = grouped.rename(columns={"_fips_norm": "countyfp"})
-    zero_null_mask = grouped["countyfp"].isna() & grouped["totVMT"].eq(0.0) & grouped["totTrips"].eq(0.0)
-    if zero_null_mask.any():
-        grouped = grouped.loc[~zero_null_mask].reset_index(drop=True)
-    return grouped
-
-
 def _build_source_activity_totals(skims_df: pd.DataFrame) -> Optional[pd.DataFrame]:
     if {"countyfp", "distanceMiles_county", "tripCount_county"}.issubset(skims_df.columns):
         activity = skims_df[["countyfp", "distanceMiles_county", "tripCount_county"]].copy()
@@ -323,15 +491,24 @@ def prepare_staged_skims_for_processing(
     annualization_days_or_file: float | str,
     population_sample: float,
     transit_sample: float,
+    include_passenger: bool,
+    include_freight: bool,
 ) -> pd.DataFrame:
     prepared_grouped_skims_path = prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
-    prepare_skims_for_grid_allocation(
+    prepared_grouped = prepare_skims_for_grid_allocation(
         skims_path=skims_input_source,
         output_path=str(prepared_grouped_skims_path),
         group_cols=list(prepared_skims_group_cols),
         required_pollutants=list(pollutants),
         pollutants_map=dict(pollutants_map),
     )
+    prepared_grouped = _filter_prepared_skims_by_assignment(
+        prepared_grouped,
+        vehicle_types_path=vehicle_types_path,
+        include_passenger=include_passenger,
+        include_freight=include_freight,
+    )
+    _write_frame(prepared_grouped, prepared_grouped_skims_path)
     prepared_skims_path = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
     annualize_prepared_skims_for_grid_allocation(
         prepared_skims_path=str(prepared_grouped_skims_path),
@@ -359,6 +536,8 @@ def load_or_prepare_skims_df(
     annualization_days_or_file: float | str,
     population_sample: float,
     transit_sample: float,
+    include_passenger: bool,
+    include_freight: bool,
     manifest_inputs: Optional[Dict[str, Any]] = None,
 ) -> pd.DataFrame:
     prepared_path = resolve_prepared_skims_path(input_root)
@@ -389,6 +568,8 @@ def load_or_prepare_skims_df(
             annualization_days_or_file=annualization_days_or_file,
             population_sample=population_sample,
             transit_sample=transit_sample,
+            include_passenger=include_passenger,
+            include_freight=include_freight,
         )
 
     from .prepare_emissions_from_events import build_staged_skims_from_events
@@ -418,6 +599,8 @@ def load_or_prepare_skims_df(
         annualization_days_or_file=annualization_days_or_file,
         population_sample=population_sample,
         transit_sample=transit_sample,
+        include_passenger=include_passenger,
+        include_freight=include_freight,
     )
 
 
@@ -457,6 +640,8 @@ def prepare_skims_inputs(
             annualization_days_or_file=processing.annualization_days_or_file,
             population_sample=float(processing.population_sample),
             transit_sample=float(processing.transit_sample),
+            include_passenger=bool(processing.include_passenger),
+            include_freight=bool(processing.include_freight),
         )
         if event_inputs is None:
             raise FileNotFoundError(
@@ -480,13 +665,20 @@ def prepare_skims_inputs(
 
     prepared_grouped_skims_path = prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
     canonical_pollutants = list(processing.pollutants)
-    prepare_skims_for_grid_allocation(
+    prepared_grouped = prepare_skims_for_grid_allocation(
         skims_path=staged_skims_input,
         output_path=str(prepared_grouped_skims_path),
         group_cols=list(processing.prepared_skims_group_cols),
         required_pollutants=canonical_pollutants,
         pollutants_map=dict(processing.pollutants_map),
     )
+    prepared_grouped = _filter_prepared_skims_by_assignment(
+        prepared_grouped,
+        vehicle_types_path=vehicle_types_path,
+        include_passenger=bool(processing.include_passenger),
+        include_freight=bool(processing.include_freight),
+    )
+    _write_frame(prepared_grouped, prepared_grouped_skims_path)
     prepared_skims_path = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
     annualize_prepared_skims_for_grid_allocation(
         prepared_skims_path=str(prepared_grouped_skims_path),

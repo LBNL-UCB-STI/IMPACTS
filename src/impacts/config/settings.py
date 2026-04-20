@@ -202,12 +202,26 @@ class AermodDispersion:
     asrv_patterns_file: Optional[str] = None
     asrv_patterns_epsg: Optional[int] = None
     asrv_nox_to_no2_ratios_file: Optional[str] = None
+    default_site: Optional[str] = None
+    default_urban_class: int = 0
+    default_temporal: Optional[str] = None
+    default_release_height: float = 1.0
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "AermodDispersion":
         _reject_unknown_keys(
             payload,
-            {"enabled", "grid_size_meters", "asrv_patterns_file", "asrv_patterns_epsg", "asrv_nox_to_no2_ratios_file"},
+            {
+                "enabled",
+                "grid_size_meters",
+                "asrv_patterns_file",
+                "asrv_patterns_epsg",
+                "asrv_nox_to_no2_ratios_file",
+                "default_site",
+                "default_urban_class",
+                "default_temporal",
+                "default_release_height",
+            },
             "impacts.dispersions.aermod",
         )
         enabled = _required_bool(payload.get("enabled"), "impacts.dispersions.aermod.enabled")
@@ -217,12 +231,28 @@ class AermodDispersion:
             asrv_patterns_file=_optional_string(payload.get("asrv_patterns_file")),
             asrv_patterns_epsg=_optional_int(payload.get("asrv_patterns_epsg")),
             asrv_nox_to_no2_ratios_file=_optional_string(payload.get("asrv_nox_to_no2_ratios_file")),
+            default_site=_optional_string(payload.get("default_site")),
+            default_urban_class=(
+                _optional_int(payload.get("default_urban_class"))
+                if payload.get("default_urban_class") is not None
+                else 0
+            ),
+            default_temporal=_optional_string(payload.get("default_temporal")),
+            default_release_height=(
+                _optional_float(payload.get("default_release_height"))
+                if payload.get("default_release_height") is not None
+                else 1.0
+            ),
         )
         if result.enabled:
             if result.grid_size_meters is None:
                 raise ValueError("Missing required value: impacts.dispersions.aermod.grid_size_meters")
             if not result.asrv_patterns_file:
                 raise ValueError("Missing required value: impacts.dispersions.aermod.asrv_patterns_file")
+            if not result.default_site:
+                raise ValueError("Missing required value: impacts.dispersions.aermod.default_site")
+            if not result.default_temporal:
+                raise ValueError("Missing required value: impacts.dispersions.aermod.default_temporal")
         return result
 
 
@@ -244,12 +274,13 @@ class Dispersions:
 class Emissions:
     osm_network_folder: str
     emissions_rates_folder: str
+    inventory_file: str
     annualization_days_or_file: float | str
     population_sample: float
     source_pollutants: List[str]
     transit_sample: float = 1.0
-    activity_totals_file: Optional[str] = None
-    inventory_file: Optional[str] = None
+    include_passenger: bool = True
+    include_freight: bool = True
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Emissions":
@@ -258,11 +289,12 @@ class Emissions:
             {
                 "osm_network_folder",
                 "emissions_rates_folder",
-                "activity_totals_file",
                 "inventory_file",
                 "annualization_days_or_file",
                 "population_sample",
                 "transit_sample",
+                "include_passenger",
+                "include_freight",
                 "pollutants",
             },
             "impacts.emissions",
@@ -278,6 +310,10 @@ class Emissions:
                 payload.get("emissions_rates_folder"),
                 "impacts.emissions.emissions_rates_folder",
             ),
+            inventory_file=_required_string(
+                payload.get("inventory_file"),
+                "impacts.emissions.inventory_file",
+            ),
             annualization_days_or_file=_required_float_or_string(
                 payload.get("annualization_days_or_file"),
                 "impacts.emissions.annualization_days_or_file",
@@ -291,9 +327,17 @@ class Emissions:
                 if payload.get("transit_sample") is not None
                 else 1.0
             ),
+            include_passenger=(
+                _required_bool(payload.get("include_passenger"), "impacts.emissions.include_passenger")
+                if payload.get("include_passenger") is not None
+                else True
+            ),
+            include_freight=(
+                _required_bool(payload.get("include_freight"), "impacts.emissions.include_freight")
+                if payload.get("include_freight") is not None
+                else True
+            ),
             source_pollutants=source_pollutants,
-            activity_totals_file=_optional_string(payload.get("activity_totals_file")),
-            inventory_file=_optional_string(payload.get("inventory_file")),
         )
 
     @property
@@ -318,19 +362,162 @@ class Emissions:
         return ["linkId", "vehicleTypeId", "process"]
 
     @property
-    def activity_totals_columns(self) -> Dict[str, str]:
-        return {
-            "county_fips": "countyfp",
-            "tot_vmt": "tot_vmt_vehicle_miles_per_year",
-            "tot_trips": "tot_trips_per_year",
-        }
-
-    @property
     def mapping_columns(self) -> Dict[str, str]:
         return {
             "link_id": "edge_linkId",
             "proportion": "zone_edge_proportion",
         }
+
+
+@dataclass(frozen=True)
+class AnalysisPollutantTarget:
+    columns: List[str] = field(default_factory=list)
+    prefixes: List[str] = field(default_factory=list)
+    exclude_columns: List[str] = field(default_factory=list)
+    exclude_prefixes: List[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any], *, path: str) -> "AnalysisPollutantTarget":
+        _reject_unknown_keys(payload, {"columns", "prefixes", "exclude_columns", "exclude_prefixes"}, path)
+        columns = _coerce_string_list(payload.get("columns"))
+        prefixes = _coerce_string_list(payload.get("prefixes"))
+        exclude_columns = _coerce_string_list(payload.get("exclude_columns"))
+        exclude_prefixes = _coerce_string_list(payload.get("exclude_prefixes"))
+        if not columns and not prefixes:
+            raise ValueError(f"{path} must define at least one of columns or prefixes")
+        return cls(
+            columns=columns,
+            prefixes=prefixes,
+            exclude_columns=exclude_columns,
+            exclude_prefixes=exclude_prefixes,
+        )
+
+
+@dataclass(frozen=True)
+class AnalysisTarget:
+    name: str
+    pollutants: Dict[str, AnalysisPollutantTarget]
+
+    @classmethod
+    def from_dict(cls, name: str, payload: Dict[str, Any], *, path: str) -> "AnalysisTarget":
+        raw_pollutants = dict(payload or {})
+        if not raw_pollutants:
+            raise ValueError(f"Missing required value: {path}")
+        pollutants = {
+            str(pollutant).strip(): AnalysisPollutantTarget.from_dict(
+                dict(selector or {}),
+                path=f"{path}.{str(pollutant).strip()}",
+            )
+            for pollutant, selector in raw_pollutants.items()
+        }
+        return cls(
+            name=_required_string(name, f"{path} key"),
+            pollutants=pollutants,
+        )
+
+
+@dataclass(frozen=True)
+class AnalysisSectorTarget:
+    source: str
+    sector: str
+    annual_pm25_short_tons: Optional[float] = None
+    annual_nox_short_tons: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class Analysis:
+    inventory_file: Optional[str] = None
+    inventory_label: Optional[str] = None
+    targets: List[AnalysisTarget] = field(default_factory=list)
+    sector_targets: List[AnalysisSectorTarget] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "Analysis":
+        _reject_unknown_keys(
+            payload,
+            {
+                "inventory_file",
+                "inventory_label",
+                "targets",
+                "pm25_annual_targets_short_tons",
+                "nox_annual_targets_short_tons",
+            },
+            "impacts.analysis",
+        )
+        raw_targets = payload.get("targets")
+        raw_pm25_targets = payload.get("pm25_annual_targets_short_tons")
+        raw_nox_targets = payload.get("nox_annual_targets_short_tons")
+        if (
+            raw_targets is None
+            and raw_pm25_targets is None
+            and raw_nox_targets is None
+            and payload.get("inventory_file") is None
+            and payload.get("inventory_label") is None
+        ):
+            return cls()
+        if raw_targets is None:
+            targets: List[AnalysisTarget] = []
+        elif not isinstance(raw_targets, dict):
+            raise ValueError("impacts.analysis.targets must be a mapping of target_name -> pollutant selectors")
+        else:
+            targets = [
+                AnalysisTarget.from_dict(
+                    str(name).strip(),
+                    dict(target or {}),
+                    path=f"impacts.analysis.targets.{str(name).strip()}",
+                )
+                for name, target in raw_targets.items()
+            ]
+        sector_targets_by_key: Dict[tuple[str, str], AnalysisSectorTarget] = {}
+        for pollutant_name, raw_sector_targets in (
+            ("pm25", raw_pm25_targets),
+            ("nox", raw_nox_targets),
+        ):
+            if raw_sector_targets is None:
+                continue
+            if not isinstance(raw_sector_targets, dict):
+                raise ValueError(
+                    f"impacts.analysis.{pollutant_name}_annual_targets_short_tons must be a mapping of source -> sector -> annual target"
+                )
+            for source, sectors in raw_sector_targets.items():
+                source_name = str(source).strip()
+                source_path = f"impacts.analysis.{pollutant_name}_annual_targets_short_tons.{source_name}"
+                if not isinstance(sectors, dict):
+                    raise ValueError(f"{source_path} must be a mapping of sector -> annual target")
+                for sector, value in sectors.items():
+                    sector_name = str(sector).strip()
+                    key = (source_name, sector_name)
+                    existing = sector_targets_by_key.get(key)
+                    if existing is None:
+                        existing = AnalysisSectorTarget(source=source_name, sector=sector_name)
+                    if pollutant_name == "pm25":
+                        existing = AnalysisSectorTarget(
+                            source=existing.source,
+                            sector=existing.sector,
+                            annual_pm25_short_tons=_required_float(value, f"{source_path}.{sector_name}"),
+                            annual_nox_short_tons=existing.annual_nox_short_tons,
+                        )
+                    else:
+                        existing = AnalysisSectorTarget(
+                            source=existing.source,
+                            sector=existing.sector,
+                            annual_pm25_short_tons=existing.annual_pm25_short_tons,
+                            annual_nox_short_tons=_required_float(value, f"{source_path}.{sector_name}"),
+                        )
+                    sector_targets_by_key[key] = existing
+        sector_targets = list(sector_targets_by_key.values())
+        inventory_file = _optional_string(payload.get("inventory_file"))
+        inventory_label = _optional_string(payload.get("inventory_label"))
+        if targets and (not inventory_file or not inventory_label):
+            raise ValueError(
+                "impacts.analysis.inventory_file and impacts.analysis.inventory_label are required when impacts.analysis.targets is configured"
+            )
+        return cls(
+            inventory_file=inventory_file,
+            inventory_label=inventory_label,
+            targets=targets,
+            sector_targets=sector_targets,
+        )
 
 @dataclass(frozen=True)
 class Impacts:
@@ -339,12 +526,13 @@ class Impacts:
     emissions: Emissions
     dispersions: Dispersions
     exposure: "Exposure"
+    analysis: Analysis = field(default_factory=Analysis)
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Impacts":
         _reject_unknown_keys(
             payload,
-            {"local_input_folder", "local_output_folder", "emissions", "dispersions", "exposure"},
+            {"local_input_folder", "local_output_folder", "emissions", "dispersions", "exposure", "analysis"},
             "impacts",
         )
         return cls(
@@ -353,6 +541,7 @@ class Impacts:
             emissions=Emissions.from_dict(dict(payload.get("emissions", {}) or {})),
             dispersions=Dispersions.from_dict(dict(payload.get("dispersions", {}) or {})),
             exposure=Exposure.from_dict(dict(payload.get("exposure", {}) or {})),
+            analysis=Analysis.from_dict(dict(payload.get("analysis", {}) or {})),
         )
 
 
@@ -416,11 +605,12 @@ class ImpactsSettings:
                 "emissions": {
                     "osm_network_folder": self.impacts.emissions.osm_network_folder,
                     "emissions_rates_folder": self.impacts.emissions.emissions_rates_folder,
-                    "activity_totals_file": self.impacts.emissions.activity_totals_file,
                     "inventory_file": self.impacts.emissions.inventory_file,
                     "annualization_days_or_file": self.impacts.emissions.annualization_days_or_file,
                     "population_sample": self.impacts.emissions.population_sample,
                     "transit_sample": self.impacts.emissions.transit_sample,
+                    "include_passenger": self.impacts.emissions.include_passenger,
+                    "include_freight": self.impacts.emissions.include_freight,
                     "pollutants": list(self.impacts.emissions.source_pollutants),
                 },
                 "dispersions": {
@@ -438,11 +628,69 @@ class ImpactsSettings:
                         "asrv_patterns_file": self.impacts.dispersions.aermod.asrv_patterns_file,
                         "asrv_patterns_epsg": self.impacts.dispersions.aermod.asrv_patterns_epsg,
                         "asrv_nox_to_no2_ratios_file": self.impacts.dispersions.aermod.asrv_nox_to_no2_ratios_file,
+                        "default_site": self.impacts.dispersions.aermod.default_site,
+                        "default_urban_class": self.impacts.dispersions.aermod.default_urban_class,
+                        "default_temporal": self.impacts.dispersions.aermod.default_temporal,
+                        "default_release_height": self.impacts.dispersions.aermod.default_release_height,
                     },
                 },
                 "exposure": {
                     "enabled": self.impacts.exposure.enabled,
                     "population_folder": self.impacts.exposure.population_folder,
+                },
+                "analysis": {
+                    "pm25_annual_targets_short_tons": {
+                        source: {
+                            sector: target.annual_pm25_short_tons
+                            for sector, target in sectors.items()
+                            if target.annual_pm25_short_tons is not None
+                        }
+                        for source, sectors in {
+                            source: {
+                                target.sector: target
+                                for target in self.impacts.analysis.sector_targets
+                                if target.source == source
+                            }
+                            for source in dict.fromkeys(target.source for target in self.impacts.analysis.sector_targets)
+                        }.items()
+                        if any(target.annual_pm25_short_tons is not None for target in sectors.values())
+                    },
+                    "nox_annual_targets_short_tons": {
+                        source: {
+                            sector: target.annual_nox_short_tons
+                            for sector, target in sectors.items()
+                            if target.annual_nox_short_tons is not None
+                        }
+                        for source, sectors in {
+                            source: {
+                                target.sector: target
+                                for target in self.impacts.analysis.sector_targets
+                                if target.source == source
+                            }
+                            for source in dict.fromkeys(target.source for target in self.impacts.analysis.sector_targets)
+                        }.items()
+                        if any(target.annual_nox_short_tons is not None for target in sectors.values())
+                    },
+                    **(
+                        {
+                            "inventory_file": self.impacts.analysis.inventory_file,
+                            "inventory_label": self.impacts.analysis.inventory_label,
+                            "targets": {
+                                target.name: {
+                                    pollutant: {
+                                        "columns": list(selector.columns),
+                                        "prefixes": list(selector.prefixes),
+                                        "exclude_columns": list(selector.exclude_columns),
+                                        "exclude_prefixes": list(selector.exclude_prefixes),
+                                    }
+                                    for pollutant, selector in target.pollutants.items()
+                                }
+                                for target in self.impacts.analysis.targets
+                            },
+                        }
+                        if self.impacts.analysis.targets
+                        else {}
+                    ),
                 },
             },
         }

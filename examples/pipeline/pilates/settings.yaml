@@ -30,11 +30,12 @@ impacts:
   emissions:
     osm_network_folder: r5/sfbay-cbg5500-weakConn-network
     emissions_rates_folder: vehicle-tech/emissions/2018-Baseline
-    activity_totals_file: vehicle-tech/emissions/SFBay_2018_Annual_activity_totals.parquet
     inventory_file: beam/production/sfbay/vehicle-tech/emissions/sf-emfac-2018-emissions-inventory-with-activity.parquet
     annualization_days_or_file: examples/emfac/2018_mappings/vehicle_operation_days_per_year.csv
     population_sample: 0.08
     transit_sample: 1.0
+    include_passenger: true
+    include_freight: true
     pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
   dispersions:
     inmap:
@@ -50,6 +51,27 @@ impacts:
       asrv_patterns_file: vehicle-tech/dispersions/aermod/aermod_patterns_wgs84.parquet
       asrv_patterns_epsg: 4326
       asrv_nox_to_no2_ratios_file:
+      default_site: LIVERMORE_2015
+      default_urban_class: 0
+      default_temporal: CITYSTREET
+      default_release_height: 1.0
   exposure:
     enabled: true
     population_folder: urbansim/atlas-2019
+  analysis:
+    pm25_annual_targets_short_tons:
+      mobile_onroad:
+        passenger_cars: 714.26
+        heavy_duty_trucks: 486.16
+        light_duty_trucks: 313.92
+        medium_duty_trucks: 151.68
+        other: 43.62
+      road_dust:
+        all: 1499.25
+    nox_annual_targets_short_tons:
+      mobile_onroad:
+        passenger_cars: 3964.37
+        heavy_duty_trucks: 16524.57
+        light_duty_trucks: 3083.81
+        medium_duty_trucks: 1880.14
+        other: 1429.61

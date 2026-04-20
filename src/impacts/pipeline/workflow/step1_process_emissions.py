@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import re
 from typing import Any
 from typing import Dict
 from typing import Optional
@@ -16,23 +17,20 @@ from ...common import log_substep_banner
 from ...common import normalize_county_fips
 from ...common import read_table
 from ...common import read_vector
+from ...common import resolve_required_manifest_input
 from ...manifest.schema import PipelineConfig
-from .prepare_emissions_from_skims import _build_beam_activity_totals
 from .prepare_emissions_from_skims import _build_combined_allocated_table
 from .prepare_emissions_from_skims import _build_combined_grouped_table
+from .prepare_emissions_from_skims import _load_vehicle_type_activity_lookup
 from .prepare_emissions_from_skims import _reuse_existing_outputs
 from .prepare_emissions_from_skims import load_or_prepare_skims_df
 from . import _step_label
 
 logger = logging.getLogger(__name__)
 
-_COUNTY_CORRECTION_COLUMNS = {
-    "county_fips": "countyfp",
-    "tot_vmt": "tot_vmt_vehicle_miles_per_year",
-    "tot_trips": "tot_trips_per_year",
-}
 _VMT_PROCESSES = {"RUNEX", "PMBW", "PMTW", "PRDUST", "RUNLOSS"}
 _TRIP_PROCESSES = {"HOTSOAK", "DIURN", "STREX"}
+_FREIGHT_EMFAC_PATTERN = re.compile(r"^(T6|T7|LHD1|LHD2|MH)", re.IGNORECASE)
 
 
 def _safe_ratio(
@@ -57,51 +55,256 @@ def _safe_ratio(
     return ratio
 
 
+def _build_county_name_lookup(county_boundaries_path: str) -> dict[str, str]:
+    county_gdf = read_vector(county_boundaries_path)
+    if "COUNTYFP" not in county_gdf.columns or "NAME" not in county_gdf.columns:
+        raise ValueError("County boundaries must include COUNTYFP and NAME for inventory-based correction.")
+    lookup = county_gdf[["COUNTYFP", "NAME"]].drop_duplicates().copy()
+    lookup["countyfp"] = normalize_county_fips(lookup["COUNTYFP"])
+    lookup["NAME"] = lookup["NAME"].astype(str).str.strip()
+    lookup = lookup.loc[lookup["countyfp"].notna() & lookup["NAME"].ne("")].copy()
+    return dict(zip(lookup["NAME"], lookup["countyfp"]))
+
+
+def _fallback_inventory_group_for_category(category: object) -> Optional[str]:
+    token = str("" if pd.isna(category) else category).strip()
+    if not token:
+        return None
+    if _FREIGHT_EMFAC_PATTERN.match(token):
+        return "freight"
+    if token in {"OBUS", "SBUS", "UBUS", "MCY", "Motor Coach"}:
+        return "passenger"
+    return None
+
+
+def _build_beam_activity_details(
+    *,
+    skims_df: pd.DataFrame,
+    grouped_df: pd.DataFrame,
+    vehicle_types_path: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    required_skims = {"linkId", "vehicleTypeId", "totVMT", "totTrips"}
+    missing_skims = sorted(required_skims - set(skims_df.columns))
+    if missing_skims:
+        raise ValueError(f"Prepared skims are missing required activity columns: {missing_skims}")
+    required_grouped = {"linkId", "countyfp", "county_zone_edge_proportion"}
+    missing_grouped = sorted(required_grouped - set(grouped_df.columns))
+    if missing_grouped:
+        raise ValueError(f"Grouped intersection is missing required county allocation columns: {missing_grouped}")
+
+    vehicle_lookup = _load_vehicle_type_activity_lookup(vehicle_types_path)
+    county_link = grouped_df[["linkId", "countyfp", "county_zone_edge_proportion"]].copy()
+    county_link["countyfp"] = normalize_county_fips(county_link["countyfp"])
+    county_link["county_zone_edge_proportion"] = pd.to_numeric(
+        county_link["county_zone_edge_proportion"], errors="coerce"
+    ).fillna(0.0)
+    county_link = (
+        county_link.groupby(["linkId", "countyfp"], dropna=False)["county_zone_edge_proportion"]
+        .sum()
+        .reset_index()
+    )
+
+    activity = skims_df[["linkId", "vehicleTypeId", "totVMT", "totTrips"]].copy()
+    activity["vehicleTypeId"] = activity["vehicleTypeId"].astype(str).str.strip()
+    activity["totVMT"] = pd.to_numeric(activity["totVMT"], errors="coerce").fillna(0.0)
+    activity["totTrips"] = pd.to_numeric(activity["totTrips"], errors="coerce").fillna(0.0)
+    activity = (
+        activity.groupby(["linkId", "vehicleTypeId"], dropna=False)[["totVMT", "totTrips"]]
+        .max()
+        .reset_index()
+    )
+    detailed = activity.merge(county_link, how="inner", on="linkId")
+    detailed["totVMT"] = detailed["totVMT"] * detailed["county_zone_edge_proportion"]
+    detailed["totTrips"] = detailed["totTrips"] * detailed["county_zone_edge_proportion"]
+    detailed = detailed.merge(vehicle_lookup, how="left", on="vehicleTypeId")
+    missing_vehicle_types = (
+        detailed.loc[
+            detailed["assignment_group"].isna() | detailed["emfacVehicleCategory"].isna(),
+            "vehicleTypeId",
+        ]
+        .drop_duplicates()
+        .tolist()
+    )
+    if missing_vehicle_types:
+        raise ValueError(
+            "Could not resolve assignment_group/emfacVehicleCategory for skim vehicleTypeId values: "
+            f"{missing_vehicle_types[:10]}"
+        )
+    detailed = (
+        detailed.groupby(["countyfp", "assignment_group", "emfacVehicleCategory"], dropna=False)[["totVMT", "totTrips"]]
+        .sum()
+        .reset_index()
+    )
+    totals = (
+        detailed.groupby(["countyfp", "assignment_group"], dropna=False)[["totVMT", "totTrips"]]
+        .sum()
+        .reset_index()
+    )
+    return detailed, totals
+
+
+def _derive_inventory_activity_targets(
+    *,
+    inventory_path: str,
+    county_name_lookup: dict[str, str],
+    beam_activity_details: pd.DataFrame,
+) -> pd.DataFrame:
+    inventory = read_table(inventory_path)
+    required = {
+        "county",
+        "vehicleCategory",
+        "fuel",
+        "modelYear",
+        "total_vmt_vehicle_miles_per_year",
+        "trips_per_year",
+    }
+    missing = sorted(required - set(inventory.columns))
+    if missing:
+        raise ValueError(f"Inventory file missing required activity columns: {missing}")
+
+    prepared = inventory.copy()
+    prepared["county"] = prepared["county"].astype(str).str.strip()
+    prepared["countyfp"] = prepared["county"].map(county_name_lookup)
+    missing_counties = prepared.loc[prepared["countyfp"].isna(), "county"].drop_duplicates().tolist()
+    if missing_counties:
+        raise ValueError(
+            "Could not map some inventory counties to FIPS codes using county boundaries: "
+            f"{missing_counties[:10]}"
+        )
+    prepared["vehicleCategory"] = prepared["vehicleCategory"].astype(str).str.strip()
+    prepared["total_vmt_vehicle_miles_per_year"] = pd.to_numeric(
+        prepared["total_vmt_vehicle_miles_per_year"], errors="coerce"
+    ).fillna(0.0)
+    prepared["trips_per_year"] = pd.to_numeric(prepared["trips_per_year"], errors="coerce").fillna(0.0)
+
+    vmt_targets = (
+        prepared.groupby(["countyfp", "vehicleCategory"], dropna=False)["total_vmt_vehicle_miles_per_year"]
+        .sum()
+        .reset_index()
+        .rename(columns={"total_vmt_vehicle_miles_per_year": "totVMT"})
+    )
+    trip_targets = (
+        prepared.groupby(["countyfp", "vehicleCategory", "fuel", "modelYear"], dropna=False)["trips_per_year"]
+        .first()
+        .reset_index()
+        .groupby(["countyfp", "vehicleCategory"], dropna=False)["trips_per_year"]
+        .sum()
+        .reset_index()
+        .rename(columns={"trips_per_year": "totTrips"})
+    )
+    targets = vmt_targets.merge(trip_targets, how="outer", on=["countyfp", "vehicleCategory"]).fillna(0.0)
+
+    beam_shares = beam_activity_details.copy().rename(columns={"emfacVehicleCategory": "vehicleCategory"})
+    beam_shares["totVMT"] = pd.to_numeric(beam_shares["totVMT"], errors="coerce").fillna(0.0)
+    beam_shares["totTrips"] = pd.to_numeric(beam_shares["totTrips"], errors="coerce").fillna(0.0)
+    county_category_totals = (
+        beam_shares.groupby(["countyfp", "vehicleCategory"], dropna=False)[["totVMT", "totTrips"]]
+        .sum()
+        .rename(columns={"totVMT": "totVMT_category", "totTrips": "totTrips_category"})
+        .reset_index()
+    )
+    county_category_shares = beam_shares.merge(
+        county_category_totals,
+        how="left",
+        on=["countyfp", "vehicleCategory"],
+    )
+    county_category_shares["vmt_share"] = _safe_ratio(
+        county_category_shares["totVMT"],
+        county_category_shares["totVMT_category"],
+        label="inventory county/category totVMT",
+    )
+    county_category_shares["trip_share"] = _safe_ratio(
+        county_category_shares["totTrips"],
+        county_category_shares["totTrips_category"],
+        label="inventory county/category totTrips",
+    )
+
+    global_category_totals = (
+        beam_shares.groupby(["vehicleCategory"], dropna=False)[["totVMT", "totTrips"]]
+        .sum()
+        .rename(columns={"totVMT": "totVMT_category", "totTrips": "totTrips_category"})
+        .reset_index()
+    )
+    global_category_shares = beam_shares.groupby(["vehicleCategory", "assignment_group"], dropna=False)[["totVMT", "totTrips"]].sum().reset_index()
+    global_category_shares = global_category_shares.merge(
+        global_category_totals,
+        how="left",
+        on=["vehicleCategory"],
+    )
+    global_category_shares["vmt_share"] = _safe_ratio(
+        global_category_shares["totVMT"],
+        global_category_shares["totVMT_category"],
+        label="inventory global/category totVMT",
+    )
+    global_category_shares["trip_share"] = _safe_ratio(
+        global_category_shares["totTrips"],
+        global_category_shares["totTrips_category"],
+        label="inventory global/category totTrips",
+    )
+
+    rows: list[dict[str, object]] = []
+    for row in targets.itertuples(index=False):
+        county_matches = county_category_shares[
+            (county_category_shares["countyfp"] == row.countyfp)
+            & (county_category_shares["vehicleCategory"] == row.vehicleCategory)
+        ]
+        if county_matches.empty:
+            county_matches = global_category_shares[
+                global_category_shares["vehicleCategory"] == row.vehicleCategory
+            ]
+        if county_matches.empty:
+            fallback_group = _fallback_inventory_group_for_category(row.vehicleCategory)
+            if fallback_group is None:
+                raise ValueError(
+                    "Could not split inventory activity into passenger/freight for EMFAC vehicleCategory="
+                    f"{row.vehicleCategory!r}. No BEAM share and no deterministic fallback."
+                )
+            county_matches = pd.DataFrame(
+                [{"assignment_group": fallback_group, "vmt_share": 1.0, "trip_share": 1.0}]
+            )
+        for share_row in county_matches.itertuples(index=False):
+            rows.append(
+                {
+                    "countyfp": row.countyfp,
+                    "assignment_group": str(share_row.assignment_group),
+                    "totVMT": float(row.totVMT) * float(share_row.vmt_share),
+                    "totTrips": float(row.totTrips) * float(share_row.trip_share),
+                }
+            )
+    allocated = pd.DataFrame(rows)
+    return (
+        allocated.groupby(["countyfp", "assignment_group"], dropna=False)[["totVMT", "totTrips"]]
+        .sum()
+        .reset_index()
+    )
+
+
 def _derive_county_correction_factors(
     beam_activity_totals: pd.DataFrame,
-    corrections_path: str,
-    *,
-    correction_columns: Optional[Dict[str, str]] = None,
+    inventory_targets: pd.DataFrame,
 ) -> pd.DataFrame:
-    columns = dict(_COUNTY_CORRECTION_COLUMNS)
-    if correction_columns:
-        columns.update(correction_columns)
-    corrections = read_table(corrections_path)
-    fips_source_col = columns["county_fips"]
-    if fips_source_col not in corrections.columns:
-        raise ValueError(
-            f"County corrections file must include county FIPS column: {columns['county_fips']}."
-        )
-
-    required_targets = {
-        "totVMT": columns["tot_vmt"],
-        "totTrips": columns["tot_trips"],
-    }
-    missing = [target_col for target_col in required_targets.values() if target_col not in corrections.columns]
-    if missing:
-        raise ValueError(f"County corrections file missing required activity total columns: {missing}")
-
-    targets = corrections.copy()
-    targets["countyfp"] = normalize_county_fips(targets[fips_source_col])
-    for output_col, source_col in required_targets.items():
-        targets[output_col] = pd.to_numeric(targets[source_col], errors="coerce").fillna(0.0)
-    targets = targets[["countyfp", "totVMT", "totTrips"]].drop_duplicates("countyfp")
-
-    merged = targets.merge(
+    merged = inventory_targets.merge(
         beam_activity_totals.rename(
             columns={
                 "totVMT": "totVMT_source",
                 "totTrips": "totTrips_source",
             }
         ),
-        how="left",
-        on="countyfp",
+        how="outer",
+        on=["countyfp", "assignment_group"],
     )
-    for col in ["totVMT_source", "totTrips_source"]:
+    for col in ["totVMT", "totTrips", "totVMT_source", "totTrips_source"]:
         merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0.0)
-
-    merged["factor_totVMT"] = _safe_ratio(merged["totVMT"], merged["totVMT_source"], label="totVMT")
-    merged["factor_totTrips"] = _safe_ratio(merged["totTrips"], merged["totTrips_source"], label="totTrips")
+    merged["factor_totVMT"] = _safe_ratio(
+        merged["totVMT"],
+        merged["totVMT_source"],
+        label="totVMT by county/assignment_group",
+    )
+    merged["factor_totTrips"] = _safe_ratio(
+        merged["totTrips"],
+        merged["totTrips_source"],
+        label="totTrips by county/assignment_group",
+    )
     return merged
 
 
@@ -110,13 +313,23 @@ def apply_county_corrections(
     county_correction_factors: pd.DataFrame,
     *,
     county_col: str,
+    vehicle_types_path: str,
 ) -> pd.DataFrame:
     result = allocated_df.copy()
+    vehicle_lookup = _load_vehicle_type_activity_lookup(vehicle_types_path)[["vehicleTypeId", "assignment_group"]].copy()
+    result["vehicleTypeId"] = result["vehicleTypeId"].astype(str).str.strip()
+    result = result.merge(vehicle_lookup, how="left", on="vehicleTypeId")
+    missing_vehicle_types = result.loc[result["assignment_group"].isna(), "vehicleTypeId"].drop_duplicates().tolist()
+    if missing_vehicle_types:
+        raise ValueError(
+            "Could not resolve passenger/freight assignment for allocated rows with vehicleTypeId values: "
+            f"{missing_vehicle_types[:10]}"
+        )
     result["_fips_norm"] = normalize_county_fips(result[county_col])
     result = result.merge(
-        county_correction_factors[["countyfp", "factor_totVMT", "factor_totTrips"]].rename(columns={"countyfp": "_fips_norm"}),
+        county_correction_factors[["countyfp", "assignment_group", "factor_totVMT", "factor_totTrips"]].rename(columns={"countyfp": "_fips_norm"}),
         how="left",
-        on="_fips_norm",
+        on=["_fips_norm", "assignment_group"],
     )
     result["factor_totVMT"] = pd.to_numeric(result["factor_totVMT"], errors="coerce").fillna(1.0)
     result["factor_totTrips"] = pd.to_numeric(result["factor_totTrips"], errors="coerce").fillna(1.0)
@@ -148,7 +361,7 @@ def apply_county_corrections(
     for col in emission_allocated_cols:
         result[col] = pd.to_numeric(result[col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32) * factor_arr
 
-    return result.drop(columns=["_fips_norm", "factor_totVMT", "factor_totTrips"])
+    return result.drop(columns=["_fips_norm", "assignment_group", "factor_totVMT", "factor_totTrips"])
 
 
 def _save_grid_emissions(
@@ -256,7 +469,10 @@ def _split_zone_outputs(
 def _build_combined_corrected_table(
     *,
     allocated_df: pd.DataFrame,
+    grouped_df: pd.DataFrame,
+    skims_df: pd.DataFrame,
     pipeline: PipelineConfig,
+    manifest_inputs: Dict[str, Any],
 ) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     if allocated_df is None or allocated_df.empty:
         return None, None, None
@@ -268,32 +484,35 @@ def _build_combined_corrected_table(
             f"Expected: {county_col}."
         )
 
-    if pipeline.activity_totals_file:
-        logger.info(
-            "%s deriving county activity correction factors from %s",
-            _step_label("1.3"),
-            pipeline.activity_totals_file,
-        )
-        beam_activity_totals = _build_beam_activity_totals(
-            allocated_df,
-            county_col=county_col,
-        )
-        county_correction_factors = _derive_county_correction_factors(
-            beam_activity_totals,
-            corrections_path=pipeline.activity_totals_file,
-            correction_columns=pipeline.activity_totals_columns or None,
-        )
-        logger.info("%s correcting allocated emissions by county/process factors", _step_label("1.4"))
-        corrected = apply_county_corrections(
-            allocated_df,
-            county_correction_factors,
-            county_col=county_col,
-        )
-    else:
-        corrected = allocated_df
-        beam_activity_totals = None
-        county_correction_factors = None
-        logger.info("%s no corrections configured; using allocated totals as-is", _step_label("1.4"))
+    inventory_path = pipeline.inventory_file
+    vehicle_types_path = resolve_required_manifest_input(manifest_inputs, key="vehicle_types_input")
+    county_boundaries_path = resolve_required_manifest_input(manifest_inputs, key="county_boundaries")
+    logger.info(
+        "%s deriving county activity correction factors from inventory %s",
+        _step_label("1.3"),
+        inventory_path,
+    )
+    beam_activity_details, beam_activity_totals = _build_beam_activity_details(
+        skims_df=skims_df,
+        grouped_df=grouped_df,
+        vehicle_types_path=vehicle_types_path,
+    )
+    inventory_targets = _derive_inventory_activity_targets(
+        inventory_path=inventory_path,
+        county_name_lookup=_build_county_name_lookup(county_boundaries_path),
+        beam_activity_details=beam_activity_details,
+    )
+    county_correction_factors = _derive_county_correction_factors(
+        beam_activity_totals,
+        inventory_targets,
+    )
+    logger.info("%s correcting allocated emissions by county/process/assignment factors", _step_label("1.4"))
+    corrected = apply_county_corrections(
+        allocated_df,
+        county_correction_factors,
+        county_col=county_col,
+        vehicle_types_path=vehicle_types_path,
+    )
     return corrected, beam_activity_totals, county_correction_factors
 
 
@@ -321,6 +540,8 @@ def run(
         annualization_days_or_file=pipeline.annualization_days_or_file,
         population_sample=float(pipeline.population_sample),
         transit_sample=float(pipeline.transit_sample),
+        include_passenger=bool(pipeline.include_passenger),
+        include_freight=bool(pipeline.include_freight),
         manifest_inputs=manifest_inputs,
     )
 
@@ -337,7 +558,10 @@ def run(
     log_substep_banner("1.3", "apply activity corrections", logger=logger)
     combined_corrected_df, beam_activity_totals, county_correction_factors = _build_combined_corrected_table(
         allocated_df=combined_allocated_df,
+        grouped_df=combined_grouped_df,
+        skims_df=skims_df,
         pipeline=pipeline,
+        manifest_inputs=manifest_inputs or {},
     )
 
     beam_activity_totals_path = None

@@ -12,14 +12,6 @@ ACTIVITY_COLUMN = "speedMph_timeMin"
 SPEED_PROCESSES = ["RUNEX", "PMBW", "PTOEX"]
 TIME_PROCESSES = ["STREX"]
 OTHER_PROCESSES = ["DIURN", "HOTSOAK", "IDLEX", "PMTW", "RUNLOSS"]
-PTO_VEHICLE_CATEGORIES = [
-    "T7 Public Class 8",
-    "T7 Utility Class 8",
-    "T7 Single Concrete/Transit Mix Class 8",
-    "T7 Single Dump Class 8",
-    "T7 Single Other Class 8",
-    "T7 SWCV Class 8",
-]
 POLLUTANT_COLUMNS = [
     "bc_gram",
     "ch4_gram",
@@ -85,6 +77,7 @@ def build_comprehensive_project_analysis(
     project_analysis_prdust: pd.DataFrame,
     emissions_inventory: pd.DataFrame,
     emfac_category_fuel_mapping: pd.DataFrame,
+    pto_vehicle_categories: list[str] | None = None,
     pollutant_columns: list[str] | None = None,
 ) -> pd.DataFrame:
     supported_emfac_combinations = (
@@ -140,8 +133,9 @@ def build_comprehensive_project_analysis(
     speed_rates = base_rates.merge(speed_processes, how="cross").merge(speeds, how="cross")
     speed_rates["roadCategory"] = pd.NA
 
+    pto_vehicle_category_set = {str(category).strip() for category in pto_vehicle_categories or [] if str(category).strip()}
     pto_base_rates = base_rates.loc[
-        base_rates["vehicleCategory"].astype(str).isin(PTO_VEHICLE_CATEGORIES)
+        base_rates["vehicleCategory"].astype(str).isin(pto_vehicle_category_set)
     ].copy()
     pto_rates = pto_base_rates.merge(pto_processes, how="cross").merge(speeds, how="cross")
     pto_rates["roadCategory"] = pd.NA
@@ -226,6 +220,7 @@ def _run_step2_substep_build_group_surface(
     project_analysis_prdust: pd.DataFrame,
     emissions_inventory: pd.DataFrame,
     emfac_category_fuel_mapping: pd.DataFrame,
+    pto_vehicle_categories: list[str] | None = None,
 ) -> pd.DataFrame:
     group_mapping = emfac_category_fuel_mapping[
         emfac_category_fuel_mapping["group"].astype(str).str.lower().eq(group_name)
@@ -235,20 +230,27 @@ def _run_step2_substep_build_group_surface(
         project_analysis_prdust=project_analysis_prdust,
         emissions_inventory=emissions_inventory,
         emfac_category_fuel_mapping=group_mapping,
+        pto_vehicle_categories=pto_vehicle_categories,
         pollutant_columns=POLLUTANT_COLUMNS,
     )
+
+
+def _pto_vehicle_categories(workflow: dict[str, object]) -> list[str]:
+    return list(workflow["run"]["pto_as_process"]["targets"])
 
 
 def run_step2(workflow: dict[str, object]) -> dict[str, object]:
     print("  Step 2. Build Comprehensive Project Analysis")
     print("    2.1 Build comprehensive output surface")
     project_analysis, project_analysis_prdust, emissions_inventory, emfac_category_fuel_mapping = _run_step2_substep_load_inputs(workflow)
+    pto_vehicle_categories = _pto_vehicle_categories(workflow)
     passenger_comprehensive = _run_step2_substep_build_group_surface(
         group_name="passenger",
         project_analysis=project_analysis,
         project_analysis_prdust=project_analysis_prdust,
         emissions_inventory=emissions_inventory,
         emfac_category_fuel_mapping=emfac_category_fuel_mapping,
+        pto_vehicle_categories=pto_vehicle_categories,
     )
     freight_comprehensive = _run_step2_substep_build_group_surface(
         group_name="freight",
@@ -256,6 +258,7 @@ def run_step2(workflow: dict[str, object]) -> dict[str, object]:
         project_analysis_prdust=project_analysis_prdust,
         emissions_inventory=emissions_inventory,
         emfac_category_fuel_mapping=emfac_category_fuel_mapping,
+        pto_vehicle_categories=pto_vehicle_categories,
     )
     _write_parquet(passenger_comprehensive, workflow["paths"]["project_analysis_passenger"])
     _write_parquet(freight_comprehensive, workflow["paths"]["project_analysis_freight"])

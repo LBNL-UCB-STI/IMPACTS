@@ -33,6 +33,10 @@ def _pipeline_payload(tmp_path: Path) -> dict:
         "grid_size_meters": 100.0,
         "asrv_patterns_file": str(tmp_path / "asrv_patterns.parquet"),
         "asrv_patterns_epsg": 4326,
+        "aermod_default_site": "LIVERMORE_2015",
+        "aermod_default_urban_class": 0,
+        "aermod_default_temporal": "CITYSTREET",
+        "aermod_default_release_height": 1.0,
         "aermod_full_grid_path": str(tmp_path / "aermod_full_grid.parquet"),
         "aermod_grid_path": str(tmp_path / "aermod_grid.parquet"),
         "aermod_grid_epsg": 26910,
@@ -41,13 +45,14 @@ def _pipeline_payload(tmp_path: Path) -> dict:
         "start_year": 2017,
         "county_state_fips": "06",
         "county_fips_codes": ["001", "013"],
-        "activity_totals_file": str(tmp_path / "activity.parquet"),
-        "activity_totals_columns": {"county": "countyfp", "year": "year"},
+        "inventory_file": str(tmp_path / "inventory.parquet"),
         "prepared_skims_group_cols": ["hour", "linkId"],
         "pollutants": ["NOx", "PM2_5"],
         "source_pollutants": ["NOx", "PM2_5"],
         "annualization_days_or_file": 330.0,
         "population_sample": 0.1,
+        "include_passenger": True,
+        "include_freight": True,
     }
 
 
@@ -88,8 +93,21 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.dispersions.inmap.enabled is True
     assert config.impacts.dispersions.inmap.grid_path.endswith("isrm_polygon_wgs84.gpkg")
     assert config.impacts.dispersions.aermod.enabled is True
+    assert config.impacts.dispersions.aermod.default_site == "LIVERMORE_2015"
+    assert config.impacts.dispersions.aermod.default_temporal == "CITYSTREET"
     assert config.impacts.exposure.enabled is True
     assert config.impacts.exposure.population_folder == "urbansim/atlas-2019"
+    assert config.impacts.emissions.include_passenger is True
+    assert config.impacts.emissions.include_freight is True
+    assert len(config.impacts.analysis.sector_targets) == 6
+    assert config.impacts.analysis.sector_targets[0].source == "mobile_onroad"
+    assert config.impacts.analysis.sector_targets[0].sector == "passenger_cars"
+    assert config.impacts.analysis.sector_targets[0].annual_pm25_short_tons == 714.26
+    assert config.impacts.analysis.sector_targets[0].annual_nox_short_tons == 3964.37
+    assert config.impacts.analysis.sector_targets[-1].source == "road_dust"
+    assert config.impacts.analysis.sector_targets[-1].annual_pm25_short_tons == 1499.25
+    assert config.impacts.analysis.sector_targets[-1].annual_nox_short_tons is None
+    assert config.impacts.analysis.targets == []
 
 
 def test_settings_and_pipeline_allow_annualization_days_or_file_csv_path(tmp_path: Path):
@@ -119,8 +137,11 @@ def test_settings_and_pipeline_allow_annualization_days_or_file_csv_path(tmp_pat
                 "  emissions:",
                 "    osm_network_folder: r5/network",
                 "    emissions_rates_folder: vehicle-tech/emissions/2018-Baseline",
+                "    inventory_file: beam/production/sfbay/vehicle-tech/emissions/inventory.parquet",
                 f"    annualization_days_or_file: {days_csv.name}",
                 "    population_sample: 0.1",
+                "    include_passenger: false",
+                "    include_freight: true",
                 "    pollutants: [NOx, PM25]",
                 "  dispersions:",
                 "    inmap:",
@@ -135,11 +156,15 @@ def test_settings_and_pipeline_allow_annualization_days_or_file_csv_path(tmp_pat
     )
     config = load_settings_from_yaml(settings_yaml)
     assert config.impacts.emissions.annualization_days_or_file == days_csv.name
+    assert config.impacts.emissions.include_passenger is False
+    assert config.impacts.emissions.include_freight is True
 
     payload = _pipeline_payload(tmp_path)
     payload["annualization_days_or_file"] = str(days_csv)
     pipeline = PipelineConfig.from_dict(payload)
     assert pipeline.annualization_days_or_file == str(days_csv)
+    assert pipeline.include_passenger is True
+    assert pipeline.include_freight is True
 
 
 def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_path: Path):
@@ -182,7 +207,13 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
     assert config.impacts.dispersions.inmap.isrm_zarr == "~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr"
     assert config.impacts.dispersions.aermod.enabled is True
     assert config.impacts.dispersions.aermod.grid_size_meters == 100.0
+    assert config.impacts.dispersions.aermod.default_site == "LIVERMORE_2015"
+    assert config.impacts.dispersions.aermod.default_temporal == "CITYSTREET"
     assert config.impacts.exposure.population_folder == "urbansim/2018"
+    assert config.impacts.emissions.include_passenger is True
+    assert config.impacts.emissions.include_freight is True
+    assert len(config.impacts.analysis.sector_targets) == 6
+    assert config.impacts.analysis.targets == []
 
 
 def test_manifest_models_round_trip_current_shape(tmp_path: Path):

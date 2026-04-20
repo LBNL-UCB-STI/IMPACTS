@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+import re
 import tempfile
 from typing import Optional
 
@@ -26,13 +27,6 @@ _MODELED_POLLUTANT_COLUMNS = {
     "NOx": "tons_per_year_NOx_inmap_allocated",
     "BC": "tons_per_year_BC_inmap_allocated",
 }
-_INVENTORY_EMFAC_PREFIXES = {
-    "PM2.5": ("pm25_",),
-    "NOx": ("nox_",),
-    "BC": ("bc_", "bch_", "bcm_"),
-}
-
-
 def _load_county_lookup(county_boundaries_path: str) -> pd.DataFrame:
     import geopandas as gpd
 
@@ -81,16 +75,40 @@ def _aggregate_modeled_emissions(
     return pd.concat(rows, ignore_index=True)
 
 
-def _aggregate_inventory_emissions(inventory_path: str) -> pd.DataFrame:
+def _slugify(value: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9]+", "_", str(value).strip()).strip("_").lower()
+    return token or "target"
+
+
+def _aggregate_inventory_emissions(
+    inventory_path: str,
+    *,
+    pollutant_targets: dict[str, dict[str, tuple[str, ...]]],
+) -> pd.DataFrame:
     inventory = read_table(inventory_path)
     if "county" not in inventory.columns:
         raise ValueError("Inventory input must include county for analysis Step 1.")
     rows: list[pd.DataFrame] = []
-    for pollutant, prefixes in _INVENTORY_EMFAC_PREFIXES.items():
+    for pollutant, selector in pollutant_targets.items():
+        explicit_columns = tuple(selector.get("columns", ()))
+        prefixes = tuple(selector.get("prefixes", ()))
+        exclude_columns = set(selector.get("exclude_columns", ()))
+        exclude_prefixes = tuple(selector.get("exclude_prefixes", ()))
+        if explicit_columns:
+            pollutant_cols = [
+                column for column in explicit_columns
+                if column in inventory.columns
+            ]
+        else:
+            pollutant_cols = [
+                column for column in inventory.columns
+                if any(column.startswith(prefix) for prefix in prefixes)
+                and column.endswith("_short_tons_per_year")
+            ]
         pollutant_cols = [
-            column for column in inventory.columns
-            if any(column.startswith(prefix) for prefix in prefixes)
-            and column.endswith("_short_tons_per_year")
+            column for column in pollutant_cols
+            if column not in exclude_columns
+            and not any(column.startswith(prefix) for prefix in exclude_prefixes)
         ]
         if not pollutant_cols:
             continue
@@ -107,8 +125,7 @@ def _aggregate_inventory_emissions(inventory_path: str) -> pd.DataFrame:
         rows.append(grouped[["county", "pollutant", "emfac_tons"]])
     if not rows:
         raise ValueError(
-            "Inventory input does not include supported EMFAC pollutant columns for analysis Step 1. "
-            "Expected pm25_*, nox_*, and optionally bc_*/bch_*/bcm_* columns ending in _short_tons_per_year."
+            "Inventory input does not include any configured pollutant columns for analysis Step 1."
         )
     return pd.concat(rows, ignore_index=True)
 
@@ -160,6 +177,7 @@ def _plot_county_comparison(
     comparison: pd.DataFrame,
     *,
     pollutant: str,
+    inventory_label: str,
     output_dir: Path,
 ) -> Optional[str]:
     subset = comparison.loc[comparison["pollutant"] == pollutant].copy()
@@ -181,13 +199,13 @@ def _plot_county_comparison(
         [pos + width / 2 for pos in x],
         subset["emfac_tons"].to_numpy(dtype=float),
         width=width,
-        label="EMFAC",
+        label=inventory_label,
         color="#ff7f0e",
     )
     ax.set_xticks(list(x))
     ax.set_xticklabels(subset["county"].tolist(), rotation=45, ha="right")
     ax.set_ylabel("Annual tons")
-    ax.set_title(f"{pollutant} by County: Simulation vs EMFAC")
+    ax.set_title(f"{pollutant} by County: Simulation vs {inventory_label}")
     ax.legend()
     ax.grid(axis="y", alpha=0.2)
     fig.tight_layout()
@@ -211,27 +229,35 @@ def run(
     county_boundaries_path: str,
     output_dir: Path,
     county_order: list[str],
+    target_name: str,
+    inventory_label: str,
+    pollutant_targets: dict[str, dict[str, tuple[str, ...]]],
 ) -> dict[str, str]:
-    log_step_banner("Analysis Step 1", "Compare Emissions Inventory", logger=logger)
-    log_substep_banner("1.1", "compare modeled emissions with EMFAC inventory", logger=logger)
+    log_step_banner("Analysis Step 1", f"Compare Emissions Inventory ({inventory_label})", logger=logger)
+    log_substep_banner("1.1", f"compare modeled emissions with {inventory_label} inventory", logger=logger)
     county_lookup = _load_county_lookup(county_boundaries_path)
     modeled_df = _aggregate_modeled_emissions(
         modeled_emissions_path,
         county_lookup=county_lookup,
     )
-    inventory_df = _aggregate_inventory_emissions(inventory_path)
+    inventory_df = _aggregate_inventory_emissions(
+        inventory_path,
+        pollutant_targets=pollutant_targets,
+    )
     inventory_df["emfac_tons"] = pd.to_numeric(inventory_df["emfac_tons"], errors="coerce").fillna(0.0)
     comparison = _build_comparison_table(
         modeled_df=modeled_df,
         inventory_df=inventory_df,
         county_order=county_order,
     )
-    outputs = _write_comparison_table(comparison, output_dir=output_dir)
+    target_output_dir = output_dir / _slugify(target_name)
+    outputs = _write_comparison_table(comparison, output_dir=target_output_dir)
     for pollutant in ("PM2.5", "NOx", "BC"):
         plot_path = _plot_county_comparison(
             comparison,
             pollutant=pollutant,
-            output_dir=output_dir,
+            inventory_label=inventory_label,
+            output_dir=target_output_dir,
         )
         if plot_path:
             outputs[f"{pollutant}_plot"] = plot_path

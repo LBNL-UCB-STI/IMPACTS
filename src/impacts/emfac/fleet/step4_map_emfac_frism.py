@@ -415,10 +415,6 @@ def _build_freight_payload_profiles(
     ].copy()
 
 
-_DEFAULT_LIKELIHOOD_FLOOR = 0.01
-_DEFAULT_ASSIGNMENT_MODEL = "dag"
-
-
 def _normalize_likelihoods(category_totals: dict[str, float]) -> dict[str, float]:
     """Normalize raw category totals to a proper conditional probability distribution.
 
@@ -477,10 +473,10 @@ def _build_dag_log_score(
     mass_log = np.log(pd.to_numeric(matched["massLikelihood"], errors="coerce").fillna(1.0).clip(lower=1e-9))
     port_log = np.log(pd.to_numeric(matched["portLikelihood"], errors="coerce").fillna(1.0).clip(lower=1e-9))
     return (
-        (float(weights.get("prior", 0.0)) * prior_log)
-        + (float(weights.get("naics_sector", 0.0)) * naics_sector_log)
-        + (float(weights.get("mass", 0.0)) * mass_log)
-        + (float(weights.get("port", 0.0)) * port_log)
+        (float(weights["prior"]) * prior_log)
+        + (float(weights["naics_sector"]) * naics_sector_log)
+        + (float(weights["mass"]) * mass_log)
+        + (float(weights["port"]) * port_log)
     )
 
 
@@ -694,7 +690,7 @@ def _port_category_weight(
     vehicle_category: str,
     port_weights: dict[str, float],
     configured_port_classes: set[str],
-    likelihood_floor: float = _DEFAULT_LIKELIHOOD_FLOOR,
+    likelihood_floor: float,
 ) -> float:
     category = _normalize_text(vehicle_category)
     if not configured_port_classes:
@@ -769,11 +765,10 @@ def _build_freight_emfac_candidates(
     port_weights: dict[str, float],
     median_mass_kg: float = 0.0,
     heavy_mass_kg: float = 0.0,
-    likelihood_floor: float = _DEFAULT_LIKELIHOOD_FLOOR,
-    prior_vmt_share: float = 1.0,
-    naics_sector: float = 1.0,
-    port_location: float = 1.0,
-    assignment_model: str = _DEFAULT_ASSIGNMENT_MODEL,
+    likelihood_floor: float,
+    prior_vmt_share: float,
+    naics_sector: float,
+    port_location: float,
     configured_port_classes: set[str] | None = None,
 ) -> pd.DataFrame:
     category_candidates = _extract_freight_category_candidates(
@@ -841,11 +836,6 @@ def _build_freight_emfac_candidates(
     if matched.empty:
         raise ValueError(f"No freight EMFAC candidates have positive fleetShare for vehicleTypeId={vehicle_type_id}")
 
-    if assignment_model != _DEFAULT_ASSIGNMENT_MODEL:
-        raise ValueError(
-            f"Unsupported freight vehicle_type_assignment.model '{assignment_model}'; "
-            f"expected '{_DEFAULT_ASSIGNMENT_MODEL}'"
-        )
     log_score = _build_dag_log_score(
         matched=matched,
         branch_weights={
@@ -911,11 +901,15 @@ def _build_freight_vehicle_types_with_emfac(
     )
     payload_mass_thresholds = _build_payload_mass_thresholds(payload_profiles)
     assignment_config = config.get("vehicle_type_assignment", {})
-    assignment_model = str(assignment_config.get("model", _DEFAULT_ASSIGNMENT_MODEL)).strip().lower()
-    likelihood_floor = float(assignment_config.get("likelihood_floor", _DEFAULT_LIKELIHOOD_FLOOR))
-    prior_vmt_share = float(assignment_config.get("prior_vmt_share", 1.0))
-    naics_sector = float(assignment_config.get("naics_sector", 1.0))
-    port_location = float(assignment_config.get("port_location", 1.0))
+    if "likelihood_floor" not in assignment_config:
+        raise ValueError("vehicle_type_assignment.likelihood_floor must be configured from the model YAML")
+    likelihood_floor = float(assignment_config["likelihood_floor"])
+    for key in ("prior_vmt_share", "naics_sector", "port_location"):
+        if key not in assignment_config:
+            raise ValueError(f"vehicle_type_assignment.{key} must be configured from the model YAML")
+    prior_vmt_share = float(assignment_config["prior_vmt_share"])
+    naics_sector = float(assignment_config["naics_sector"])
+    port_location = float(assignment_config["port_location"])
     configured_port_classes = _load_configured_port_classes(config)
 
     prepared = freight_vehicle_types.copy()
@@ -943,7 +937,6 @@ def _build_freight_vehicle_types_with_emfac(
             prior_vmt_share=prior_vmt_share,
             naics_sector=naics_sector,
             port_location=port_location,
-            assignment_model=assignment_model,
             configured_port_classes=configured_port_classes,
         )
         candidates["probabilityShare"] = candidates["score"] / candidates["score"].sum()
