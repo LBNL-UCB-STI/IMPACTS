@@ -259,7 +259,7 @@ def run_from_input_manifest(
     from .common import prepared_table_target
 
     _log_step_banner("PREPROCESS STEP 3", "network mapping and grid intersection")
-    grid_intersection_path, intersection_df = run_grid_intersection(
+    grid_intersection_paths, intersection_dfs = run_grid_intersection(
         pipeline,
         output_root,
         input_root,
@@ -272,8 +272,8 @@ def run_from_input_manifest(
         pipeline,
         output_root,
         input_root,
-        grid_intersection_path,
-        intersection_df=intersection_df,
+        grid_intersection_paths,
+        intersection_dfs=intersection_dfs,
         manifest_inputs=manifest_inputs,
     )
     prepared_skims_candidate = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
@@ -350,7 +350,9 @@ def run_from_input_manifest(
         "image": "not_recorded",
         "outputs": {
             "skims_emissions": prepared_skims_path,
-            "grid_intersection": str(grid_intersection_path),
+            "county_intersection": grid_intersection_paths.get("county"),
+            "inmap_intersection": grid_intersection_paths.get("inmap"),
+            "aermod_intersection": grid_intersection_paths.get("aermod"),
             "aermod_full_grid": pipeline.aermod_full_grid_path,
             **emissions_outputs,
             "beam_inmap_concentrations": str(concentration_path) if concentration_path else None,

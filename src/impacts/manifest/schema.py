@@ -60,6 +60,7 @@ class PipelineConfig:
     annualization_days_or_file: float | str = default_representative_days_per_year
     population_sample: float = 1.0
     transit_sample: float = 1.0
+    include_non_osm_car_links: bool = False
     include_passenger: bool = True
     include_freight: bool = True
 
@@ -106,6 +107,7 @@ class PipelineConfig:
                 "annualization_days_or_file",
                 "population_sample",
                 "transit_sample",
+                "include_non_osm_car_links",
                 "include_passenger",
                 "include_freight",
             },
@@ -187,6 +189,11 @@ class PipelineConfig:
                 _optional_float(payload.get("transit_sample"))
                 if payload.get("transit_sample") is not None
                 else 1.0
+            ),
+            include_non_osm_car_links=(
+                _required_bool(payload.get("include_non_osm_car_links"), "pipeline.include_non_osm_car_links")
+                if payload.get("include_non_osm_car_links") is not None
+                else False
             ),
             include_passenger=(
                 _required_bool(payload.get("include_passenger"), "pipeline.include_passenger")

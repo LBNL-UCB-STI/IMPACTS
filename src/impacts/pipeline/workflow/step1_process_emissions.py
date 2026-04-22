@@ -19,8 +19,8 @@ from ...common import read_table
 from ...common import read_vector
 from ...common import resolve_required_manifest_input
 from ...manifest.schema import PipelineConfig
-from .prepare_emissions_from_skims import _build_combined_allocated_table
-from .prepare_emissions_from_skims import _build_combined_grouped_table
+from .prepare_emissions_from_skims import _build_zone_allocated_table
+from .prepare_emissions_from_skims import _build_zone_grouped_table
 from .prepare_emissions_from_skims import _load_vehicle_type_activity_lookup
 from .prepare_emissions_from_skims import _reuse_existing_outputs
 from .prepare_emissions_from_skims import load_or_prepare_skims_df
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 _VMT_PROCESSES = {"RUNEX", "PMBW", "PMTW", "PRDUST", "RUNLOSS", "PTOEX"}
 _TRIP_PROCESSES = {"HOTSOAK", "DIURN", "STREX"}
+_CORRECTION_ASSIGNMENT_GROUPS = {"passenger", "freight"}
 
 
 def _safe_ratio(
@@ -110,6 +111,7 @@ def _build_beam_activity_details(
     detailed["totVMT"] = detailed["totVMT"] * detailed["county_zone_edge_proportion"]
     detailed["totTrips"] = detailed["totTrips"] * detailed["county_zone_edge_proportion"]
     detailed = detailed.merge(vehicle_lookup, how="left", on="vehicleTypeId")
+    detailed = detailed.loc[detailed["assignment_group"].isin(_CORRECTION_ASSIGNMENT_GROUPS)].copy()
     missing_vehicle_types = detailed.loc[
         detailed["assignment_group"].isna() | detailed["modelYear"].isna(),
         "vehicleTypeId",
@@ -221,14 +223,24 @@ def apply_county_corrections(
     )[["vehicleTypeId", "assignment_group", "modelYear"]].copy()
     result["vehicleTypeId"] = result["vehicleTypeId"].astype(str).str.strip()
     result = result.merge(vehicle_lookup, how="left", on="vehicleTypeId")
+    correction_eligible = result["assignment_group"].isin(_CORRECTION_ASSIGNMENT_GROUPS)
     missing_vehicle_types = result.loc[
-        result["assignment_group"].isna() | result["modelYear"].isna(),
+        correction_eligible & result["modelYear"].isna(),
+        "vehicleTypeId",
+    ].drop_duplicates().tolist()
+    unresolved_vehicle_types = result.loc[
+        result["assignment_group"].isna(),
         "vehicleTypeId",
     ].drop_duplicates().tolist()
     if missing_vehicle_types:
         raise ValueError(
-            "Could not resolve passenger/freight assignment and modelYear for allocated rows with vehicleTypeId values: "
+            "Could not resolve modelYear for correction-eligible allocated rows with vehicleTypeId values: "
             f"{missing_vehicle_types[:10]}"
+        )
+    if unresolved_vehicle_types:
+        raise ValueError(
+            "Could not resolve vehicle type assignment for allocated rows with vehicleTypeId values: "
+            f"{unresolved_vehicle_types[:10]}"
         )
     result["_fips_norm"] = normalize_county_fips(result[county_col])
     result["_process_norm"] = result.get("process", pd.Series("", index=result.index)).astype(str).str.upper().str.strip()
@@ -270,6 +282,28 @@ def apply_county_corrections(
         result[col] = pd.to_numeric(result[col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32) * factor_arr
 
     return result.drop(columns=["_fips_norm", "_process_norm", "assignment_group", "modelYear", "factor_totVMT", "factor_totTrips"])
+
+
+def _build_corrected_source_totals(county_corrected_df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    if county_corrected_df is None or county_corrected_df.empty:
+        return None
+    group_cols = ["linkId", "vehicleTypeId", "process"]
+    required = set(group_cols)
+    missing = sorted(required - set(county_corrected_df.columns))
+    if missing:
+        raise ValueError(f"County-corrected emissions are missing source grouping columns: {missing}")
+    source = county_corrected_df.copy()
+    value_cols = [col for col in source.columns if col.endswith("_county_allocated")]
+    aggregated = source.groupby(group_cols, dropna=False)[value_cols].sum().reset_index()
+    rename_map = {
+        "totVMT_county_allocated": "totVMT",
+        "totTrips_county_allocated": "totTrips",
+    }
+    for col in value_cols:
+        if col.startswith("tons_per_year_"):
+            rename_map[col] = col.removesuffix("_county_allocated")
+    aggregated = aggregated.rename(columns=rename_map)
+    return aggregated
 
 
 def _save_grid_emissions(
@@ -321,77 +355,16 @@ def _save_grid_emissions(
     return gpd.GeoDataFrame(study_area_grid, geometry="geometry", crs=geo.crs)
 
 
-def _split_zone_allocated(
+def _build_county_corrected_table(
     *,
-    combined_df: pd.DataFrame,
-    zone_label: str,
-    cell_col: str,
-) -> Optional[pd.DataFrame]:
-    if combined_df is None or combined_df.empty or cell_col not in combined_df.columns:
-        return None
-    zone_metric_cols = [
-        col for col in combined_df.columns
-        if col.startswith(f"{zone_label}_") and col != cell_col
-    ]
-    zone_allocated_cols = [
-        col for col in combined_df.columns
-        if col.endswith(f"_{zone_label}_allocated")
-    ]
-    keep_cols = [col for col in ["linkId", "vehicleTypeId", "process", cell_col] if col in combined_df.columns]
-    if "countyfp" in combined_df.columns and "countyfp" not in keep_cols:
-        keep_cols.append("countyfp")
-    keep_cols.extend(zone_metric_cols)
-    keep_cols.extend(zone_allocated_cols)
-    keep_cols = [col for i, col in enumerate(keep_cols) if col not in keep_cols[:i]]
-    zone_df = combined_df[keep_cols].copy()
-    zone_df = zone_df[zone_df[cell_col].notna()].copy()
-    if zone_df.empty:
-        return None
-
-    sum_cols = [col for col in zone_df.columns if col not in {"linkId", "vehicleTypeId", "process", cell_col, "countyfp"}]
-    group_cols = [col for col in ["linkId", "vehicleTypeId", "process", cell_col, "countyfp"] if col in zone_df.columns]
-    zone_df = zone_df.groupby(group_cols, dropna=False)[sum_cols].sum().reset_index()
-    return zone_df
-
-
-def _split_zone_outputs(
-    *,
-    zone_df: pd.DataFrame,
-    zone_label: str,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    activity_suffixes = {
-        f"totVMT_{zone_label}_allocated",
-        f"totTrips_{zone_label}_allocated",
-    }
-    emissions_cols = [col for col in zone_df.columns if col not in activity_suffixes]
-    activity_cols = [
-        col for col in zone_df.columns
-        if not col.startswith("tons_per_year_") or col in activity_suffixes
-    ]
-
-    emissions_df = zone_df[emissions_cols].copy()
-    activity_df = zone_df[activity_cols].copy()
-    return emissions_df, activity_df
-
-
-def _build_combined_corrected_table(
-    *,
-    allocated_df: pd.DataFrame,
-    grouped_df: pd.DataFrame,
+    county_allocated_df: pd.DataFrame,
+    county_grouped_df: pd.DataFrame,
     skims_df: pd.DataFrame,
     pipeline: PipelineConfig,
     manifest_inputs: Dict[str, Any],
 ) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-    if allocated_df is None or allocated_df.empty:
+    if county_allocated_df is None or county_allocated_df.empty:
         return None, None, None
-
-    county_col = "countyfp"
-    if county_col not in allocated_df.columns:
-        raise ValueError(
-            "Allocated DataFrame must include a county FIPS column. "
-            f"Expected: {county_col}."
-        )
-
     passenger_inventory_path = pipeline.passenger_inventory_file
     freight_inventory_path = pipeline.freight_inventory_file
     passenger_vehicle_types_path = resolve_required_manifest_input(manifest_inputs, key="passenger_vehicle_types_input")
@@ -399,7 +372,7 @@ def _build_combined_corrected_table(
     county_boundaries_path = resolve_required_manifest_input(manifest_inputs, key="county_boundaries")
     _, beam_activity_totals = _build_beam_activity_details(
         skims_df=skims_df,
-        grouped_df=grouped_df,
+        grouped_df=county_grouped_df,
         passenger_vehicle_types_path=passenger_vehicle_types_path,
         freight_vehicle_types_path=freight_vehicle_types_path,
     )
@@ -446,9 +419,9 @@ def _build_combined_corrected_table(
         _step_label("1.4"),
     )
     corrected = apply_county_corrections(
-        allocated_df,
+        county_allocated_df,
         county_correction_factors,
-        county_col=county_col,
+        county_col="countyfp",
         passenger_vehicle_types_path=passenger_vehicle_types_path,
         freight_vehicle_types_path=freight_vehicle_types_path,
     )
@@ -459,8 +432,8 @@ def run(
     pipeline: PipelineConfig,
     raw_dir: Path,
     input_root: Path,
-    intersection_path: str,
-    intersection_df: Optional[pd.DataFrame] = None,
+    intersection_paths: Dict[str, Optional[str]],
+    intersection_dfs: Optional[Dict[str, Optional[pd.DataFrame]]] = None,
     manifest_inputs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Optional[str]]:
     log_step_banner("Step 1", "Process Emissions", logger=logger)
@@ -471,7 +444,7 @@ def run(
     log_substep_banner("1.0", "prepare skims inputs", logger=logger)
     skims_df = load_or_prepare_skims_df(
         input_root=input_root,
-        intersection_path=intersection_path,
+        intersection_path=(intersection_paths.get("county") or ""),
         beam_length_col=pipeline.beam_length_col,
         prepared_skims_group_cols=list(pipeline.prepared_skims_group_cols),
         pollutants=list(pipeline.pollutants),
@@ -484,92 +457,108 @@ def run(
         manifest_inputs=manifest_inputs,
     )
 
-    log_substep_banner("1.1", "group intersection by link and zone", logger=logger)
-    combined_grouped_df = _build_combined_grouped_table(
-        intersection_path=intersection_path,
-        intersection_df=intersection_df,
+    intersection_dfs = intersection_dfs or {}
+    log_substep_banner("1.1", "group county, inmap, and aermod intersections separately", logger=logger)
+    county_grouped_df = _build_zone_grouped_table(
+        intersection_path=intersection_paths.get("county"),
+        intersection_df=intersection_dfs.get("county"),
+        zone_label="county",
     )
-    log_substep_banner("1.2", "allocate emissions to zones", logger=logger)
-    combined_allocated_df = _build_combined_allocated_table(
-        grouped_df=combined_grouped_df,
+    inmap_grouped_df = _build_zone_grouped_table(
+        intersection_path=intersection_paths.get("inmap"),
+        intersection_df=intersection_dfs.get("inmap"),
+        zone_label="inmap",
+    )
+    aermod_grouped_df = _build_zone_grouped_table(
+        intersection_path=intersection_paths.get("aermod"),
+        intersection_df=intersection_dfs.get("aermod"),
+        zone_label="aermod",
+    )
+
+    log_substep_banner("1.2[county]", "allocate emissions to county surface", logger=logger)
+    county_allocated_df = _build_zone_allocated_table(
+        grouped_df=county_grouped_df,
         skims_df=skims_df,
+        zone_label="county",
     )
     log_substep_banner("1.3", "apply activity corrections", logger=logger)
-    combined_corrected_df, beam_activity_totals, county_correction_factors = _build_combined_corrected_table(
-        allocated_df=combined_allocated_df,
-        grouped_df=combined_grouped_df,
+    county_corrected_df, beam_activity_totals, county_correction_factors = _build_county_corrected_table(
+        county_allocated_df=county_allocated_df,
+        county_grouped_df=county_grouped_df,
         skims_df=skims_df,
         pipeline=pipeline,
         manifest_inputs=manifest_inputs or {},
+    )
+    corrected_source_df = _build_corrected_source_totals(county_corrected_df)
+
+    log_substep_banner("1.4[inmap/aermod]", "allocate corrected totals independently to inmap and aermod surfaces", logger=logger)
+    inmap_allocated_df = _build_zone_allocated_table(
+        grouped_df=inmap_grouped_df,
+        skims_df=corrected_source_df if corrected_source_df is not None else skims_df,
+        zone_label="inmap",
+    )
+    aermod_allocated_df = _build_zone_allocated_table(
+        grouped_df=aermod_grouped_df,
+        skims_df=corrected_source_df if corrected_source_df is not None else skims_df,
+        zone_label="aermod",
     )
 
     beam_activity_totals_path = None
     beam_activity_correction_factors_path = None
     beam_emissions_by_county_process_path = None
-    log_substep_banner("1.4", "write activity correction artifacts", logger=logger)
+    log_substep_banner("1.5[county]", "write county activity correction artifacts", logger=logger)
     if beam_activity_totals is not None and not beam_activity_totals.empty:
         beam_activity_totals_path = str(raw_dir / "beam_activity_totals.parquet")
         beam_activity_totals.to_parquet(beam_activity_totals_path, index=False)
-        logger.info("%s BEAM activity totals → %s", _step_label("1.3"), beam_activity_totals_path)
+        logger.info("%s BEAM activity totals → %s", _step_label("1.5", "county"), beam_activity_totals_path)
     if county_correction_factors is not None and not county_correction_factors.empty:
         beam_activity_correction_factors_path = str(raw_dir / "beam_activity_correction_factors.parquet")
         county_correction_factors.to_parquet(beam_activity_correction_factors_path, index=False)
-        logger.info("%s BEAM activity correction factors → %s", _step_label("1.3"), beam_activity_correction_factors_path)
-    if combined_corrected_df is not None and not combined_corrected_df.empty:
+        logger.info(
+            "%s BEAM activity correction factors → %s",
+            _step_label("1.5", "county"),
+            beam_activity_correction_factors_path,
+        )
+    if county_corrected_df is not None and not county_corrected_df.empty:
         beam_emissions_by_county_process_path = str(raw_dir / "beam_emissions_by_county_process.parquet")
-        combined_corrected_df.to_parquet(beam_emissions_by_county_process_path, index=False)
-        logger.info("%s county-intersected BEAM emissions → %s", _step_label("1.4"), beam_emissions_by_county_process_path)
+        county_corrected_df.to_parquet(beam_emissions_by_county_process_path, index=False)
+        logger.info(
+            "%s county-intersected BEAM emissions → %s",
+            _step_label("1.5", "county"),
+            beam_emissions_by_county_process_path,
+        )
 
     beam_emissions_for_aermod_path = None
 
-    if pipeline.aermod_grid_path and combined_grouped_df is not None:
+    if pipeline.aermod_grid_path and aermod_allocated_df is not None and not aermod_allocated_df.empty:
         if not pipeline.aermod_grid_id:
             raise ValueError("pipeline.aermod_grid_id must be configured before writing AERMOD emissions.")
-        log_substep_banner("1.5[aermod]", "write AERMOD emissions table", logger=logger)
-        aermod_corrected_df = _split_zone_allocated(
-            combined_df=combined_corrected_df,
-            zone_label="aermod",
-            cell_col="aermod_cell_id",
+        log_substep_banner("1.6[aermod]", "write AERMOD emissions table", logger=logger)
+        beam_emissions_for_aermod_stem = raw_dir / "beam_emissions_for_aermod"
+        _save_grid_emissions(
+            aermod_allocated_df,
+            left_col="aermod_cell_id",
+            right_col=str(pipeline.aermod_grid_id),
+            grid_path=pipeline.aermod_grid_path,
+            output_epsg=int(pipeline.output_epsg),
+            output_stem=beam_emissions_for_aermod_stem,
         )
-        if aermod_corrected_df is not None and not aermod_corrected_df.empty:
-            aermod_emissions_df, _ = _split_zone_outputs(
-                zone_df=aermod_corrected_df,
-                zone_label="aermod",
-            )
-            beam_emissions_for_aermod_stem = raw_dir / "beam_emissions_for_aermod"
-            _save_grid_emissions(
-                aermod_emissions_df,
-                left_col="aermod_cell_id",
-                right_col=str(pipeline.aermod_grid_id),
-                grid_path=pipeline.aermod_grid_path,
-                output_epsg=int(pipeline.output_epsg),
-                output_stem=beam_emissions_for_aermod_stem,
-            )
-            beam_emissions_for_aermod_path = str(beam_emissions_for_aermod_stem) + ".parquet"
-            logger.info(
-                "%s BEAM emissions for AERMOD → %s",
-                _step_label("1.5", "aermod"),
-                beam_emissions_for_aermod_path,
-            )
+        beam_emissions_for_aermod_path = str(beam_emissions_for_aermod_stem) + ".parquet"
+        logger.info(
+            "%s BEAM emissions for AERMOD → %s",
+            _step_label("1.6", "aermod"),
+            beam_emissions_for_aermod_path,
+        )
 
-    inmap_corrected_df = _split_zone_allocated(
-        combined_df=combined_corrected_df,
-        zone_label="inmap",
-        cell_col="inmap_cell_id",
-    )
     beam_emissions_for_inmap_path = None
     beam_inmap_study_area_grid_path = None
-    if inmap_corrected_df is not None and not inmap_corrected_df.empty:
+    if inmap_allocated_df is not None and not inmap_allocated_df.empty:
         if "grid_id" not in pipeline.mapping_columns or not str(pipeline.mapping_columns["grid_id"]).strip():
             raise ValueError("pipeline.mapping_columns.grid_id must be configured before writing InMAP emissions.")
-        log_substep_banner("1.6[inmap]", "write InMAP emissions table", logger=logger)
-        inmap_emissions_df, _ = _split_zone_outputs(
-            zone_df=inmap_corrected_df,
-            zone_label="inmap",
-        )
+        log_substep_banner("1.7[inmap]", "write InMAP emissions table", logger=logger)
         beam_emissions_for_inmap_stem = raw_dir / "beam_emissions_for_inmap"
         inmap_study_area_grid = _save_grid_emissions(
-            inmap_emissions_df,
+            inmap_allocated_df,
             left_col="inmap_cell_id",
             right_col=str(pipeline.mapping_columns["grid_id"]),
             grid_path=pipeline.inmap_grid_path,
@@ -578,11 +567,11 @@ def run(
         )
         beam_inmap_study_area_grid_path = str(raw_dir / "beam_inmap_study_area_grid.gpkg")
         inmap_study_area_grid.to_file(beam_inmap_study_area_grid_path, driver="GPKG")
-        logger.info("%s InMAP study area grid → %s", _step_label("1.6", "inmap"), beam_inmap_study_area_grid_path)
+        logger.info("%s InMAP study area grid → %s", _step_label("1.7", "inmap"), beam_inmap_study_area_grid_path)
         beam_emissions_for_inmap_path = str(beam_emissions_for_inmap_stem) + ".parquet"
         logger.info(
             "%s BEAM emissions for InMAP → %s",
-            _step_label("1.6", "inmap"),
+            _step_label("1.7", "inmap"),
             beam_emissions_for_inmap_path,
         )
 

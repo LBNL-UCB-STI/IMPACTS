@@ -31,6 +31,7 @@ impacts:
     freight_vehicle_types_file: vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv
     population_sample: 0.001
     transit_sample: 1.0
+    include_non_osm_car_links: true
     include_passenger: true
     include_freight: true
   emissions:
@@ -39,8 +40,8 @@ impacts:
     inventory:
       passenger_file: vehicle-tech/emissions/sf-emfac-2018-inventory-final-passenger-activity.parquet
       freight_file: vehicle-tech/emissions/sf-emfac-2018-inventory-final-freight-activity.parquet
-      enable_passenger_activity_correction: true
-      enable_freight_activity_correction: true
+      enable_passenger_activity_correction: false
+      enable_freight_activity_correction: false
     annualization_days_or_file: vehicle-tech/emissions/vehicle_operation_days_per_year.csv
     pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
   dispersions:

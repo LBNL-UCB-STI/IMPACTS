@@ -696,11 +696,11 @@ def run(
     )
 
     log_substep_banner("2.1", "load ISRM source data", logger=logger)
-    logger.info("%s loading ISRM store from %s", _step_label("2.0"), pipeline.isrm_url)
+    logger.info("%s loading ISRM store from %s", _step_label("2.1"), pipeline.isrm_url)
     sr = _load_isrm_store(pipeline.isrm_url)
     logger.info(
         "%s trace isrm_shapes SOA=%s TotalPop=%s MortalityRate=%s",
-        _step_label("2.0"),
+        _step_label("2.1"),
         getattr(sr["SOA"], "shape", None),
         getattr(sr["TotalPop"], "shape", None) if "TotalPop" in sr else None,
         getattr(sr["MortalityRate"], "shape", None) if "MortalityRate" in sr else None,
@@ -725,6 +725,6 @@ def run(
         grid_id_col=str(pipeline.mapping_columns["grid_id"]),
         source_id_col="inmap_cell_id",
     )
-    log_substep_banner("2.4", "write concentration outputs", logger=logger)
+    log_substep_banner("2.5", "write concentration outputs", logger=logger)
     _write_concentration_outputs(beam_inmap_concentrations_gdf, str(output_path))
     return beam_inmap_concentrations_gdf, beam_inmap_grid_ids, output_path

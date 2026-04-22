@@ -5,6 +5,7 @@ impacts:
     freight_vehicle_types_file: vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv
     population_sample: 0.1
     transit_sample: 1.0
+    include_non_osm_car_links: false
     include_passenger: true
     include_freight: true
   emissions:

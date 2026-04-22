@@ -324,12 +324,19 @@ def test_run_from_input_manifest_uses_current_step_name(monkeypatch, tmp_path: P
     monkeypatch.setattr(
         step3_integrate_grids,
         "run",
-        lambda pipeline, raw_dir, input_root, manifest_inputs=None: (tmp_path / "grid_intersection.parquet", None),
+        lambda pipeline, raw_dir, input_root, manifest_inputs=None: (
+            {
+                "county": str(tmp_path / "beam_osm_county_intersection.parquet"),
+                "inmap": str(tmp_path / "beam_osm_inmap_intersection.parquet"),
+                "aermod": str(tmp_path / "beam_osm_aermod_intersection.parquet"),
+            },
+            {"county": None, "inmap": None, "aermod": None},
+        ),
     )
     monkeypatch.setattr(
         step1_process_emissions,
         "run",
-        lambda pipeline, raw_dir, input_root, grid_intersection_path, intersection_df=None, manifest_inputs=None: {
+        lambda pipeline, raw_dir, input_root, grid_intersection_paths, intersection_dfs=None, manifest_inputs=None: {
             "beam_emissions_by_county_process": str(tmp_path / "beam_emissions_by_county_process.parquet"),
             "beam_emissions_for_inmap": str(tmp_path / "beam_emissions_for_inmap.parquet"),
         },

@@ -170,6 +170,7 @@ def build_inputs_manifest(
             "annualization_days_or_file": staged_annualization_days_or_file,
             "population_sample": float(beam_processing.population_sample),
             "transit_sample": float(beam_processing.transit_sample),
+            "include_non_osm_car_links": bool(beam_processing.include_non_osm_car_links),
             "include_passenger": bool(beam_processing.include_passenger),
             "include_freight": bool(beam_processing.include_freight),
         },

@@ -24,7 +24,10 @@ _SKIMS_DIMENSION_COLS = {
 }
 
 
-_TRANSIT_VEHICLETYPE_PATTERN = re.compile(r"(^|[-_])BUS($|[-_])", re.IGNORECASE)
+_TRANSIT_VEHICLETYPE_PATTERN = re.compile(
+    r"(^|[-_])(BUS|RAIL|FERRY|SUBWAY|TRAM|TRAIN|COACH)($|[-_])",
+    re.IGNORECASE,
+)
 
 
 def _is_transit_vehicle_type(vehicle_type_id: object) -> bool:

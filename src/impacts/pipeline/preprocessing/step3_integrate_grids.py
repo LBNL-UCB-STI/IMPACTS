@@ -12,6 +12,7 @@ import numpy as np
 import osm_chordify
 import pandas as pd
 import shapely.wkb
+from shapely.geometry import LineString
 
 from ...common import log_step_banner
 from ...common import log_substep_banner
@@ -22,20 +23,28 @@ from ...manifest.schema import PipelineConfig
 
 logger = logging.getLogger(__name__)
 _SOURCE_ROW_ID = "source_row_id"
-_CANONICAL_INTERSECTION_COLUMNS = [
+_COUNTY_INTERSECTION_COLUMNS = [
     "linkId",
     "countyfp",
-    "aermod_cell_id",
-    "inmap_cell_id",
     "county_zone_edge_proportion",
     "county_edge_link_length_m",
     "county_zone_link_length_m",
-    "aermod_zone_edge_proportion",
-    "aermod_edge_link_length_m",
-    "aermod_zone_link_length_m",
+    "geometry",
+]
+_INMAP_INTERSECTION_COLUMNS = [
+    "linkId",
+    "inmap_cell_id",
     "inmap_zone_edge_proportion",
     "inmap_edge_link_length_m",
     "inmap_zone_link_length_m",
+    "geometry",
+]
+_AERMOD_INTERSECTION_COLUMNS = [
+    "linkId",
+    "aermod_cell_id",
+    "aermod_zone_edge_proportion",
+    "aermod_edge_link_length_m",
+    "aermod_zone_link_length_m",
     "geometry",
 ]
 
@@ -83,6 +92,86 @@ def _map_beam_network_to_osm(
         _save_geodataframe(mapped_gdf, output_path)
         return mapped_gdf
     return mapped
+
+
+def _link_supports_car(value: object) -> bool:
+    token = str("" if pd.isna(value) else value).strip()
+    if not token:
+        return False
+    return "car" in {part.strip().lower() for part in token.split(";") if part.strip()}
+
+
+def _build_synthetic_beam_links(
+    *,
+    network_path: str,
+    mapped_network: gpd.GeoDataFrame,
+    output_epsg: int,
+) -> gpd.GeoDataFrame:
+    network = pd.read_csv(network_path, compression="infer")
+    required = {
+        "linkId",
+        "linkModes",
+        "attributeOrigId",
+        "fromLocationX",
+        "fromLocationY",
+        "toLocationX",
+        "toLocationY",
+        "linkLength",
+    }
+    missing = sorted(required - set(network.columns))
+    if missing:
+        raise ValueError(f"Network input missing required columns for synthetic BEAM links: {missing}")
+
+    mapped_ids = set(pd.to_numeric(mapped_network["linkId"], errors="coerce").dropna().astype(int).tolist())
+    candidates = network.loc[
+        network["attributeOrigId"].isna()
+        & network["linkModes"].map(_link_supports_car)
+        & ~network["linkId"].isin(mapped_ids)
+    ].copy()
+    if candidates.empty:
+        return mapped_network
+
+    for col in ("fromLocationX", "fromLocationY", "toLocationX", "toLocationY", "linkLength"):
+        candidates[col] = pd.to_numeric(candidates[col], errors="coerce")
+    candidates = candidates.loc[
+        candidates[["fromLocationX", "fromLocationY", "toLocationX", "toLocationY"]].notna().all(axis=1)
+    ].copy()
+    if candidates.empty:
+        return mapped_network
+
+    candidates["geometry"] = candidates.apply(
+        lambda row: LineString(
+            [
+                (float(row["fromLocationX"]), float(row["fromLocationY"])),
+                (float(row["toLocationX"]), float(row["toLocationY"])),
+            ]
+        ),
+        axis=1,
+    )
+    candidates = gpd.GeoDataFrame(candidates, geometry="geometry", crs=f"EPSG:{output_epsg}")
+    candidates["osm_id"] = pd.NA
+    candidates["name"] = pd.NA
+    candidates["highway"] = pd.NA
+    candidates["waterway"] = pd.NA
+    candidates["aerialway"] = pd.NA
+    candidates["barrier"] = pd.NA
+    candidates["man_made"] = pd.NA
+    candidates["railway"] = pd.NA
+    candidates["z_order"] = pd.NA
+    candidates["other_tags"] = pd.NA
+    candidates["edge_id"] = candidates["linkId"].map(lambda value: f"beam_synthetic_{int(value)}")
+    candidates["edge_length"] = pd.to_numeric(candidates["linkLength"], errors="coerce").fillna(candidates.geometry.length)
+
+    for col in mapped_network.columns:
+        if col not in candidates.columns:
+            candidates[col] = pd.NA
+    candidates = candidates[mapped_network.columns].copy()
+    augmented = pd.concat([mapped_network, candidates], ignore_index=True)
+    logger.info(
+        "Step 3.1 synthetic link fallback: appended %d BEAM car links without OSM origin to mapped network",
+        len(candidates),
+    )
+    return gpd.GeoDataFrame(augmented, geometry="geometry", crs=mapped_network.crs)
 
 
 def trace_and_filter_void_zone_rows(
@@ -152,8 +241,35 @@ def _resolve_mapped_network_path(input_root: Path) -> str:
     )
 
 
-def canonicalize_intersection_schema(df: pd.DataFrame) -> pd.DataFrame:
+def _ensure_mapped_network_covers_car_beam_links(
+    *,
+    mapped_network_path: str,
+    network_path: str,
+    output_epsg: int,
+    enabled: bool,
+) -> gpd.GeoDataFrame:
+    mapped_network = _load_geodataframe(mapped_network_path)
+    if not enabled:
+        return mapped_network
+    augmented = _build_synthetic_beam_links(
+        network_path=network_path,
+        mapped_network=mapped_network,
+        output_epsg=output_epsg,
+    )
+    if len(augmented) != len(mapped_network):
+        _save_geodataframe(augmented, mapped_network_path)
+        gpkg_path = str(Path(mapped_network_path).with_suffix(".gpkg"))
+        _save_geodataframe(augmented, gpkg_path)
+    return augmented
+
+
+def _canonicalize_zone_intersection_schema(
+    df: pd.DataFrame,
+    *,
+    zone_label: str,
+) -> gpd.GeoDataFrame:
     canonical = df.copy()
+
     def _combine(target: str, candidates: tuple[str, ...]) -> None:
         result = None
         for col in candidates:
@@ -165,45 +281,26 @@ def canonicalize_intersection_schema(df: pd.DataFrame) -> pd.DataFrame:
             canonical[target] = result
 
     _combine("linkId", ("edge_linkId", "linkId"))
-    _combine("countyfp", ("countyfp", "county_COUNTYFP", "zone_COUNTYFP", "COUNTYFP"))
-    _combine(
-        "county_zone_edge_proportion",
-        ("edge_county_zone_edge_proportion", "county_zone_edge_proportion"),
-    )
-    _combine(
-        "county_edge_link_length_m",
-        ("edge_county_edge_link_length_m", "county_edge_link_length_m"),
-    )
-    _combine(
-        "county_zone_link_length_m",
-        ("edge_county_zone_link_length_m", "county_zone_link_length_m"),
-    )
-    _combine("aermod_cell_id", ("edge_aermod_cell_id", "aermod_aermod_cell_id", "aermod_cell_id"))
-    _combine("inmap_cell_id", ("edge_inmap_cell_id", "edge_inmap_inmap_cell_id", "aermod_inmap_cell_id", "inmap_cell_id"))
-    _combine(
-        "aermod_zone_edge_proportion",
-        ("edge_aermod_zone_edge_proportion", "aermod_zone_edge_proportion"),
-    )
-    _combine(
-        "aermod_edge_link_length_m",
-        ("edge_aermod_edge_link_length_m", "aermod_edge_link_length_m"),
-    )
-    _combine(
-        "aermod_zone_link_length_m",
-        ("edge_aermod_zone_link_length_m", "aermod_zone_link_length_m"),
-    )
-    _combine(
-        "inmap_zone_edge_proportion",
-        ("edge_inmap_zone_edge_proportion", "inmap_zone_edge_proportion"),
-    )
-    _combine(
-        "inmap_edge_link_length_m",
-        ("edge_inmap_edge_link_length_m", "inmap_edge_link_length_m"),
-    )
-    _combine(
-        "inmap_zone_link_length_m",
-        ("edge_inmap_zone_link_length_m", "inmap_zone_link_length_m"),
-    )
+    if zone_label == "county":
+        _combine("countyfp", ("countyfp", "county_COUNTYFP", "zone_COUNTYFP", "COUNTYFP"))
+        _combine("county_zone_edge_proportion", ("edge_county_zone_edge_proportion", "county_zone_edge_proportion"))
+        _combine("county_edge_link_length_m", ("edge_county_edge_link_length_m", "county_edge_link_length_m"))
+        _combine("county_zone_link_length_m", ("edge_county_zone_link_length_m", "county_zone_link_length_m"))
+        ordered_cols = [col for col in _COUNTY_INTERSECTION_COLUMNS if col in canonical.columns]
+    elif zone_label == "inmap":
+        _combine("inmap_cell_id", ("edge_inmap_cell_id", "edge_inmap_inmap_cell_id", "inmap_cell_id"))
+        _combine("inmap_zone_edge_proportion", ("edge_inmap_zone_edge_proportion", "inmap_zone_edge_proportion"))
+        _combine("inmap_edge_link_length_m", ("edge_inmap_edge_link_length_m", "inmap_edge_link_length_m"))
+        _combine("inmap_zone_link_length_m", ("edge_inmap_zone_link_length_m", "inmap_zone_link_length_m"))
+        ordered_cols = [col for col in _INMAP_INTERSECTION_COLUMNS if col in canonical.columns]
+    elif zone_label == "aermod":
+        _combine("aermod_cell_id", ("edge_aermod_cell_id", "aermod_aermod_cell_id", "aermod_cell_id"))
+        _combine("aermod_zone_edge_proportion", ("edge_aermod_zone_edge_proportion", "aermod_zone_edge_proportion"))
+        _combine("aermod_edge_link_length_m", ("edge_aermod_edge_link_length_m", "aermod_edge_link_length_m"))
+        _combine("aermod_zone_link_length_m", ("edge_aermod_zone_link_length_m", "aermod_zone_link_length_m"))
+        ordered_cols = [col for col in _AERMOD_INTERSECTION_COLUMNS if col in canonical.columns]
+    else:
+        raise ValueError(f"Unsupported zone_label {zone_label!r}")
 
     for col in ("linkId", "aermod_cell_id", "inmap_cell_id"):
         if col in canonical.columns:
@@ -216,14 +313,9 @@ def canonicalize_intersection_schema(df: pd.DataFrame) -> pd.DataFrame:
             canonical["geometry"] = canonical["geometry"].map(
                 lambda value: shapely.wkb.loads(value) if isinstance(value, (bytes, bytearray, memoryview)) else value
             )
-
-    ordered_cols = [col for col in _CANONICAL_INTERSECTION_COLUMNS if col in canonical.columns]
-    if "geometry" not in ordered_cols and "geometry" in canonical.columns:
+    if "geometry" in canonical.columns and "geometry" not in ordered_cols:
         ordered_cols.append("geometry")
-    canonical = canonical[ordered_cols].copy()
-    if "geometry" in canonical.columns:
-        return gpd.GeoDataFrame(canonical, geometry="geometry", crs=getattr(df, "crs", None))
-    return canonical
+    return gpd.GeoDataFrame(canonical[ordered_cols].copy(), geometry="geometry", crs=getattr(df, "crs", None))
 
 
 def _union_county_matches_with_unmatched(
@@ -266,6 +358,116 @@ def _union_county_matches_with_unmatched(
     )
 
 
+def _assign_fallback_counties(
+    *,
+    source_links: gpd.GeoDataFrame,
+    county_gdf: gpd.GeoDataFrame,
+) -> pd.DataFrame:
+    fallback = source_links[["linkId", "geometry"]].copy()
+    fallback["geometry"] = fallback.geometry.representative_point()
+    joined = gpd.sjoin(
+        fallback,
+        county_gdf[["COUNTYFP", "geometry"]],
+        how="left",
+        predicate="within",
+    ).drop(columns=["index_right"], errors="ignore")
+    missing = joined["COUNTYFP"].isna()
+    if missing.any():
+        nearest = gpd.sjoin_nearest(
+            fallback.loc[missing, ["linkId", "geometry"]],
+            county_gdf[["COUNTYFP", "geometry"]],
+            how="left",
+        ).drop(columns=["index_right", "distance"], errors="ignore")
+        joined.loc[missing, "COUNTYFP"] = nearest["COUNTYFP"].to_numpy()
+    joined["countyfp"] = joined["COUNTYFP"].astype("string")
+    return pd.DataFrame(joined[["linkId", "countyfp"]].copy())
+
+
+def _ensure_county_mass_conservation(
+    *,
+    source_links: gpd.GeoDataFrame,
+    county_intersection: gpd.GeoDataFrame,
+    county_gdf: gpd.GeoDataFrame,
+) -> gpd.GeoDataFrame:
+    if county_intersection.empty:
+        return county_intersection
+
+    result = county_intersection.copy()
+    result["county_zone_edge_proportion"] = pd.to_numeric(
+        result["county_zone_edge_proportion"], errors="coerce"
+    ).fillna(0.0)
+    result["county_edge_link_length_m"] = pd.to_numeric(
+        result["county_edge_link_length_m"], errors="coerce"
+    ).fillna(0.0)
+    result["county_zone_link_length_m"] = pd.to_numeric(
+        result["county_zone_link_length_m"], errors="coerce"
+    ).fillna(0.0)
+
+    link_metrics = (
+        result.groupby("linkId", dropna=False)
+        .agg(
+            county_prop_sum=("county_zone_edge_proportion", "sum"),
+            county_zone_length_sum=("county_zone_link_length_m", "sum"),
+        )
+        .reset_index()
+    )
+    affected = link_metrics.loc[link_metrics["county_prop_sum"] < 0.999999].copy()
+    if affected.empty:
+        return result
+
+    source = source_links[["linkId", "geometry"]].copy()
+    source["source_edge_length_m"] = source.geometry.length
+    fallback_links = source.loc[source["linkId"].isin(affected["linkId"])].copy()
+    fallback_counties = _assign_fallback_counties(source_links=fallback_links, county_gdf=county_gdf)
+
+    affected = affected.merge(source[["linkId", "geometry", "source_edge_length_m"]], how="left", on="linkId")
+    affected = affected.merge(
+        fallback_counties.rename(columns={"countyfp": "nearest_countyfp"}),
+        how="left",
+        on="linkId",
+    )
+    affected["countyfp"] = affected["nearest_countyfp"].astype("string")
+    affected["missing_share"] = (1.0 - affected["county_prop_sum"]).clip(lower=0.0)
+    affected["missing_zone_length_m"] = (
+        affected["source_edge_length_m"] - affected["county_zone_length_sum"]
+    ).clip(lower=0.0)
+    use_length_fallback = affected["missing_zone_length_m"].le(0.0) & affected["missing_share"].gt(0.0)
+    affected.loc[use_length_fallback, "missing_zone_length_m"] = (
+        affected.loc[use_length_fallback, "source_edge_length_m"]
+        * affected.loc[use_length_fallback, "missing_share"]
+    )
+
+    synthetic = affected.loc[affected["missing_share"] > 0.0, [
+        "linkId",
+        "countyfp",
+        "missing_share",
+        "source_edge_length_m",
+        "missing_zone_length_m",
+        "geometry",
+    ]].copy()
+    synthetic = synthetic.rename(
+        columns={
+            "missing_share": "county_zone_edge_proportion",
+            "source_edge_length_m": "county_edge_link_length_m",
+            "missing_zone_length_m": "county_zone_link_length_m",
+        }
+    )
+    synthetic = synthetic.loc[synthetic["countyfp"].notna()].copy()
+    if synthetic.empty:
+        return result
+
+    result = result.loc[
+        ~(result["linkId"].isin(synthetic["linkId"])) | result["countyfp"].notna()
+    ].copy()
+    combined = pd.concat([result, synthetic], ignore_index=True)
+    logger.info(
+        "Step 3.6 county conservation: synthesized %d fallback county rows across %d links",
+        len(synthetic),
+        synthetic["linkId"].nunique(),
+    )
+    return gpd.GeoDataFrame(combined, geometry="geometry", crs=county_intersection.crs)
+
+
 
 
 def run(
@@ -273,23 +475,35 @@ def run(
     raw_dir: Path,
     input_root: Path,
     manifest_inputs: Optional[dict[str, object]] = None,
-) -> Tuple[str, Optional[gpd.GeoDataFrame]]:
-    """Map staged BEAM network to OSM and intersect it with enabled dispersion grids and county boundaries."""
+) -> Tuple[dict[str, Optional[str]], dict[str, Optional[gpd.GeoDataFrame]]]:
+    """Map staged BEAM network to OSM and intersect it with county, InMAP, and AERMOD surfaces separately."""
     from osm_chordify.osm.intersect import intersect_road_network_with_zones
 
     log_step_banner("Preprocess Step 3", "Integrate Grids", logger=logger)
-    grid_intersection_path = raw_dir / "beam_osm_zone_county_intersection.parquet"
-    if grid_intersection_path.exists():
-        logger.info("Step 3: reusing existing grid intersection %s", grid_intersection_path)
-        return str(grid_intersection_path), None
+    county_intersection_path = raw_dir / "beam_osm_county_intersection.parquet"
+    inmap_intersection_path = raw_dir / "beam_osm_inmap_intersection.parquet"
+    aermod_intersection_path = raw_dir / "beam_osm_aermod_intersection.parquet"
+    existing_paths = {
+        "county": str(county_intersection_path) if county_intersection_path.exists() else None,
+        "inmap": str(inmap_intersection_path) if pipeline.inmap_enabled and inmap_intersection_path.exists() else None,
+        "aermod": str(aermod_intersection_path) if pipeline.aermod_enabled and aermod_intersection_path.exists() else None,
+    }
+    if manifest_inputs is None:
+        raise ValueError("Step 3 requires manifest_inputs to resolve network and OSM inputs.")
+    staged_network = resolve_required_manifest_input(manifest_inputs, key="network")
+    if existing_paths["county"] and ((not pipeline.inmap_enabled) or existing_paths["inmap"]) and ((not pipeline.aermod_enabled) or existing_paths["aermod"]):
+        logger.info(
+            "Step 3: reusing existing separate intersections county=%s inmap=%s aermod=%s",
+            existing_paths["county"],
+            existing_paths["inmap"],
+            existing_paths["aermod"],
+        )
+        return existing_paths, {"county": None, "inmap": None, "aermod": None}
     mapped_network_path = str((input_root / "network" / "beam_osm_mapped.parquet").resolve())
     log_substep_banner("3.1", "map BEAM network to OSM", logger=logger)
     if Path(mapped_network_path).exists():
         logger.info("Step 3.1: reusing BEAM/OSM mapping %s", mapped_network_path)
     else:
-        if manifest_inputs is None:
-            raise ValueError("Step 3 requires manifest_inputs to resolve network and OSM inputs.")
-        staged_network = resolve_required_manifest_input(manifest_inputs, key="network")
         staged_osm = resolve_required_manifest_input(manifest_inputs, key="osm_network")
         logger.info("Step 3.1: mapping BEAM network to OSM using %s", staged_osm)
         mapped_network = _map_beam_network_to_osm(
@@ -301,14 +515,19 @@ def run(
         )
         mapped_network.to_file(str(Path(mapped_network_path).with_suffix(".gpkg")), driver="GPKG")
         logger.info("Step 3.1 complete: wrote %s", mapped_network_path)
-    mapped_network = _load_geodataframe(mapped_network_path)
+    mapped_network = _ensure_mapped_network_covers_car_beam_links(
+        mapped_network_path=mapped_network_path,
+        network_path=staged_network,
+        output_epsg=int(pipeline.output_epsg),
+        enabled=bool(pipeline.include_non_osm_car_links),
+    )
     epsg = int(pipeline.output_epsg)
 
-    network_with_zones = mapped_network
+    inmap_intersection: Optional[gpd.GeoDataFrame] = None
     if pipeline.inmap_enabled:
         log_substep_banner("3.2", "intersect with InMAP grid", logger=logger)
         logger.info("Step 3.2: intersecting with inMAP grid %s", pipeline.inmap_grid_path)
-        network_with_zones = intersect_road_network_with_zones(
+        inmap_intersection = intersect_road_network_with_zones(
             mapped_network,
             epsg,
             pipeline.inmap_grid_path,
@@ -316,33 +535,39 @@ def run(
             prefilter_zones_to_network_bbox=True,
             zone_label="inmap",
         )
-        network_with_zones = trace_and_filter_void_zone_rows(
-            network_with_zones,
+        inmap_intersection = trace_and_filter_void_zone_rows(
+            inmap_intersection,
             zone_id_col="inmap_cell_id",
             proportion_col="inmap_zone_edge_proportion",
             context="Step 3.2",
         )
-        logger.info("Step 3.2 complete: %d rows", len(network_with_zones))
+        inmap_intersection = _canonicalize_zone_intersection_schema(inmap_intersection, zone_label="inmap")
+        inmap_intersection.to_parquet(inmap_intersection_path, index=False)
+        inmap_intersection.to_file(inmap_intersection_path.with_suffix(".gpkg"), driver="GPKG")
+        logger.info("Step 3.2 complete: %d rows → %s", len(inmap_intersection), inmap_intersection_path)
 
+    aermod_intersection: Optional[gpd.GeoDataFrame] = None
     if pipeline.aermod_enabled:
         log_substep_banner("3.3", "intersect with AERMOD grid", logger=logger)
         logger.info("Step 3.3: intersecting line network with AERMOD grid %s", pipeline.aermod_grid_path)
-        network_with_zones = intersect_road_network_with_zones(
-            network_with_zones,
+        aermod_intersection = intersect_road_network_with_zones(
+            mapped_network,
             epsg,
             pipeline.aermod_grid_path,
             output_epsg=epsg,
             prefilter_zones_to_network_bbox=True,
             zone_label="aermod",
         )
-        logger.info("Step 3.3 complete: %d rows", len(network_with_zones))
-    B = network_with_zones.reset_index(drop=True).copy()
+        aermod_intersection = _canonicalize_zone_intersection_schema(aermod_intersection, zone_label="aermod")
+        aermod_intersection.to_parquet(aermod_intersection_path, index=False)
+        aermod_intersection.to_file(aermod_intersection_path.with_suffix(".gpkg"), driver="GPKG")
+        logger.info("Step 3.3 complete: %d rows → %s", len(aermod_intersection), aermod_intersection_path)
+
+    B = mapped_network.reset_index(drop=True).copy()
     B[_SOURCE_ROW_ID] = range(len(B))
 
     log_substep_banner("3.4", "intersect with county boundaries", logger=logger)
     county_setup_started = time.perf_counter()
-    if manifest_inputs is None:
-        raise ValueError("Step 3 requires manifest_inputs to resolve county boundaries.")
     county_path = resolve_required_manifest_input(manifest_inputs, key="county_boundaries")
     county_gdf = read_vector(county_path)
     if county_gdf.crs is not None:
@@ -374,15 +599,36 @@ def run(
     )
 
     persist_started = time.perf_counter()
-    log_substep_banner("3.6", "write canonical intersection outputs", logger=logger)
-    logger.info("Step 3.6: canonicalizing and writing intersection outputs")
-    C_canonical = canonicalize_intersection_schema(C)
-    C_canonical.to_parquet(grid_intersection_path, index=False)
-    C_canonical.to_file(grid_intersection_path.with_suffix(".gpkg"), driver="GPKG")
+    log_substep_banner("3.6", "write canonical county intersection outputs", logger=logger)
+    logger.info("Step 3.6: canonicalizing and writing county intersection outputs")
+    county_intersection = _canonicalize_zone_intersection_schema(C, zone_label="county")
+    county_intersection = _ensure_county_mass_conservation(
+        source_links=B,
+        county_intersection=county_intersection,
+        county_gdf=county_gdf,
+    )
+    county_intersection.to_parquet(county_intersection_path, index=False)
+    county_intersection.to_file(county_intersection_path.with_suffix(".gpkg"), driver="GPKG")
     logger.info(
-        "Step 3.6 complete: wrote outputs in %.2fs",
+        "Step 3.6 complete: wrote county outputs in %.2fs",
         time.perf_counter() - persist_started,
     )
-    logger.info("Step 3 complete: %d total rows → %s", len(C_canonical), grid_intersection_path)
+    logger.info(
+        "Step 3 complete: county=%s inmap=%s aermod=%s",
+        county_intersection_path,
+        inmap_intersection_path if pipeline.inmap_enabled else None,
+        aermod_intersection_path if pipeline.aermod_enabled else None,
+    )
 
-    return str(grid_intersection_path), C_canonical
+    return (
+        {
+            "county": str(county_intersection_path),
+            "inmap": str(inmap_intersection_path) if pipeline.inmap_enabled else None,
+            "aermod": str(aermod_intersection_path) if pipeline.aermod_enabled else None,
+        },
+        {
+            "county": county_intersection,
+            "inmap": inmap_intersection,
+            "aermod": aermod_intersection,
+        },
+    )

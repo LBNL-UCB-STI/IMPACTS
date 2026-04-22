@@ -10,7 +10,6 @@ from typing import Dict
 from typing import List
 from typing import Optional
 
-import duckdb
 import pandas as pd
 
 from ...common import normalize_county_fips
@@ -44,6 +43,26 @@ _PASSENGER_CATEGORY_TOKENS = {
     "mcy",
     "motor coach",
 }
+_TRANSIT_CATEGORY_TOKENS = {
+    "obus",
+    "sbus",
+    "ubus",
+    "motor coach",
+    "rail-default",
+    "rail default",
+    "ferry-default",
+    "ferry default",
+    "subway-default",
+    "subway default",
+    "tram-default",
+    "tram default",
+    "train-default",
+    "train default",
+}
+_TRANSIT_VEHICLETYPE_PATTERN = re.compile(
+    r"(^|[-_])(BUS|RAIL|FERRY|SUBWAY|TRAM|TRAIN|COACH)($|[-_])",
+    re.IGNORECASE,
+)
 _FREIGHT_CATEGORY_PATTERN = re.compile(r"^(class\d|class\d+[a-z]?|mdv|ldt\d|hdt|t\d)", re.IGNORECASE)
 _FREIGHT_CATEGORY_SUBSTRINGS = ("vocational", "tractor")
 _EMFAC_MODEL_YEAR_GROUP_PATTERN = re.compile(r"^(pre\d+|\d{4}to\d{4}|post\d+)")
@@ -75,9 +94,23 @@ def _normalize_vehicle_type_token(value: object) -> str:
     return str("" if pd.isna(value) else value).strip()
 
 
+def _row_is_transit_vehicle_type(row: pd.Series) -> bool:
+    vehicle_type_id = _normalize_vehicle_type_token(row.get("vehicleTypeId"))
+    if vehicle_type_id and _TRANSIT_VEHICLETYPE_PATTERN.search(vehicle_type_id):
+        return True
+    for candidate in ("emfacVehicleCategory", "vehicleCategory"):
+        token = _normalize_vehicle_type_token(row.get(candidate)).lower()
+        if token in _TRANSIT_CATEGORY_TOKENS:
+            return True
+    return False
+
+
 def _classify_vehicle_type_assignment(row: pd.Series, *, source_name: str) -> Optional[str]:
+    if _row_is_transit_vehicle_type(row):
+        return "transit"
+
     explicit_assignment = _normalize_vehicle_type_token(row.get("assignment_group")).lower()
-    if explicit_assignment in {"passenger", "freight"}:
+    if explicit_assignment in {"passenger", "freight", "transit"}:
         return explicit_assignment
 
     source_lower = source_name.lower()
@@ -196,7 +229,9 @@ def _load_vehicle_type_activity_lookup(
     )
     prepared["emfacId"] = prepared["emfacId"].map(_normalize_vehicle_type_token)
     prepared["modelYear"] = prepared["emfacId"].str.extract(_EMFAC_MODEL_YEAR_GROUP_PATTERN, expand=False)
-    prepared = prepared.loc[prepared["assignment_group"].notna() & prepared["modelYear"].notna()].copy()
+    prepared = prepared.loc[prepared["assignment_group"].notna()].copy()
+    correction_eligible = prepared["assignment_group"].isin({"passenger", "freight"})
+    prepared = prepared.loc[~correction_eligible | prepared["modelYear"].notna()].copy()
     duplicate_conflicts = (
         prepared[["vehicleTypeId", "assignment_group", "modelYear"]]
         .drop_duplicates()
@@ -259,6 +294,7 @@ def _filter_prepared_skims_by_assignment(
     allowed_groups = set()
     if include_passenger:
         allowed_groups.add("passenger")
+        allowed_groups.add("transit")
     if include_freight:
         allowed_groups.add("freight")
     allowed_ids = set(assignments.loc[assignments["assignment_group"].isin(allowed_groups), "vehicleTypeId"].tolist())
@@ -315,91 +351,52 @@ def _reuse_existing_outputs(raw_dir: Path) -> Optional[Dict[str, Optional[str]]]
 
 
 # ---------------------------------------------------------------------------
-# substep 1.1 — group intersection by link × zone
+# substep 1.1 — group each intersection surface independently
 # ---------------------------------------------------------------------------
 
-def _build_combined_grouped_table(
+def _build_zone_grouped_table(
     *,
-    intersection_path: str,
+    intersection_path: Optional[str],
     intersection_df: Optional[pd.DataFrame],
+    zone_label: str,
 ) -> Optional[pd.DataFrame]:
-    required_cols = {
-        "linkId",
-        "countyfp",
-        "county_zone_edge_proportion",
-        "county_edge_link_length_m",
-        "county_zone_link_length_m",
-        "aermod_cell_id",
-        "inmap_cell_id",
-        "aermod_zone_edge_proportion",
-        "aermod_edge_link_length_m",
-        "aermod_zone_link_length_m",
-        "inmap_zone_edge_proportion",
-        "inmap_edge_link_length_m",
-        "inmap_zone_link_length_m",
-    }
+    if not intersection_path and intersection_df is None:
+        return None
+    zone_id_col = f"{zone_label}_cell_id" if zone_label != "county" else "countyfp"
+    proportion_col = f"{zone_label}_zone_edge_proportion"
+    edge_length_col = f"{zone_label}_edge_link_length_m"
+    zone_length_col = f"{zone_label}_zone_link_length_m"
+    required_cols = {"linkId", zone_id_col, proportion_col, edge_length_col, zone_length_col}
     intersection = _load_intersection_subset_or_df(
-        path=intersection_path,
+        path=str(intersection_path),
         columns=list(required_cols),
         intersection_df=intersection_df,
     )
     missing = [col for col in required_cols if col not in intersection.columns]
     if missing:
         raise ValueError(
-            f"{_step_label('1.1')} requires canonical intersection columns. Missing: {missing}"
+            f"{_step_label('1.1')} requires canonical {zone_label} intersection columns. Missing: {missing}"
         )
-
-    metric_cols = [
-        "county_zone_edge_proportion",
-        "county_edge_link_length_m",
-        "county_zone_link_length_m",
-        "aermod_zone_edge_proportion",
-        "aermod_edge_link_length_m",
-        "aermod_zone_link_length_m",
-        "inmap_zone_edge_proportion",
-        "inmap_edge_link_length_m",
-        "inmap_zone_link_length_m",
-    ]
-
-    con = duckdb.connect(database=":memory:")
-    try:
-        con.register("intersection_df", intersection)
-        metric_select = ",\n                ".join([f"SUM(COALESCE(i.{col}, 0.0)) AS {col}" for col in metric_cols])
-        grouped = con.execute(
-            f"""
-            SELECT
-                i.linkId,
-                i.aermod_cell_id,
-                i.inmap_cell_id
-                , i.countyfp
-                {"," if metric_select else ""} {metric_select}
-            FROM intersection_df AS i
-            WHERE i.aermod_cell_id IS NOT NULL OR i.inmap_cell_id IS NOT NULL
-            GROUP BY
-                i.linkId,
-                i.aermod_cell_id,
-                i.inmap_cell_id
-                , i.countyfp
-            """
-        ).df()
-    finally:
-        con.close()
-
+    grouped = intersection.copy()
+    for col in [proportion_col, edge_length_col, zone_length_col]:
+        grouped[col] = pd.to_numeric(grouped[col], errors="coerce").fillna(0.0)
+    group_cols = ["linkId", zone_id_col]
+    grouped = grouped.groupby(group_cols, dropna=False)[[proportion_col, edge_length_col, zone_length_col]].sum().reset_index()
     if grouped.empty:
         return None
-
-    logger.info("%s BEAM mapping across grids rows=%d", _step_label("1.1"), len(grouped))
+    logger.info("%s BEAM %s mapping rows=%d", _step_label("1.1"), zone_label, len(grouped))
     return grouped
 
 
 # ---------------------------------------------------------------------------
-# substep 1.2 — allocate skims emissions to zones
+# substep 1.2 — allocate skims emissions to one surface
 # ---------------------------------------------------------------------------
 
-def _build_combined_allocated_table(
+def _build_zone_allocated_table(
     *,
-    grouped_df: pd.DataFrame,
+    grouped_df: Optional[pd.DataFrame],
     skims_df: pd.DataFrame,
+    zone_label: str,
 ) -> Optional[pd.DataFrame]:
     if grouped_df is None or grouped_df.empty:
         return None
@@ -412,87 +409,29 @@ def _build_combined_allocated_table(
         c for c in ("totVMT", "totTrips")
         if c in skims_df.columns and pd.api.types.is_numeric_dtype(skims_df[c])
     ]
-    county_prop = "county_zone_edge_proportion"
-    aermod_prop = "aermod_zone_edge_proportion"
-    inmap_prop = "inmap_zone_edge_proportion"
+    zone_id_col = f"{zone_label}_cell_id" if zone_label != "county" else "countyfp"
+    proportion_col = f"{zone_label}_zone_edge_proportion"
+    edge_length_col = f"{zone_label}_edge_link_length_m"
+    zone_length_col = f"{zone_label}_zone_link_length_m"
 
-    metric_cols = [
-        col for col in grouped_df.columns
-        if (col.startswith("aermod_") or col.startswith("inmap_")) and any(tag in col for tag in ("_proportion", "_length_m", "_surface_m2"))
-    ]
-
-    con = duckdb.connect(database=":memory:")
-    try:
-        con.register("grouped_df", grouped_df)
-        con.register("skims_df", skims_df[["linkId", "vehicleTypeId", "process"] + activity_cols + emission_cols].copy())
-        metric_select = ",\n                ".join([f"g.{col}" for col in metric_cols])
-        county_activity = ",\n                ".join([
-            f"COALESCE(CAST(s.{col} AS DOUBLE), 0.0) * COALESCE(CAST(g.{county_prop} AS DOUBLE), 0.0) AS {col}_county_allocated"
-            for col in activity_cols
-        ])
-        county_alloc = ",\n                ".join([
-            f"COALESCE(CAST(s.{col} AS DOUBLE), 0.0) * COALESCE(CAST(g.{county_prop} AS DOUBLE), 0.0) AS {col}_county_allocated"
-            for col in emission_cols
-        ])
-        aermod_activity = ",\n                ".join([
-            f"COALESCE(CAST(s.{col} AS DOUBLE), 0.0) * COALESCE(CAST(g.{aermod_prop} AS DOUBLE), 0.0) AS {col}_aermod_allocated"
-            for col in activity_cols
-        ])
-        inmap_activity = ",\n                ".join([
-            f"COALESCE(CAST(s.{col} AS DOUBLE), 0.0) * COALESCE(CAST(g.{inmap_prop} AS DOUBLE), 0.0) AS {col}_inmap_allocated"
-            for col in activity_cols
-        ])
-        aermod_alloc = ",\n                ".join([
-            f"COALESCE(CAST(s.{col} AS DOUBLE), 0.0) * COALESCE(CAST(g.{aermod_prop} AS DOUBLE), 0.0) AS {col}_aermod_allocated"
-            for col in emission_cols
-        ])
-        inmap_alloc = ",\n                ".join([
-            f"COALESCE(CAST(s.{col} AS DOUBLE), 0.0) * COALESCE(CAST(g.{inmap_prop} AS DOUBLE), 0.0) AS {col}_inmap_allocated"
-            for col in emission_cols
-        ])
-        extra_select = ",\n                ".join([
-            part
-            for part in [
-                metric_select,
-                county_activity,
-                aermod_activity,
-                inmap_activity,
-                county_alloc,
-                aermod_alloc,
-                inmap_alloc,
-            ]
-            if part
-        ])
-        allocated = con.execute(
-            f"""
-            SELECT
-                g.linkId,
-                s.vehicleTypeId,
-                s.process,
-                g.aermod_cell_id,
-                g.inmap_cell_id,
-                g.countyfp
-                {"," if extra_select else ""} {extra_select}
-            FROM grouped_df AS g
-            LEFT JOIN skims_df AS s
-                ON g.linkId = s.linkId
-            """
-        ).df()
-    finally:
-        con.close()
-
-    if allocated.empty:
-        return None
-
+    merge_cols = ["linkId", "vehicleTypeId", "process"] + activity_cols + emission_cols
+    allocated = grouped_df.merge(skims_df[merge_cols].copy(), how="left", on="linkId")
     allocated["vehicleTypeId"] = allocated["vehicleTypeId"].map(_normalize_vehicle_type_token)
     allocated["process"] = allocated["process"].map(_normalize_vehicle_type_token)
-    allocated = allocated.loc[
-        allocated["vehicleTypeId"].ne("") & allocated["process"].ne("")
-    ].copy()
+    allocated = allocated.loc[allocated["vehicleTypeId"].ne("") & allocated["process"].ne("")].copy()
     if allocated.empty:
         return None
 
-    logger.info("%s BEAM emissions allocated across grids rows=%d", _step_label("1.2"), len(allocated))
+    proportion = pd.to_numeric(allocated[proportion_col], errors="coerce").fillna(0.0)
+    for col in activity_cols:
+        allocated[f"{col}_{zone_label}_allocated"] = pd.to_numeric(allocated[col], errors="coerce").fillna(0.0) * proportion
+    for col in emission_cols:
+        allocated[f"{col}_{zone_label}_allocated"] = pd.to_numeric(allocated[col], errors="coerce").fillna(0.0) * proportion
+
+    keep_cols = ["linkId", "vehicleTypeId", "process", zone_id_col, proportion_col, edge_length_col, zone_length_col]
+    keep_cols.extend([f"{col}_{zone_label}_allocated" for col in activity_cols + emission_cols])
+    allocated = allocated[keep_cols].copy()
+    logger.info("%s BEAM emissions allocated across %s rows=%d", _step_label("1.2"), zone_label, len(allocated))
     return allocated
 
 

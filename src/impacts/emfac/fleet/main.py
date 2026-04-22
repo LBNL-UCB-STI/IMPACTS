@@ -1,16 +1,13 @@
 """Main entrypoint for the step-based fleet workflow."""
 
-from copy import deepcopy
 from pathlib import Path
 import sys
 
-from impacts.emfac.config import load_activities_workflow_from_data
 from impacts.emfac.config import load_default_fleet_workflow
 from impacts.emfac.config import load_fleet_workflow
 from impacts.emfac.common import raise_runtime_error
 from impacts.emfac.common import write_failure_trace
 from impacts.emfac.common import write_trace
-from impacts.emfac.activities.main import run_workflow as run_activities_workflow
 from impacts.emfac.fleet.step1_build_vehicle_types import run_step1
 from impacts.emfac.fleet.step2_map_emfac_bus_bike import run_step2
 from impacts.emfac.fleet.step3_map_emfac_atlas import run_step3
@@ -44,7 +41,7 @@ def _run_step(workflow: dict[str, object], *, step_name: str, runner) -> dict[st
     return updated_workflow
 
 
-def _ensure_activities_outputs(workflow: dict[str, object]) -> dict[str, object]:
+def _missing_activities_outputs(workflow: dict[str, object]) -> dict[str, Path]:
     activities = workflow["config"]["activities"]
     activities_output_root = Path(str(activities["outputs"])).expanduser().resolve()
     frism_year = workflow["config"]["frism"]["year"]
@@ -67,36 +64,21 @@ def _ensure_activities_outputs(workflow: dict[str, object]) -> dict[str, object]
         partition_exists = any(rates_store_dataset.glob("emfacId=*/*.parquet"))
         if not partition_exists:
             missing["rates_store_partitions"] = rates_store_dataset
+    return missing
+
+
+def ensure_activities_outputs_exist(workflow: dict[str, object]) -> dict[str, object]:
+    missing = _missing_activities_outputs(workflow)
     if not missing:
         return workflow
-
-    activities_config = deepcopy(activities)
-
-    print("Running EMFAC activities first because required activities outputs are missing:")
-    for path in missing.values():
-        print(f"  missing: {path}")
-    activities_workflow = load_activities_workflow_from_data(
-        activities_config,
-        source_label="<emfac.activities>",
+    missing_paths = "\n".join(f"  missing: {path}" for path in missing.values())
+    raise FileNotFoundError(
+        "Fleet workflow requires EMFAC activities outputs to exist before running.\n"
+        f"{missing_paths}"
     )
-    activities_workflow = run_activities_workflow(activities_workflow)
-
-    activities["passenger_rates_file"] = str(Path(str(activities_workflow["paths"]["final_output_passenger"])).resolve())
-    activities["passenger_activity_file"] = str(Path(str(activities_workflow["paths"]["matching_activity_output_passenger"])).resolve())
-    activities["passenger_fleet_file"] = str(Path(str(activities_workflow["paths"]["final_fleet_output_passenger"])).resolve())
-    activities["freight_rates_file"] = str(Path(str(activities_workflow["paths"]["final_output_freight"])).resolve())
-    activities["freight_activity_file"] = str(Path(str(activities_workflow["paths"]["matching_activity_output_freight"])).resolve())
-    activities["freight_fleet_file"] = str(Path(str(activities_workflow["paths"]["final_fleet_output_freight"])).resolve())
-    return workflow
 
 
-def run_all_steps(config_path: str | Path | None = None) -> None:
-    """Run the active fleet workflow steps."""
-    try:
-        workflow = _configure_run(config_path)
-    except Exception as error:
-        raise_runtime_error("config_load", error)
-    workflow = _ensure_activities_outputs(workflow)
+def run_workflow(workflow: dict[str, object]) -> dict[str, object]:
     _print_run_banner(workflow)
     write_trace(
         workflow,
@@ -133,6 +115,17 @@ def run_all_steps(config_path: str | Path | None = None) -> None:
     if freight_vehicle_types_output:
         print(f"  Freight vehicle types file: {freight_vehicle_types_output}")
     print("  DONE")
+    return workflow
+
+
+def run_all_steps(config_path: str | Path | None = None) -> None:
+    """Run the fleet-only workflow against existing activities outputs."""
+    try:
+        workflow = _configure_run(config_path)
+    except Exception as error:
+        raise_runtime_error("config_load", error)
+    workflow = ensure_activities_outputs_exist(workflow)
+    run_workflow(workflow)
 
 
 def main(config_path: str | Path | None = None) -> None:
