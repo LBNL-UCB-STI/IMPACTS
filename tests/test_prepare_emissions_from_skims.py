@@ -8,10 +8,14 @@ from impacts.pipeline.workflow.prepare_emissions_from_skims import _filter_prepa
 
 
 def test_filter_prepared_skims_by_assignment_uses_vehicle_types_contract(tmp_path: Path) -> None:
-    vehicle_types = pd.DataFrame(
+    passenger_vehicle_types = pd.DataFrame(
         [
             {"vehicleTypeId": "pax-car", "vehicleCategory": "Car"},
             {"vehicleTypeId": "pax-bus", "vehicleCategory": "Bus"},
+        ]
+    )
+    freight_vehicle_types = pd.DataFrame(
+        [
             {
                 "vehicleTypeId": "ft-md",
                 "vehicleCategory": "Class456Vocational",
@@ -20,8 +24,10 @@ def test_filter_prepared_skims_by_assignment_uses_vehicle_types_contract(tmp_pat
             },
         ]
     )
-    vehicle_types_path = tmp_path / "vehicleTypes.csv"
-    vehicle_types.to_csv(vehicle_types_path, index=False)
+    passenger_vehicle_types_path = tmp_path / "vehicleTypes--atlas.csv"
+    freight_vehicle_types_path = tmp_path / "vehicleTypes--frism.csv"
+    passenger_vehicle_types.to_csv(passenger_vehicle_types_path, index=False)
+    freight_vehicle_types.to_csv(freight_vehicle_types_path, index=False)
 
     prepared = pd.DataFrame(
         [
@@ -33,7 +39,8 @@ def test_filter_prepared_skims_by_assignment_uses_vehicle_types_contract(tmp_pat
 
     passenger_only = _filter_prepared_skims_by_assignment(
         prepared,
-        vehicle_types_path=str(vehicle_types_path),
+        passenger_vehicle_types_path=str(passenger_vehicle_types_path),
+        freight_vehicle_types_path=str(freight_vehicle_types_path),
         include_passenger=True,
         include_freight=False,
     )
@@ -41,7 +48,8 @@ def test_filter_prepared_skims_by_assignment_uses_vehicle_types_contract(tmp_pat
 
     freight_only = _filter_prepared_skims_by_assignment(
         prepared,
-        vehicle_types_path=str(vehicle_types_path),
+        passenger_vehicle_types_path=str(passenger_vehicle_types_path),
+        freight_vehicle_types_path=str(freight_vehicle_types_path),
         include_passenger=False,
         include_freight=True,
     )

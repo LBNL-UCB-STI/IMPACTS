@@ -65,7 +65,8 @@ def annualize_prepared_skims_for_grid_allocation(
     group_cols: Optional[list[str]] = None,
     required_pollutants: Optional[list[str]] = None,
     annualization_days_or_file: float | str = default_representative_days_per_year,
-    vehicle_types_path: Optional[str] = None,
+    passenger_vehicle_types_path: Optional[str] = None,
+    freight_vehicle_types_path: Optional[str] = None,
     population_sample: float = 1.0,
     transit_sample: float = 1.0,
 ) -> pd.DataFrame:
@@ -98,7 +99,8 @@ def annualize_prepared_skims_for_grid_allocation(
     annualization_factors = resolve_skims_annualization_factors(
         prepared,
         annualization_days_or_file=annualization_days_or_file,
-        vehicle_types_path=vehicle_types_path,
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
     )
 
     retained_dim_cols = [col for col in prepared.columns if col in _SKIMS_DIMENSION_COLS and col not in prepared_group_cols]
@@ -170,12 +172,15 @@ def _infer_emfac_vehicle_category_from_emfac_id(
 
 
 def _load_vehicle_type_category_lookup(
-    vehicle_types_path: str,
+    passenger_vehicle_types_path: str,
+    freight_vehicle_types_path: str,
     *,
     category_lookup: dict[str, float],
     sanitized_categories: list[tuple[str, str]],
 ) -> dict[str, str]:
-    vehicle_types = read_table(vehicle_types_path)
+    passenger = read_table(passenger_vehicle_types_path).copy()
+    freight = read_table(freight_vehicle_types_path).copy()
+    vehicle_types = pd.concat([passenger, freight], ignore_index=True, sort=False)
     if "vehicleTypeId" not in vehicle_types.columns:
         raise ValueError("Vehicle types input must include vehicleTypeId for annualization lookup.")
 
@@ -229,7 +234,8 @@ def resolve_skims_annualization_factors(
     prepared: pd.DataFrame,
     *,
     annualization_days_or_file: float | str,
-    vehicle_types_path: Optional[str] = None,
+    passenger_vehicle_types_path: Optional[str] = None,
+    freight_vehicle_types_path: Optional[str] = None,
 ) -> pd.Series:
     if isinstance(annualization_days_or_file, str):
         csv_path = str(annualization_days_or_file).strip()
@@ -237,11 +243,12 @@ def resolve_skims_annualization_factors(
             raise ValueError("Annualization days file path must be non-empty.")
         if "vehicleTypeId" not in prepared.columns:
             raise ValueError("Prepared skims must include vehicleTypeId when annualization_days_or_file is a CSV path.")
-        if not vehicle_types_path:
+        if not passenger_vehicle_types_path or not freight_vehicle_types_path:
             raise ValueError("A vehicle types input is required when annualization_days_or_file is a CSV path.")
         category_lookup, sanitized_categories = _load_vehicle_operation_days_lookup(csv_path)
         vehicle_type_category_lookup = _load_vehicle_type_category_lookup(
-            vehicle_types_path,
+            passenger_vehicle_types_path,
+            freight_vehicle_types_path,
             category_lookup=category_lookup,
             sanitized_categories=sanitized_categories,
         )
@@ -255,7 +262,8 @@ def resolve_skims_annualization_factors(
         if missing_vehicle_types:
             raise ValueError(
                 "Could not resolve EMFAC vehicle category for some skim vehicleTypeId values using "
-                f"{vehicle_types_path}: sample={missing_vehicle_types[:10]}"
+                "the configured passenger/freight vehicle types files: "
+                f"sample={missing_vehicle_types[:10]}"
             )
         return categories.map(category_lookup).astype(float)
     days = float(annualization_days_or_file)

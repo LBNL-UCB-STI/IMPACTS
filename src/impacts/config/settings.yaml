@@ -24,7 +24,6 @@ beam:
   local_output_folder: beam/beam_output/
 
 impacts:
-  local_input_folder: impacts/input/
   local_output_folder: impacts/impacts_output/
   beam:
     passenger_vehicle_types_file: vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv

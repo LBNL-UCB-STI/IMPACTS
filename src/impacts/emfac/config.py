@@ -47,6 +47,8 @@ def _build_activities_config_from_root(emfac_root: dict[str, object]) -> dict[st
     root_scenario = emfac_root.get("scenario", {})
     if isinstance(root_scenario, dict) and "year" in root_scenario:
         defaults["calendar_year"] = deepcopy(root_scenario["year"])
+    if isinstance(root_scenario, dict) and "name" in root_scenario:
+        defaults["scenario_name"] = deepcopy(root_scenario["name"])
     if "output" in emfac_root:
         defaults["outputs"] = deepcopy(emfac_root["output"])
     mappings = emfac_root.get("mappings", {})
@@ -354,6 +356,7 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
 
     year = int(raw["calendar_year"])
     region = str(raw["region_label"])
+    scenario_name = str(raw.get("scenario_name", "Baseline"))
     outputs_root = Path(str(raw["outputs"])).expanduser()
     activities_output_root = outputs_root / "activities"
     tmp_root = outputs_root / "_tmp"
@@ -362,11 +365,13 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
     base_name = f"{region_slug}-emfac-{year}"
     final_name = f"{base_name}-project-analysis-final"
     inventory_final_name = f"{base_name}-inventory-final"
+    emissions_store_name = f"{year}-{scenario_name}"
 
     return {
         "run": {
             "region_label": region,
             "calendar_year": year,
+            "scenario_name": scenario_name,
             "outputs": str(outputs_root),
             "model_year_groups": {
                 "light_duty": list(raw["model_year_groups"]["light_duty"]),
@@ -414,6 +419,7 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
             "final_output_freight": str(activities_output_root / f"{final_name}-freight-rates.parquet"),
             "final_activity_output_freight": str(activities_output_root / f"{inventory_final_name}-freight-activity.parquet"),
             "final_fleet_output_freight": str(activities_output_root / f"{inventory_final_name}-freight-fleet.parquet"),
+            "emissions_store_root": str(outputs_root / "emissions" / emissions_store_name),
         },
     }
 

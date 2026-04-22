@@ -118,9 +118,6 @@ def build_settings_payload_from_pilates(
         pilates_settings,
     )
     _assert_no_unresolved_placeholders(impacts_section, label="impacts")
-    local_input_folder = str(impacts_section.get("local_input_folder") or "").strip()
-    if not local_input_folder:
-        raise ValueError("impacts.local_input_folder must be provided in settings.")
     impacts_output_dir = str(impacts_section.get("local_output_folder") or "").strip()
     if not impacts_output_dir:
         raise ValueError("impacts.local_output_folder must be provided in settings.")

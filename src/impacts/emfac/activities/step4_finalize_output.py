@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import duckdb
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from impacts.emfac.activities.step3_fill_project_analysis_rates import ACTIVITY_COLUMN
 from impacts.emfac.activities.step3_fill_project_analysis_rates import POLLUTANT_COLUMNS
@@ -31,6 +34,12 @@ ACTIVITY_COLUMNS = [
     "pto_total_vmt_vehicle_miles_per_year",
 ]
 LIGHT_DUTY_VEHICLE_CATEGORIES = {"LDA", "LDT1", "LDT2"}
+_RATES_STORE_NUMERIC_DIMENSION_COLUMNS = {
+    "modelYear",
+    "speedMph_timeMin",
+    "speed_mph_float_bins",
+    "time_minutes_float_bins",
+}
 
 
 def _model_year_group_label(group: dict[str, object]) -> str:
@@ -317,6 +326,178 @@ def _print_model_year_group_stats(
             print(f"        {model_year}: {int(count):,}")
 
 
+def _build_emfac_id(*, vehicle_category: object, fuel: object, model_year: object) -> str:
+    def _sanitize_emfac_component(value: object) -> str:
+        return "".join(ch for ch in str("" if pd.isna(value) else value).strip() if ch.isalnum())
+
+    return (
+        f"{_sanitize_emfac_component(model_year)}"
+        f"{_sanitize_emfac_component(vehicle_category)}"
+        f"{_sanitize_emfac_component(fuel)}"
+    )
+
+
+def _complete_sparse_counties_for_rates_store(frame: pd.DataFrame, *, expected_counties: list[str]) -> pd.DataFrame:
+    if "county" not in frame.columns or len(expected_counties) <= 1:
+        return frame
+
+    result = frame.copy()
+    result["county"] = result["county"].astype(str).str.strip()
+    value_columns = [
+        column
+        for column in result.columns
+        if column not in {"county", "emfacId"}
+        and column not in _RATES_STORE_NUMERIC_DIMENSION_COLUMNS
+        and pd.api.types.is_numeric_dtype(result[column])
+    ]
+    if not value_columns:
+        return result
+    group_columns = [column for column in result.columns if column not in {"county", *value_columns}]
+    slice_means = result.groupby(group_columns, dropna=False)[value_columns].mean(numeric_only=True).reset_index()
+    observed = result[group_columns + ["county"]].drop_duplicates()
+    county_frame = pd.DataFrame({"county": expected_counties, "_join_key": 1})
+    missing = (
+        slice_means.assign(_join_key=1)
+        .merge(county_frame, on="_join_key", how="inner")
+        .drop(columns="_join_key")
+        .merge(observed.assign(_observed=True), on=group_columns + ["county"], how="left")
+    )
+    missing = missing.loc[missing["_observed"].isna()].drop(columns="_observed")
+    if missing.empty:
+        return result
+    return pd.concat([result, missing[result.columns]], ignore_index=True)
+
+
+def _column_exists(con: duckdb.DuckDBPyConnection, table_name: str, column_name: str) -> bool:
+    rows = con.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+    return any(str(row[1]) == column_name for row in rows)
+
+
+def _summarize_rates_store_county_coverage(frame: pd.DataFrame) -> dict[str, object]:
+    if "county" not in frame.columns or "emfacId" not in frame.columns:
+        return {
+            "partition_count": int(frame["emfacId"].nunique(dropna=True)) if "emfacId" in frame.columns else 0,
+            "full_county_partition_count": 0,
+            "partial_county_partition_count": 0,
+            "sample_partial_partitions": [],
+        }
+    working = frame.copy()
+    working["county"] = working["county"].astype(str).str.strip()
+    coverage = (
+        working.groupby("emfacId", dropna=False)["county"]
+        .nunique(dropna=True)
+        .sort_values()
+    )
+    expected_count = int(working["county"].nunique(dropna=True))
+    partial = coverage[coverage < expected_count]
+    return {
+        "expected_county_count": expected_count,
+        "partition_count": int(len(coverage)),
+        "full_county_partition_count": int((coverage == expected_count).sum()),
+        "partial_county_partition_count": int(len(partial)),
+        "sample_partial_partitions": [
+            {"emfacId": str(emfac_id), "county_count": int(count)}
+            for emfac_id, count in partial.head(20).items()
+        ],
+    }
+
+
+def _build_rates_store_duckdb(*, parquet_root: Path, duckdb_path: Path) -> Path:
+    duckdb_path.parent.mkdir(parents=True, exist_ok=True)
+    parquet_glob = (parquet_root / "**" / "*.parquet").as_posix()
+    con = duckdb.connect(str(duckdb_path))
+    try:
+        con.execute("DROP TABLE IF EXISTS emfac_rates")
+        con.execute(
+            """
+            CREATE TABLE emfac_rates AS
+            SELECT *
+            FROM read_parquet(?, hive_partitioning = true, union_by_name = true)
+            """,
+            [parquet_glob],
+        )
+        con.execute("CREATE INDEX IF NOT EXISTS emfac_rates_emfac_id_idx ON emfac_rates (emfacId)")
+        if _column_exists(con, "emfac_rates", "county"):
+            con.execute("CREATE INDEX IF NOT EXISTS emfac_rates_county_idx ON emfac_rates (county)")
+        if _column_exists(con, "emfac_rates", "process"):
+            con.execute("CREATE INDEX IF NOT EXISTS emfac_rates_process_idx ON emfac_rates (process)")
+    finally:
+        con.close()
+    return duckdb_path
+
+
+def _write_rates_store_from_dataframe(
+    *,
+    rates: pd.DataFrame,
+    output_dir: str | Path,
+    compression: str = "zstd",
+) -> dict[str, object]:
+    output_root = Path(output_dir).resolve()
+    parquet_root = output_root / "dataset"
+    duckdb_path = output_root / "dataset.duckdb"
+    parquet_root.mkdir(parents=True, exist_ok=True)
+
+    working = rates.copy()
+    working["emfacId"] = working["emfacId"].astype(str)
+    expected_counties = (
+        sorted(working["county"].dropna().astype(str).str.strip().unique().tolist())
+        if "county" in working.columns else []
+    )
+    pre_write_summary = _summarize_rates_store_county_coverage(working)
+    written: list[Path] = []
+    relative_paths: dict[str, str] = {}
+    completed_frames: list[pd.DataFrame] = []
+    for emfac_id, frame in working.groupby("emfacId", dropna=False):
+        frame = _complete_sparse_counties_for_rates_store(frame, expected_counties=expected_counties)
+        completed_frames.append(frame)
+        emfac_id_str = str(emfac_id)
+        partition_dir = parquet_root / f"emfacId={emfac_id_str}"
+        partition_dir.mkdir(parents=True, exist_ok=True)
+        output_path = partition_dir / f"{emfac_id_str}.parquet"
+        parquet_frame = frame.drop(columns=["emfacId"], errors="ignore").reset_index(drop=True)
+        table = pa.Table.from_pandas(parquet_frame, preserve_index=False)
+        pq.write_table(table, output_path, compression=compression)
+        written.append(output_path)
+        relative_paths[emfac_id_str] = str(output_path.relative_to(output_root))
+
+    built_duckdb = _build_rates_store_duckdb(parquet_root=parquet_root, duckdb_path=duckdb_path)
+    post_write_summary = _summarize_rates_store_county_coverage(
+        pd.concat(completed_frames, ignore_index=True, sort=False) if completed_frames else working.iloc[0:0].copy()
+    )
+    return {
+        "parquet_file_count": len(written),
+        "output_dir": str(output_root),
+        "parquet_root": str(parquet_root),
+        "duckdb_path": str(built_duckdb),
+        "relative_paths": relative_paths,
+        "pre_write_county_coverage": pre_write_summary,
+        "post_write_county_coverage": post_write_summary,
+    }
+
+
+def _build_rates_store_substep(
+    *,
+    workflow: dict[str, object],
+    passenger_rates: pd.DataFrame,
+    freight_rates: pd.DataFrame,
+) -> dict[str, object]:
+    rates = pd.concat([passenger_rates, freight_rates], ignore_index=True, sort=False)
+    rates = rates.copy()
+    rates["emfacId"] = rates.apply(
+        lambda row: _build_emfac_id(
+            vehicle_category=row["vehicleCategory"],
+            fuel=row["fuel"],
+            model_year=row["modelYear"],
+        ),
+        axis=1,
+    )
+    return _write_rates_store_from_dataframe(
+        rates=rates,
+        output_dir=workflow["paths"]["emissions_store_root"],
+        compression="zstd",
+    )
+
+
 def _run_step4_substep_finalize_group(
     *,
     workflow: dict[str, object],
@@ -355,6 +536,10 @@ def _run_step4_substep_finalize_group(
     return (final_rates, matching_activity, aggregated_activity, fleet), trace_payload
 
 
+def _load_written_final_rates(workflow: dict[str, object], *, group_name: str) -> pd.DataFrame:
+    return pd.read_parquet(Path(str(workflow["paths"][f"final_output_{group_name}"])).expanduser().resolve())
+
+
 def run_step4(workflow: dict[str, object]) -> dict[str, object]:
     print("  Step 4. Finalize Output")
     print("    4.1 Load filled project analysis surface and activity weights")
@@ -378,9 +563,25 @@ def run_step4(workflow: dict[str, object]) -> dict[str, object]:
         _write_parquet(aggregated_activity, workflow["paths"][f"final_activity_output_{group_name}"])
         _write_parquet(fleet, workflow["paths"][f"final_fleet_output_{group_name}"])
         _print_model_year_group_stats(final_rates, aggregated_activity, fleet)
+    print("    4.5 Build emissions rates store")
+    rates_store = _build_rates_store_substep(
+        workflow=workflow,
+        passenger_rates=_load_written_final_rates(workflow, group_name="passenger"),
+        freight_rates=_load_written_final_rates(workflow, group_name="freight"),
+    )
     write_trace(
         workflow,
         "step4_finalize_output",
-        trace_payload,
+        {
+            **trace_payload,
+            "rates_store": {
+                "store_root": rates_store["output_dir"],
+                "parquet_root": rates_store["parquet_root"],
+                "duckdb_path": rates_store["duckdb_path"],
+                "parquet_file_count": rates_store["parquet_file_count"],
+                "pre_write_county_coverage": rates_store["pre_write_county_coverage"],
+                "post_write_county_coverage": rates_store["post_write_county_coverage"],
+            },
+        },
     )
     return workflow

@@ -6,8 +6,6 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
-import pandas as pd
-
 from ...common import find_preferred_file
 from ...common import log_step_banner
 from ...common import log_substep_banner
@@ -72,29 +70,6 @@ def _resolve_region_or_absolute_path(raw_path: str, *, region_input_root: Path, 
     if raw.startswith("~") or Path(raw).is_absolute():
         return resolve_path(raw, config_path) or raw
     return str((region_input_root / raw).resolve())
-
-
-def _build_combined_vehicle_types_input(
-    *,
-    passenger_vehicle_types_source: str,
-    freight_vehicle_types_source: str,
-    input_root: Path,
-) -> str:
-    passenger = read_table(passenger_vehicle_types_source).copy()
-    passenger["assignment_group"] = "passenger"
-    freight = read_table(freight_vehicle_types_source).copy()
-    freight["assignment_group"] = "freight"
-    combined = pd.concat([passenger, freight], ignore_index=True, sort=False)
-    duplicate_ids = combined.loc[combined["vehicleTypeId"].duplicated(), "vehicleTypeId"].drop_duplicates().tolist()
-    if duplicate_ids:
-        raise ValueError(
-            "Configured passenger and freight vehicle types files contain duplicate vehicleTypeId values: "
-            f"{duplicate_ids[:10]}"
-        )
-    output_path = input_root / "vehicle_types_input" / "vehicleTypes--combined--EM.csv"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    combined.to_csv(output_path, index=False)
-    return str(output_path)
 
 
 def run(
@@ -276,23 +251,14 @@ def run(
         relative_target=str(beam_processing.freight_vehicle_types_file),
         metadata={"artifact_family": "freight_vehicle_types_input"},
     )
-    combined_vehicle_types_source = _build_combined_vehicle_types_input(
-        passenger_vehicle_types_source=passenger_vehicle_types_source,
-        freight_vehicle_types_source=freight_vehicle_types_source,
-        input_root=input_root,
-    )
-    _register_manifest_input(
-        manifest_inputs,
-        input_root=input_root,
-        key="vehicle_types_input",
-        source_path=combined_vehicle_types_source,
-        relative_target=Path(combined_vehicle_types_source).name,
-        metadata={"artifact_family": "vehicle_types_input"},
-    )
     staged_annualization_days_or_file = emissions.annualization_days_or_file
     if isinstance(emissions.annualization_days_or_file, str):
         annualization_days_source = required_local_path(
-            resolve_path(emissions.annualization_days_or_file, config_path),
+            _resolve_region_or_absolute_path(
+                emissions.annualization_days_or_file,
+                region_input_root=region_input_root,
+                config_path=config_path,
+            ),
             "impacts.emissions.annualization_days_or_file",
         )
         staged_annualization_days_or_file = _register_manifest_input(
@@ -394,7 +360,6 @@ def run(
         "staged_network": staged_network,
         "staged_osm": staged_osm,
         "staged_skims": staged_skims,
-        "staged_vehicle_types": staged_vehicle_types,
         "staged_events": staged_events,
         "staged_inmap_grid": staged_inmap_grid,
         "staged_passenger_inventory_file": staged_passenger_inventory_file,

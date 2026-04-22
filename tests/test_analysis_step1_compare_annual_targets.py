@@ -20,21 +20,33 @@ def test_analysis_step1_compares_modeled_totals_to_annual_targets(tmp_path: Path
     modeled_path = tmp_path / "beam_emissions_by_county_process.parquet"
     modeled.to_parquet(modeled_path, index=False)
 
-    vehicle_types = pd.DataFrame(
+    passenger_vehicle_types = pd.DataFrame(
         {
-            "vehicleTypeId": ["pax-car", "ft-light", "ft-heavy"],
-            "vehicleCategory": ["Car", "Class12aVocational", "Class78Tractor"],
-            "vehicleClass": ["Car", "Class 1&2A Vocational", "Class 7&8 Tractor"],
-            "vehicleUse": ["", "Freight", "Freight"],
-            "emfacVehicleCategory": ["LDA", "LDT1", "T7 Tractor"],
+            "vehicleTypeId": ["pax-car"],
+            "vehicleCategory": ["Car"],
+            "vehicleClass": ["Car"],
+            "vehicleUse": [""],
+            "emfacVehicleCategory": ["LDA"],
         }
     )
-    vehicle_types_path = tmp_path / "vehicle_types.csv"
-    vehicle_types.to_csv(vehicle_types_path, index=False)
+    freight_vehicle_types = pd.DataFrame(
+        {
+            "vehicleTypeId": ["ft-light", "ft-heavy"],
+            "vehicleCategory": ["Class12aVocational", "Class78Tractor"],
+            "vehicleClass": ["Class 1&2A Vocational", "Class 7&8 Tractor"],
+            "vehicleUse": ["Freight", "Freight"],
+            "emfacVehicleCategory": ["LDT1", "T7 Tractor"],
+        }
+    )
+    passenger_vehicle_types_path = tmp_path / "vehicleTypes--atlas.csv"
+    freight_vehicle_types_path = tmp_path / "vehicleTypes--frism.csv"
+    passenger_vehicle_types.to_csv(passenger_vehicle_types_path, index=False)
+    freight_vehicle_types.to_csv(freight_vehicle_types_path, index=False)
 
     outputs = run(
         modeled_emissions_path=str(modeled_path),
-        vehicle_types_path=str(vehicle_types_path),
+        passenger_vehicle_types_path=str(passenger_vehicle_types_path),
+        freight_vehicle_types_path=str(freight_vehicle_types_path),
         output_dir=tmp_path / "analysis",
         sector_targets=[
             {"source": "mobile_onroad", "sector": "passenger_cars", "annual_pm25_short_tons": 11.0, "annual_nox_short_tons": 101.0},

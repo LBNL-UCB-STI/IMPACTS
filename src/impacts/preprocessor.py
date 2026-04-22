@@ -18,6 +18,10 @@ CONTRACT_VERSION = "1"
 logger = logging.getLogger(__name__)
 
 
+def _derive_impacts_tmp_root(output_root: Path) -> Path:
+    return output_root / "tmp"
+
+
 def _validate_configured_local_path(
     path: str | None,
     label: str,
@@ -42,8 +46,8 @@ def build_inputs_manifest(
     inmap = settings.impacts.dispersions.inmap
     aermod = settings.impacts.dispersions.aermod
 
-    input_root = Path(resolve_path(settings.impacts.local_input_folder, config_path)).resolve()
     output_root = Path(resolve_path(settings.impacts.local_output_folder, config_path)).resolve()
+    input_root = _derive_impacts_tmp_root(output_root).resolve()
     input_root.mkdir(parents=True, exist_ok=True)
     output_root.mkdir(parents=True, exist_ok=True)
 

@@ -94,7 +94,6 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.shared.geography.fips.counties[0] == "001"
     assert config.beam.local_input_folder == "beam/production/"
     assert config.beam.local_output_folder == "beam/beam_output/"
-    assert config.impacts.local_input_folder == "impacts/input/"
     assert config.impacts.dispersions.inmap.enabled is True
     assert config.impacts.dispersions.inmap.grid_path.endswith("isrm_polygon_wgs84.gpkg")
     assert config.impacts.dispersions.aermod.enabled is True
@@ -139,7 +138,6 @@ def test_settings_and_pipeline_allow_annualization_days_or_file_csv_path(tmp_pat
                 "  local_input_folder: pilates/beam/production/",
                 "  local_output_folder: beam/beam_output/",
                 "impacts:",
-                "  local_input_folder: impacts/input/",
                 "  local_output_folder: impacts/impacts_output/",
                 "  beam:",
                 "    passenger_vehicle_types_file: vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv",
@@ -221,7 +219,6 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
     assert config.shared.geography.local_crs == "EPSG:26910"
     assert config.beam.local_input_folder == "pilates/beam/production/"
     assert config.beam.local_output_folder == "beam/beam_output/"
-    assert config.impacts.local_input_folder == "impacts/input/"
     assert config.impacts.emissions.osm_network_folder.endswith("r5/sfbay-cbg5500-weakConn-network")
     assert config.impacts.dispersions.inmap.enabled is True
     assert config.impacts.dispersions.inmap.isrm_zarr == "~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr"
@@ -363,8 +360,8 @@ def test_run_from_settings_delegates_through_preprocess(monkeypatch, tmp_path: P
         }
         return {
             "inputs_manifest_path": str(tmp_path / "impacts" / "inputs_manifest.yaml"),
-            "staging_dir": str(tmp_path / "impacts" / "input"),
-            "input_dir": str(tmp_path / "impacts" / "input"),
+            "staging_dir": str(tmp_path / "impacts" / "tmp"),
+            "input_dir": str(tmp_path / "impacts" / "tmp"),
         }
 
     def _fake_run(input_manifest_path, output_dir, run_manifest_path=None, run_dispersion=False):
@@ -387,7 +384,7 @@ def test_run_from_settings_delegates_through_preprocess(monkeypatch, tmp_path: P
     assert result["run_manifest_path"].endswith("run_manifest.yaml")
     assert calls["preprocess"]["settings_path"].endswith("settings.yaml")
     assert calls["run"]["input_manifest_path"].endswith("inputs_manifest.yaml")
-    assert calls["run"]["output_dir"].endswith("input")
+    assert calls["run"]["output_dir"].endswith("tmp")
     assert calls["run"]["run_dispersion"] is False
 
 
@@ -456,7 +453,7 @@ def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_pat
 
 
 def test_analysis_runner_resolves_modeled_emissions_from_run_manifest(monkeypatch, tmp_path: Path):
-    from impacts.analysis import runner as analysis_runner
+    from impacts import runner as analysis_runner
 
     output_root = tmp_path / "impacts"
     emissions_path = output_root / "beam_emissions_by_county_process.parquet"
@@ -487,7 +484,6 @@ def test_analysis_runner_resolves_modeled_emissions_from_run_manifest(monkeypatc
     class _Settings:
         class impacts:
             local_output_folder = str(output_root)
-            local_input_folder = str(tmp_path / "input")
 
             class emissions:
                 passenger_inventory_file = str(tmp_path / "passenger_inventory.parquet")
@@ -514,13 +510,13 @@ def test_analysis_runner_resolves_modeled_emissions_from_run_manifest(monkeypatc
         classmethod(lambda cls, payload: SimpleNamespace(to_dict=lambda: payload)),
     )
 
-    resolved = analysis_runner._resolve_modeled_emissions_path(tmp_path / "settings.yaml")
+    resolved = analysis_runner._resolve_analysis_modeled_emissions_path(tmp_path / "settings.yaml")
 
     assert resolved == emissions_path.resolve()
 
 
 def test_analysis_runner_resolves_county_boundaries_from_input_manifest(monkeypatch, tmp_path: Path):
-    from impacts.analysis import runner as analysis_runner
+    from impacts import runner as analysis_runner
 
     output_root = tmp_path / "impacts"
     input_root = tmp_path / "input"
@@ -578,7 +574,6 @@ def test_analysis_runner_resolves_county_boundaries_from_input_manifest(monkeypa
     class _Settings:
         class impacts:
             local_output_folder = str(output_root)
-            local_input_folder = str(input_root)
 
             class emissions:
                 passenger_inventory_file = str(tmp_path / "passenger_inventory.parquet")
@@ -604,7 +599,7 @@ def test_analysis_runner_resolves_county_boundaries_from_input_manifest(monkeypa
         classmethod(lambda cls, payload: SimpleNamespace(to_dict=lambda: payload)),
     )
 
-    resolved = analysis_runner._resolve_county_boundaries_path(tmp_path / "settings.yaml")
+    resolved = analysis_runner._resolve_analysis_county_boundaries_path(tmp_path / "settings.yaml")
 
     assert resolved == county_path.resolve()
 

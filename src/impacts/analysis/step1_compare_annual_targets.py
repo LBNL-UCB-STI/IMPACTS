@@ -64,8 +64,13 @@ def _classify_sector(row: pd.Series) -> str:
     return "other"
 
 
-def _load_vehicle_type_sectors(vehicle_types_path: str) -> pd.DataFrame:
-    vehicle_types = read_table(vehicle_types_path)
+def _load_vehicle_type_sectors(
+    passenger_vehicle_types_path: str,
+    freight_vehicle_types_path: str,
+) -> pd.DataFrame:
+    passenger = read_table(passenger_vehicle_types_path).copy()
+    freight = read_table(freight_vehicle_types_path).copy()
+    vehicle_types = pd.concat([passenger, freight], ignore_index=True, sort=False)
     if "vehicleTypeId" not in vehicle_types.columns:
         raise ValueError("Vehicle types input must include vehicleTypeId for analysis Step 1.")
     prepared = vehicle_types.copy()
@@ -110,7 +115,8 @@ def _build_targets_table(sector_targets: list[dict[str, object]]) -> pd.DataFram
 def _aggregate_modeled_to_targets(
     modeled_emissions_path: str,
     *,
-    vehicle_types_path: str,
+    passenger_vehicle_types_path: str,
+    freight_vehicle_types_path: str,
 ) -> pd.DataFrame:
     modeled = read_table(modeled_emissions_path)
     required_columns = {"vehicleTypeId", "process"}
@@ -121,7 +127,10 @@ def _aggregate_modeled_to_targets(
             f"for analysis Step 1. Missing: {missing}"
         )
 
-    sector_lookup = _load_vehicle_type_sectors(vehicle_types_path)
+    sector_lookup = _load_vehicle_type_sectors(
+        passenger_vehicle_types_path,
+        freight_vehicle_types_path,
+    )
     modeled = modeled.copy()
     modeled["vehicleTypeId"] = modeled["vehicleTypeId"].map(_normalize_token)
     modeled["process"] = modeled["process"].map(_normalize_token).str.upper()
@@ -244,7 +253,8 @@ def _plot_source_pollutant_comparison(
 def run(
     *,
     modeled_emissions_path: str,
-    vehicle_types_path: str,
+    passenger_vehicle_types_path: str,
+    freight_vehicle_types_path: str,
     output_dir: Path,
     sector_targets: list[dict[str, object]],
 ) -> dict[str, str]:
@@ -253,7 +263,8 @@ def run(
     targets_df = _build_targets_table(sector_targets)
     modeled_df = _aggregate_modeled_to_targets(
         modeled_emissions_path,
-        vehicle_types_path=vehicle_types_path,
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
     )
     comparison = _build_comparison_table(
         modeled_df=modeled_df,

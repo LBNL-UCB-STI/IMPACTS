@@ -594,7 +594,6 @@ class Analysis:
 
 @dataclass(frozen=True)
 class Impacts:
-    local_input_folder: str
     local_output_folder: str
     beam: ImpactsBeamProcessing
     emissions: Emissions
@@ -606,11 +605,10 @@ class Impacts:
     def from_dict(cls, payload: Dict[str, Any]) -> "Impacts":
         _reject_unknown_keys(
             payload,
-            {"local_input_folder", "local_output_folder", "beam", "emissions", "dispersions", "exposure", "analysis"},
+            {"local_output_folder", "beam", "emissions", "dispersions", "exposure", "analysis"},
             "impacts",
         )
         return cls(
-            local_input_folder=_required_string(payload.get("local_input_folder"), "impacts.local_input_folder"),
             local_output_folder=_required_string(payload.get("local_output_folder"), "impacts.local_output_folder"),
             beam=ImpactsBeamProcessing.from_dict(dict(payload.get("beam", {}) or {})),
             emissions=Emissions.from_dict(dict(payload.get("emissions", {}) or {})),
@@ -675,7 +673,6 @@ class ImpactsSettings:
                 "local_output_folder": self.beam.local_output_folder,
             },
             "impacts": {
-                "local_input_folder": self.impacts.local_input_folder,
                 "local_output_folder": self.impacts.local_output_folder,
                 "beam": {
                     "passenger_vehicle_types_file": self.impacts.beam.passenger_vehicle_types_file,

@@ -120,14 +120,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Filter to one or more years.",
     )
 
-    build_emfac_rates_store = subparsers.add_parser(
-        "build_emfac_rates_store",
-        help="Convert an EMFAC rates folder into partitioned Parquet and DuckDB outputs.",
-    )
-    build_emfac_rates_store.add_argument("--input-dir", required=True)
-    build_emfac_rates_store.add_argument("--output-dir", required=True)
-    build_emfac_rates_store.add_argument("--compression", default="zstd")
-
     return parser
 
 
@@ -207,9 +199,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "analysis":
-        from impacts.analysis.runner import run_from_settings
+        from impacts.runner import run_analysis_from_settings
 
-        run_from_settings(
+        run_analysis_from_settings(
             settings_path=args.config,
         )
         return 0
@@ -289,21 +281,6 @@ def main(argv: list[str] | None = None) -> int:
             county_fips_filters=args.county_fips_filters,
             year_filters=args.year_filters,
         )
-        return 0
-
-    if args.command == "build_emfac_rates_store":
-        from impacts.tools.emfac.build_emfac_rates_store import build_emfac_rates_store
-
-        result = build_emfac_rates_store(
-            input_dir=args.input_dir,
-            output_dir=args.output_dir,
-            compression=args.compression,
-        )
-        print(f"input_file_count={result['input_file_count']}")
-        print(f"parquet_file_count={result['parquet_file_count']}")
-        print(f"output_dir={result['output_dir']}")
-        print(f"parquet_root={result['parquet_root']}")
-        print(f"duckdb_path={result['duckdb_path']}")
         return 0
 
     parser.error(f"Unknown command: {args.command}")

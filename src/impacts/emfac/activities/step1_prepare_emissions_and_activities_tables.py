@@ -736,6 +736,69 @@ def _select_output_columns(frame: pd.DataFrame, source_type: str) -> pd.DataFram
     return result
 
 
+def _complete_sparse_counties_by_slice(
+    frame: pd.DataFrame,
+    *,
+    group_columns: list[str],
+    value_columns: list[str],
+) -> pd.DataFrame:
+    if "county" not in frame.columns:
+        return frame
+    expected_counties = sorted(frame["county"].dropna().astype(str).str.strip().unique().tolist())
+    if len(expected_counties) <= 1:
+        result = frame.copy()
+        if "is_imputed_county" not in result.columns:
+            result["is_imputed_county"] = False
+        return result
+
+    base_columns = ["county", *group_columns, *value_columns]
+    existing = frame[base_columns].copy()
+    existing["county"] = existing["county"].astype(str).str.strip()
+    existing["is_imputed_county"] = False
+
+    observed = existing[["county", *group_columns]].drop_duplicates()
+    slice_means = existing.groupby(group_columns, dropna=False)[value_columns].mean(numeric_only=True).reset_index()
+    county_template = pd.DataFrame({"county": expected_counties, "_join_key": 1})
+    missing = (
+        slice_means.assign(_join_key=1)
+        .merge(county_template, on="_join_key", how="inner")
+        .drop(columns="_join_key")
+        .merge(observed.assign(_observed=True), on=["county", *group_columns], how="left")
+    )
+    missing = missing.loc[missing["_observed"].isna()].drop(columns="_observed")
+    if missing.empty:
+        return existing
+
+    missing["is_imputed_county"] = True
+    result = pd.concat([existing, missing[existing.columns]], ignore_index=True)
+    return result.sort_values(["county", *group_columns]).reset_index(drop=True)
+
+
+def _complete_sparse_inventory_counties(frame: pd.DataFrame, source_type: str) -> pd.DataFrame:
+    configs: dict[str, tuple[list[str], list[str]]] = {
+        "population-inventory": (["vehicleCategory", "fuel", "modelYear"], ["population"]),
+        "trips-inventory": (["vehicleCategory", "fuel", "modelYear"], ["trips"]),
+        "vmt-inventory": (["vehicleCategory", "fuel", "modelYear", "speed"], ["total_vmt", "cvmt", "evmt"]),
+        "emission-inventory": (
+            ["vehicleCategory", "fuel", "modelYear", "speed", "process", "pollutant"],
+            ["emission"],
+        ),
+        "ghg-inventory": (
+            ["vehicleCategory", "fuel", "modelYear", "speed", "process", "pollutant"],
+            ["emission"],
+        ),
+    }
+    config = configs.get(source_type)
+    if config is None:
+        return frame
+    group_columns, value_columns = config
+    return _complete_sparse_counties_by_slice(
+        frame,
+        group_columns=[column for column in group_columns if column in frame.columns],
+        value_columns=[column for column in value_columns if column in frame.columns],
+    )
+
+
 def _clean_file(path: Path, *, source_type: str, region_label: str | None) -> pd.DataFrame:
     if source_type in HEADER_DETECTION_COLUMNS:
         frame = pd.read_csv(path, skiprows=_detect_header_row(path, source_type))
@@ -782,6 +845,8 @@ def clean_emfac_to_parquet(
     if year is not None:
         combined = combined.loc[combined["calendar_year"] == year].copy()
     combined = _select_output_columns(combined, source_type)
+    if region_label is not None:
+        combined = _complete_sparse_inventory_counties(combined, source_type)
 
     destination = Path(output_path).expanduser().resolve()
     if destination.suffix.lower() != ".parquet":

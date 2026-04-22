@@ -270,7 +270,8 @@ def _calculate_emissions(
     rates_folder: str,
     pollutants_map: Dict[str, str],
     annualization_days_or_file: float | str,
-    vehicle_types_path: Optional[str],
+    passenger_vehicle_types_path: Optional[str],
+    freight_vehicle_types_path: Optional[str],
     population_sample: float,
     transit_sample: float,
 ) -> pd.DataFrame:
@@ -317,7 +318,8 @@ def _calculate_emissions(
     annualization_factors = resolve_skims_annualization_factors(
         skims,
         annualization_days_or_file=annualization_days_or_file,
-        vehicle_types_path=vehicle_types_path,
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
     )
     scale = (
         annualization_factors
@@ -434,7 +436,8 @@ def build_skims_from_events(
     rates_folder: Optional[str] = None,
     pollutants_map: Optional[Dict[str, str]] = None,
     annualization_days_or_file: Optional[float | str] = None,
-    vehicle_types_path: Optional[str] = None,
+    passenger_vehicle_types_path: Optional[str] = None,
+    freight_vehicle_types_path: Optional[str] = None,
     population_sample: Optional[float] = None,
     transit_sample: Optional[float] = None,
 ) -> pd.DataFrame:
@@ -480,7 +483,8 @@ def build_skims_from_events(
             rates_folder=rates_folder,
             pollutants_map=pollutants_map,
             annualization_days_or_file=annualization_days_or_file,
-            vehicle_types_path=vehicle_types_path,
+            passenger_vehicle_types_path=passenger_vehicle_types_path,
+            freight_vehicle_types_path=freight_vehicle_types_path,
             population_sample=population_sample,
             transit_sample=transit_sample,
         )
@@ -520,7 +524,8 @@ def build_staged_skims_from_events(
     *,
     input_root: Path,
     network_path: str,
-    vehicle_types_path: Optional[str],
+    passenger_vehicle_types_path: Optional[str],
+    freight_vehicle_types_path: Optional[str],
     intersection_path: str,
     manifest_inputs: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
@@ -532,7 +537,8 @@ def build_staged_skims_from_events(
     skims_df = build_skims_from_events(
         events_path,
         network_path=network_path,
-        vehicle_types_path=vehicle_types_path,
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
         intersection_path=intersection_path,
     )
     skims_path = _write_staged_skims(skims_df, input_root=input_root)
@@ -545,7 +551,8 @@ def prepare_events_inputs(
     manifest_inputs: Dict,
     input_root: Path,
     network_path: str,
-    vehicle_types_path: Optional[str],
+    passenger_vehicle_types_path: Optional[str],
+    freight_vehicle_types_path: Optional[str],
     intersection_path: str,
     beam_length_col: str,
     prepared_skims_group_cols: List[str],
@@ -564,7 +571,8 @@ def prepare_events_inputs(
     skims_df = build_skims_from_events(
         events_path,
         network_path=network_path,
-        vehicle_types_path=vehicle_types_path,
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
         intersection_path=intersection_path,
     )
     skims_path = _write_staged_skims(skims_df, input_root=input_root)
@@ -596,7 +604,8 @@ def prepare_events_inputs(
         input_root=input_root,
         skims_input_source=skims_path,
         network_path=network_path,
-        vehicle_types_path=vehicle_types_path,
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
         beam_length_col=beam_length_col,
         prepared_skims_group_cols=list(prepared_skims_group_cols),
         pollutants=list(pollutants),

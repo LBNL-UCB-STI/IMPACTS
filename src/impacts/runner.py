@@ -7,6 +7,8 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
+import pandas as pd
+
 from .config.settings_builder import load_settings_from_yaml
 from .manifest.file_ops import load_structured_file
 from .manifest.file_ops import resolve_path
@@ -14,6 +16,7 @@ from .manifest.file_ops import write_structured_file
 from .manifest.schema import InputsManifest
 from .manifest.schema import PipelineConfig
 from .manifest.schema import RunManifest
+from .common import resolve_required_manifest_input
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,185 @@ def _resolve_runtime_output_root(
     if not resolved:
         raise ValueError("Could not resolve impacts.local_output_folder from settings.")
     return Path(resolved).resolve()
+
+
+def _humanize_target_name(name: str) -> str:
+    return str(name).strip().replace("_", " ").replace("-", " ").title()
+
+
+def _resolve_run_manifest_settings_path(run_manifest_path: str | Path) -> Path:
+    run_manifest = RunManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
+    input_manifest_path = run_manifest.get("input_manifest_path")
+    if not input_manifest_path:
+        raise ValueError("Analysis requires input_manifest_path in run_manifest.")
+    input_manifest = InputsManifest.from_dict(load_structured_file(input_manifest_path)).to_dict()
+    settings_source = input_manifest.get("settings_source")
+    if not settings_source:
+        raise ValueError("Analysis requires settings_source in input manifest.")
+    return Path(settings_source).resolve()
+
+
+def _resolve_analysis_run_manifest_path(settings_path: str | Path) -> Path:
+    candidate = Path(resolve_path(load_settings_from_yaml(settings_path).impacts.local_output_folder, settings_path)).resolve() / "run_manifest.yaml"
+    if not candidate.exists():
+        raise FileNotFoundError(
+            "Analysis requires workflow run_manifest.yaml in the configured impacts.local_output_folder. "
+            f"Expected {candidate}."
+        )
+    return candidate
+
+
+def _load_analysis_run_manifest(settings_path: str | Path) -> tuple[Path, dict[str, Any]]:
+    run_manifest_path = _resolve_analysis_run_manifest_path(settings_path)
+    run_manifest = RunManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
+    return run_manifest_path, run_manifest
+
+
+def _load_analysis_context(settings_path: str | Path) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    run_manifest_path, run_manifest = _load_analysis_run_manifest(settings_path)
+    input_manifest_path = run_manifest.get("input_manifest_path")
+    if not input_manifest_path:
+        raise ValueError("Analysis requires input_manifest_path in run_manifest.")
+    input_manifest = InputsManifest.from_dict(load_structured_file(input_manifest_path)).to_dict()
+    inputs = input_manifest.get("inputs", {}) or {}
+    return run_manifest_path, run_manifest, input_manifest, inputs
+
+
+def _resolve_analysis_modeled_emissions_path(settings_path: str | Path) -> Path:
+    _, run_manifest = _load_analysis_run_manifest(settings_path)
+    candidate_raw = run_manifest.get("outputs", {}).get("beam_emissions_by_county_process")
+    if not candidate_raw:
+        raise ValueError("Analysis requires beam_emissions_by_county_process in run_manifest.outputs.")
+    candidate = Path(candidate_raw).resolve()
+    if not candidate.exists():
+        raise FileNotFoundError(
+            "Analysis requires county-intersected workflow emissions outputs. "
+            f"Expected {candidate}."
+        )
+    return candidate
+
+
+def _resolve_analysis_county_boundaries_path(settings_path: str | Path) -> Path:
+    _, _, _, inputs = _load_analysis_context(settings_path)
+    candidate = Path(resolve_required_manifest_input(inputs, key="county_boundaries")).resolve()
+    if not candidate.exists():
+        raise FileNotFoundError(
+            "Analysis requires staged county boundaries from preprocess. "
+            f"Expected {candidate}."
+        )
+    return candidate
+
+
+def _resolve_analysis_vehicle_types_paths(settings_path: str | Path) -> tuple[Path, Path]:
+    _, _, _, inputs = _load_analysis_context(settings_path)
+    passenger_candidate = Path(resolve_required_manifest_input(inputs, key="passenger_vehicle_types_input")).resolve()
+    freight_candidate = Path(resolve_required_manifest_input(inputs, key="freight_vehicle_types_input")).resolve()
+    if not passenger_candidate.exists():
+        raise FileNotFoundError(
+            "Analysis requires staged passenger vehicle types from preprocess. "
+            f"Expected {passenger_candidate}."
+        )
+    if not freight_candidate.exists():
+        raise FileNotFoundError(
+            "Analysis requires staged freight vehicle types from preprocess. "
+            f"Expected {freight_candidate}."
+        )
+    return passenger_candidate, freight_candidate
+
+
+def _resolve_analysis_inventory_target_path(settings_path: str | Path, raw: str) -> Path:
+    candidate = Path(resolve_path(raw, settings_path) or raw).resolve()
+    if not candidate.exists():
+        raise FileNotFoundError(
+            "Analysis inventory target file was configured but not found. "
+            f"Resolved path: {candidate}"
+        )
+    return candidate
+
+
+def run_analysis_from_settings(
+    *,
+    settings_path: str | Path,
+) -> Dict[str, str]:
+    from .analysis.step1_compare_annual_targets import run as run_step1
+    from .analysis.step2_compare_emissions_inventory import run as run_step2
+    from .common import normalize_county_fips
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        force=False,
+    )
+    settings = load_settings_from_yaml(settings_path)
+    output_dir = Path(resolve_path(settings.impacts.local_output_folder, settings_path)).resolve() / "analysis"
+    modeled_emissions_path = _resolve_analysis_modeled_emissions_path(settings_path)
+    outputs: Dict[str, str] = {}
+    if settings.impacts.analysis.sector_targets:
+        passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_analysis_vehicle_types_paths(settings_path)
+        target_outputs = run_step1(
+            modeled_emissions_path=str(modeled_emissions_path),
+            passenger_vehicle_types_path=str(passenger_vehicle_types_path),
+            freight_vehicle_types_path=str(freight_vehicle_types_path),
+            output_dir=output_dir / "annual_targets",
+            sector_targets=[
+                {
+                    "source": target.source,
+                    "sector": target.sector,
+                    "annual_pm25_short_tons": target.annual_pm25_short_tons,
+                    "annual_nox_short_tons": target.annual_nox_short_tons,
+                }
+                for target in settings.impacts.analysis.sector_targets
+            ],
+        )
+        for key, value in target_outputs.items():
+            outputs[f"annual_targets_{key}"] = value
+    if not settings.impacts.analysis.targets:
+        return outputs
+    county_boundaries_path = _resolve_analysis_county_boundaries_path(settings_path)
+    county_order: list[str] = []
+    if settings.shared.geography.fips.counties:
+        import geopandas as gpd
+
+        county_gdf = gpd.read_file(county_boundaries_path)
+        county_gdf["COUNTYFP"] = normalize_county_fips(county_gdf["COUNTYFP"])
+        wanted = set(normalize_county_fips(pd.Series(list(settings.shared.geography.fips.counties))).dropna().tolist())
+        county_order = (
+            county_gdf.loc[county_gdf["COUNTYFP"].isin(wanted), ["COUNTYFP", "NAME"]]
+            .drop_duplicates()
+            .sort_values("COUNTYFP")["NAME"]
+            .astype(str)
+            .tolist()
+        )
+    inventory_path = _resolve_analysis_inventory_target_path(settings_path, settings.impacts.analysis.inventory_file)
+    for target in settings.impacts.analysis.targets:
+        target_outputs = run_step2(
+            modeled_emissions_path=str(modeled_emissions_path),
+            inventory_path=str(inventory_path),
+            county_boundaries_path=str(county_boundaries_path),
+            output_dir=output_dir,
+            county_order=county_order,
+            target_name=target.name,
+            inventory_label=f"{settings.impacts.analysis.inventory_label} {_humanize_target_name(target.name)}".strip(),
+            pollutant_targets={
+                pollutant: {
+                    "columns": tuple(selector.columns),
+                    "prefixes": tuple(selector.prefixes),
+                    "exclude_columns": tuple(selector.exclude_columns),
+                    "exclude_prefixes": tuple(selector.exclude_prefixes),
+                }
+                for pollutant, selector in target.pollutants.items()
+            },
+        )
+        for key, value in target_outputs.items():
+            outputs[f"{target.name}_{key}"] = value
+    return outputs
+
+
+def run_analysis_from_run_manifest(
+    *,
+    run_manifest_path: str | Path,
+) -> Dict[str, str]:
+    return run_analysis_from_settings(settings_path=_resolve_run_manifest_settings_path(run_manifest_path))
 
 
 def run_from_input_manifest(
@@ -103,9 +285,9 @@ def run_from_input_manifest(
     population_distribution_path: Optional[Path] = None
     population_counts_path: Optional[Path] = None
     if run_dispersion:
-        from .workflow.step2_compute_inmap_concentrations import run as run_inmap_dispersion
-        from .workflow.step3_compute_aermod_concentrations import run as run_aermod_dispersion
-        from .workflow.step4_prepare_exposure import run as run_prepare_exposure
+        from .pipeline.workflow.step2_compute_inmap_concentrations import run as run_inmap_dispersion
+        from .pipeline.workflow.step3_compute_aermod_concentrations import run as run_aermod_dispersion
+        from .pipeline.workflow.step4_prepare_exposure import run as run_prepare_exposure
         if pipeline.inmap_enabled and emissions_outputs.get("beam_emissions_for_inmap"):
             _log_step_banner("STEP 2", "inmap concentrations")
             logger.info("Using Step 2 implementation: inmap_concentrations_and_export")

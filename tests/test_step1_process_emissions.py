@@ -8,26 +8,29 @@ from impacts.pipeline.workflow.step1_process_emissions import _derive_county_cor
 from impacts.pipeline.workflow.step1_process_emissions import _derive_inventory_activity_targets_for_assignment
 
 
-def test_inventory_targets_per_assignment_dedup_trips(tmp_path: Path) -> None:
+def test_inventory_targets_per_assignment_grouped_by_model_year_and_process(tmp_path: Path) -> None:
     passenger_inventory = pd.DataFrame(
         [
             {
                 "county": "Alameda",
-                "vehicleCategory": "LDA",
-                "fuel": "Gas",
-                "modelYear": 2018,
-                "speed": 10,
+                "modelYear": "post2014",
+                "process": "RUNEX",
                 "total_vmt_vehicle_miles_per_year": 100.0,
                 "trips_per_year": 20.0,
             },
             {
                 "county": "Alameda",
-                "vehicleCategory": "LDA",
-                "fuel": "Gas",
-                "modelYear": 2018,
-                "speed": 20,
+                "modelYear": "post2014",
+                "process": "RUNEX",
                 "total_vmt_vehicle_miles_per_year": 50.0,
-                "trips_per_year": 20.0,
+                "trips_per_year": 5.0,
+            },
+            {
+                "county": "Alameda",
+                "modelYear": "pre2004",
+                "process": "STREX",
+                "total_vmt_vehicle_miles_per_year": 0.0,
+                "trips_per_year": 7.0,
             },
         ]
     )
@@ -38,10 +41,8 @@ def test_inventory_targets_per_assignment_dedup_trips(tmp_path: Path) -> None:
         [
             {
                 "county": "Alameda",
-                "vehicleCategory": "T7 Tractor Class 8",
-                "fuel": "Dsl",
-                "modelYear": 2018,
-                "speed": 55,
+                "modelYear": "2007to2009",
+                "process": "PRDUST",
                 "total_vmt_vehicle_miles_per_year": 40.0,
                 "trips_per_year": 4.0,
             },
@@ -62,36 +63,94 @@ def test_inventory_targets_per_assignment_dedup_trips(tmp_path: Path) -> None:
     )
     targets = (
         pd.concat([passenger_targets, freight_targets], ignore_index=True)
-        .sort_values(["countyfp", "assignment_group"])
+        .sort_values(["assignment_group", "modelYear", "process"])
         .reset_index(drop=True)
     )
 
     assert targets.to_dict("records") == [
-        {"countyfp": "001", "assignment_group": "freight", "totVMT": 40.0, "totTrips": 4.0},
-        {"countyfp": "001", "assignment_group": "passenger", "totVMT": 150.0, "totTrips": 20.0},
+        {
+            "countyfp": "001",
+            "assignment_group": "freight",
+            "modelYear": "2007to2009",
+            "process": "PRDUST",
+            "totVMT": 40.0,
+            "totTrips": 4.0,
+        },
+        {
+            "countyfp": "001",
+            "assignment_group": "passenger",
+            "modelYear": "post2014",
+            "process": "RUNEX",
+            "totVMT": 150.0,
+            "totTrips": 25.0,
+        },
+        {
+            "countyfp": "001",
+            "assignment_group": "passenger",
+            "modelYear": "pre2004",
+            "process": "STREX",
+            "totVMT": 0.0,
+            "totTrips": 7.0,
+        },
     ]
 
     beam_group_totals = pd.DataFrame(
         [
-            {"countyfp": "001", "assignment_group": "passenger", "totVMT": 90.0, "totTrips": 9.0},
-            {"countyfp": "001", "assignment_group": "freight", "totVMT": 30.0, "totTrips": 3.0},
+            {
+                "countyfp": "001",
+                "assignment_group": "passenger",
+                "modelYear": "post2014",
+                "process": "RUNEX",
+                "totVMT": 90.0,
+                "totTrips": 9.0,
+            },
+            {
+                "countyfp": "001",
+                "assignment_group": "passenger",
+                "modelYear": "pre2004",
+                "process": "STREX",
+                "totVMT": 0.0,
+                "totTrips": 3.5,
+            },
+            {
+                "countyfp": "001",
+                "assignment_group": "freight",
+                "modelYear": "2007to2009",
+                "process": "PRDUST",
+                "totVMT": 30.0,
+                "totTrips": 3.0,
+            },
         ]
     )
     factors = _derive_county_correction_factors(beam_group_totals, targets).sort_values(
-        ["countyfp", "assignment_group"]
+        ["assignment_group", "modelYear", "process"]
     ).reset_index(drop=True)
 
-    assert factors[["countyfp", "assignment_group", "factor_totVMT", "factor_totTrips"]].to_dict("records") == [
+    assert factors[
+        ["countyfp", "assignment_group", "modelYear", "process", "factor_totVMT", "factor_totTrips"]
+    ].to_dict("records") == [
         {
             "countyfp": "001",
             "assignment_group": "freight",
+            "modelYear": "2007to2009",
+            "process": "PRDUST",
             "factor_totVMT": 40.0 / 30.0,
             "factor_totTrips": 4.0 / 3.0,
         },
         {
             "countyfp": "001",
             "assignment_group": "passenger",
+            "modelYear": "post2014",
+            "process": "RUNEX",
             "factor_totVMT": 150.0 / 90.0,
-            "factor_totTrips": 20.0 / 9.0,
+            "factor_totTrips": 25.0 / 9.0,
+        },
+        {
+            "countyfp": "001",
+            "assignment_group": "passenger",
+            "modelYear": "pre2004",
+            "process": "STREX",
+            "factor_totVMT": 1.0,
+            "factor_totTrips": 2.0,
         },
     ]

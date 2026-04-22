@@ -21,7 +21,7 @@ def postprocess_from_run_manifest(
     output_dir: str | Path,
     manifest_path: str | Path | None = None,
 ) -> Dict[str, Any]:
-    from .analysis.runner import run_from_run_manifest
+    from .runner import run_analysis_from_run_manifest
 
     run_manifest = RunManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
     output_root = Path(output_dir).resolve()
@@ -32,7 +32,7 @@ def postprocess_from_run_manifest(
 
     completion_path = output_root / "impacts_complete.txt"
     completion_path.write_text("End of impacts concluded.\n", encoding="utf-8")
-    analysis_outputs = run_from_run_manifest(
+    analysis_outputs = run_analysis_from_run_manifest(
         run_manifest_path=run_manifest_path,
     )
 
