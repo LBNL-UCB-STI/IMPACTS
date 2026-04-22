@@ -164,6 +164,7 @@ def _run_step5_substep_load_rates_store(
     workflow: dict[str, Any],
 ) -> tuple[dict[str, str], pd.DataFrame, pd.DataFrame]:
     config = workflow["config"]
+    output_root = Path(str(config["output"])).expanduser().resolve()
     passenger_vehicle_types = _build_passenger_vehicle_types_table(workflow)
     freight_vehicle_types = workflow["built_freight_vehicle_types"].copy()
     passenger_emfac_ids = sorted(
@@ -184,7 +185,7 @@ def _run_step5_substep_load_rates_store(
     for emfac_id in shared_emfac_ids:
         parquet_path = parquet_root / f"emfacId={emfac_id}" / f"{emfac_id}.parquet"
         if parquet_path.exists():
-            relative_paths[emfac_id] = str(parquet_path.relative_to(store_root))
+            relative_paths[emfac_id] = str(parquet_path.relative_to(output_root))
         else:
             missing_store_ids.append(emfac_id)
     if missing_store_ids:

@@ -44,8 +44,14 @@ def _run_step(workflow: dict[str, object], *, step_name: str, runner) -> dict[st
     return updated_workflow
 
 
-def _bootstrap_emfac_outputs_if_needed(workflow: dict[str, object]) -> dict[str, object]:
+def _ensure_activities_outputs(workflow: dict[str, object]) -> dict[str, object]:
     activities = workflow["config"]["activities"]
+    activities_output_root = Path(str(activities["outputs"])).expanduser().resolve()
+    frism_year = workflow["config"]["frism"]["year"]
+    scenario_name = str(workflow["scenario"])
+    rates_store_root = activities_output_root / "emissions" / f"{frism_year}-{scenario_name}"
+    rates_store_dataset = rates_store_root / "dataset"
+    rates_store_duckdb = rates_store_root / "dataset.duckdb"
     required_outputs = {
         "passenger_rates_file": Path(str(activities["passenger_rates_file"])),
         "passenger_activity_file": Path(str(activities["passenger_activity_file"])),
@@ -53,14 +59,20 @@ def _bootstrap_emfac_outputs_if_needed(workflow: dict[str, object]) -> dict[str,
         "freight_rates_file": Path(str(activities["freight_rates_file"])),
         "freight_activity_file": Path(str(activities["freight_activity_file"])),
         "freight_fleet_file": Path(str(activities["freight_fleet_file"])),
+        "rates_store_dataset": rates_store_dataset,
+        "rates_store_duckdb": rates_store_duckdb,
     }
     missing = {label: path for label, path in required_outputs.items() if not path.exists()}
+    if not missing:
+        partition_exists = any(rates_store_dataset.glob("emfacId=*/*.parquet"))
+        if not partition_exists:
+            missing["rates_store_partitions"] = rates_store_dataset
     if not missing:
         return workflow
 
     activities_config = deepcopy(activities)
 
-    print("Bootstrapping EMFAC activities because required fleet inputs are missing:")
+    print("Running EMFAC activities first because required activities outputs are missing:")
     for path in missing.values():
         print(f"  missing: {path}")
     activities_workflow = load_activities_workflow_from_data(
@@ -84,7 +96,7 @@ def run_all_steps(config_path: str | Path | None = None) -> None:
         workflow = _configure_run(config_path)
     except Exception as error:
         raise_runtime_error("config_load", error)
-    workflow = _bootstrap_emfac_outputs_if_needed(workflow)
+    workflow = _ensure_activities_outputs(workflow)
     _print_run_banner(workflow)
     write_trace(
         workflow,
