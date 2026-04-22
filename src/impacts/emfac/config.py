@@ -55,8 +55,8 @@ def _build_activities_config_from_root(emfac_root: dict[str, object]) -> dict[st
     if isinstance(mappings, dict):
         if "emfac_category_fuel_mapping_file" in mappings:
             defaults["emfac_category_fuel_mapping_file"] = deepcopy(mappings["emfac_category_fuel_mapping_file"])
-        if "vehicle_operation_days_file" in mappings:
-            defaults["vehicle_operation_days_file"] = deepcopy(mappings["vehicle_operation_days_file"])
+        if "vehicle_category_metadata_file" in mappings:
+            defaults["vehicle_category_metadata_file"] = deepcopy(mappings["vehicle_category_metadata_file"])
     return _merge_dicts(defaults, activities)
 
 
@@ -84,7 +84,7 @@ def _build_fleet_config_from_root(emfac_root: dict[str, object]) -> dict[str, ob
             "emfac_category_fuel_mapping_file",
             "fastsim_category_fuel_mapping_file",
             "atlas_frism_xwalk_file",
-            "vehicle_operation_days_file",
+            "vehicle_category_metadata_file",
         ):
             if key in mappings:
                 defaults[key] = deepcopy(mappings[key])
@@ -268,7 +268,7 @@ def _normalize_activities_inputs(raw: dict) -> dict:
         "black_carbon_raw": _find_matching_file(black_carbon_root, ("bc",), required=False),
         "black_carbon_pollutant": black_carbon_pollutant,
         "emfac_category_fuel_mapping_file": _expand_optional_path(raw.get("emfac_category_fuel_mapping_file")),
-        "vehicle_operation_days_file": _expand_optional_path(raw.get("vehicle_operation_days_file")),
+        "vehicle_category_metadata_file": _expand_optional_path(raw.get("vehicle_category_metadata_file")),
         "statewide_inventory_raw": _find_matching_file(emissions_inventory_fallback, ("statewide",), required=False),
         "population_raw": _find_matching_file(emissions_inventory_main, ("population",), required=False),
         "trips_raw": _find_matching_file(emissions_inventory_main, ("trips",), required=False),
@@ -323,7 +323,7 @@ def _validate_activities(raw: dict, source_path: Path) -> None:
         ("model_year_groups",),
         ("project_analysis_raw",),
         ("emfac_category_fuel_mapping_file",),
-        ("vehicle_operation_days_file",),
+        ("vehicle_category_metadata_file",),
         ("statewide_inventory_raw",),
         ("vmt_raw",),
         ("population_raw",),
@@ -384,7 +384,7 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
             for key in (
                 "project_analysis_raw",
                 "emfac_category_fuel_mapping_file",
-                "vehicle_operation_days_file",
+                "vehicle_category_metadata_file",
                 "black_carbon_raw",
                 "black_carbon_pollutant",
                 "statewide_inventory_raw",
@@ -521,7 +521,7 @@ def _ingest_fleet_sources(config: dict) -> dict:
             "emfac_category_fuel_mapping_file",
             "fastsim_category_fuel_mapping_file",
             "atlas_frism_xwalk_file",
-            "vehicle_operation_days_file",
+            "vehicle_category_metadata_file",
         ):
             mappings[key] = _normalize_configured_path(mappings.get(key), path_label=f"mappings.{key}")
         config["mappings"] = mappings
@@ -620,7 +620,7 @@ def _validate_fleet(raw: dict, source_path: Path) -> None:
         ("vehicle_type_assignment_model_settings",),
         ("fastsim_category_fuel_mapping_file",),
         ("atlas_frism_xwalk_file",),
-        ("vehicle_operation_days_file",),
+        ("vehicle_category_metadata_file",),
         ("activities",),
         ("activities", "outputs"),
         ("activities", "region_label"),
@@ -667,7 +667,7 @@ def load_fleet_workflow(config_path: str | Path | None = None) -> dict:
                 "emfac_category_fuel_mapping_file",
                 "fastsim_category_fuel_mapping_file",
                 "atlas_frism_xwalk_file",
-                "vehicle_operation_days_file",
+                "vehicle_category_metadata_file",
             )
         },
         "activities": raw["activities"],

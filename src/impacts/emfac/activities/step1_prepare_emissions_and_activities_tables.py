@@ -394,7 +394,7 @@ def _run_step1_substep_prepare_emissions_inventory(workflow: dict[str, object]) 
         region_label=workflow["run"]["region_label"],
         year=workflow["run"]["calendar_year"],
         pto_config=pto_config,
-        operation_days_path=str(workflow["inputs"]["vehicle_operation_days_file"]),
+        operation_days_path=str(workflow["inputs"]["vehicle_category_metadata_file"]),
     )
     return emissions_inventory_path, pd.read_parquet(emissions_inventory_path)
 
@@ -876,10 +876,16 @@ def _annualize_daily_series(series: pd.Series) -> pd.Series:
 @lru_cache(maxsize=None)
 def _load_operation_days_lookup(operation_days_path: str) -> dict[str, float]:
     frame = pd.read_csv(Path(operation_days_path).expanduser().resolve())
-    _require_columns(frame, {"vehicleCategory", "operation_days_per_year"}, "Vehicle operation days CSV")
+    category_column = "vehicleCategory" if "vehicleCategory" in frame.columns else "emfac_vehicle_category" if "emfac_vehicle_category" in frame.columns else None
+    if category_column is None:
+        raise ValueError(
+            "Vehicle category metadata CSV must include one of ['vehicleCategory', 'emfac_vehicle_category'] "
+            "and 'operation_days_per_year'"
+        )
+    _require_columns(frame, {category_column, "operation_days_per_year"}, "Vehicle category metadata CSV")
     result: dict[str, float] = {}
     for row in frame.itertuples(index=False):
-        result[str(row.vehicleCategory).strip()] = float(row.operation_days_per_year)
+        result[str(getattr(row, category_column)).strip()] = float(row.operation_days_per_year)
     return result
 
 
@@ -896,7 +902,7 @@ def _operation_days_for_vehicle_categories(
     if operation_days.isna().any():
         missing = sorted(categories.loc[operation_days.isna()].drop_duplicates().tolist())
         raise ValueError(
-            "Vehicle operation days CSV is missing vehicle categories: "
+            "Vehicle category metadata CSV is missing vehicle categories: "
             f"{missing[:20]}"
         )
     return pd.to_numeric(operation_days, errors="raise")

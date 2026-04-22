@@ -26,9 +26,6 @@ _MODELED_POLLUTANT_COLUMNS = {
     "NOx": "tons_per_year_NOx_county_allocated",
 }
 
-_LIGHT_DUTY_EMFAC = {"LDA", "LDT1", "LDT2"}
-_MEDIUM_DUTY_EMFAC = {"MDV"}
-
 
 def _slugify(value: str) -> str:
     token = re.sub(r"[^A-Za-z0-9]+", "_", str(value).strip()).strip("_").lower()
@@ -39,44 +36,54 @@ def _normalize_token(value: object) -> str:
     return str("" if pd.isna(value) else value).strip()
 
 
-def _classify_sector(row: pd.Series) -> str:
-    vehicle_category = _normalize_token(row.get("vehicleCategory")).lower()
-    vehicle_class = _normalize_token(row.get("vehicleClass")).lower()
-    emfac_category = _normalize_token(row.get("emfacVehicleCategory")).upper()
-    vehicle_use = _normalize_token(row.get("vehicleUse")).lower()
-
-    if vehicle_category == "car":
-        return "passenger_cars"
-    if emfac_category in _LIGHT_DUTY_EMFAC:
-        return "light_duty_trucks"
-    if emfac_category in _MEDIUM_DUTY_EMFAC:
-        return "medium_duty_trucks"
-    if emfac_category.startswith("T6") or emfac_category.startswith("T7"):
-        return "heavy_duty_trucks"
-    if "class 1&2" in vehicle_class or "class12" in vehicle_category or vehicle_category.startswith("class12"):
-        return "light_duty_trucks"
-    if "class 4-6" in vehicle_class or "class456" in vehicle_category or vehicle_category.startswith("mdv"):
-        return "medium_duty_trucks"
-    if "class 7&8" in vehicle_class or "class78" in vehicle_category or vehicle_category.startswith("hdt") or vehicle_category.startswith("hdv"):
-        return "heavy_duty_trucks"
-    if vehicle_use == "freight":
-        return "other"
-    return "other"
-
-
 def _load_vehicle_type_sectors(
     passenger_vehicle_types_path: str,
     freight_vehicle_types_path: str,
+    *,
+    vehicle_category_metadata_file: str,
 ) -> pd.DataFrame:
     passenger = read_table(passenger_vehicle_types_path).copy()
     freight = read_table(freight_vehicle_types_path).copy()
     vehicle_types = pd.concat([passenger, freight], ignore_index=True, sort=False)
-    if "vehicleTypeId" not in vehicle_types.columns:
-        raise ValueError("Vehicle types input must include vehicleTypeId for analysis Step 1.")
+    required_columns = {"vehicleTypeId", "emfacVehicleCategory"}
+    missing = sorted(required_columns - set(vehicle_types.columns))
+    if missing:
+        raise ValueError(
+            "Vehicle types input must include vehicleTypeId and emfacVehicleCategory for analysis Step 1. "
+            f"Missing: {missing}"
+        )
+    category_mapping = read_table(vehicle_category_metadata_file).copy()
+    mapping_required = {"emfac_vehicle_category", "generic_vehicle_category"}
+    mapping_missing = sorted(mapping_required - set(category_mapping.columns))
+    if mapping_missing:
+        raise ValueError(
+            "Vehicle category metadata input must include emfac_vehicle_category and generic_vehicle_category "
+            f"for analysis Step 1. Missing: {mapping_missing}"
+        )
+    category_mapping["emfac_vehicle_category"] = category_mapping["emfac_vehicle_category"].map(_normalize_token)
+    category_mapping["generic_vehicle_category"] = category_mapping["generic_vehicle_category"].map(_normalize_token)
+    category_mapping = category_mapping.loc[
+        category_mapping["emfac_vehicle_category"].ne("") & category_mapping["generic_vehicle_category"].ne("")
+    ].copy()
+    category_mapping = (
+        category_mapping[["emfac_vehicle_category", "generic_vehicle_category"]]
+        .drop_duplicates(subset=["emfac_vehicle_category"], keep="first")
+        .reset_index(drop=True)
+    )
     prepared = vehicle_types.copy()
     prepared["vehicleTypeId"] = prepared["vehicleTypeId"].map(_normalize_token)
+    prepared["emfacVehicleCategory"] = prepared["emfacVehicleCategory"].map(_normalize_token)
     prepared = prepared.loc[prepared["vehicleTypeId"].ne("")].copy()
-    prepared["sector"] = prepared.apply(_classify_sector, axis=1)
+    prepared = prepared.merge(
+        category_mapping.rename(
+            columns={
+                "emfac_vehicle_category": "emfacVehicleCategory",
+                "generic_vehicle_category": "sector",
+            }
+        ),
+        how="left",
+        on="emfacVehicleCategory",
+    )
     return (
         prepared[["vehicleTypeId", "sector"]]
         .drop_duplicates(subset=["vehicleTypeId"], keep="first")
@@ -117,6 +124,7 @@ def _aggregate_modeled_to_targets(
     *,
     passenger_vehicle_types_path: str,
     freight_vehicle_types_path: str,
+    vehicle_category_metadata_file: str,
 ) -> pd.DataFrame:
     modeled = read_table(modeled_emissions_path)
     required_columns = {"vehicleTypeId", "process"}
@@ -130,6 +138,7 @@ def _aggregate_modeled_to_targets(
     sector_lookup = _load_vehicle_type_sectors(
         passenger_vehicle_types_path,
         freight_vehicle_types_path,
+        vehicle_category_metadata_file=vehicle_category_metadata_file,
     )
     modeled = modeled.copy()
     modeled["vehicleTypeId"] = modeled["vehicleTypeId"].map(_normalize_token)
@@ -255,6 +264,7 @@ def run(
     modeled_emissions_path: str,
     passenger_vehicle_types_path: str,
     freight_vehicle_types_path: str,
+    vehicle_category_metadata_file: str,
     output_dir: Path,
     sector_targets: list[dict[str, object]],
 ) -> dict[str, str]:
@@ -265,6 +275,7 @@ def run(
         modeled_emissions_path,
         passenger_vehicle_types_path=passenger_vehicle_types_path,
         freight_vehicle_types_path=freight_vehicle_types_path,
+        vehicle_category_metadata_file=vehicle_category_metadata_file,
     )
     comparison = _build_comparison_table(
         modeled_df=modeled_df,

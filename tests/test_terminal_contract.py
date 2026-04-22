@@ -106,6 +106,7 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.beam.passenger_vehicle_types_file == "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
     assert config.impacts.beam.freight_vehicle_types_file == "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
     assert len(config.impacts.analysis.sector_targets) == 6
+    assert config.impacts.emissions.vehicle_category_metadata_file == "vehicle-tech/emissions/emfac_vehicle_category_attributes.csv"
     assert config.impacts.analysis.sector_targets[0].source == "mobile_onroad"
     assert config.impacts.analysis.sector_targets[0].sector == "passenger_cars"
     assert config.impacts.analysis.sector_targets[0].annual_pm25_short_tons == 714.26
@@ -113,7 +114,7 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.analysis.sector_targets[-1].source == "road_dust"
     assert config.impacts.analysis.sector_targets[-1].annual_pm25_short_tons == 1499.25
     assert config.impacts.analysis.sector_targets[-1].annual_nox_short_tons is None
-    assert config.impacts.analysis.targets == []
+    assert config.impacts.analysis.inventory_targets == []
 
 
 def test_settings_and_pipeline_allow_annualization_days_or_file_csv_path(tmp_path: Path):
@@ -153,6 +154,7 @@ def test_settings_and_pipeline_allow_annualization_days_or_file_csv_path(tmp_pat
                 "      freight_file: beam/production/sfbay/vehicle-tech/emissions/freight_inventory.parquet",
                 "      enable_passenger_activity_correction: true",
                 "      enable_freight_activity_correction: false",
+                f"    vehicle_category_metadata_file: {days_csv.name}",
                 f"    annualization_days_or_file: {days_csv.name}",
                 "    pollutants: [NOx, PM25]",
                 "  dispersions:",
@@ -168,6 +170,7 @@ def test_settings_and_pipeline_allow_annualization_days_or_file_csv_path(tmp_pat
     )
     config = load_settings_from_yaml(settings_yaml)
     assert config.impacts.emissions.annualization_days_or_file == days_csv.name
+    assert config.impacts.emissions.vehicle_category_metadata_file == days_csv.name
     assert config.impacts.emissions.inventory.passenger_file.endswith("passenger_inventory.parquet")
     assert config.impacts.emissions.inventory.freight_file.endswith("freight_inventory.parquet")
     assert config.impacts.emissions.inventory.enable_passenger_activity_correction is True
@@ -232,7 +235,8 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
     assert config.impacts.beam.passenger_vehicle_types_file == "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
     assert config.impacts.beam.freight_vehicle_types_file == "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
     assert len(config.impacts.analysis.sector_targets) == 6
-    assert config.impacts.analysis.targets == []
+    assert config.impacts.emissions.vehicle_category_metadata_file == "vehicle-tech/emissions/emfac_vehicle_category_attributes.csv"
+    assert config.impacts.analysis.inventory_targets == []
 
 
 def test_manifest_models_round_trip_current_shape(tmp_path: Path):

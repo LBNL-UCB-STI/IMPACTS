@@ -16,7 +16,8 @@ impacts:
       freight_file: beam/production/sfbay/vehicle-tech/emissions/sf-emfac-2018-inventory-final-freight-activity.parquet
       enable_passenger_activity_correction: true
       enable_freight_activity_correction: true
-    annualization_days_or_file: vehicle-tech/emissions/vehicle_operation_days_per_year.csv
+    vehicle_category_metadata_file: vehicle-tech/emissions/emfac_vehicle_category_attributes.csv
+    annualization_days_or_file: vehicle-tech/emissions/emfac_vehicle_category_attributes.csv
     pollutants:
       - NH3
       - NOx
@@ -45,19 +46,20 @@ impacts:
     enabled: true
     population_folder: urbansim/2018
   analysis:
-    pm25_annual_targets_short_tons:
-      mobile_onroad:
-        passenger_cars: 714.26
-        heavy_duty_trucks: 486.16
-        light_duty_trucks: 313.92
-        medium_duty_trucks: 151.68
-        other: 43.62
-      road_dust:
-        all: 1499.25
-    nox_annual_targets_short_tons:
-      mobile_onroad:
-        passenger_cars: 3964.37
-        heavy_duty_trucks: 16524.57
-        light_duty_trucks: 3083.81
-        medium_duty_trucks: 1880.14
-        other: 1429.61
+    targets:
+      pm25_annual_short_tons:
+        mobile_onroad:
+          passenger_cars: 714.26
+          heavy_duty_trucks: 486.16
+          light_duty_trucks: 313.92
+          medium_duty_trucks: 151.68
+          other: 43.62
+        road_dust:
+          all: 1499.25
+      nox_annual_short_tons:
+        mobile_onroad:
+          passenger_cars: 3964.37
+          heavy_duty_trucks: 16524.57
+          light_duty_trucks: 3083.81
+          medium_duty_trucks: 1880.14
+          other: 1429.61

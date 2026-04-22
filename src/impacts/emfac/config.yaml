@@ -12,7 +12,7 @@ emfac:
     emfac_category_fuel_mapping_file: examples/emfac/2018_mappings/emfac_category_fuel_mapping.csv
     fastsim_category_fuel_mapping_file: examples/emfac/2018_mappings/fastsim_category_fuel_mapping.csv
     atlas_frism_xwalk_file: examples/emfac/2018_mappings/atlas_frism_xwalk.csv
-    vehicle_operation_days_file: examples/emfac/2018_mappings/vehicle_operation_days_per_year.csv
+    vehicle_category_metadata_file: examples/emfac/2018_mappings/vehicle_operation_days_per_year.csv
 
   activities:
     model_year_groups:

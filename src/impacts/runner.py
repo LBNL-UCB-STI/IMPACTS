@@ -19,6 +19,7 @@ from .manifest.schema import RunManifest
 from .common import resolve_required_manifest_input
 
 logger = logging.getLogger(__name__)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def _normalized_stage_label(label: str) -> str:
     text = str(label).strip()
@@ -136,13 +137,17 @@ def _resolve_analysis_vehicle_types_paths(settings_path: str | Path) -> tuple[Pa
 
 
 def _resolve_analysis_inventory_target_path(settings_path: str | Path, raw: str) -> Path:
-    candidate = Path(resolve_path(raw, settings_path) or raw).resolve()
-    if not candidate.exists():
-        raise FileNotFoundError(
-            "Analysis inventory target file was configured but not found. "
-            f"Resolved path: {candidate}"
-        )
-    return candidate
+    raw_text = str(raw).strip()
+    candidate = Path(resolve_path(raw_text, settings_path) or raw_text).resolve()
+    if candidate.exists():
+        return candidate
+    fallback = (_REPO_ROOT / raw_text).resolve()
+    if fallback.exists():
+        return fallback
+    raise FileNotFoundError(
+        "Analysis inventory target file was configured but not found. "
+        f"Tried {candidate} and {fallback}."
+    )
 
 
 def run_analysis_from_settings(
@@ -164,10 +169,20 @@ def run_analysis_from_settings(
     outputs: Dict[str, str] = {}
     if settings.impacts.analysis.sector_targets:
         passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_analysis_vehicle_types_paths(settings_path)
+        if not settings.impacts.emissions.vehicle_category_metadata_file:
+            raise ValueError(
+                "Analysis Step 1 requires impacts.emissions.vehicle_category_metadata_file when annual sector targets are configured."
+            )
         target_outputs = run_step1(
             modeled_emissions_path=str(modeled_emissions_path),
             passenger_vehicle_types_path=str(passenger_vehicle_types_path),
             freight_vehicle_types_path=str(freight_vehicle_types_path),
+            vehicle_category_metadata_file=str(
+                _resolve_analysis_inventory_target_path(
+                    settings_path,
+                    settings.impacts.emissions.vehicle_category_metadata_file,
+                )
+            ),
             output_dir=output_dir / "annual_targets",
             sector_targets=[
                 {
@@ -181,7 +196,7 @@ def run_analysis_from_settings(
         )
         for key, value in target_outputs.items():
             outputs[f"annual_targets_{key}"] = value
-    if not settings.impacts.analysis.targets:
+    if not settings.impacts.analysis.inventory_targets:
         return outputs
     county_boundaries_path = _resolve_analysis_county_boundaries_path(settings_path)
     county_order: list[str] = []
@@ -199,7 +214,7 @@ def run_analysis_from_settings(
             .tolist()
         )
     inventory_path = _resolve_analysis_inventory_target_path(settings_path, settings.impacts.analysis.inventory_file)
-    for target in settings.impacts.analysis.targets:
+    for target in settings.impacts.analysis.inventory_targets:
         target_outputs = run_step2(
             modeled_emissions_path=str(modeled_emissions_path),
             inventory_path=str(inventory_path),

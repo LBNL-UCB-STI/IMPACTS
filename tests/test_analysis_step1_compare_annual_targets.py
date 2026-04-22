@@ -42,11 +42,21 @@ def test_analysis_step1_compares_modeled_totals_to_annual_targets(tmp_path: Path
     freight_vehicle_types_path = tmp_path / "vehicleTypes--frism.csv"
     passenger_vehicle_types.to_csv(passenger_vehicle_types_path, index=False)
     freight_vehicle_types.to_csv(freight_vehicle_types_path, index=False)
+    mapping = pd.DataFrame(
+        {
+            "emfac_vehicle_category": ["LDA", "LDT1", "T7 Tractor"],
+            "generic_vehicle_category": ["passenger_cars", "light_duty_trucks", "heavy_duty_trucks"],
+            "operation_days_per_year": [347, 347, 312],
+        }
+    )
+    mapping_path = tmp_path / "emfac_vehicle_category_attributes.csv"
+    mapping.to_csv(mapping_path, index=False)
 
     outputs = run(
         modeled_emissions_path=str(modeled_path),
         passenger_vehicle_types_path=str(passenger_vehicle_types_path),
         freight_vehicle_types_path=str(freight_vehicle_types_path),
+        vehicle_category_metadata_file=str(mapping_path),
         output_dir=tmp_path / "analysis",
         sector_targets=[
             {"source": "mobile_onroad", "sector": "passenger_cars", "annual_pm25_short_tons": 11.0, "annual_nox_short_tons": 101.0},

@@ -137,19 +137,25 @@ def _sanitize_emfac_token(value: object) -> str:
 
 def _load_vehicle_operation_days_lookup(csv_path: str) -> tuple[dict[str, float], list[tuple[str, str]]]:
     frame = read_table(csv_path)
-    required = {"vehicleCategory", "operation_days_per_year"}
-    missing = sorted(required - set(frame.columns))
-    if missing:
-        raise ValueError(f"Vehicle operation days CSV is missing required columns: {missing}")
+    category_column = None
+    for candidate in ("emfac_vehicle_category", "vehicleCategory"):
+        if candidate in frame.columns:
+            category_column = candidate
+            break
+    if category_column is None or "operation_days_per_year" not in frame.columns:
+        raise ValueError(
+            "Vehicle operation days CSV is missing required columns: one of "
+            "['emfac_vehicle_category', 'vehicleCategory'] and 'operation_days_per_year'"
+        )
     lookup: dict[str, float] = {}
     sanitized_categories: list[tuple[str, str]] = []
-    for row in frame[["vehicleCategory", "operation_days_per_year"]].itertuples(index=False):
-        category = str(row.vehicleCategory).strip()
+    for row in frame[[category_column, "operation_days_per_year"]].itertuples(index=False):
+        category = str(row[0]).strip()
         if not category:
             continue
-        days = float(row.operation_days_per_year)
+        days = float(row[1])
         if days <= 0:
-            raise ValueError(f"Operation days must be positive for vehicleCategory={category!r}")
+            raise ValueError(f"Operation days must be positive for vehicle category={category!r}")
         lookup[category] = days
         sanitized_categories.append((category, _sanitize_emfac_token(category)))
     sanitized_categories.sort(key=lambda item: len(item[1]), reverse=True)
