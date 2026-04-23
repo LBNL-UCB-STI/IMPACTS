@@ -213,7 +213,6 @@ def _load_freight_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
     freight_model = config.get("freight_bayesian_dag", {}) or {}
     vehicle_categories = freight_model.get("vehicle_categories", {})
     fuel_types = freight_model.get("fuel_types", {})
-    category_fuel_support = freight_model.get("category_fuel_support", {})
     if not isinstance(vehicle_categories, dict) or not vehicle_categories:
         raise ValueError(
             "Freight Bayesian DAG model is missing evidence.vehicle_categories required for freight fuel mapping."
@@ -235,13 +234,6 @@ def _load_freight_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
             vehicle_category = _normalize_text(emfac_category)
             if vehicle_category == "":
                 continue
-            supported_fuels = {
-                _normalize_text(emfac_fuel)
-                for emfac_fuel in category_fuel_support.get(vehicle_category, [])
-                if _normalize_text(emfac_fuel)
-            }
-            if not supported_fuels:
-                continue
             for adopt_fuel, emfac_fuels in fuel_types.items():
                 normalized_adopt_fuel = _normalize_lower(adopt_fuel)
                 if normalized_adopt_fuel == "":
@@ -252,7 +244,7 @@ def _load_freight_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
                     )
                 for emfac_fuel in emfac_fuels:
                     fuel = _normalize_text(emfac_fuel)
-                    if fuel == "" or fuel not in supported_fuels:
+                    if fuel == "":
                         continue
                     rows.append(
                         {

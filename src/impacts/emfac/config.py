@@ -513,22 +513,16 @@ def build_model_category_fuel_mapping(model_spec_path: str | Path) -> pd.DataFra
     freight_evidence = freight_model.get("evidence", {})
     freight_vehicle_categories = freight_evidence.get("vehicle_categories", {})
     freight_fuel_types = freight_evidence.get("fuel_types", {})
-    freight_category_fuel_support = freight_evidence.get("category_fuel_support", {})
     for beam_category, emfac_categories in freight_vehicle_categories.items():
         beam_category_token = str(beam_category).strip()
         if not beam_category_token:
             continue
         for emfac_category in _normalized_string_list(emfac_categories):
-            supported_fuels = set(_normalized_string_list(freight_category_fuel_support.get(emfac_category)))
-            if not supported_fuels:
-                continue
             for adopt_fuel, emfac_fuels in freight_fuel_types.items():
                 adopt_fuel_token = str(adopt_fuel).strip().lower()
                 if not adopt_fuel_token:
                     continue
                 for emfac_fuel in _normalized_string_list(emfac_fuels):
-                    if emfac_fuel not in supported_fuels:
-                        continue
                     rows.append(
                         {
                             "group": "freight",
@@ -798,22 +792,6 @@ def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str
             f"Configured fleet path '{path_label}' has invalid models.freight_bayesian_dag.evidence.fuel_types entries in {model_spec_path}: "
             + ", ".join(sorted(str(key) for key in invalid_freight_fuel_types))
         )
-    freight_category_fuel_support = evidence.get("category_fuel_support")
-    if not isinstance(freight_category_fuel_support, dict) or not freight_category_fuel_support:
-        raise ValueError(
-            f"Configured fleet path '{path_label}' has no models.freight_bayesian_dag.evidence.category_fuel_support entries in {model_spec_path}. "
-            "It should contain the freight EMFAC-category-to-fuel support mappings."
-        )
-    invalid_freight_category_fuel_support = [
-        key
-        for key, value in freight_category_fuel_support.items()
-        if not isinstance(value, list) or not value
-    ]
-    if invalid_freight_category_fuel_support:
-        raise ValueError(
-            f"Configured fleet path '{path_label}' has invalid models.freight_bayesian_dag.evidence.category_fuel_support entries in {model_spec_path}: "
-            + ", ".join(sorted(str(key) for key in invalid_freight_category_fuel_support))
-        )
     port_evidence = evidence.get("port_location")
     if not isinstance(port_evidence, list) or not port_evidence:
         raise ValueError(
@@ -1063,15 +1041,6 @@ def _ingest_fleet_sources(config: dict) -> dict:
                     ]
                     for fuel, emfac_fuels in freight_fuel_types.items()
                     if str(fuel).strip()
-                },
-                "category_fuel_support": {
-                    str(category).strip(): [
-                        str(fuel).strip()
-                        for fuel in fuels
-                        if str(fuel).strip()
-                    ]
-                    for category, fuels in freight_evidence.get("category_fuel_support", {}).items()
-                    if str(category).strip()
                 },
             }
             passenger_model = _extract_named_model(

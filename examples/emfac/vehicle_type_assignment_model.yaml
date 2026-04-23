@@ -1,4 +1,5 @@
 models:
+
   freight_bayesian_dag:
     scoring:
       likelihood_floor: 0.01
@@ -17,43 +18,6 @@ models:
         diesel: [Dsl]
         electricity: [Elec]
         gasoline: [Gas]
-      category_fuel_support:
-        LDA: [Dsl, Elec, Gas]
-        LDT1: [Dsl, Elec, Gas]
-        LDT2: [Dsl, Elec, Gas]
-        MDV: [Dsl, Elec, Gas]
-        LHD1: [Dsl, Gas]
-        LHD2: [Dsl, Gas]
-        T6 CAIRP Class 4: [Dsl]
-        T6 CAIRP Class 5: [Dsl]
-        T6 CAIRP Class 6: [Dsl]
-        T6 CAIRP Class 7: [Dsl]
-        T6 Instate Delivery Class 4: [Dsl]
-        T6 Instate Delivery Class 5: [Dsl]
-        T6 Instate Delivery Class 6: [Dsl]
-        T6 Instate Delivery Class 7: [Dsl]
-        T6 Instate Other Class 4: [Dsl]
-        T6 Instate Other Class 5: [Dsl]
-        T6 Instate Other Class 6: [Dsl]
-        T6 Instate Other Class 7: [Dsl]
-        T6 Instate Tractor Class 6: [Dsl]
-        T6 Instate Tractor Class 7: [Dsl]
-        T6 OOS Class 4: [Dsl]
-        T6 OOS Class 5: [Dsl]
-        T6 OOS Class 6: [Dsl]
-        T6 OOS Class 7: [Dsl]
-        T6TS: [Gas]
-        T7 CAIRP Class 8: [Dsl]
-        T7 NNOOS Class 8: [Dsl]
-        T7 NOOS Class 8: [Dsl]
-        T7 Other Port Class 8: [Dsl]
-        T7 POAK Class 8: [Dsl]
-        T7 SWCV Class 8: [Dsl]
-        T7 Single Concrete/Transit Mix Class 8: [Dsl]
-        T7 Single Dump Class 8: [Dsl]
-        T7 Single Other Class 8: [Dsl]
-        T7 Tractor Class 8: [Dsl]
-        T7IS: [Gas]
       naics_sector:
       - naics_code_2: ['11', '31', '32', '33', '48', '49']
         vehicle_category: [T6 CAIRP Class 7, T6 Instate Tractor Class 7, T7 CAIRP Class 8, T7 Tractor Class 8, T7IS]
@@ -70,6 +34,7 @@ models:
         vehicle_category: [T7 Other Port Class 8]
       - zone_codes: ['060019819001']
         vehicle_category: [T7 POAK Class 8]
+
   passenger_bayesian_dag:
     scoring:
       weights:
@@ -104,6 +69,7 @@ models:
         MDV: [Elec, Gas, Phe]
         MCY: [Gas]
         UBUS: [Dsl, Elec, Gas]
+
   fastsim_assignment_model:
     scoring:
       weights:
