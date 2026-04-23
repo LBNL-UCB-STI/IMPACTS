@@ -20,9 +20,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "workflow",
         nargs="?",
-        choices=("all", "activities", "fleet"),
-        default="all",
-        help="Workflow to run. Defaults to all.",
+        choices=("activities", "fleet"),
+        default=None,
+        help="Optional workflow to run. Omit to run the full EMFAC workflow.",
     )
     parser.add_argument(
         "--config",
@@ -37,21 +37,21 @@ def main(argv: list[str] | None = None) -> None:
     if args.workflow == "activities":
         run_activities(args.config_path)
         return
-    if args.workflow == "all":
-        fleet_workflow = load_fleet_workflow(args.config_path)
-        missing = _missing_activities_outputs(fleet_workflow)
-        if missing:
-            print("Running EMFAC activities first because required activities outputs are missing:")
-            for path in missing.values():
-                print(f"  missing: {path}")
-            activities_workflow = load_activities_workflow_from_data(
-                dict(fleet_workflow["config"]["activities"]),
-                source_label="<emfac.activities>",
-            )
-            run_activities_workflow(activities_workflow)
-        run_fleet_workflow(fleet_workflow)
+    if args.workflow == "fleet":
+        run_fleet(args.config_path)
         return
-    run_fleet(args.config_path)
+    fleet_workflow = load_fleet_workflow(args.config_path)
+    missing = _missing_activities_outputs(fleet_workflow)
+    if missing:
+        print("Running EMFAC activities first because required activities outputs are missing:")
+        for path in missing.values():
+            print(f"  missing: {path}")
+        activities_workflow = load_activities_workflow_from_data(
+            dict(fleet_workflow["config"]["activities"]),
+            source_label="<emfac.activities>",
+        )
+        run_activities_workflow(activities_workflow)
+    run_fleet_workflow(fleet_workflow)
 
 
 if __name__ == "__main__":

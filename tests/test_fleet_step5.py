@@ -30,6 +30,23 @@ def test_attach_idle_time_fraction_uses_emfac_vehicle_category_lookup() -> None:
     assert pd.isna(result["idleTimeFraction"].iloc[2])
 
 
+def test_attach_idle_time_fraction_defaults_missing_categories_to_zero() -> None:
+    vehicle_types = pd.DataFrame(
+        {
+            "vehicleTypeId": ["pax-1", "bike-1"],
+            "emfacVehicleCategory": ["LDA", ""],
+        }
+    )
+
+    result = _attach_idle_time_fraction(
+        vehicle_types,
+        idle_time_fraction_lookup={"UBUS": 0.3550},
+    )
+
+    assert result["idleTimeFraction"].iloc[0] == 0.0
+    assert pd.isna(result["idleTimeFraction"].iloc[1])
+
+
 def test_special_category_rate_aliases_average_model_years_by_vmt_share_and_override_bus_path(tmp_path: Path) -> None:
     output_root = tmp_path / "emfac_output"
     store_root = output_root / "emissions" / "2018-Baseline"

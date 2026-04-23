@@ -12,16 +12,23 @@ def _write_required_model_file(model_file: Path) -> None:
     model_file.write_text(
         "\n".join(
             [
-                "model:",
-                "  scoring:",
-                "    likelihood_floor: 0.01",
-                "    weights:",
-                "      prior_vmt_share: 1.0",
-                "      naics_sector: 1.0",
-                "      port_location: 1.0",
-                "  evidence:",
-                "    naics_sector: []",
-                "    port_location: []",
+                "models:",
+                "  freight_bayesian_dag:",
+                "    scoring:",
+                "      likelihood_floor: 0.01",
+                "      weights:",
+                "        prior_vmt_share: 1.0",
+                "        naics_sector: 1.0",
+                "        port_location: 1.0",
+                "    evidence:",
+                "      naics_sector: []",
+                "      port_location: []",
+                "  passenger_emfac_matching:",
+                "    scoring:",
+                "      bodytype_bias: 1.0",
+                "      fuel_bias: 1.0",
+                "      emfac_population_bias: 1.0",
+                "      emfac_vmt_bias: 0.0",
             ]
         ),
         encoding="utf-8",
@@ -41,24 +48,27 @@ def test_normalize_model_spec_path_requires_expected_evidence_sources(tmp_path: 
     model_file.write_text(
         "\n".join(
             [
-                "model:",
-                "  scoring:",
-                "    likelihood_floor: 0.01",
-                "    weights:",
-                "      prior_vmt_share: 1.0",
-                "  evidence:",
-                "    naics_sector: []",
-                "    port_location:",
-                "      - vehicle_category:",
-                "          - T7 POAK Class 8",
-                "        zone_codes:",
-                "          - '060019819001'",
+                "models:",
+                "  freight_bayesian_dag:",
+                "    scoring:",
+                "      likelihood_floor: 0.01",
+                "      weights:",
+                "        prior_vmt_share: 1.0",
+                "    evidence:",
+                "      naics_sector: []",
+                "      port_location:",
+                "        - vehicle_category:",
+                "            - T7 POAK Class 8",
+                "          zone_codes:",
+                "            - '060019819001'",
+                "  passenger_emfac_matching:",
+                "    scoring: {}",
             ]
         ),
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="evidence.naics_sector"):
+    with pytest.raises(ValueError, match="freight_bayesian_dag.evidence.naics_sector"):
         _normalize_model_spec_path(str(model_file), path_label="vehicle_type_assignment.model_file")
 
 
@@ -68,23 +78,26 @@ def test_normalize_model_spec_path_requires_embedded_rows_to_exist(tmp_path: Pat
     model_file.write_text(
         "\n".join(
             [
-                "model:",
-                "  scoring:",
-                "    likelihood_floor: 0.01",
-                "    weights:",
-                "      prior_vmt_share: 1.0",
-                "  evidence:",
-                "    naics_sector:",
-                "      - naics_code_2: '11'",
-                "        vehicle_category:",
-                "          - T7 Tractor Class 8",
-                "    port_location: []",
+                "models:",
+                "  freight_bayesian_dag:",
+                "    scoring:",
+                "      likelihood_floor: 0.01",
+                "      weights:",
+                "        prior_vmt_share: 1.0",
+                "    evidence:",
+                "      naics_sector:",
+                "        - naics_code_2: '11'",
+                "          vehicle_category:",
+                "            - T7 Tractor Class 8",
+                "      port_location: []",
+                "  passenger_emfac_matching:",
+                "    scoring: {}",
             ]
         ),
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="evidence.port_location"):
+    with pytest.raises(ValueError, match="freight_bayesian_dag.evidence.port_location"):
         _normalize_model_spec_path(str(model_file), path_label="vehicle_type_assignment.model_file")
 
 
@@ -93,28 +106,31 @@ def test_ingest_fleet_sources_requires_likelihood_floor_in_model_scoring(tmp_pat
     model_file.write_text(
         "\n".join(
             [
-                "model:",
-                "  scoring:",
-                "    weights:",
-                "      prior_vmt_share: 1.0",
-                "      naics_sector: 1.0",
-                "      port_location: 1.0",
-                "  evidence:",
-                "    naics_sector:",
-                "      - naics_code_2: '11'",
-                "        vehicle_category:",
-                "          - T7 Tractor Class 8",
-                "    port_location:",
-                "      - zone_codes:",
-                "          - '060019819001'",
-                "        vehicle_category:",
-                "          - T7 POAK Class 8",
+                "models:",
+                "  freight_bayesian_dag:",
+                "    scoring:",
+                "      weights:",
+                "        prior_vmt_share: 1.0",
+                "        naics_sector: 1.0",
+                "        port_location: 1.0",
+                "    evidence:",
+                "      naics_sector:",
+                "        - naics_code_2: '11'",
+                "          vehicle_category:",
+                "            - T7 Tractor Class 8",
+                "      port_location:",
+                "        - zone_codes:",
+                "            - '060019819001'",
+                "          vehicle_category:",
+                "            - T7 POAK Class 8",
+                "  passenger_emfac_matching:",
+                "    scoring: {}",
             ]
         ),
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="model.scoring.likelihood_floor"):
+    with pytest.raises(ValueError, match="freight_bayesian_dag.scoring.likelihood_floor"):
         _ingest_fleet_sources(
             {
                 "vehicle_type_assignment_model_settings": str(model_file),
@@ -138,27 +154,30 @@ def test_ingest_fleet_sources_requires_scoring_weights_in_model_scoring(tmp_path
     model_file.write_text(
         "\n".join(
             [
-                "model:",
-                "  scoring:",
-                "    likelihood_floor: 0.01",
-                "    weights:",
-                "      prior_vmt_share: 1.0",
-                "  evidence:",
-                "    naics_sector:",
-                "      - naics_code_2: '11'",
-                "        vehicle_category:",
-                "          - T7 Tractor Class 8",
-                "    port_location:",
-                "      - zone_codes:",
-                "          - '060019819001'",
-                "        vehicle_category:",
-                "          - T7 POAK Class 8",
+                "models:",
+                "  freight_bayesian_dag:",
+                "    scoring:",
+                "      likelihood_floor: 0.01",
+                "      weights:",
+                "        prior_vmt_share: 1.0",
+                "    evidence:",
+                "      naics_sector:",
+                "        - naics_code_2: '11'",
+                "          vehicle_category:",
+                "            - T7 Tractor Class 8",
+                "      port_location:",
+                "        - zone_codes:",
+                "            - '060019819001'",
+                "          vehicle_category:",
+                "            - T7 POAK Class 8",
+                "  passenger_emfac_matching:",
+                "    scoring: {}",
             ]
         ),
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="model.scoring.weights"):
+    with pytest.raises(ValueError, match="freight_bayesian_dag.scoring.weights"):
         _ingest_fleet_sources(
             {
                 "vehicle_type_assignment_model_settings": str(model_file),

@@ -415,9 +415,15 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
             "matching_activity_output_freight": str(tmp_root / f"{base_name}-inventory-matching-freight-activity.parquet"),
             "final_output_passenger": str(activities_output_root / f"{final_name}-passenger-rates.parquet"),
             "final_activity_output_passenger": str(activities_output_root / f"{inventory_final_name}-passenger-activity.parquet"),
+            "final_activity_emfacid_output_passenger": str(
+                activities_output_root / f"{inventory_final_name}-passenger-activity-by-emfacid.parquet"
+            ),
             "final_fleet_output_passenger": str(activities_output_root / f"{inventory_final_name}-passenger-fleet.parquet"),
             "final_output_freight": str(activities_output_root / f"{final_name}-freight-rates.parquet"),
             "final_activity_output_freight": str(activities_output_root / f"{inventory_final_name}-freight-activity.parquet"),
+            "final_activity_emfacid_output_freight": str(
+                activities_output_root / f"{inventory_final_name}-freight-activity-by-emfacid.parquet"
+            ),
             "final_fleet_output_freight": str(activities_output_root / f"{inventory_final_name}-freight-fleet.parquet"),
             "emissions_store_root": str(outputs_root / "emissions" / emissions_store_name),
         },
@@ -444,6 +450,22 @@ def _load_model_spec(model_spec_path: str) -> dict:
         return yaml.safe_load(handle) or {}
 
 
+def _extract_named_model(model_spec: dict, *, model_name: str, model_spec_path: Path) -> dict[str, object]:
+    models = model_spec.get("models")
+    if not isinstance(models, dict):
+        raise ValueError(
+            f"Configured fleet path has an invalid model spec file at {model_spec_path}. "
+            "It must contain a top-level 'models' mapping."
+        )
+    model_section = models.get(model_name)
+    if not isinstance(model_section, dict):
+        raise ValueError(
+            f"Configured fleet path has an invalid model spec file at {model_spec_path}. "
+            f"It must contain models.{model_name}."
+        )
+    return model_section
+
+
 def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str | None:
     resolved = _normalize_configured_path(
         path_like,
@@ -455,29 +477,39 @@ def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str
         return None
     model_spec_path = Path(resolved)
     model_spec = _load_model_spec(str(model_spec_path))
-    model_section = model_spec.get("model")
-    if not isinstance(model_section, dict):
-        raise ValueError(
-            f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
-            "It must contain a top-level 'model' mapping."
-        )
+    model_section = _extract_named_model(
+        model_spec,
+        model_name="freight_bayesian_dag",
+        model_spec_path=model_spec_path,
+    )
     evidence = model_section.get("evidence")
     if not isinstance(evidence, dict):
         raise ValueError(
             f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
-            "It must contain model.evidence."
+            "It must contain models.freight_bayesian_dag.evidence."
         )
     naics_evidence = evidence.get("naics_sector")
     if not isinstance(naics_evidence, list) or not naics_evidence:
         raise ValueError(
-            f"Configured fleet path '{path_label}' has no evidence.naics_sector entries in {model_spec_path}. "
+            f"Configured fleet path '{path_label}' has no models.freight_bayesian_dag.evidence.naics_sector entries in {model_spec_path}. "
             "It should contain the NAICS-sector-to-vehicle-category evidence mappings."
         )
     port_evidence = evidence.get("port_location")
     if not isinstance(port_evidence, list) or not port_evidence:
         raise ValueError(
-            f"Configured fleet path '{path_label}' has no evidence.port_location entries in {model_spec_path}. "
+            f"Configured fleet path '{path_label}' has no models.freight_bayesian_dag.evidence.port_location entries in {model_spec_path}. "
             "It should contain the zone-to-vehicle-category evidence mappings for port assignments."
+        )
+    passenger_model = _extract_named_model(
+        model_spec,
+        model_name="passenger_emfac_matching",
+        model_spec_path=model_spec_path,
+    )
+    passenger_scoring = passenger_model.get("scoring")
+    if not isinstance(passenger_scoring, dict):
+        raise ValueError(
+            f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
+            "It must contain models.passenger_emfac_matching.scoring."
         )
     return str(model_spec_path)
 
@@ -568,9 +600,16 @@ def _ingest_fleet_sources(config: dict) -> dict:
         if model_file is not None:
             vta["model_file"] = model_file
             model_spec = _load_model_spec(model_file)
-            scoring = model_spec.get("model", {}).get("scoring", {})
+            freight_model = _extract_named_model(
+                model_spec,
+                model_name="freight_bayesian_dag",
+                model_spec_path=Path(model_file),
+            )
+            scoring = freight_model.get("scoring", {})
             if "likelihood_floor" not in scoring:
-                raise ValueError("vehicle_type_assignment.model_file must define model.scoring.likelihood_floor")
+                raise ValueError(
+                    "vehicle_type_assignment.model_file must define models.freight_bayesian_dag.scoring.likelihood_floor"
+                )
             floor_value = float(scoring["likelihood_floor"])
             if not (0.0 < floor_value < 1.0):
                 raise ValueError(
@@ -581,7 +620,7 @@ def _ingest_fleet_sources(config: dict) -> dict:
             missing_weights = [key for key in ("prior_vmt_share", "naics_sector", "port_location") if key not in weights]
             if missing_weights:
                 raise ValueError(
-                    "vehicle_type_assignment.model_file must define model.scoring.weights for: "
+                    "vehicle_type_assignment.model_file must define models.freight_bayesian_dag.scoring.weights for: "
                     + ", ".join(missing_weights)
                 )
             for key in ("prior_vmt_share", "naics_sector", "port_location"):
@@ -589,6 +628,18 @@ def _ingest_fleet_sources(config: dict) -> dict:
                 if value < 0.0:
                     raise ValueError(f"vehicle_type_assignment {key} weight must be non-negative, got {value}")
                 vta[key] = value
+            passenger_model = _extract_named_model(
+                model_spec,
+                model_name="passenger_emfac_matching",
+                model_spec_path=Path(model_file),
+            )
+            passenger_scoring = passenger_model.get("scoring", {})
+            config["passenger_emfac_matching"] = {
+                "bodytype_bias": float(passenger_scoring.get("bodytype_bias", 1.0)),
+                "fuel_bias": float(passenger_scoring.get("fuel_bias", 1.0)),
+                "emfac_population_bias": float(passenger_scoring.get("emfac_population_bias", 1.0)),
+                "emfac_vmt_bias": float(passenger_scoring.get("emfac_vmt_bias", 0.0)),
+            }
         config["vehicle_type_assignment"] = vta
     atlas = config.get("atlas", {})
     if isinstance(atlas, dict):

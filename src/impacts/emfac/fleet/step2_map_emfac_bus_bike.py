@@ -165,6 +165,7 @@ def _normalize_to_fastsim_adopt_fuel(*, fuel_domain: str, adopt_fuel: object) ->
             "biodiesel": "conv",
             "cng": "conv",
             "naturalgas": "conv",
+            "hybrid": "conv",
             "electricity": "ev",
             "hydrogen": "fuelcell",
             "electricity+gasoline": "phev",

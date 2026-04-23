@@ -1,75 +1,83 @@
-model:
-  scoring:
-    likelihood_floor: 0.01
-    weights:
-      prior_vmt_share: 0.5
-      naics_sector: 0.25
-      port_location: 2.0
-  evidence:
-    naics_sector:
-  # Agriculture, manufacturing, and transportation sectors often align with tractors.
-    - naics_code_2: ['11', '31', '32', '33', '48', '49']
-      vehicle_category: # Tractors
-      - T6 CAIRP Class 7
-      - T6 Instate Tractor Class 7
-      - T7 CAIRP Class 8
-      - T7 Tractor Class 8
-      - T7IS
-  # Mining and extraction activities skew toward heavy vocational trucks.
-    - naics_code_2: '21'
-      vehicle_category: # Heavy-duty vocational
-      - T6 Instate Delivery Class 7
-      - T6 Instate Other Class 7
-      - T6 OOS Class 7
-      - T7 NNOOS Class 8
-      - T7 NOOS Class 8
-      - T7 Single Dump Class 8
-      - T7 Single Other Class 8
-  # Construction-related sectors point to construction-oriented heavy vehicles.
-    - naics_code_2: '23'
-      vehicle_category: # Construction-related
-      - T7 Single Concrete/Transit Mix Class 8
-      - T7 Single Dump Class 8
-  # Wholesale, health, accommodation, and food service often mix medium-duty delivery and heavier vocational fleets.
-    - naics_code_2: ['42', '62', '72']
-      vehicle_category: # Medium and heavy vocational
-      - T6 CAIRP Class 4
-      - T6 CAIRP Class 5
-      - T6 CAIRP Class 6
-      - T6 OOS Class 4
-      - T6 OOS Class 5
-      - T6 OOS Class 6
-      - T6 Instate Other Class 4
-      - T6 Instate Other Class 5
-      - T6 Instate Other Class 6
-      - T6 Instate Delivery Class 7
-      - T6 Instate Other Class 7
-      - T6 OOS Class 7
-      - T7 NNOOS Class 8
-      - T7 NOOS Class 8
-      - T7 Single Dump Class 8
-      - T7 Single Other Class 8
-  # Waste and remediation services map to refuse and related vocational trucks.
-    - naics_code_2: '56'
-      vehicle_category: # Waste-related
-      - T7 SWCV Class 8
-      - T7 Single Dump Class 8
-    port_location:
-    - zone_codes:
-      - '060230013001'
-      - '060530126001'
-      - '060759809001'
-      - '060770039001'
-      - '060133780002'
-      - '060133180002'
-      - '060816103021'
-      - '060133580005'
-      - '060770039001'
-      - '060133580005'
-      - '060133200011'
-      vehicle_category: # Other ports
-      - T7 Other Port Class 8
-    - zone_codes:
-      - '060019819001'
-      vehicle_category: # Port of Oakland
-      - T7 POAK Class 8
+models:
+  freight_bayesian_dag:
+    scoring:
+      likelihood_floor: 0.01
+      weights:
+        prior_vmt_share: 0.5
+        naics_sector: 0.25
+        port_location: 2.0
+    evidence:
+      naics_sector:
+      # Agriculture, manufacturing, and transportation sectors often align with tractors.
+      - naics_code_2: ['11', '31', '32', '33', '48', '49']
+        vehicle_category: # Tractors
+        - T6 CAIRP Class 7
+        - T6 Instate Tractor Class 7
+        - T7 CAIRP Class 8
+        - T7 Tractor Class 8
+        - T7IS
+      # Mining and extraction activities skew toward heavy vocational trucks.
+      - naics_code_2: '21'
+        vehicle_category: # Heavy-duty vocational
+        - T6 Instate Delivery Class 7
+        - T6 Instate Other Class 7
+        - T6 OOS Class 7
+        - T7 NNOOS Class 8
+        - T7 NOOS Class 8
+        - T7 Single Dump Class 8
+        - T7 Single Other Class 8
+      # Construction-related sectors point to construction-oriented heavy vehicles.
+      - naics_code_2: '23'
+        vehicle_category: # Construction-related
+        - T7 Single Concrete/Transit Mix Class 8
+        - T7 Single Dump Class 8
+      # Wholesale, health, accommodation, and food service often mix medium-duty delivery and heavier vocational fleets.
+      - naics_code_2: ['42', '62', '72']
+        vehicle_category: # Medium and heavy vocational
+        - T6 CAIRP Class 4
+        - T6 CAIRP Class 5
+        - T6 CAIRP Class 6
+        - T6 OOS Class 4
+        - T6 OOS Class 5
+        - T6 OOS Class 6
+        - T6 Instate Other Class 4
+        - T6 Instate Other Class 5
+        - T6 Instate Other Class 6
+        - T6 Instate Delivery Class 7
+        - T6 Instate Other Class 7
+        - T6 OOS Class 7
+        - T7 NNOOS Class 8
+        - T7 NOOS Class 8
+        - T7 Single Dump Class 8
+        - T7 Single Other Class 8
+      # Waste and remediation services map to refuse and related vocational trucks.
+      - naics_code_2: '56'
+        vehicle_category: # Waste-related
+        - T7 SWCV Class 8
+        - T7 Single Dump Class 8
+      port_location:
+      - zone_codes:
+        - '060230013001'
+        - '060530126001'
+        - '060759809001'
+        - '060770039001'
+        - '060133780002'
+        - '060133180002'
+        - '060816103021'
+        - '060133580005'
+        - '060770039001'
+        - '060133580005'
+        - '060133200011'
+        vehicle_category: # Other ports
+        - T7 Other Port Class 8
+      - zone_codes:
+        - '060019819001'
+        vehicle_category: # Port of Oakland
+        - T7 POAK Class 8
+
+  passenger_emfac_matching:
+    scoring:
+      bodytype_bias: 1.0
+      fuel_bias: 1.0
+      emfac_population_bias: 1.0
+      emfac_vmt_bias: 0.0

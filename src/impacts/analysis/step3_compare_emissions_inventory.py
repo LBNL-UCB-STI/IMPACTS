@@ -35,7 +35,7 @@ def _load_county_lookup(county_boundaries_path: str) -> pd.DataFrame:
     county_gdf = gpd.read_file(county_boundaries_path)
     if "COUNTYFP" not in county_gdf.columns or "NAME" not in county_gdf.columns:
         raise ValueError(
-            "County boundaries must include COUNTYFP and NAME columns for analysis Step 2."
+            "County boundaries must include COUNTYFP and NAME columns for analysis Step 3."
         )
     lookup = county_gdf[["COUNTYFP", "NAME"]].drop_duplicates().copy()
     lookup["COUNTYFP"] = normalize_county_fips(lookup["COUNTYFP"])
@@ -54,7 +54,7 @@ def _aggregate_modeled_emissions(
     if missing:
         raise ValueError(
             "County-intersected modeled emissions input must include countyfp, vehicleTypeId, and process "
-            f"for analysis Step 2. Missing: {missing}"
+            f"for analysis Step 3. Missing: {missing}"
         )
     modeled["countyfp"] = normalize_county_fips(modeled["countyfp"])
     modeled = modeled.loc[modeled["countyfp"].notna()].copy()
@@ -65,7 +65,7 @@ def _aggregate_modeled_emissions(
     }
     if not available:
         raise ValueError(
-            "Modeled emissions input does not include any supported pollutant columns for analysis Step 2."
+            "Modeled emissions input does not include any supported pollutant columns for analysis Step 3."
         )
     grouped = (
         modeled.groupby("countyfp", dropna=False)[list(available.values())]
@@ -94,7 +94,7 @@ def _aggregate_inventory_emissions(
 ) -> pd.DataFrame:
     inventory = read_table(inventory_path)
     if "county" not in inventory.columns:
-        raise ValueError("Inventory input must include county for analysis Step 2.")
+        raise ValueError("Inventory input must include county for analysis Step 3.")
     rows: list[pd.DataFrame] = []
     for pollutant, selector in pollutant_targets.items():
         explicit_columns = tuple(selector.get("columns", ()))
@@ -132,7 +132,7 @@ def _aggregate_inventory_emissions(
         rows.append(grouped[["county", "pollutant", "emfac_tons"]])
     if not rows:
         raise ValueError(
-            "Inventory input does not include any configured pollutant columns for analysis Step 2."
+            "Inventory input does not include any configured pollutant columns for analysis Step 3."
         )
     return pd.concat(rows, ignore_index=True)
 
@@ -170,8 +170,8 @@ def _build_comparison_table(
 
 def _write_comparison_table(comparison: pd.DataFrame, *, output_dir: Path) -> dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    parquet_path = output_dir / "step2_emissions_comparison_by_county_pollutant.parquet"
-    csv_path = output_dir / "step2_emissions_comparison_by_county_pollutant.csv"
+    parquet_path = output_dir / "step3_emissions_comparison_by_county_pollutant.parquet"
+    csv_path = output_dir / "step3_emissions_comparison_by_county_pollutant.csv"
     comparison.to_parquet(parquet_path, index=False)
     comparison.to_csv(csv_path, index=False)
     return {
@@ -222,7 +222,7 @@ def _plot_county_comparison(
         "NOx": "nox",
         "BC": "bc",
     }.get(pollutant, pollutant.lower().replace(".", ""))
-    filename = f"step2_county_{pollutant_slug}_simulation_vs_emfac.png"
+    filename = f"step3_county_{pollutant_slug}_simulation_vs_emfac.png"
     output_path = output_dir / filename
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
@@ -240,8 +240,8 @@ def run(
     inventory_label: str,
     pollutant_targets: dict[str, dict[str, tuple[str, ...]]],
 ) -> dict[str, str]:
-    log_step_banner("Analysis Step 2", f"Compare Emissions Inventory ({inventory_label})", logger=logger)
-    log_substep_banner("2.1", f"compare modeled emissions with {inventory_label} inventory", logger=logger)
+    log_step_banner("Analysis Step 3", f"Compare Emissions Inventory ({inventory_label})", logger=logger)
+    log_substep_banner("3.1", f"compare modeled emissions with {inventory_label} inventory", logger=logger)
     county_lookup = _load_county_lookup(county_boundaries_path)
     modeled_df = _aggregate_modeled_emissions(
         modeled_emissions_path,
@@ -268,5 +268,5 @@ def run(
         )
         if plot_path:
             outputs[f"{pollutant}_plot"] = plot_path
-    logger.info("Analysis Step 2 complete")
+    logger.info("Analysis Step 3 complete")
     return outputs

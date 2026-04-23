@@ -49,7 +49,7 @@ def _load_vehicle_type_sectors(
     missing = sorted(required_columns - set(vehicle_types.columns))
     if missing:
         raise ValueError(
-            "Vehicle types input must include vehicleTypeId and emfacVehicleCategory for analysis Step 1. "
+            "Vehicle types input must include vehicleTypeId and emfacVehicleCategory for analysis Step 2. "
             f"Missing: {missing}"
         )
     category_mapping = read_table(vehicle_category_metadata_file).copy()
@@ -58,7 +58,7 @@ def _load_vehicle_type_sectors(
     if mapping_missing:
         raise ValueError(
             "Vehicle category metadata input must include emfac_vehicle_category and generic_vehicle_category "
-            f"for analysis Step 1. Missing: {mapping_missing}"
+            f"for analysis Step 2. Missing: {mapping_missing}"
         )
     category_mapping["emfac_vehicle_category"] = category_mapping["emfac_vehicle_category"].map(_normalize_token)
     category_mapping["generic_vehicle_category"] = category_mapping["generic_vehicle_category"].map(_normalize_token)
@@ -115,7 +115,7 @@ def _build_targets_table(sector_targets: list[dict[str, object]]) -> pd.DataFram
                 }
             )
     if not rows:
-        raise ValueError("Analysis Step 1 requires configured annual sector targets.")
+        raise ValueError("Analysis Step 2 requires configured annual sector targets.")
     return pd.DataFrame(rows)
 
 
@@ -132,7 +132,7 @@ def _aggregate_modeled_to_targets(
     if missing:
         raise ValueError(
             "County-intersected modeled emissions input must include vehicleTypeId and process "
-            f"for analysis Step 1. Missing: {missing}"
+            f"for analysis Step 2. Missing: {missing}"
         )
 
     sector_lookup = _load_vehicle_type_sectors(
@@ -189,7 +189,7 @@ def _aggregate_modeled_to_targets(
             rows.append(grouped[["source", "sector", "pollutant", "simulation_tons"]])
 
     if not rows:
-        raise ValueError("Modeled emissions input does not include supported pollutant columns for analysis Step 1.")
+        raise ValueError("Modeled emissions input does not include supported pollutant columns for analysis Step 2.")
     return pd.concat(rows, ignore_index=True)
 
 
@@ -206,8 +206,8 @@ def _build_comparison_table(*, modeled_df: pd.DataFrame, targets_df: pd.DataFram
 
 def _write_comparison_table(comparison: pd.DataFrame, *, output_dir: Path) -> dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    parquet_path = output_dir / "step1_annual_targets_comparison.parquet"
-    csv_path = output_dir / "step1_annual_targets_comparison.csv"
+    parquet_path = output_dir / "step2_annual_targets_comparison.parquet"
+    csv_path = output_dir / "step2_annual_targets_comparison.csv"
     comparison.to_parquet(parquet_path, index=False)
     comparison.to_csv(csv_path, index=False)
     return {
@@ -253,7 +253,7 @@ def _plot_source_pollutant_comparison(
     ax.legend()
     ax.grid(axis="y", alpha=0.2)
     fig.tight_layout()
-    output_path = output_dir / f"step1_{_slugify(source)}_{_slugify(pollutant)}_simulation_vs_target.png"
+    output_path = output_dir / f"step2_{_slugify(source)}_{_slugify(pollutant)}_simulation_vs_target.png"
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
     return str(output_path)
@@ -268,8 +268,8 @@ def run(
     output_dir: Path,
     sector_targets: list[dict[str, object]],
 ) -> dict[str, str]:
-    log_step_banner("Analysis Step 1", "Compare Annual Targets", logger=logger)
-    log_substep_banner("1.1", "compare modeled emissions with configured annual targets", logger=logger)
+    log_step_banner("Analysis Step 2", "Compare Annual Targets", logger=logger)
+    log_substep_banner("2.1", "compare modeled emissions with configured annual targets", logger=logger)
     targets_df = _build_targets_table(sector_targets)
     modeled_df = _aggregate_modeled_to_targets(
         modeled_emissions_path,
@@ -291,5 +291,5 @@ def run(
         )
         if plot_path:
             outputs[f"{source}_{pollutant}_plot"] = plot_path
-    logger.info("Analysis Step 1 complete")
+    logger.info("Analysis Step 2 complete")
     return outputs

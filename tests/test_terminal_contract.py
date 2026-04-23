@@ -117,6 +117,20 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.analysis.inventory_targets == []
 
 
+def test_top_level_emfac_command_defaults_to_all(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "emfac.yaml"
+    config_path.write_text("emfac: {}\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def _fake_main(argv=None):
+        captured["argv"] = list(argv or [])
+
+    monkeypatch.setattr("impacts.emfac.__main__.main", _fake_main)
+
+    assert main(["emfac", "--config", str(config_path)]) == 0
+    assert captured["argv"] == ["--config", str(config_path)]
+
+
 def test_settings_and_pipeline_allow_annualization_days_or_file_csv_path(tmp_path: Path):
     days_csv = tmp_path / "vehicle_operation_days_per_year.csv"
     days_csv.write_text("vehicleCategory,operation_days_per_year\nLDA,347\n", encoding="utf-8")

@@ -108,6 +108,20 @@ def _resolve_analysis_modeled_emissions_path(settings_path: str | Path) -> Path:
     return candidate
 
 
+def _resolve_analysis_skims_emissions_path(settings_path: str | Path) -> Path:
+    _, run_manifest = _load_analysis_run_manifest(settings_path)
+    candidate_raw = run_manifest.get("outputs", {}).get("skims_emissions")
+    if not candidate_raw:
+        raise ValueError("Analysis requires skims_emissions in run_manifest.outputs.")
+    candidate = Path(candidate_raw).resolve()
+    if not candidate.exists():
+        raise FileNotFoundError(
+            "Analysis requires prepared skims output from the workflow run manifest. "
+            f"Expected {candidate}."
+        )
+    return candidate
+
+
 def _resolve_analysis_county_boundaries_path(settings_path: str | Path) -> Path:
     _, _, _, inputs = _load_analysis_context(settings_path)
     candidate = Path(resolve_required_manifest_input(inputs, key="county_boundaries")).resolve()
@@ -136,6 +150,21 @@ def _resolve_analysis_vehicle_types_paths(settings_path: str | Path) -> tuple[Pa
     return passenger_candidate, freight_candidate
 
 
+def _resolve_optional_analysis_population_assignment_paths(
+    settings_path: str | Path,
+) -> tuple[Path | None, Path | None]:
+    passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_analysis_vehicle_types_paths(settings_path)
+    passenger_candidates = list(
+        passenger_vehicle_types_path.parents[1].glob("urbansim/**/vehicles--*--EM.parquet")
+    )
+    passenger_vehicles_path = passenger_candidates[0].resolve() if passenger_candidates else None
+    freight_candidates = list(
+        freight_vehicle_types_path.parents[1].glob("**/carriers--*--EM.parquet")
+    )
+    freight_carriers_path = freight_candidates[0].resolve() if freight_candidates else None
+    return passenger_vehicles_path, freight_carriers_path
+
+
 def _resolve_analysis_inventory_target_path(settings_path: str | Path, raw: str) -> Path:
     raw_text = str(raw).strip()
     candidate = Path(resolve_path(raw_text, settings_path) or raw_text).resolve()
@@ -150,12 +179,80 @@ def _resolve_analysis_inventory_target_path(settings_path: str | Path, raw: str)
     )
 
 
+def _resolve_analysis_inventory_paths(settings_path: str | Path) -> tuple[Path, Path]:
+    _, _, _, inputs = _load_analysis_context(settings_path)
+    passenger_candidate = Path(resolve_required_manifest_input(inputs, key="passenger_inventory_file")).resolve()
+    freight_candidate = Path(resolve_required_manifest_input(inputs, key="freight_inventory_file")).resolve()
+    if not passenger_candidate.exists():
+        raise FileNotFoundError(
+            "Analysis requires staged passenger EMFAC inventory activity input from preprocess. "
+            f"Expected {passenger_candidate}."
+        )
+    if not freight_candidate.exists():
+        raise FileNotFoundError(
+            "Analysis requires staged freight EMFAC inventory activity input from preprocess. "
+            f"Expected {freight_candidate}."
+        )
+    return passenger_candidate, freight_candidate
+
+
+def _resolve_analysis_inventory_emfacid_activity_path(
+    settings_path: str | Path,
+    *,
+    source: str | Path,
+    manifest_key: str | None = None,
+) -> Path:
+    if manifest_key:
+        _, _, _, inputs = _load_analysis_context(settings_path)
+        candidate_raw = inputs.get(manifest_key)
+        if candidate_raw:
+            candidate = Path(resolve_required_manifest_input(inputs, key=manifest_key)).resolve()
+            if candidate.exists():
+                return candidate
+    source = Path(source).resolve()
+    name = source.name
+    if name.endswith("-activity.parquet"):
+        derived = source.with_name(name.replace("-activity.parquet", "-activity-by-emfacid.parquet"))
+    else:
+        derived = source.with_name(f"{source.stem}-by-emfacid{source.suffix}")
+    if derived.exists():
+        return derived
+    emfac_output_fallback = (_REPO_ROOT / "examples" / "emfac" / "output" / "activities" / derived.name).resolve()
+    if emfac_output_fallback.exists():
+        return emfac_output_fallback
+    raise FileNotFoundError(
+        "Analysis Step 1 requires an EMFAC activity-by-emfacId file, but it was not found. "
+        f"Expected one of: {derived} or {emfac_output_fallback}"
+    )
+
+
+def _resolve_analysis_vehicle_category_metadata_path(settings_path: str | Path) -> Path:
+    _, _, _, inputs = _load_analysis_context(settings_path)
+    for key in ("vehicle_category_metadata_file_input", "annualization_days_or_file_input"):
+        try:
+            resolved = Path(resolve_required_manifest_input(inputs, key=key)).resolve()
+        except ValueError:
+            continue
+        if resolved.exists():
+            return resolved
+    settings = load_settings_from_yaml(settings_path)
+    if not settings.impacts.emissions.vehicle_category_metadata_file:
+        raise ValueError(
+            "Analysis Step 2 requires impacts.emissions.vehicle_category_metadata_file when annual sector targets are configured."
+        )
+    return _resolve_analysis_inventory_target_path(
+        settings_path,
+        settings.impacts.emissions.vehicle_category_metadata_file,
+    )
+
+
 def run_analysis_from_settings(
     *,
     settings_path: str | Path,
 ) -> Dict[str, str]:
-    from .analysis.step1_compare_annual_targets import run as run_step1
-    from .analysis.step2_compare_emissions_inventory import run as run_step2
+    from .analysis.step1_compare_fleet import run as run_step1
+    from .analysis.step2_compare_annual_targets import run as run_step2
+    from .analysis.step3_compare_emissions_inventory import run as run_step3
     from .common import normalize_county_fips
 
     logging.basicConfig(
@@ -166,23 +263,39 @@ def run_analysis_from_settings(
     settings = load_settings_from_yaml(settings_path)
     output_dir = Path(resolve_path(settings.impacts.local_output_folder, settings_path)).resolve() / "analysis"
     modeled_emissions_path = _resolve_analysis_modeled_emissions_path(settings_path)
+    skims_emissions_path = _resolve_analysis_skims_emissions_path(settings_path)
     outputs: Dict[str, str] = {}
+    passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_analysis_vehicle_types_paths(settings_path)
+    passenger_vehicles_path, freight_carriers_path = _resolve_optional_analysis_population_assignment_paths(settings_path)
+    passenger_inventory_path, freight_inventory_path = _resolve_analysis_inventory_paths(settings_path)
+    passenger_activity_path = _resolve_analysis_inventory_emfacid_activity_path(
+        settings_path,
+        source=passenger_inventory_path,
+        manifest_key="passenger_inventory_emfacid_file",
+    )
+    freight_activity_path = _resolve_analysis_inventory_emfacid_activity_path(
+        settings_path,
+        source=freight_inventory_path,
+        manifest_key="freight_inventory_emfacid_file",
+    )
+    fleet_outputs = run_step1(
+        skims_emissions_path=str(skims_emissions_path),
+        passenger_vehicle_types_path=str(passenger_vehicle_types_path),
+        freight_vehicle_types_path=str(freight_vehicle_types_path),
+        emfac_passenger_activity_path=str(passenger_activity_path),
+        emfac_freight_activity_path=str(freight_activity_path),
+        output_dir=output_dir / "fleet",
+        passenger_vehicles_path=str(passenger_vehicles_path) if passenger_vehicles_path else None,
+        freight_carriers_path=str(freight_carriers_path) if freight_carriers_path else None,
+    )
+    for key, value in fleet_outputs.items():
+        outputs[f"fleet_{key}"] = value
     if settings.impacts.analysis.sector_targets:
-        passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_analysis_vehicle_types_paths(settings_path)
-        if not settings.impacts.emissions.vehicle_category_metadata_file:
-            raise ValueError(
-                "Analysis Step 1 requires impacts.emissions.vehicle_category_metadata_file when annual sector targets are configured."
-            )
-        target_outputs = run_step1(
+        target_outputs = run_step2(
             modeled_emissions_path=str(modeled_emissions_path),
             passenger_vehicle_types_path=str(passenger_vehicle_types_path),
             freight_vehicle_types_path=str(freight_vehicle_types_path),
-            vehicle_category_metadata_file=str(
-                _resolve_analysis_inventory_target_path(
-                    settings_path,
-                    settings.impacts.emissions.vehicle_category_metadata_file,
-                )
-            ),
+            vehicle_category_metadata_file=str(_resolve_analysis_vehicle_category_metadata_path(settings_path)),
             output_dir=output_dir / "annual_targets",
             sector_targets=[
                 {
@@ -215,7 +328,7 @@ def run_analysis_from_settings(
         )
     inventory_path = _resolve_analysis_inventory_target_path(settings_path, settings.impacts.analysis.inventory_file)
     for target in settings.impacts.analysis.inventory_targets:
-        target_outputs = run_step2(
+        target_outputs = run_step3(
             modeled_emissions_path=str(modeled_emissions_path),
             inventory_path=str(inventory_path),
             county_boundaries_path=str(county_boundaries_path),

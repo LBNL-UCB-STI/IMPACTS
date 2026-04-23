@@ -12,7 +12,7 @@ emfac:
     emfac_category_fuel_mapping_file: examples/emfac/2018_mappings/emfac_category_fuel_mapping.csv
     fastsim_category_fuel_mapping_file: examples/emfac/2018_mappings/fastsim_category_fuel_mapping.csv
     atlas_frism_xwalk_file: examples/emfac/2018_mappings/atlas_frism_xwalk.csv
-    vehicle_category_metadata_file: examples/emfac/2018_mappings/vehicle_operation_days_per_year.csv
+    vehicle_category_metadata_file: examples/pipeline/pilates/beam/production/sfbay/vehicle-tech/emissions/emfac_vehicle_category_attributes.csv
 
   activities:
     model_year_groups:
@@ -54,9 +54,9 @@ emfac:
       - fallback: ~/Workspace/Models/emfac/raw/statewide-emfac-emissions-inventory
 
   fleet:
-    # Single standardized Bayesian/DAG model input.
-    # It contains the DAG structure, weights, category families, constraints,
-    # and all embedded evidence tables.
+    # Single standardized vehicle-type assignment model file.
+    # It contains the named freight and passenger assignment models,
+    # including scoring weights and embedded evidence tables.
     vehicle_type_assignment_model_settings: examples/emfac/fleet/vehicle_type_assignment_model.yaml
 
     atlas:

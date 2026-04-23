@@ -61,6 +61,16 @@ def _use_existing_reference(manifest_inputs: Dict[str, Any], key: str, entry: Di
     return resolve_logged_path(entry)
 
 
+def _derive_emfacid_activity_path(path_like: str) -> Optional[str]:
+    source = Path(str(path_like)).expanduser().resolve()
+    name = source.name
+    if name.endswith("-activity.parquet"):
+        derived = source.with_name(name.replace("-activity.parquet", "-activity-by-emfacid.parquet"))
+    else:
+        derived = source.with_name(f"{source.stem}-by-emfacid{source.suffix}")
+    return str(derived) if derived.exists() else None
+
+
 def _locate_exchange_file(folder: Path, stem: str) -> Optional[str]:
     return find_preferred_file(str(folder), [f"{stem}.csv.gz", f"{stem}.csv", f"{stem}.parquet"])
 
@@ -203,6 +213,16 @@ def run(
         relative_target=str(emissions.inventory.passenger_file),
         metadata={"artifact_family": "passenger_inventory_file"},
     )
+    passenger_inventory_emfacid_source = _derive_emfacid_activity_path(passenger_inventory_source)
+    if passenger_inventory_emfacid_source:
+        _register_manifest_input(
+            manifest_inputs,
+            input_root=input_root,
+            key="passenger_inventory_emfacid_file",
+            source_path=passenger_inventory_emfacid_source,
+            relative_target=Path(passenger_inventory_emfacid_source).name,
+            metadata={"artifact_family": "passenger_inventory_emfacid_file"},
+        )
     freight_inventory_source = required_local_path(
         _resolve_region_or_absolute_path(
             emissions.inventory.freight_file,
@@ -219,6 +239,16 @@ def run(
         relative_target=str(emissions.inventory.freight_file),
         metadata={"artifact_family": "freight_inventory_file"},
     )
+    freight_inventory_emfacid_source = _derive_emfacid_activity_path(freight_inventory_source)
+    if freight_inventory_emfacid_source:
+        _register_manifest_input(
+            manifest_inputs,
+            input_root=input_root,
+            key="freight_inventory_emfacid_file",
+            source_path=freight_inventory_emfacid_source,
+            relative_target=Path(freight_inventory_emfacid_source).name,
+            metadata={"artifact_family": "freight_inventory_emfacid_file"},
+        )
     passenger_vehicle_types_source = required_local_path(
         _resolve_region_or_absolute_path(
             beam_processing.passenger_vehicle_types_file,
@@ -268,6 +298,23 @@ def run(
             source_path=annualization_days_source,
             relative_target=Path(annualization_days_source).name,
             metadata={"artifact_family": "annualization_days_or_file_input"},
+        )
+    if emissions.vehicle_category_metadata_file:
+        vehicle_category_metadata_source = required_local_path(
+            _resolve_region_or_absolute_path(
+                emissions.vehicle_category_metadata_file,
+                region_input_root=region_input_root,
+                config_path=config_path,
+            ),
+            "impacts.emissions.vehicle_category_metadata_file",
+        )
+        _register_manifest_input(
+            manifest_inputs,
+            input_root=input_root,
+            key="vehicle_category_metadata_file_input",
+            source_path=vehicle_category_metadata_source,
+            relative_target=Path(vehicle_category_metadata_source).name,
+            metadata={"artifact_family": "vehicle_category_metadata_file_input"},
         )
 
     staged_inmap_grid = None

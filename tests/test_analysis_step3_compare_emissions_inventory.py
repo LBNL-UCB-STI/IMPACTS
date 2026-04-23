@@ -6,10 +6,10 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Polygon
 
-from impacts.analysis.step2_compare_emissions_inventory import run
+from impacts.analysis.step3_compare_emissions_inventory import run
 
 
-def test_analysis_step1_writes_comparison_table_and_plots(tmp_path: Path) -> None:
+def test_analysis_step3_writes_comparison_table_and_plots(tmp_path: Path) -> None:
     modeled = pd.DataFrame(
         {
             "countyfp": ["001", "001", "013"],
@@ -96,7 +96,7 @@ def test_analysis_step1_writes_comparison_table_and_plots(tmp_path: Path) -> Non
     assert Path(outputs["BC_plot"]).exists()
 
 
-def test_analysis_step1_can_compare_road_dust_pm25_only(tmp_path: Path) -> None:
+def test_analysis_step3_can_compare_road_dust_pm25_only(tmp_path: Path) -> None:
     modeled = pd.DataFrame(
         {
             "countyfp": ["001"],

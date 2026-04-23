@@ -45,6 +45,16 @@ def build_parser() -> argparse.ArgumentParser:
     analysis = subparsers.add_parser("analysis", help="Run maintained analysis outputs from workflow artifacts")
     analysis.add_argument("--config", required=True)
 
+    emfac = subparsers.add_parser("emfac", help="Run EMFAC activities, fleet, or the full EMFAC workflow")
+    emfac.add_argument(
+        "workflow",
+        nargs="?",
+        choices=("activities", "fleet"),
+        default=None,
+        help="Optional workflow to run. Omit to run the full EMFAC workflow.",
+    )
+    emfac.add_argument("--config", required=True)
+
     pipeline = subparsers.add_parser("pipeline", help="Run preprocess, run, and postprocess end-to-end")
     pipeline.add_argument("--config", required=True)
     derive_settings = subparsers.add_parser(
@@ -203,6 +213,18 @@ def main(argv: list[str] | None = None) -> int:
 
         run_analysis_from_settings(
             settings_path=args.config,
+        )
+        return 0
+
+    if args.command == "emfac":
+        from impacts.emfac.__main__ import main as run_emfac_main
+
+        run_emfac_main(
+            [
+                *([args.workflow] if args.workflow else []),
+                "--config",
+                args.config,
+            ]
         )
         return 0
 

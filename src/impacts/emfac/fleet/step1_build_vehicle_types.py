@@ -24,6 +24,7 @@ import pandas as pd
 
 from impacts.emfac.config import read_table
 from impacts.emfac.config import resolve_workflow_path
+from impacts.emfac.model_year_groups import assign_model_year_groups
 
 
 def _read_csv(path_like: str, *, columns: list[str] | tuple[str, ...] | None = None) -> pd.DataFrame:
@@ -77,15 +78,14 @@ def _combine_vehicle_type_ids(fastsim_vehicle_type_id: object, atlas_vehicle_typ
 def _build_atlas_vehicle_type_ids(
     bodytypes: pd.Series,
     adopt_fuels: pd.Series,
-    modelyears: pd.Series,
+    modelyear_groups: pd.Series,
 ) -> pd.Series:
     body = bodytypes.astype(str).str.strip()
     body = body.str[:1].str.upper() + body.str[1:]
     fuel = adopt_fuels.astype(str).str.strip()
     fuel = fuel.str[:1].str.upper() + fuel.str[1:]
-    years = pd.to_numeric(modelyears, errors="coerce")
-    year_tokens = years.map(lambda value: str(int(value)) if pd.notna(value) else str(value))
-    return body + "_" + fuel + "_" + year_tokens
+    groups = modelyear_groups.astype(str).str.strip()
+    return body + "_" + fuel + "_" + groups
 
 
 def _step1_tmp_dir(output_dir: str) -> Path:
@@ -193,36 +193,52 @@ def _align_vehicle_types_to_source_schema(
     return frame.loc[:, source_columns].copy()
 
 
-def _build_atlas_vehicle_type_targets(vehicles: pd.DataFrame) -> pd.DataFrame:
+def _build_atlas_vehicle_type_targets(
+    vehicles: pd.DataFrame,
+    *,
+    model_year_groups: dict[str, list[dict[str, object]]],
+) -> pd.DataFrame:
     _require_column(vehicles, "bodytype", "ATLAS vehicles file")
     _require_column(vehicles, "modelyear", "ATLAS vehicles file")
     _require_column(vehicles, "adopt_fuel", "ATLAS vehicles file")
 
     prepared = vehicles[["bodytype", "modelyear", "adopt_fuel"]].copy()
+    prepared["modelyear"] = pd.to_numeric(prepared["modelyear"], errors="coerce")
+    if prepared["modelyear"].isna().any():
+        raise ValueError("ATLAS vehicles file contains non-numeric modelyear values")
+    prepared["vehicleCategory"] = "LDA"
+    prepared = assign_model_year_groups(
+        prepared,
+        model_year_groups,
+        year_column="modelyear",
+        category_column="vehicleCategory",
+        output_column="emfacModelYearGroup",
+    )
     prepared["atlasVehicleTypeId"] = _build_atlas_vehicle_type_ids(
         prepared["bodytype"],
         prepared["adopt_fuel"],
-        prepared["modelyear"],
+        prepared["emfacModelYearGroup"],
     )
     grouped = (
-        prepared.groupby(["atlasVehicleTypeId", "bodytype", "modelyear", "adopt_fuel"], dropna=False)
-        .size()
-        .reset_index(name="vehicleCount")
-    )
-    duplicate_atlas_vehicle_type_ids = grouped["atlasVehicleTypeId"].duplicated(keep=False)
-    if duplicate_atlas_vehicle_type_ids.any():
-        duplicate_rows = grouped.loc[duplicate_atlas_vehicle_type_ids, ["atlasVehicleTypeId", "bodytype", "modelyear", "adopt_fuel", "vehicleCount"]]
-        raise ValueError(
-            "Duplicate atlasVehicleTypeId values were generated in Step 1.2:\n"
-            + duplicate_rows.to_string(index=False)
+        prepared.groupby(
+            ["atlasVehicleTypeId", "bodytype", "emfacModelYearGroup", "adopt_fuel"],
+            dropna=False,
         )
+        .agg(
+            vehicleCount=("modelyear", "size"),
+            modelyear=("modelyear", "median"),
+        )
+        .reset_index()
+    )
     total = grouped["vehicleCount"].sum()
     prepared = grouped.copy()
+    prepared["modelyear"] = pd.to_numeric(prepared["modelyear"], errors="coerce").round().astype("Int64")
     prepared["fleetShare"] = prepared["vehicleCount"] / total if total > 0 else 0.0
     return prepared[
         [
             "atlasVehicleTypeId",
             "bodytype",
+            "emfacModelYearGroup",
             "modelyear",
             "adopt_fuel",
             "vehicleCount",
@@ -825,6 +841,7 @@ def _build_atlas_income_bin_targets(
     households: pd.DataFrame,
     persons: pd.DataFrame,
     income_bins: list[object] | None = None,
+    model_year_groups: dict[str, list[dict[str, object]]] | None = None,
 ) -> pd.DataFrame:
     _require_column(vehicles, "household_id", "ATLAS vehicles file")
     _require_column(persons, "household_id", "ATLAS persons file")
@@ -847,10 +864,20 @@ def _build_atlas_income_bin_targets(
 
     prepared_vehicles = vehicles[["household_id", "bodytype", "modelyear", "adopt_fuel"]].copy()
     prepared_vehicles["household_id"] = pd.to_numeric(prepared_vehicles["household_id"], errors="coerce").astype("Int64")
+    if model_year_groups is None:
+        raise ValueError("Step 1 income-bin targets require configured model_year_groups")
+    prepared_vehicles["vehicleCategory"] = "LDA"
+    prepared_vehicles = assign_model_year_groups(
+        prepared_vehicles,
+        model_year_groups,
+        year_column="modelyear",
+        category_column="vehicleCategory",
+        output_column="emfacModelYearGroup",
+    )
     prepared_vehicles["atlasVehicleTypeId"] = _build_atlas_vehicle_type_ids(
         prepared_vehicles["bodytype"],
         prepared_vehicles["adopt_fuel"],
-        prepared_vehicles["modelyear"],
+        prepared_vehicles["emfacModelYearGroup"],
     )
 
     merged = prepared_vehicles.merge(
@@ -1124,6 +1151,7 @@ def _build_vehicle_type_atlas_crosswalk(
                         "fastsimVehicleTypeId": selected_vehicle_type_id,
                         "vehicleTypeId": _combine_vehicle_type_ids(selected_vehicle_type_id, atlas_vehicle_type_id),
                         "bodytype": representative_row["bodytype"],
+                        "emfacModelYearGroup": str(representative_row["emfacModelYearGroup"]),
                         "modelyear": int(representative_row["modelyear"]) if pd.notna(representative_row["modelyear"]) else representative_row["modelyear"],
                         "adopt_fuel": representative_row["adopt_fuel"],
                         "fleetShare": float(representative_row["fleetShare"]) if pd.notna(representative_row["fleetShare"]) else 0.0,
@@ -1141,6 +1169,7 @@ def _build_vehicle_type_atlas_crosswalk(
             "fastsimVehicleTypeId",
             "vehicleTypeId",
             "bodytype",
+            "emfacModelYearGroup",
             "modelyear",
             "adopt_fuel",
             "fleetShare",
@@ -1162,7 +1191,7 @@ def _build_vehicle_type_atlas_crosswalk(
         )
 
     return crosswalk.sort_values(
-        ["atlasVehicleTypeId", "bodytype", "adopt_fuel", "modelyear", "vehicleTypeId"]
+        ["atlasVehicleTypeId", "bodytype", "adopt_fuel", "emfacModelYearGroup", "modelyear", "vehicleTypeId"]
     ).reset_index(drop=True)
 
 
@@ -1262,6 +1291,92 @@ def _apply_vehicle_type_probabilities_from_crosswalk(
         axis=1,
     )
     return prepared.drop(columns=["fleetShare", "incomeBin", "incomeProbability"])
+
+
+def _build_placeholder_passenger_vehicle_types_from_atlas_targets(
+    source_car_vehicle_types: pd.DataFrame,
+    vehicle_type_mapping: pd.DataFrame,
+    atlas_vehicle_type_targets: pd.DataFrame,
+) -> pd.DataFrame:
+    _require_column(source_car_vehicle_types, "vehicleTypeId", "Passenger car vehicle types file")
+    _require_column(vehicle_type_mapping, "vehicleTypeId", "Passenger FASTSim vehicle type mapping file")
+    for column_name in [
+        "atlasVehicleTypeId",
+        "bodytype",
+        "passenger_bodytype_norm",
+        "emfacModelYearGroup",
+        "modelyear",
+        "adopt_fuel",
+        "fleetShare",
+        "incomeBin",
+        "incomeProbability",
+    ]:
+        if column_name == "passenger_bodytype_norm":
+            continue
+        _require_column(atlas_vehicle_type_targets, column_name, "ATLAS vehicle type targets")
+
+    template_rows = source_car_vehicle_types.copy()
+    template_rows["templateVehicleTypeId"] = template_rows["vehicleTypeId"].astype(str)
+    template_rows = template_rows.merge(
+        vehicle_type_mapping[["vehicleTypeId", "body_type", "modelyear"]]
+        .drop_duplicates()
+        .rename(columns={"vehicleTypeId": "templateVehicleTypeId", "modelyear": "template_modelyear"}),
+        on="templateVehicleTypeId",
+        how="left",
+    )
+    template_rows["bodytype_norm"] = template_rows["body_type"].apply(_normalize_bodytype)
+    template_rows["template_modelyear"] = pd.to_numeric(template_rows["template_modelyear"], errors="coerce")
+
+    built_rows: list[pd.Series] = []
+    for row in atlas_vehicle_type_targets.itertuples(index=False):
+        bodytype_norm = _normalize_bodytype(
+            getattr(row, "passenger_bodytype_norm", "") or getattr(row, "bodytype", "")
+        )
+        candidates = template_rows.loc[template_rows["bodytype_norm"].eq(bodytype_norm)].copy()
+        if candidates.empty:
+            raise ValueError(
+                "No passenger FASTSim template row is available for ATLAS bodytype="
+                f"{row.bodytype} mapped_bodytype={bodytype_norm}"
+            )
+        candidates["yearDistance"] = (
+            pd.to_numeric(candidates["template_modelyear"], errors="coerce").fillna(float(row.modelyear))
+            - float(row.modelyear)
+        ).abs()
+        selected = candidates.sort_values(
+            ["yearDistance", "templateVehicleTypeId"],
+            ascending=[True, True],
+            kind="mergesort",
+        ).iloc[0].copy()
+        selected["vehicleTypeId"] = str(row.atlasVehicleTypeId)
+        selected["sampleProbabilityWithinCategory"] = f"{float(row.fleetShare):.6f}"
+        selected["sampleProbabilityString"] = _create_probability_string(
+            str(row.incomeBin),
+            float(row.incomeProbability),
+            float(row.fleetShare),
+        )
+        selected["adopt_fuel"] = str(row.adopt_fuel)
+        selected["bodytype"] = str(row.bodytype)
+        selected["passenger_bodytype_norm"] = str(
+            getattr(row, "passenger_bodytype_norm", "") or getattr(row, "bodytype", "")
+        )
+        selected["emfacModelYearGroup"] = str(row.emfacModelYearGroup)
+        selected["modelyear"] = row.modelyear
+        selected_columns = list(
+            dict.fromkeys(
+                source_car_vehicle_types.columns.tolist()
+                + ["adopt_fuel", "bodytype", "passenger_bodytype_norm", "emfacModelYearGroup", "modelyear"]
+            )
+        )
+        built_rows.append(selected[selected_columns])
+
+    built = pd.DataFrame(built_rows).reset_index(drop=True)
+    if built["vehicleTypeId"].duplicated().any():
+        duplicate_values = built.loc[built["vehicleTypeId"].duplicated(), "vehicleTypeId"].drop_duplicates().tolist()
+        raise ValueError(
+            "Duplicate ATLAS passenger vehicleTypeId values were generated in Step 1:\n"
+            + "\n".join(duplicate_values)
+        )
+    return built
 
 
 def _strip_known_suffixes(filename: str) -> str:
@@ -1565,12 +1680,17 @@ def _run_step1_passenger_substeps(
         config["atlas"]["persons_file"],
         columns=["household_id"],
     )
-    atlas_vehicle_type_targets = _build_atlas_vehicle_type_targets(atlas_vehicles)
+    model_year_groups = config["activities"]["model_year_groups"]
+    atlas_vehicle_type_targets = _build_atlas_vehicle_type_targets(
+        atlas_vehicles,
+        model_year_groups=model_year_groups,
+    )
     atlas_income_bin_targets = _build_atlas_income_bin_targets(
         atlas_vehicles,
         atlas_households,
         atlas_persons,
         config["atlas"].get("income_bins"),
+        model_year_groups=model_year_groups,
     )
     atlas_vehicle_type_targets = atlas_vehicle_type_targets.merge(
         atlas_income_bin_targets,
@@ -1584,35 +1704,47 @@ def _run_step1_passenger_substeps(
         atlas_vehicle_type_targets["incomeProbability"],
         errors="coerce",
     ).fillna(0.0)
+    atlas_vehicle_type_targets["bodytype_norm"] = atlas_vehicle_type_targets["bodytype"].apply(_normalize_bodytype)
+    atlas_vehicle_type_targets = atlas_vehicle_type_targets.merge(
+        atlas_passenger_category_mapping.rename(
+            columns={
+                "body_type": "bodytype_norm",
+                "passenger_beam_category": "passenger_bodytype_norm",
+            }
+        ),
+        on="bodytype_norm",
+        how="left",
+    )
+    missing_bodytype_mapping = atlas_vehicle_type_targets[
+        atlas_vehicle_type_targets["passenger_bodytype_norm"].isna()
+    ]["bodytype"].drop_duplicates()
+    if not missing_bodytype_mapping.empty:
+        raise ValueError(
+            "ATLAS body types are missing passenger BEAM category mappings:\n"
+            + "\n".join(missing_bodytype_mapping.astype(str).tolist())
+        )
 
-    print("=== Step 1.3: create fastsim-to-atlas crosswalk file ===")
-    vehicle_type_atlas_crosswalk = _build_vehicle_type_atlas_crosswalk(
-        prepared_vehicle_types,
+    print("=== Step 1.3: build atlas-canonical passenger car vehicle types ===")
+    passenger_vehicle_type_sections = _split_passenger_vehicle_types(prepared_vehicle_types)
+    prepared_vehicle_types = _build_placeholder_passenger_vehicle_types_from_atlas_targets(
+        passenger_vehicle_type_sections["car"],
         vehicle_type_mapping,
         atlas_vehicle_type_targets,
-        atlas_passenger_category_mapping,
-        fastsim_category_fuel_mapping,
-        rng,
-    )
-    vehicle_type_atlas_crosswalk = _round_fleet_share(vehicle_type_atlas_crosswalk)
-    vehicle_type_atlas_crosswalk = _round_income_probability(vehicle_type_atlas_crosswalk)
-    prepared_vehicle_types = _expand_vehicle_types_by_crosswalk(
-        prepared_vehicle_types,
-        vehicle_type_atlas_crosswalk,
-    )
-    prepared_vehicle_types = _apply_vehicle_type_probabilities_from_crosswalk(
-        prepared_vehicle_types,
-        vehicle_type_atlas_crosswalk,
-        config["atlas"].get("income_bins"),
-    )
-    prepared_vehicle_types = _align_vehicle_types_to_source_schema(
-        prepared_vehicle_types,
-        list(vehicle_types.columns),
-        frame_name="Built passenger vehicle types",
     )
     prepared_vehicle_types = _normalize_energy_file_columns(prepared_vehicle_types)
-    prepared_vehicle_types = _attach_adopt_fuel_column(prepared_vehicle_types)
     prepared_vehicle_types_file = _write_new_vehicle_types_file(prepared_vehicle_types, config["output"])
+    vehicle_type_atlas_crosswalk = atlas_vehicle_type_targets[
+        [
+            "atlasVehicleTypeId",
+            "bodytype",
+            "emfacModelYearGroup",
+            "modelyear",
+            "adopt_fuel",
+            "fleetShare",
+            "incomeBin",
+            "incomeProbability",
+        ]
+    ].rename(columns={"atlasVehicleTypeId": "vehicleTypeId"}).copy()
     vehicle_type_atlas_crosswalk_file = _write_vehicle_type_crosswalk_file(
         vehicle_type_atlas_crosswalk,
         config["output"],

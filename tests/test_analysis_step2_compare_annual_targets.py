@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from impacts.analysis.step1_compare_annual_targets import run
+from impacts.analysis.step2_compare_annual_targets import run
 
 
-def test_analysis_step1_compares_modeled_totals_to_annual_targets(tmp_path: Path) -> None:
+def test_analysis_step2_compares_modeled_totals_to_annual_targets(tmp_path: Path) -> None:
     modeled = pd.DataFrame(
         {
             "countyfp": ["001", "001", "001", "001"],

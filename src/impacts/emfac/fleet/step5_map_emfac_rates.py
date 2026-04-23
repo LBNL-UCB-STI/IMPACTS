@@ -252,12 +252,7 @@ def _attach_idle_time_fraction(
     _require_column(prepared, "emfacVehicleCategory", "Vehicle types table")
     categories = prepared["emfacVehicleCategory"].fillna("").astype(str).str.strip()
     prepared["idleTimeFraction"] = categories.map(idle_time_fraction_lookup)
-    missing_categories = sorted(categories.loc[categories.ne("") & prepared["idleTimeFraction"].isna()].drop_duplicates().tolist())
-    if missing_categories:
-        raise ValueError(
-            "Vehicle category metadata file is missing idle_time_fraction values for emfacVehicleCategory values: "
-            f"{missing_categories[:20]}"
-        )
+    prepared.loc[categories.ne("") & prepared["idleTimeFraction"].isna(), "idleTimeFraction"] = 0.0
     return prepared
 
 
@@ -398,12 +393,16 @@ def _run_step5_substep_load_rates_store(
     parquet_root = store_root / "dataset"
     duckdb_path = store_root / "dataset.duckdb"
     relative_paths: dict[str, str] = {}
-    missing_store_ids: list[str] = []
-    for emfac_id in shared_emfac_ids:
-        parquet_path = parquet_root / f"emfacId={emfac_id}" / f"{emfac_id}.parquet"
+    for partition_dir in sorted(parquet_root.glob("emfacId=*")):
+        if not partition_dir.is_dir():
+            continue
+        emfac_id = partition_dir.name.removeprefix("emfacId=")
+        parquet_path = partition_dir / f"{emfac_id}.parquet"
         if parquet_path.exists():
             relative_paths[emfac_id] = str(parquet_path.relative_to(output_root))
-        else:
+    missing_store_ids: list[str] = []
+    for emfac_id in shared_emfac_ids:
+        if emfac_id not in relative_paths:
             missing_store_ids.append(emfac_id)
     if missing_store_ids:
         preview = ", ".join(missing_store_ids[:10])
@@ -413,9 +412,10 @@ def _run_step5_substep_load_rates_store(
         )
     if not duckdb_path.exists():
         raise FileNotFoundError(f"EMFAC rates store database not found: {duckdb_path}")
-    metadata_path = config.get("vehicle_category_metadata_file")
+    mappings = config.get("mappings", {})
+    metadata_path = mappings.get("vehicle_category_metadata_file") if isinstance(mappings, dict) else None
     if not metadata_path:
-        raise ValueError("Fleet Step 5 requires vehicle_category_metadata_file in the EMFAC config.")
+        raise ValueError("Fleet Step 5 requires mappings.vehicle_category_metadata_file in the EMFAC config.")
     shared_rates_store = {
         "store_root": str(store_root),
         "parquet_root": str(parquet_root),

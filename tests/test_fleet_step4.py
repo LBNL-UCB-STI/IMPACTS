@@ -39,20 +39,27 @@ def _write_model_file(tmp_path: Path, *, port_rows: list[str] | None = None) -> 
     model_file.write_text(
         "\n".join(
             [
-                "model:",
-                "  scoring:",
-                "    likelihood_floor: 0.01",
-                "    weights:",
-                "      prior_vmt_share: 1.0",
-                "      naics_sector: 1.0",
-                "      port_location: 1.0",
-                "  evidence:",
-                "    naics_sector:",
-                "      - naics_code_2: '11'",
-                "        vehicle_category:",
-                "          - T7 Tractor Class 8",
-                "    port_location:",
+                "models:",
+                "  freight_bayesian_dag:",
+                "    scoring:",
+                "      likelihood_floor: 0.01",
+                "      weights:",
+                "        prior_vmt_share: 1.0",
+                "        naics_sector: 1.0",
+                "        port_location: 1.0",
+                "    evidence:",
+                "      naics_sector:",
+                "        - naics_code_2: '11'",
+                "          vehicle_category:",
+                "            - T7 Tractor Class 8",
+                "      port_location:",
                 port_rows_yaml.replace("    - ", "      - ").replace("      zone_codes:", "        zone_codes:").replace("      label:", "        label:").replace("      vehicle_category:", "        vehicle_category:").replace("        - ", "          - "),
+                "  passenger_emfac_matching:",
+                "    scoring:",
+                "      bodytype_bias: 1.0",
+                "      fuel_bias: 1.0",
+                "      emfac_population_bias: 1.0",
+                "      emfac_vmt_bias: 0.0",
             ]
         ),
         encoding="utf-8",
@@ -99,21 +106,24 @@ def test_load_vehicle_type_assignment_table_expands_naics_code_lists(tmp_path: P
     model_file.write_text(
         "\n".join(
             [
-                "model:",
-                "  scoring:",
-                "    likelihood_floor: 0.01",
-                "    weights:",
-                "      prior_vmt_share: 1.0",
-                "      naics_sector: 1.0",
-                "      port_location: 1.0",
-                "  evidence:",
-                "    naics_sector:",
-                "      - naics_code_2:",
-                "          - '31'",
-                "          - '32'",
-                "        vehicle_category:",
-                "          - T7 Tractor Class 8",
-                "    port_location: []",
+                "models:",
+                "  freight_bayesian_dag:",
+                "    scoring:",
+                "      likelihood_floor: 0.01",
+                "      weights:",
+                "        prior_vmt_share: 1.0",
+                "        naics_sector: 1.0",
+                "        port_location: 1.0",
+                "    evidence:",
+                "      naics_sector:",
+                "        - naics_code_2:",
+                "            - '31'",
+                "            - '32'",
+                "          vehicle_category:",
+                "            - T7 Tractor Class 8",
+                "      port_location: []",
+                "  passenger_emfac_matching:",
+                "    scoring: {}",
             ]
         ),
         encoding="utf-8",
@@ -295,21 +305,25 @@ def test_port_category_weight_prefers_matching_port_for_tractors() -> None:
         vehicle_category="T7 POAK Class 8",
         port_weights=poak_weights,
         configured_port_classes=configured_port_classes,
+        likelihood_floor=0.01,
     )
     poak_base = _port_category_weight(
         vehicle_category="T7 Tractor Class 8",
         port_weights=poak_weights,
         configured_port_classes=configured_port_classes,
+        likelihood_floor=0.01,
     )
     other_port_match = _port_category_weight(
         vehicle_category="T7 Other Port Class 8",
         port_weights=other_port_weights,
         configured_port_classes=configured_port_classes,
+        likelihood_floor=0.01,
     )
     other_port_base = _port_category_weight(
         vehicle_category="T7 Tractor Class 8",
         port_weights=other_port_weights,
         configured_port_classes=configured_port_classes,
+        likelihood_floor=0.01,
     )
     assert poak_match == 1.0
     assert other_port_match == 1.0
@@ -323,6 +337,7 @@ def test_port_category_weight_prefers_matching_port_for_tractors() -> None:
         vehicle_category="T7 POAK Class 8",
         port_weights=poak_weights,
         configured_port_classes=configured_port_classes,
+        likelihood_floor=0.01,
     ) == 1.0
 
 

@@ -278,7 +278,8 @@ def _load_model_spec(config: dict[str, Any]) -> dict[str, Any]:
 
 def _load_vehicle_type_assignment_table(config: dict[str, Any], evidence_source: str) -> pd.DataFrame:
     model_spec = _load_model_spec(config)
-    model_section = model_spec.get("model", {})
+    models = model_spec.get("models", {})
+    model_section = models.get("freight_bayesian_dag", {}) if isinstance(models, dict) else {}
     evidence = model_section.get("evidence", {})
     if evidence_source == "naics_sector":
         rows = evidence.get("naics_sector", [])
