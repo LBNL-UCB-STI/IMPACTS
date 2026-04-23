@@ -145,10 +145,10 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
 
 def _load_passenger_vehicle_category_weights(config: dict[str, Any]) -> pd.DataFrame:
     passenger_model = config.get("passenger_bayesian_dag", {}) or {}
-    vehicle_categories = passenger_model.get("vehicle_categories", {})
+    vehicle_categories = passenger_model.get("atlas_vehicle_categories", {})
     if not isinstance(vehicle_categories, dict) or not vehicle_categories:
         raise ValueError(
-            "Passenger Bayesian DAG model is missing evidence.vehicle_categories required for passenger vehicle-category support."
+            "Passenger Bayesian DAG model is missing evidence.atlas_vehicle_categories required for passenger vehicle-category support."
         )
 
     rows: list[dict[str, object]] = []
@@ -158,7 +158,7 @@ def _load_passenger_vehicle_category_weights(config: dict[str, Any]) -> pd.DataF
             continue
         if not isinstance(vehicle_category_list, list):
             raise ValueError(
-                "Passenger Bayesian DAG evidence.vehicle_categories entries must be lists of EMFAC vehicle-category strings."
+                "Passenger Bayesian DAG evidence.atlas_vehicle_categories entries must be lists of EMFAC vehicle-category strings."
             )
         for vehicle_category in vehicle_category_list:
             category = _normalize_text(vehicle_category)
@@ -175,23 +175,22 @@ def _load_passenger_vehicle_category_weights(config: dict[str, Any]) -> pd.DataF
     prepared = pd.DataFrame(rows)
     if prepared.empty:
         raise ValueError(
-            "Passenger Bayesian DAG evidence.vehicle_categories produced no passenger vehicle-category support rows."
+            "Passenger Bayesian DAG evidence.atlas_vehicle_categories produced no passenger vehicle-category support rows."
         )
     return prepared.drop_duplicates().reset_index(drop=True)
 
 
 def _load_emfac_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
     passenger_model = config.get("passenger_bayesian_dag", {}) or {}
-    vehicle_categories = passenger_model.get("vehicle_categories", {})
-    fuel_types = passenger_model.get("fuel_types", {})
-    category_fuel_support = passenger_model.get("category_fuel_support", {})
+    vehicle_categories = passenger_model.get("atlas_vehicle_categories", {})
+    fuel_types = passenger_model.get("atlas_fuel_types", {})
     if not isinstance(vehicle_categories, dict) or not vehicle_categories:
         raise ValueError(
-            "Passenger Bayesian DAG model is missing evidence.vehicle_categories required for passenger fuel mapping."
+            "Passenger Bayesian DAG model is missing evidence.atlas_vehicle_categories required for passenger fuel mapping."
         )
     if not isinstance(fuel_types, dict) or not fuel_types:
         raise ValueError(
-            "Passenger Bayesian DAG model is missing evidence.fuel_types required for passenger fuel mapping."
+            "Passenger Bayesian DAG model is missing evidence.atlas_fuel_types required for passenger fuel mapping."
         )
 
     passenger_categories = sorted(
@@ -205,29 +204,22 @@ def _load_emfac_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
     )
     if not passenger_categories:
         raise ValueError(
-            "Passenger Bayesian DAG evidence.vehicle_categories produced no passenger EMFAC categories for passenger fuel mapping."
+            "Passenger Bayesian DAG evidence.atlas_vehicle_categories produced no passenger EMFAC categories for passenger fuel mapping."
         )
 
     rows: list[dict[str, str]] = []
     for vehicle_category in passenger_categories:
-        supported_fuels = {
-            _normalize_text(emfac_fuel)
-            for emfac_fuel in category_fuel_support.get(vehicle_category, [])
-            if _normalize_text(emfac_fuel)
-        }
-        if not supported_fuels:
-            continue
         for adopt_fuel, emfac_fuels in fuel_types.items():
             normalized_adopt_fuel = _normalize_lower(adopt_fuel)
             if normalized_adopt_fuel == "":
                 continue
             if not isinstance(emfac_fuels, list):
                 raise ValueError(
-                    "Passenger Bayesian DAG evidence.fuel_types entries must be lists of EMFAC fuel strings."
+                    "Passenger Bayesian DAG evidence.atlas_fuel_types entries must be lists of EMFAC fuel strings."
                 )
             for emfac_fuel in emfac_fuels:
                 fuel = _normalize_text(emfac_fuel)
-                if fuel == "" or fuel not in supported_fuels:
+                if fuel == "":
                     continue
                 rows.append(
                     {
@@ -239,7 +231,7 @@ def _load_emfac_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
     prepared = pd.DataFrame(rows)
     if prepared.empty:
         raise ValueError(
-            "Passenger Bayesian DAG evidence.vehicle_categories and evidence.fuel_types produced no passenger fuel mapping rows."
+            "Passenger Bayesian DAG evidence.atlas_vehicle_categories and evidence.atlas_fuel_types produced no passenger fuel mapping rows."
         )
     return prepared.drop_duplicates().reset_index(drop=True)
 

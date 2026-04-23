@@ -404,10 +404,10 @@ def _load_freight_vehicle_category_mapping(config: dict[str, Any]) -> pd.DataFra
 def _derive_freight_ldv_bodytype_mapping(config: dict[str, Any]) -> pd.DataFrame:
     freight_category_mapping = _load_freight_vehicle_category_mapping(config)
     passenger_model = config.get("passenger_bayesian_dag", {}) or {}
-    passenger_vehicle_categories = passenger_model.get("vehicle_categories", {})
+    passenger_vehicle_categories = passenger_model.get("atlas_vehicle_categories", {})
     if not isinstance(passenger_vehicle_categories, dict) or not passenger_vehicle_categories:
         raise ValueError(
-            "Passenger Bayesian DAG model is missing evidence.vehicle_categories required for freight LDV bodytype derivation."
+            "Passenger Bayesian DAG model is missing evidence.atlas_vehicle_categories required for freight LDV bodytype derivation."
         )
 
     passenger_rows: list[dict[str, object]] = []
@@ -417,7 +417,7 @@ def _derive_freight_ldv_bodytype_mapping(config: dict[str, Any]) -> pd.DataFrame
             continue
         if not isinstance(vehicle_category_list, list):
             raise ValueError(
-                "Passenger Bayesian DAG evidence.vehicle_categories entries must be lists of EMFAC vehicle-category strings."
+                "Passenger Bayesian DAG evidence.atlas_vehicle_categories entries must be lists of EMFAC vehicle-category strings."
             )
         for vehicle_category in vehicle_category_list:
             normalized_vehicle_category = _normalize_text(vehicle_category)
@@ -432,13 +432,13 @@ def _derive_freight_ldv_bodytype_mapping(config: dict[str, Any]) -> pd.DataFrame
     passenger_support = pd.DataFrame(passenger_rows).drop_duplicates()
     if passenger_support.empty:
         raise ValueError(
-            "Passenger Bayesian DAG evidence.vehicle_categories produced no passenger bodytype support rows for freight derivation."
+            "Passenger Bayesian DAG evidence.atlas_vehicle_categories produced no passenger bodytype support rows for freight derivation."
         )
 
     prepared = freight_category_mapping.merge(passenger_support, on="vehicleCategory", how="inner")
     if prepared.empty:
         raise ValueError(
-            "Freight Bayesian DAG evidence.vehicle_categories has no overlap with passenger vehicle_categories for freight LDV bodytype derivation."
+            "Freight Bayesian DAG evidence.vehicle_categories has no overlap with passenger atlas_vehicle_categories for freight LDV bodytype derivation."
         )
 
     coverage = (
@@ -457,10 +457,10 @@ def _derive_freight_ldv_bodytype_mapping(config: dict[str, Any]) -> pd.DataFrame
 
 def _load_atlas_passenger_category_mapping(config: dict[str, Any]) -> pd.DataFrame:
     passenger_model = config.get("passenger_bayesian_dag", {}) or {}
-    vehicle_categories = passenger_model.get("vehicle_categories", {})
+    vehicle_categories = passenger_model.get("atlas_vehicle_categories", {})
     if not isinstance(vehicle_categories, dict) or not vehicle_categories:
         raise ValueError(
-            "Passenger Bayesian DAG model is missing evidence.vehicle_categories required for passenger Step 1 mapping."
+            "Passenger Bayesian DAG model is missing evidence.atlas_vehicle_categories required for passenger Step 1 mapping."
         )
 
     rows: list[dict[str, str]] = []
@@ -479,7 +479,7 @@ def _load_atlas_passenger_category_mapping(config: dict[str, Any]) -> pd.DataFra
     prepared = pd.DataFrame(rows)
     if prepared.empty:
         raise ValueError(
-            "Passenger Bayesian DAG evidence.vehicle_categories produced no passenger Step 1 bodytype mappings."
+            "Passenger Bayesian DAG evidence.atlas_vehicle_categories produced no passenger Step 1 bodytype mappings."
         )
     return prepared.drop_duplicates(subset=["body_type"], keep="first").reset_index(drop=True)
 

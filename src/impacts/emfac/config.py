@@ -482,23 +482,17 @@ def build_model_category_fuel_mapping(model_spec_path: str | Path) -> pd.DataFra
     passenger_model = _extract_named_model(model_spec, model_name="passenger_bayesian_dag", model_spec_path=spec_path)
     passenger_evidence = passenger_model.get("evidence", {})
     passenger_beam_vehicle_categories = passenger_evidence.get("beam_vehicle_categories", {})
-    passenger_fuel_types = passenger_evidence.get("fuel_types", {})
-    passenger_category_fuel_support = passenger_evidence.get("category_fuel_support", {})
+    passenger_fuel_types = passenger_evidence.get("beam_fuel_types", {})
     for beam_category, emfac_categories in passenger_beam_vehicle_categories.items():
         beam_category_token = str(beam_category).strip()
         if not beam_category_token:
             continue
         for emfac_category in _normalized_string_list(emfac_categories):
-            supported_fuels = set(_normalized_string_list(passenger_category_fuel_support.get(emfac_category)))
-            if not supported_fuels:
-                continue
             for adopt_fuel, emfac_fuels in passenger_fuel_types.items():
                 adopt_fuel_token = str(adopt_fuel).strip().lower()
                 if not adopt_fuel_token:
                     continue
                 for emfac_fuel in _normalized_string_list(emfac_fuels):
-                    if emfac_fuel not in supported_fuels:
-                        continue
                     rows.append(
                         {
                             "group": "passenger",
@@ -601,15 +595,10 @@ def build_fastsim_assignment_catalog(model_spec_path: str | Path, breakdown_path
     fastsim_model = _extract_named_model(model_spec, model_name="fastsim_assignment_model", model_spec_path=spec_path)
     freight_model = _extract_named_model(model_spec, model_name="freight_bayesian_dag", model_spec_path=spec_path)
     evidence = fastsim_model.get("evidence", {})
-    catalog = evidence.get("catalog", {})
-    if not isinstance(catalog, dict):
-        raise ValueError(
-            f"Vehicle type assignment model file at {spec_path} has an invalid fastsim_assignment_model.evidence.catalog section."
-        )
-    assignments = catalog.get("assignments", [])
+    assignments = evidence.get("assignments", [])
     if not isinstance(assignments, list) or not assignments:
         raise ValueError(
-            f"Vehicle type assignment model file at {spec_path} has no fastsim_assignment_model.evidence.catalog.assignments rows."
+            f"Vehicle type assignment model file at {spec_path} has no fastsim_assignment_model.evidence.assignments rows."
         )
     freight_evidence = freight_model.get("evidence", {})
     freight_vehicle_categories = freight_evidence.get("vehicle_categories", {})
@@ -821,10 +810,10 @@ def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str
             f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
             "It must contain models.passenger_bayesian_dag.evidence."
         )
-    passenger_vehicle_categories = passenger_evidence.get("vehicle_categories")
+    passenger_vehicle_categories = passenger_evidence.get("atlas_vehicle_categories")
     if not isinstance(passenger_vehicle_categories, dict) or not passenger_vehicle_categories:
         raise ValueError(
-            f"Configured fleet path '{path_label}' has no models.passenger_bayesian_dag.evidence.vehicle_categories entries in {model_spec_path}. "
+            f"Configured fleet path '{path_label}' has no models.passenger_bayesian_dag.evidence.atlas_vehicle_categories entries in {model_spec_path}. "
             "It should contain the ATLAS-bodytype-to-EMFAC-category support mappings."
         )
     invalid_vehicle_categories = [
@@ -834,24 +823,40 @@ def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str
     ]
     if invalid_vehicle_categories:
         raise ValueError(
-            f"Configured fleet path '{path_label}' has invalid models.passenger_bayesian_dag.evidence.vehicle_categories entries in {model_spec_path}: "
+            f"Configured fleet path '{path_label}' has invalid models.passenger_bayesian_dag.evidence.atlas_vehicle_categories entries in {model_spec_path}: "
             + ", ".join(sorted(str(key) for key in invalid_vehicle_categories))
         )
-    passenger_fuel_types = passenger_evidence.get("fuel_types")
-    if not isinstance(passenger_fuel_types, dict) or not passenger_fuel_types:
+    passenger_atlas_fuel_types = passenger_evidence.get("atlas_fuel_types")
+    if not isinstance(passenger_atlas_fuel_types, dict) or not passenger_atlas_fuel_types:
         raise ValueError(
-            f"Configured fleet path '{path_label}' has no models.passenger_bayesian_dag.evidence.fuel_types entries in {model_spec_path}. "
+            f"Configured fleet path '{path_label}' has no models.passenger_bayesian_dag.evidence.atlas_fuel_types entries in {model_spec_path}. "
             "It should contain the ATLAS-to-EMFAC fuel evidence mappings."
         )
-    invalid_passenger_fuel_types = [
+    invalid_passenger_atlas_fuel_types = [
         key
-        for key, value in passenger_fuel_types.items()
+        for key, value in passenger_atlas_fuel_types.items()
         if not isinstance(value, list) or not value
     ]
-    if invalid_passenger_fuel_types:
+    if invalid_passenger_atlas_fuel_types:
         raise ValueError(
-            f"Configured fleet path '{path_label}' has invalid models.passenger_bayesian_dag.evidence.fuel_types entries in {model_spec_path}: "
-            + ", ".join(sorted(str(key) for key in invalid_passenger_fuel_types))
+            f"Configured fleet path '{path_label}' has invalid models.passenger_bayesian_dag.evidence.atlas_fuel_types entries in {model_spec_path}: "
+            + ", ".join(sorted(str(key) for key in invalid_passenger_atlas_fuel_types))
+        )
+    passenger_beam_fuel_types = passenger_evidence.get("beam_fuel_types")
+    if not isinstance(passenger_beam_fuel_types, dict) or not passenger_beam_fuel_types:
+        raise ValueError(
+            f"Configured fleet path '{path_label}' has no models.passenger_bayesian_dag.evidence.beam_fuel_types entries in {model_spec_path}. "
+            "It should contain the BEAM-to-EMFAC fuel evidence mappings."
+        )
+    invalid_passenger_beam_fuel_types = [
+        key
+        for key, value in passenger_beam_fuel_types.items()
+        if not isinstance(value, list) or not value
+    ]
+    if invalid_passenger_beam_fuel_types:
+        raise ValueError(
+            f"Configured fleet path '{path_label}' has invalid models.passenger_bayesian_dag.evidence.beam_fuel_types entries in {model_spec_path}: "
+            + ", ".join(sorted(str(key) for key in invalid_passenger_beam_fuel_types))
         )
     passenger_beam_vehicle_categories = passenger_evidence.get("beam_vehicle_categories")
     if not isinstance(passenger_beam_vehicle_categories, dict) or not passenger_beam_vehicle_categories:
@@ -869,22 +874,6 @@ def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str
             f"Configured fleet path '{path_label}' has invalid models.passenger_bayesian_dag.evidence.beam_vehicle_categories entries in {model_spec_path}: "
             + ", ".join(sorted(str(key) for key in invalid_passenger_beam_vehicle_categories))
         )
-    passenger_category_fuel_support = passenger_evidence.get("category_fuel_support")
-    if not isinstance(passenger_category_fuel_support, dict) or not passenger_category_fuel_support:
-        raise ValueError(
-            f"Configured fleet path '{path_label}' has no models.passenger_bayesian_dag.evidence.category_fuel_support entries in {model_spec_path}. "
-            "It should contain the passenger EMFAC-category-to-fuel support mappings."
-        )
-    invalid_passenger_category_fuel_support = [
-        key
-        for key, value in passenger_category_fuel_support.items()
-        if not isinstance(value, list) or not value
-    ]
-    if invalid_passenger_category_fuel_support:
-        raise ValueError(
-            f"Configured fleet path '{path_label}' has invalid models.passenger_bayesian_dag.evidence.category_fuel_support entries in {model_spec_path}: "
-            + ", ".join(sorted(str(key) for key in invalid_passenger_category_fuel_support))
-        )
     fastsim_model = _extract_named_model(
         model_spec,
         model_name="fastsim_assignment_model",
@@ -896,16 +885,10 @@ def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str
             f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
             "It must contain models.fastsim_assignment_model.evidence."
         )
-    fastsim_catalog = fastsim_evidence.get("catalog")
-    if not isinstance(fastsim_catalog, dict):
-        raise ValueError(
-            f"Configured fleet path '{path_label}' has an invalid models.fastsim_assignment_model.evidence.catalog section in {model_spec_path}. "
-            "It should contain files and assignments."
-        )
-    fastsim_assignments = fastsim_catalog.get("assignments")
+    fastsim_assignments = fastsim_evidence.get("assignments")
     if not isinstance(fastsim_assignments, list) or not fastsim_assignments:
         raise ValueError(
-            f"Configured fleet path '{path_label}' has no models.fastsim_assignment_model.evidence.catalog.assignments rows in {model_spec_path}. "
+            f"Configured fleet path '{path_label}' has no models.fastsim_assignment_model.evidence.assignments rows in {model_spec_path}. "
             "It should contain the FASTSim assignment rows."
         )
     return str(model_spec_path)
@@ -1051,14 +1034,15 @@ def _ingest_fleet_sources(config: dict) -> dict:
             passenger_scoring = passenger_model.get("scoring", {})
             passenger_weights = passenger_scoring.get("weights", {})
             passenger_evidence = passenger_model.get("evidence", {})
-            passenger_vehicle_categories = passenger_evidence.get("vehicle_categories", {})
-            passenger_fuel_types = passenger_evidence.get("fuel_types", {})
+            passenger_vehicle_categories = passenger_evidence.get("atlas_vehicle_categories", {})
+            passenger_atlas_fuel_types = passenger_evidence.get("atlas_fuel_types", {})
+            passenger_beam_fuel_types = passenger_evidence.get("beam_fuel_types", {})
             config["passenger_bayesian_dag"] = {
                 "bodytype": float(passenger_weights.get("bodytype", 1.0)),
                 "fuel": float(passenger_weights.get("fuel", 1.0)),
                 "emfac_population": float(passenger_weights.get("emfac_population", 1.0)),
                 "emfac_vmt": float(passenger_weights.get("emfac_vmt", 0.0)),
-                "vehicle_categories": {
+                "atlas_vehicle_categories": {
                     str(bodytype).strip().lower(): [
                         str(category).strip()
                         for category in categories
@@ -1067,13 +1051,22 @@ def _ingest_fleet_sources(config: dict) -> dict:
                     for bodytype, categories in passenger_vehicle_categories.items()
                     if str(bodytype).strip()
                 },
-                "fuel_types": {
+                "atlas_fuel_types": {
                     str(fuel).strip(): [
                         str(emfac_fuel).strip()
                         for emfac_fuel in emfac_fuels
                         if str(emfac_fuel).strip()
                     ]
-                    for fuel, emfac_fuels in passenger_fuel_types.items()
+                    for fuel, emfac_fuels in passenger_atlas_fuel_types.items()
+                    if str(fuel).strip()
+                },
+                "beam_fuel_types": {
+                    str(fuel).strip(): [
+                        str(emfac_fuel).strip()
+                        for emfac_fuel in emfac_fuels
+                        if str(emfac_fuel).strip()
+                    ]
+                    for fuel, emfac_fuels in passenger_beam_fuel_types.items()
                     if str(fuel).strip()
                 },
                 "beam_vehicle_categories": {
@@ -1084,15 +1077,6 @@ def _ingest_fleet_sources(config: dict) -> dict:
                     ]
                     for beam_category, categories in passenger_evidence.get("beam_vehicle_categories", {}).items()
                     if str(beam_category).strip()
-                },
-                "category_fuel_support": {
-                    str(category).strip(): [
-                        str(fuel).strip()
-                        for fuel in fuels
-                        if str(fuel).strip()
-                    ]
-                    for category, fuels in passenger_evidence.get("category_fuel_support", {}).items()
-                    if str(category).strip()
                 },
             }
         config["vehicle_type_assignment"] = vta
