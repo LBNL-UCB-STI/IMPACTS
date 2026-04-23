@@ -7,12 +7,6 @@ emfac:
     name: Baseline
   seed: 0
   output: examples/emfac/output
-  mappings:
-    atlas_emfac_xwalk_file: examples/emfac/2018_mappings/atlas_emfac_xwalk.csv
-    emfac_category_fuel_mapping_file: examples/emfac/2018_mappings/emfac_category_fuel_mapping.csv
-    fastsim_category_fuel_mapping_file: examples/emfac/2018_mappings/fastsim_category_fuel_mapping.csv
-    atlas_frism_xwalk_file: examples/emfac/2018_mappings/atlas_frism_xwalk.csv
-    vehicle_category_metadata_file: examples/pipeline/pilates/beam/production/sfbay/vehicle-tech/emissions/emfac_vehicle_category_attributes.csv
 
   activities:
     model_year_groups:
@@ -52,12 +46,13 @@ emfac:
     emissions_inventory:
       - main: ~/Workspace/Models/emfac/raw/sfbay-emfac-emissions-inventory
       - fallback: ~/Workspace/Models/emfac/raw/statewide-emfac-emissions-inventory
+      - vehicle_category_attributes_file: examples/pipeline/pilates/beam/production/sfbay/vehicle-tech/emissions/emfac_vehicle_category_attributes.csv
 
   fleet:
     # Single standardized vehicle-type assignment model file.
     # It contains the named freight and passenger assignment models,
     # including scoring weights and embedded evidence tables.
-    vehicle_type_assignment_model_settings: examples/emfac/fleet/vehicle_type_assignment_model.yaml
+    vehicle_type_assignment_model_settings: examples/emfac/vehicle_type_assignment_model.yaml
 
     atlas:
       year: 2019
@@ -75,5 +70,6 @@ emfac:
     fastsim:
       passenger_vehicle_types_file: ~/Workspace/Simulation/sfbay/vehicle-tech/vehicleTypes_inventory.csv
       freight_vehicle_types_file: ~/Workspace/Simulation/sfbay/beam-ft/20250730/vehicle-tech/vehicletypes--frism--2018-Baseline.csv
+      fastsim_catalog_breakdown: examples/emfac/2018_mappings/fastsim_catalog_breakdown.csv
       ldv_fastsim_data_folder: ~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/fuel/Baseline_FASTSimData_Representative_Vehicles_lookup_tables_output
       mhdv_fastsim_data_folder: ~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/fuel/Freight_Baseline_FASTSimData_2020

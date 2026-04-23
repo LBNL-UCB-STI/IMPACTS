@@ -24,6 +24,7 @@ import pandas as pd
 
 from impacts.emfac.config import read_table
 from impacts.emfac.config import resolve_workflow_path
+from impacts.emfac.config import build_fastsim_assignment_catalog
 from impacts.emfac.model_year_groups import assign_model_year_groups
 
 
@@ -365,50 +366,133 @@ def _build_freight_vehicle_types_from_population(
     return prepared.drop(columns=["fleetShare"]).drop_duplicates().reset_index(drop=True)
 
 
-def _load_frism_atlas_bodytype_mapping(config: dict[str, Any]) -> pd.DataFrame:
-    frame = _read_csv(config["mappings"]["atlas_frism_xwalk_file"])
-    _require_column(frame, "body_type", "FRISM ATLAS bodytype crosswalk file")
-    weight_columns = [column for column in frame.columns if column != "body_type"]
-    if not weight_columns:
-        raise ValueError("FRISM ATLAS bodytype crosswalk file has no freight vehicle-category columns")
-    prepared = frame.melt(
-        id_vars=["body_type"],
-        value_vars=weight_columns,
-        var_name="freight_beam_category",
-        value_name="weight",
+def _load_freight_vehicle_category_mapping(config: dict[str, Any]) -> pd.DataFrame:
+    freight_model = config.get("freight_bayesian_dag", {}) or {}
+    vehicle_categories = freight_model.get("vehicle_categories", {})
+    if not isinstance(vehicle_categories, dict) or not vehicle_categories:
+        raise ValueError(
+            "Freight Bayesian DAG model is missing evidence.vehicle_categories required for freight Step 1 mapping."
+        )
+
+    rows: list[dict[str, str]] = []
+    for freight_beam_category, emfac_vehicle_categories in vehicle_categories.items():
+        normalized_freight_beam_category = _normalize_text(freight_beam_category)
+        if normalized_freight_beam_category == "":
+            continue
+        if not isinstance(emfac_vehicle_categories, list):
+            raise ValueError(
+                "Freight Bayesian DAG evidence.vehicle_categories entries must be lists of EMFAC vehicle-category strings."
+            )
+        for emfac_vehicle_category in emfac_vehicle_categories:
+            normalized_emfac_vehicle_category = _normalize_text(emfac_vehicle_category)
+            if normalized_emfac_vehicle_category == "":
+                continue
+            rows.append(
+                {
+                    "freight_beam_category": normalized_freight_beam_category,
+                    "vehicleCategory": normalized_emfac_vehicle_category,
+                }
+            )
+    prepared = pd.DataFrame(rows)
+    if prepared.empty:
+        raise ValueError(
+            "Freight Bayesian DAG evidence.vehicle_categories produced no freight vehicle-category support rows."
+        )
+    return prepared.drop_duplicates().reset_index(drop=True)
+
+
+def _derive_freight_ldv_bodytype_mapping(config: dict[str, Any]) -> pd.DataFrame:
+    freight_category_mapping = _load_freight_vehicle_category_mapping(config)
+    passenger_model = config.get("passenger_bayesian_dag", {}) or {}
+    passenger_vehicle_categories = passenger_model.get("vehicle_categories", {})
+    if not isinstance(passenger_vehicle_categories, dict) or not passenger_vehicle_categories:
+        raise ValueError(
+            "Passenger Bayesian DAG model is missing evidence.vehicle_categories required for freight LDV bodytype derivation."
+        )
+
+    passenger_rows: list[dict[str, object]] = []
+    for body_type, vehicle_category_list in passenger_vehicle_categories.items():
+        normalized_body_type = _normalize_bodytype(body_type)
+        if normalized_body_type == "":
+            continue
+        if not isinstance(vehicle_category_list, list):
+            raise ValueError(
+                "Passenger Bayesian DAG evidence.vehicle_categories entries must be lists of EMFAC vehicle-category strings."
+            )
+        for vehicle_category in vehicle_category_list:
+            normalized_vehicle_category = _normalize_text(vehicle_category)
+            if normalized_vehicle_category == "":
+                continue
+            passenger_rows.append(
+                {
+                    "vehicleCategory": normalized_vehicle_category,
+                    "body_type": normalized_body_type,
+                }
+            )
+    passenger_support = pd.DataFrame(passenger_rows).drop_duplicates()
+    if passenger_support.empty:
+        raise ValueError(
+            "Passenger Bayesian DAG evidence.vehicle_categories produced no passenger bodytype support rows for freight derivation."
+        )
+
+    prepared = freight_category_mapping.merge(passenger_support, on="vehicleCategory", how="inner")
+    if prepared.empty:
+        raise ValueError(
+            "Freight Bayesian DAG evidence.vehicle_categories has no overlap with passenger vehicle_categories for freight LDV bodytype derivation."
+        )
+
+    coverage = (
+        prepared.groupby(["freight_beam_category", "body_type"], dropna=False)
+        .size()
+        .reset_index(name="weight")
     )
-    prepared["body_type"] = prepared["body_type"].apply(_normalize_bodytype)
-    prepared["freight_beam_category"] = prepared["freight_beam_category"].astype(str)
-    prepared["weight"] = pd.to_numeric(prepared["weight"], errors="coerce").fillna(0.0)
-    return prepared[prepared["weight"].gt(0)].reset_index(drop=True)
+    bodytype_preference = {"pickup": 3.0, "suv": 2.0, "minvan": 1.0, "car": 0.0}
+    coverage["preference"] = coverage["body_type"].map(bodytype_preference).fillna(0.0)
+    return coverage.sort_values(
+        ["freight_beam_category", "weight", "preference", "body_type"],
+        ascending=[True, False, False, True],
+        kind="mergesort",
+    ).reset_index(drop=True)
 
 
 def _load_atlas_passenger_category_mapping(config: dict[str, Any]) -> pd.DataFrame:
-    frame = _read_csv(config["mappings"]["atlas_emfac_xwalk_file"])
-    _require_column(frame, "body_type", "ATLAS EMFAC crosswalk file")
-    _require_column(frame, "passenger_beam_category", "ATLAS EMFAC crosswalk file")
-    prepared = frame[["body_type", "passenger_beam_category"]].drop_duplicates().copy()
-    prepared["body_type"] = prepared["body_type"].apply(_normalize_bodytype)
-    prepared["passenger_beam_category"] = prepared["passenger_beam_category"].apply(_normalize_bodytype)
-    prepared = prepared[prepared["body_type"].ne("") & prepared["passenger_beam_category"].ne("")]
-    conflicting = (
-        prepared.groupby("body_type", dropna=False)["passenger_beam_category"]
-        .nunique()
-        .reset_index(name="passenger_category_count")
-    )
-    conflicting = conflicting[conflicting["passenger_category_count"].gt(1)]["body_type"]
-    if not conflicting.empty:
+    passenger_model = config.get("passenger_bayesian_dag", {}) or {}
+    vehicle_categories = passenger_model.get("vehicle_categories", {})
+    if not isinstance(vehicle_categories, dict) or not vehicle_categories:
         raise ValueError(
-            "ATLAS EMFAC crosswalk file maps one body_type to multiple passenger BEAM categories:\n"
-            + "\n".join(conflicting.astype(str).tolist())
+            "Passenger Bayesian DAG model is missing evidence.vehicle_categories required for passenger Step 1 mapping."
+        )
+
+    rows: list[dict[str, str]] = []
+    seen_bodytypes: set[str] = set()
+    for bodytype in vehicle_categories.keys():
+        normalized_bodytype = _normalize_bodytype(bodytype)
+        if not normalized_bodytype or normalized_bodytype in seen_bodytypes:
+            continue
+        seen_bodytypes.add(normalized_bodytype)
+        rows.append(
+            {
+                "body_type": normalized_bodytype,
+                "passenger_beam_category": _normalize_bodytype("Car"),
+            }
+        )
+    prepared = pd.DataFrame(rows)
+    if prepared.empty:
+        raise ValueError(
+            "Passenger Bayesian DAG evidence.vehicle_categories produced no passenger Step 1 bodytype mappings."
         )
     return prepared.drop_duplicates(subset=["body_type"], keep="first").reset_index(drop=True)
 
 
 def _load_fastsim_registry(config: dict[str, Any]) -> pd.DataFrame:
-    frame = _read_csv(config["mappings"]["fastsim_category_fuel_mapping_file"])
+    model_file = config.get("vehicle_type_assignment", {}).get("model_file")
+    if model_file in (None, ""):
+        raise ValueError("Fleet Step 1 requires vehicle_type_assignment.model_file in the EMFAC config.")
+    breakdown_path = config.get("fastsim", {}).get("fastsim_catalog_breakdown")
+    if breakdown_path in (None, ""):
+        raise ValueError("Fleet Step 1 requires fastsim.fastsim_catalog_breakdown in the EMFAC config.")
+    frame = build_fastsim_assignment_catalog(str(model_file), str(breakdown_path))
     for column_name in [
-        "passenger_beam_category",
         "freight_beam_category",
         "atlas_fuel",
         "frism_fuel",
@@ -418,7 +502,6 @@ def _load_fastsim_registry(config: dict[str, Any]) -> pd.DataFrame:
     ]:
         _require_column(frame, column_name, "FASTSim category fuel mapping file")
     prepared = frame.copy()
-    prepared["passenger_beam_category"] = prepared["passenger_beam_category"].fillna("").astype(str).str.strip()
     prepared["freight_beam_category"] = prepared["freight_beam_category"].fillna("").astype(str).str.strip()
     prepared["atlas_fuel"] = prepared["atlas_fuel"].fillna("").astype(str).str.strip().str.lower()
     prepared["frism_fuel"] = prepared["frism_fuel"].fillna("").astype(str).str.strip().str.lower()
@@ -435,9 +518,9 @@ def _build_adopt_fuel_keys(fuel_values: pd.Series) -> pd.Series:
 
 
 def _expand_passenger_fastsim_mapping_rows(fastsim_registry: pd.DataFrame) -> pd.DataFrame:
-    passenger_rows = fastsim_registry[fastsim_registry["passenger_beam_category"].ne("")].copy()
+    passenger_rows = fastsim_registry[fastsim_registry["atlas_fuel"].ne("")].copy()
     passenger_rows["lookup_domain"] = "ldv"
-    passenger_rows["vehicle_category"] = passenger_rows["passenger_beam_category"].map(_normalize_bodytype)
+    passenger_rows["vehicle_category"] = _normalize_bodytype("Car")
     passenger_rows["adopt_fuel"] = (
         passenger_rows["atlas_fuel"].str.split("|").str[0].fillna("").astype(str).str.strip()
     )
@@ -468,7 +551,6 @@ def _load_fastsim_category_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
     return combined[
         [
             "lookup_domain",
-            "passenger_beam_category",
             "freight_beam_category",
             "atlas_fuel",
             "frism_fuel",
@@ -720,7 +802,7 @@ def _assign_freight_fastsim_energy_files(
     lookup_indexes: dict[str, pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
     prepared = freight_vehicle_types.copy()
-    frism_atlas_map = _load_frism_atlas_bodytype_mapping(config)
+    frism_atlas_map = _derive_freight_ldv_bodytype_mapping(config)
     atlas_passenger_category_mapping = _load_atlas_passenger_category_mapping(config)
     atlas_passenger_category_lookup = dict(
         zip(
@@ -1435,9 +1517,9 @@ def _build_fastsim_vehicle_type_mapping(
     fuels = fuels.drop_duplicates()
 
     bodytypes = category_fuel_mapping[
-        category_fuel_mapping["passenger_beam_category"].astype(str).str.strip().ne("")
-    ][["fastsim_relative_path", "passenger_beam_category", "msrp_usd"]].drop_duplicates().copy()
-    bodytypes["passenger_beam_category"] = bodytypes["passenger_beam_category"].astype(str).map(_normalize_bodytype)
+        category_fuel_mapping["lookup_domain"].astype(str).str.lower().eq("ldv")
+    ][["fastsim_relative_path", "vehicle_category", "msrp_usd"]].drop_duplicates().copy()
+    bodytypes["vehicle_category"] = bodytypes["vehicle_category"].astype(str).map(_normalize_bodytype)
     bodytypes["msrp_usd"] = pd.to_numeric(bodytypes["msrp_usd"], errors="coerce")
 
     mapping = fuels.merge(
@@ -1450,7 +1532,7 @@ def _build_fastsim_vehicle_type_mapping(
     mapping = mapping[
         [
             "vehicleTypeId",
-            "passenger_beam_category",
+            "vehicle_category",
             "modelyear",
             "primaryFuelType",
             "secondaryFuelType",
@@ -1459,7 +1541,7 @@ def _build_fastsim_vehicle_type_mapping(
             "msrp_usd",
         ]
     ].drop_duplicates()
-    mapping = mapping.rename(columns={"passenger_beam_category": "body_type"})
+    mapping = mapping.rename(columns={"vehicle_category": "body_type"})
     return mapping.sort_values(["vehicleTypeId", "body_type", "primaryFuelType", "secondaryFuelType"]).reset_index(drop=True)
 
 

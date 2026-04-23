@@ -59,25 +59,48 @@ def test_special_category_rate_aliases_average_model_years_by_vmt_share_and_over
         ]
     ).to_parquet(fleet_path, index=False)
 
-    mapping_path = tmp_path / "emfac_category_fuel_mapping.csv"
-    pd.DataFrame(
-        [
-            {
-                "group": "passenger",
-                "emfac_vehicle_category": "UBUS",
-                "emfac_fuel": "Dsl",
-                "beam_category": "MediumDutyPassenger",
-                "adopt_fuel": "diesel",
-            },
-            {
-                "group": "passenger",
-                "emfac_vehicle_category": "UBUS",
-                "emfac_fuel": "Dsl",
-                "beam_category": "MediumDutyPassenger",
-                "adopt_fuel": "biodiesel",
-            },
-        ]
-    ).to_csv(mapping_path, index=False)
+    model_path = tmp_path / "vehicle_type_assignment_model.yaml"
+    model_path.write_text(
+        "\n".join(
+            [
+                "models:",
+                "  freight_bayesian_dag:",
+                "    scoring:",
+                "      likelihood_floor: 0.01",
+                "      weights:",
+                "        prior_vmt_share: 1.0",
+                "        naics_sector: 1.0",
+                "        port_location: 1.0",
+                "    evidence:",
+                "      vehicle_categories:",
+                "        Class12aVocational: [LDA]",
+                "      fuel_types:",
+                "        diesel: [Dsl]",
+                "      category_fuel_support:",
+                "        LDA: [Dsl]",
+                "      naics_sector: []",
+                "      port_location: []",
+                "  passenger_bayesian_dag:",
+                "    scoring:",
+                "      weights:",
+                "        bodytype: 1.0",
+                "        fuel: 1.0",
+                "        emfac_vmt: 0.0",
+                "    evidence:",
+                "      vehicle_categories:",
+                "        car: [LDA]",
+                "      fuel_types:",
+                "        biodiesel: [Dsl]",
+                "        diesel: [Dsl]",
+                "      beam_vehicle_categories:",
+                "        MediumDutyPassenger: [UBUS]",
+                "      category_fuel_support:",
+                "        LDA: [Gas]",
+                "        UBUS: [Dsl]",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
     for emfac_id, pm25 in [("2018UBUSDsl", 10.0), ("2019UBUSDsl", 30.0)]:
         partition = store_root / "dataset" / f"emfacId={emfac_id}"
@@ -96,7 +119,7 @@ def test_special_category_rate_aliases_average_model_years_by_vmt_share_and_over
     config = {
         "output": str(output_root),
         "activities": {"passenger_fleet_file": str(fleet_path)},
-        "mappings": {"emfac_category_fuel_mapping_file": str(mapping_path)},
+        "vehicle_type_assignment": {"model_file": str(model_path)},
     }
     shared_rates_store = {
         "store_root": str(store_root),

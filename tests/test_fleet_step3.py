@@ -3,6 +3,8 @@ from __future__ import annotations
 import pandas as pd
 
 from impacts.emfac.fleet.step1_build_vehicle_types import _build_atlas_vehicle_type_targets
+from impacts.emfac.fleet.step3_map_emfac_atlas import _apply_global_emfac_target_balancing
+from impacts.emfac.fleet.step3_map_emfac_atlas import _build_emfac_target_share_lookup
 from impacts.emfac.fleet.step3_map_emfac_atlas import _attach_passenger_fastsim_templates
 from impacts.emfac.fleet.step3_map_emfac_atlas import _build_passenger_emfac_candidates
 from impacts.emfac.fleet.step3_map_emfac_atlas import _prepare_mapped_passenger_vehicles_output
@@ -184,10 +186,11 @@ def test_build_passenger_emfac_candidates_maps_hybrid_to_gasoline_emfac_candidat
     assert result["modelYear"].tolist() == ["2004to2014"]
 
 
-def test_build_passenger_emfac_candidates_supports_population_and_vmt_bias_knobs() -> None:
+def test_global_passenger_target_balancing_supports_population_and_vmt_bias_knobs() -> None:
     candidates = pd.DataFrame(
         [
             {
+                "emfacId": "post2014LDAGas",
                 "vehicleCategory": "LDA",
                 "fuel": "Gas",
                 "modelYear": "2004to2014",
@@ -196,6 +199,7 @@ def test_build_passenger_emfac_candidates_supports_population_and_vmt_bias_knobs
                 "population_vehicles": 10.0,
             },
             {
+                "emfacId": "pre2004LDAGas",
                 "vehicleCategory": "LDA",
                 "fuel": "Gas",
                 "modelYear": "2004to2014",
@@ -205,38 +209,46 @@ def test_build_passenger_emfac_candidates_supports_population_and_vmt_bias_knobs
             },
         ]
     )
-    vehicle_category_weights = pd.DataFrame(
-        [{"body_type": "car", "vehicleCategory": "LDA", "bodytypeWeight": 1.0}]
-    )
-    fuel_mapping = pd.DataFrame(
-        [{"emfac_vehicle_category": "LDA", "emfac_fuel": "Gas", "adopt_fuel": "conv"}]
-    )
-
-    population_biased = _build_passenger_emfac_candidates(
-        vehicle_type_id="Car_Conv_2004to2014",
-        bodytype="car",
-        model_year_group="2004to2014",
-        adopt_fuel="gasoline",
-        emfac_candidates=candidates,
-        vehicle_category_weights=vehicle_category_weights,
-        fuel_mapping=fuel_mapping,
-        emfac_population_bias=1.0,
-        emfac_vmt_bias=0.0,
-    )
-    vmt_biased = _build_passenger_emfac_candidates(
-        vehicle_type_id="Car_Conv_2004to2014",
-        bodytype="car",
-        model_year_group="2004to2014",
-        adopt_fuel="gasoline",
-        emfac_candidates=candidates,
-        vehicle_category_weights=vehicle_category_weights,
-        fuel_mapping=fuel_mapping,
-        emfac_population_bias=0.0,
-        emfac_vmt_bias=1.0,
+    pending_candidates = pd.DataFrame(
+        [
+            {
+                "source_row_id": 0,
+                "base_probability": 1.0,
+                "local_score": 1.0,
+                "emfacId": "post2014LDAGas",
+            },
+            {
+                "source_row_id": 0,
+                "base_probability": 1.0,
+                "local_score": 1.0,
+                "emfacId": "pre2004LDAGas",
+            },
+        ]
     )
 
-    assert population_biased.iloc[0]["population_vehicles"] == 90.0
-    assert vmt_biased.iloc[0]["total_vmt_vehicle_miles_per_year"] == 90.0
+    population_target = _build_emfac_target_share_lookup(
+        candidates=candidates,
+        population_bias=1.0,
+        vmt_bias=0.0,
+    )
+    vmt_target = _build_emfac_target_share_lookup(
+        candidates=candidates,
+        population_bias=0.0,
+        vmt_bias=1.0,
+    )
+    population_biased = _apply_global_emfac_target_balancing(
+        candidate_rows=pending_candidates,
+        target_share_lookup=population_target,
+    )
+    vmt_biased = _apply_global_emfac_target_balancing(
+        candidate_rows=pending_candidates,
+        target_share_lookup=vmt_target,
+    )
+
+    pop_share = dict(zip(population_biased["emfacId"], population_biased["probabilityShare"]))
+    vmt_share = dict(zip(vmt_biased["emfacId"], vmt_biased["probabilityShare"]))
+    assert pop_share["pre2004LDAGas"] > pop_share["post2014LDAGas"]
+    assert vmt_share["post2014LDAGas"] > vmt_share["pre2004LDAGas"]
 
 
 def test_build_passenger_emfac_candidates_matches_overlapping_detailed_year_bins() -> None:

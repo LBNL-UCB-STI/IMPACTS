@@ -1,8 +1,0 @@
-emfac/*
-!emfac/.gitkeep
-
-output/*
-!output/.gitkeep
-
-.DS_Store
-__pycache__/

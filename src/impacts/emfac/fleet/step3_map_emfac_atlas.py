@@ -21,9 +21,6 @@ from impacts.emfac.model_year_groups import assign_model_year_groups
 
 
 _EMFAC_KEY_COLUMNS = ["vehicleCategory", "fuel", "modelYear"]
-_EMFAC_CATEGORY_FUEL_COLUMNS = ["group", "emfac_vehicle_category", "emfac_fuel", "beam_category", "adopt_fuel"]
-
-
 def _require_column(frame: pd.DataFrame, column_name: str, frame_name: str) -> None:
     if column_name not in frame.columns:
         raise ValueError(f"{frame_name} is missing required column '{column_name}'")
@@ -146,65 +143,105 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
     return candidates
 
 
-def _load_emfac_category_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
-    frame = read_table(config["mappings"]["emfac_category_fuel_mapping_file"], dtype=None)
-    for column_name in _EMFAC_CATEGORY_FUEL_COLUMNS:
-        _require_column(frame, column_name, "EMFAC category fuel mapping file")
-    prepared = frame.copy()
-    prepared["group"] = prepared["group"].apply(_normalize_lower)
-    prepared["emfac_vehicle_category"] = prepared["emfac_vehicle_category"].apply(_normalize_text)
-    prepared["emfac_fuel"] = prepared["emfac_fuel"].apply(_normalize_text)
-    prepared["beam_category"] = prepared["beam_category"].apply(_normalize_text)
-    prepared["adopt_fuel"] = prepared["adopt_fuel"].apply(_normalize_lower)
-    return prepared
-
-
 def _load_passenger_vehicle_category_weights(config: dict[str, Any]) -> pd.DataFrame:
-    category_map = _load_emfac_category_fuel_mapping(config)
-    category_map = category_map[category_map["group"] == "passenger"].copy()
-    atlas_map = read_table(config["mappings"]["atlas_emfac_xwalk_file"], dtype=None)
-    _require_column(atlas_map, "body_type", "ATLAS EMFAC crosswalk file")
-
-    atlas_emfac_columns = {
-        column for column in atlas_map.columns if column not in {"passenger_beam_category", "body_type", "cec_equivalent"}
-    }
-    passenger_categories = (
-        category_map[
-            (category_map["beam_category"] == "Car")
-            & (category_map["emfac_vehicle_category"].astype(str).isin(atlas_emfac_columns))
-        ]["emfac_vehicle_category"]
-        .dropna()
-        .astype(str)
-        .drop_duplicates()
-        .tolist()
-    )
-    if not passenger_categories:
-        raise ValueError("EMFAC category fuel mapping file has no passenger Car mappings")
-
-    missing = [column for column in passenger_categories if column not in atlas_map.columns]
-    if missing:
+    passenger_model = config.get("passenger_bayesian_dag", {}) or {}
+    vehicle_categories = passenger_model.get("vehicle_categories", {})
+    if not isinstance(vehicle_categories, dict) or not vehicle_categories:
         raise ValueError(
-            "ATLAS EMFAC crosswalk file is missing passenger EMFAC category columns:\n"
-            + "\n".join(missing)
+            "Passenger Bayesian DAG model is missing evidence.vehicle_categories required for passenger vehicle-category support."
         )
 
-    prepared = atlas_map[["body_type"] + passenger_categories].copy()
-    prepared["body_type"] = prepared["body_type"].apply(_normalize_lower)
-    long = prepared.melt(
-        id_vars=["body_type"],
-        value_vars=passenger_categories,
-        var_name="vehicleCategory",
-        value_name="bodytypeWeight",
-    )
-    long["bodytypeWeight"] = pd.to_numeric(long["bodytypeWeight"], errors="coerce").fillna(0.0)
-    return long[long["bodytypeWeight"].gt(0)].reset_index(drop=True)
+    rows: list[dict[str, object]] = []
+    for body_type, vehicle_category_list in vehicle_categories.items():
+        normalized_body_type = _normalize_lower(body_type)
+        if normalized_body_type == "":
+            continue
+        if not isinstance(vehicle_category_list, list):
+            raise ValueError(
+                "Passenger Bayesian DAG evidence.vehicle_categories entries must be lists of EMFAC vehicle-category strings."
+            )
+        for vehicle_category in vehicle_category_list:
+            category = _normalize_text(vehicle_category)
+            if category == "":
+                continue
+            rows.append(
+                {
+                    "body_type": normalized_body_type,
+                    "vehicleCategory": category,
+                    "bodytypeWeight": 1.0,
+                }
+            )
+
+    prepared = pd.DataFrame(rows)
+    if prepared.empty:
+        raise ValueError(
+            "Passenger Bayesian DAG evidence.vehicle_categories produced no passenger vehicle-category support rows."
+        )
+    return prepared.drop_duplicates().reset_index(drop=True)
 
 
 def _load_emfac_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
-    prepared = _load_emfac_category_fuel_mapping(config)
-    return prepared[
-        (prepared["group"] == "passenger") & (prepared["beam_category"] == "Car") & prepared["adopt_fuel"].ne("")
-    ][["emfac_vehicle_category", "emfac_fuel", "adopt_fuel"]].drop_duplicates().reset_index(drop=True)
+    passenger_model = config.get("passenger_bayesian_dag", {}) or {}
+    vehicle_categories = passenger_model.get("vehicle_categories", {})
+    fuel_types = passenger_model.get("fuel_types", {})
+    category_fuel_support = passenger_model.get("category_fuel_support", {})
+    if not isinstance(vehicle_categories, dict) or not vehicle_categories:
+        raise ValueError(
+            "Passenger Bayesian DAG model is missing evidence.vehicle_categories required for passenger fuel mapping."
+        )
+    if not isinstance(fuel_types, dict) or not fuel_types:
+        raise ValueError(
+            "Passenger Bayesian DAG model is missing evidence.fuel_types required for passenger fuel mapping."
+        )
+
+    passenger_categories = sorted(
+        {
+            _normalize_text(vehicle_category)
+            for vehicle_category_list in vehicle_categories.values()
+            if isinstance(vehicle_category_list, list)
+            for vehicle_category in vehicle_category_list
+            if _normalize_text(vehicle_category)
+        }
+    )
+    if not passenger_categories:
+        raise ValueError(
+            "Passenger Bayesian DAG evidence.vehicle_categories produced no passenger EMFAC categories for passenger fuel mapping."
+        )
+
+    rows: list[dict[str, str]] = []
+    for vehicle_category in passenger_categories:
+        supported_fuels = {
+            _normalize_text(emfac_fuel)
+            for emfac_fuel in category_fuel_support.get(vehicle_category, [])
+            if _normalize_text(emfac_fuel)
+        }
+        if not supported_fuels:
+            continue
+        for adopt_fuel, emfac_fuels in fuel_types.items():
+            normalized_adopt_fuel = _normalize_lower(adopt_fuel)
+            if normalized_adopt_fuel == "":
+                continue
+            if not isinstance(emfac_fuels, list):
+                raise ValueError(
+                    "Passenger Bayesian DAG evidence.fuel_types entries must be lists of EMFAC fuel strings."
+                )
+            for emfac_fuel in emfac_fuels:
+                fuel = _normalize_text(emfac_fuel)
+                if fuel == "" or fuel not in supported_fuels:
+                    continue
+                rows.append(
+                    {
+                        "emfac_vehicle_category": vehicle_category,
+                        "emfac_fuel": fuel,
+                        "adopt_fuel": normalized_adopt_fuel,
+                    }
+                )
+    prepared = pd.DataFrame(rows)
+    if prepared.empty:
+        raise ValueError(
+            "Passenger Bayesian DAG evidence.vehicle_categories and evidence.fuel_types produced no passenger fuel mapping rows."
+        )
+    return prepared.drop_duplicates().reset_index(drop=True)
 
 
 def _normalize_to_fastsim_adopt_fuel(*, fuel_domain: str, adopt_fuel: object) -> str:
@@ -278,6 +315,129 @@ def _extract_emfac_fuel_candidates(
     for row in base_matches.itertuples(index=False):
         weights[str(row.emfac_fuel)] = max(weights.get(str(row.emfac_fuel), 0.0), 1.0)
     return weights
+
+
+def _build_emfac_target_share_lookup(
+    *,
+    candidates: pd.DataFrame,
+    population_bias: float,
+    vmt_bias: float,
+) -> dict[str, float]:
+    working = candidates.copy()
+    working["population_weight"] = pd.to_numeric(working.get("population_vehicles", 0.0), errors="coerce").fillna(0.0)
+    working["vmt_weight"] = pd.to_numeric(
+        working.get("total_vmt_vehicle_miles_per_year", 0.0), errors="coerce"
+    ).fillna(0.0)
+    aggregated = (
+        working.groupby("emfacId", dropna=False)[["population_weight", "vmt_weight"]]
+        .sum(min_count=1)
+        .reset_index()
+    )
+    aggregated["population_share"] = 0.0
+    population_total = float(aggregated["population_weight"].sum())
+    if population_total > 0.0:
+        aggregated["population_share"] = aggregated["population_weight"] / population_total
+    aggregated["vmt_share"] = 0.0
+    vmt_total = float(aggregated["vmt_weight"].sum())
+    if vmt_total > 0.0:
+        aggregated["vmt_share"] = aggregated["vmt_weight"] / vmt_total
+    aggregated["target_score"] = (
+        aggregated["population_share"].pow(float(population_bias))
+        * aggregated["vmt_share"].pow(float(vmt_bias))
+    )
+    positive = aggregated["target_score"].gt(0)
+    if not positive.any():
+        aggregated["target_score"] = 1.0
+    target_total = float(aggregated["target_score"].sum())
+    if target_total <= 0.0:
+        return {str(row.emfacId): 0.0 for row in aggregated.itertuples(index=False)}
+    aggregated["target_share"] = aggregated["target_score"] / target_total
+    return {str(row.emfacId): float(row.target_share) for row in aggregated.itertuples(index=False)}
+
+
+def _normalize_branch_weights(branch_weights: dict[str, float]) -> dict[str, float]:
+    normalized = {key: max(0.0, float(value)) for key, value in branch_weights.items()}
+    total = float(sum(normalized.values()))
+    if total <= 0.0:
+        uniform = 1.0 / float(len(normalized)) if normalized else 1.0
+        return {key: uniform for key in normalized}
+    return {key: value / total for key, value in normalized.items()}
+
+
+def _build_passenger_dag_log_score(
+    *,
+    matched: pd.DataFrame,
+    branch_weights: dict[str, float],
+) -> pd.Series:
+    weights = _normalize_branch_weights(branch_weights)
+    bodytype_log = np.log(pd.to_numeric(matched["vehicleCategoryWeight"], errors="coerce").fillna(0.0).clip(lower=1e-9))
+    fuel_log = np.log(pd.to_numeric(matched["fuelWeight"], errors="coerce").fillna(0.0).clip(lower=1e-9))
+    return (
+        (float(weights["bodytype"]) * bodytype_log)
+        + (float(weights["fuel"]) * fuel_log)
+    )
+
+
+def _apply_global_emfac_target_balancing(
+    *,
+    candidate_rows: pd.DataFrame,
+    target_share_lookup: dict[str, float],
+    iteration_count: int = 8,
+    ratio_floor: float = 0.25,
+    ratio_ceiling: float = 4.0,
+) -> pd.DataFrame:
+    if candidate_rows.empty:
+        return candidate_rows
+    prepared = candidate_rows.copy()
+    prepared["base_probability"] = pd.to_numeric(prepared["base_probability"], errors="coerce").fillna(0.0)
+    prepared["local_score"] = pd.to_numeric(prepared["local_score"], errors="coerce").fillna(0.0)
+    prepared = prepared.loc[prepared["base_probability"].gt(0.0) & prepared["local_score"].gt(0.0)].copy()
+    if prepared.empty:
+        return prepared
+
+    multipliers = {str(emfac_id): 1.0 for emfac_id in prepared["emfacId"].astype(str).unique().tolist()}
+    for emfac_id, target_share in target_share_lookup.items():
+        if emfac_id in multipliers:
+            multipliers[emfac_id] = max(float(target_share), 1e-9)
+
+    for _ in range(max(1, int(iteration_count))):
+        prepared["global_multiplier"] = prepared["emfacId"].astype(str).map(multipliers).fillna(1.0)
+        prepared["adjusted_score"] = prepared["local_score"] * prepared["global_multiplier"]
+        prepared["adjusted_score_sum"] = prepared.groupby("source_row_id", dropna=False)["adjusted_score"].transform("sum")
+        prepared["probabilityShare"] = np.where(
+            prepared["adjusted_score_sum"].gt(0.0),
+            prepared["adjusted_score"] / prepared["adjusted_score_sum"],
+            0.0,
+        )
+        projected = (
+            prepared.assign(projected_weight=prepared["base_probability"] * prepared["probabilityShare"])
+            .groupby("emfacId", dropna=False)["projected_weight"]
+            .sum()
+            .reset_index()
+        )
+        projected_total = float(projected["projected_weight"].sum())
+        if projected_total <= 0.0:
+            break
+        projected["projected_share"] = projected["projected_weight"] / projected_total
+        for row in projected.itertuples(index=False):
+            emfac_id = str(row.emfacId)
+            target_share = float(target_share_lookup.get(emfac_id, 0.0))
+            current_share = float(row.projected_share)
+            if target_share <= 0.0 or current_share <= 0.0:
+                continue
+            ratio = target_share / current_share
+            ratio = max(float(ratio_floor), min(float(ratio_ceiling), float(ratio)))
+            multipliers[emfac_id] = multipliers.get(emfac_id, 1.0) * ratio
+
+    prepared["global_multiplier"] = prepared["emfacId"].astype(str).map(multipliers).fillna(1.0)
+    prepared["adjusted_score"] = prepared["local_score"] * prepared["global_multiplier"]
+    prepared["adjusted_score_sum"] = prepared.groupby("source_row_id", dropna=False)["adjusted_score"].transform("sum")
+    prepared["probabilityShare"] = np.where(
+        prepared["adjusted_score_sum"].gt(0.0),
+        prepared["adjusted_score"] / prepared["adjusted_score_sum"],
+        0.0,
+    )
+    return prepared
 
 
 def _parse_model_year_label(label: object) -> tuple[float, float] | None:
@@ -637,10 +797,8 @@ def _build_passenger_emfac_candidates(
     emfac_candidates: pd.DataFrame,
     vehicle_category_weights: pd.DataFrame,
     fuel_mapping: pd.DataFrame,
-    bodytype_bias: float = 1.0,
-    fuel_bias: float = 1.0,
-    emfac_population_bias: float = 1.0,
-    emfac_vmt_bias: float = 0.0,
+    bodytype_weight: float = 1.0,
+    fuel_weight: float = 1.0,
 ) -> pd.DataFrame:
     vehicle_category_candidates = _extract_emfac_bodytype_candidates(
         bodytype=bodytype,
@@ -683,26 +841,14 @@ def _build_passenger_emfac_candidates(
             "No passenger EMFAC candidates matched the configured modelYear group for "
             f"vehicleTypeId={vehicle_type_id}, modelYearGroup={model_year_group}"
         )
-    matched["populationWeight"] = pd.to_numeric(matched["population_vehicles"], errors="coerce").fillna(0.0)
-    population_total = float(matched["populationWeight"].sum())
-    if population_total > 0:
-        matched["populationShare"] = matched["populationWeight"] / population_total
-    else:
-        matched["populationShare"] = 0.0
-    matched["vmtWeight"] = pd.to_numeric(
-        matched["total_vmt_vehicle_miles_per_year"], errors="coerce"
-    ).fillna(0.0)
-    vmt_total = float(matched["vmtWeight"].sum())
-    if vmt_total > 0:
-        matched["vmtShare"] = matched["vmtWeight"] / vmt_total
-    else:
-        matched["vmtShare"] = 0.0
-    matched["score"] = (
-        matched["vehicleCategoryWeight"].pow(float(bodytype_bias))
-        * matched["fuelWeight"].pow(float(fuel_bias))
-        * matched["populationShare"].pow(float(emfac_population_bias))
-        * matched["vmtShare"].pow(float(emfac_vmt_bias))
+    passenger_log_score = _build_passenger_dag_log_score(
+        matched=matched,
+        branch_weights={
+            "bodytype": bodytype_weight,
+            "fuel": fuel_weight,
+        },
     )
+    matched["score"] = np.exp(passenger_log_score - passenger_log_score.max())
     matched = matched[matched["score"].gt(0)].copy()
     if matched.empty:
         raise ValueError(
@@ -737,16 +883,24 @@ def _build_passenger_car_emfac_mapping(
     emfac_candidates = _build_valid_emfac_candidates(config)
     vehicle_category_weights = _load_passenger_vehicle_category_weights(config)
     fuel_mapping = _load_emfac_fuel_mapping(config)
-    passenger_matching = config.get("passenger_emfac_matching", {}) or {}
-    bodytype_bias = float(passenger_matching.get("bodytype_bias", 1.0))
-    fuel_bias = float(passenger_matching.get("fuel_bias", 1.0))
-    emfac_population_bias = float(passenger_matching.get("emfac_population_bias", 1.0))
-    emfac_vmt_bias = float(passenger_matching.get("emfac_vmt_bias", 0.0))
+    passenger_model = config.get("passenger_bayesian_dag", {}) or {}
+    bodytype_weight = float(passenger_model.get("bodytype", 1.0))
+    fuel_weight = float(passenger_model.get("fuel", 1.0))
+    emfac_population_weight = float(passenger_model.get("emfac_population", 1.0))
+    emfac_vmt_weight = float(passenger_model.get("emfac_vmt", 0.0))
+    target_share_lookup = _build_emfac_target_share_lookup(
+        candidates=emfac_candidates,
+        population_bias=emfac_population_weight,
+        vmt_bias=emfac_vmt_weight,
+    )
     prepared = passenger_car_vehicle_types.copy()
 
     expanded_rows: list[dict[str, Any]] = []
-    for row in prepared.itertuples(index=False):
+    pending_candidates: list[dict[str, Any]] = []
+    for source_row_id, row in enumerate(prepared.itertuples(index=False)):
         row_payload = row._asdict()
+        base_probability = float(pd.to_numeric(pd.Series([row.sampleProbabilityWithinCategory]), errors="coerce").fillna(0.0).iloc[0])
+        income_bin, income_probability, ridehail_bin, ridehail_probability = _parse_probability_string(row.sampleProbabilityString)
         try:
             candidates = _build_passenger_emfac_candidates(
                 vehicle_type_id=str(row.vehicleTypeId),
@@ -756,10 +910,8 @@ def _build_passenger_car_emfac_mapping(
                 emfac_candidates=emfac_candidates,
                 vehicle_category_weights=vehicle_category_weights,
                 fuel_mapping=fuel_mapping,
-                bodytype_bias=bodytype_bias,
-                fuel_bias=fuel_bias,
-                emfac_population_bias=emfac_population_bias,
-                emfac_vmt_bias=emfac_vmt_bias,
+                bodytype_weight=bodytype_weight,
+                fuel_weight=fuel_weight,
             )
         except ValueError as error:
             if "No EMFAC fuel candidates available for passenger car" in str(error):
@@ -772,29 +924,48 @@ def _build_passenger_car_emfac_mapping(
                 expanded_rows.append(updated)
                 continue
             raise
-        score_sum = candidates["score"].sum()
-        if score_sum <= 0:
-            raise ValueError(f"Passenger car EMFAC candidate scores sum to zero for vehicleTypeId={row.vehicleTypeId}")
-        candidates["probabilityShare"] = candidates["score"] / score_sum
-
-        base_probability = float(pd.to_numeric(pd.Series([row.sampleProbabilityWithinCategory]), errors="coerce").fillna(0.0).iloc[0])
-        income_bin, income_probability, ridehail_bin, ridehail_probability = _parse_probability_string(row.sampleProbabilityString)
         for candidate in candidates.itertuples(index=False):
+            pending_candidates.append(
+                {
+                    "source_row_id": int(source_row_id),
+                    "base_probability": float(base_probability),
+                    "income_bin": income_bin,
+                    "income_probability": income_probability,
+                    "ridehail_bin": ridehail_bin,
+                    "ridehail_probability": ridehail_probability,
+                    "local_score": float(candidate.score),
+                    "row_payload": row_payload,
+                    "oldVehicleTypeId": str(row.vehicleTypeId),
+                    "emfacId": str(candidate.emfacId),
+                    "emfacVehicleCategory": str(candidate.vehicleCategory),
+                    "emfacFuel": str(candidate.fuel),
+                    "emfacResolvedModelYear": str(candidate.modelYear),
+                }
+            )
+
+    if pending_candidates:
+        calibrated = _apply_global_emfac_target_balancing(
+            candidate_rows=pd.DataFrame(pending_candidates),
+            target_share_lookup=target_share_lookup,
+        )
+        for candidate in calibrated.itertuples(index=False):
             share = float(candidate.probabilityShare)
-            income_split = None if income_probability is None else income_probability * share
-            ridehail_split = None if ridehail_probability is None else ridehail_probability * share
-            updated = dict(row_payload)
-            updated["oldVehicleTypeId"] = str(row.vehicleTypeId)
+            income_split = None if candidate.income_probability is None else float(candidate.income_probability) * share
+            ridehail_split = (
+                None if candidate.ridehail_probability is None else float(candidate.ridehail_probability) * share
+            )
+            updated = dict(candidate.row_payload)
+            updated["oldVehicleTypeId"] = str(candidate.oldVehicleTypeId)
             updated["emfacId"] = str(candidate.emfacId)
-            updated["emfacVehicleCategory"] = str(candidate.vehicleCategory)
-            updated["emfacFuel"] = str(candidate.fuel)
-            updated["emfacResolvedModelYear"] = str(candidate.modelYear)
-            updated["vehicleTypeId"] = f"{candidate.emfacId}--{row.vehicleTypeId}"
-            updated["sampleProbabilityWithinCategory"] = f"{base_probability * share:.6f}"
+            updated["emfacVehicleCategory"] = str(candidate.emfacVehicleCategory)
+            updated["emfacFuel"] = str(candidate.emfacFuel)
+            updated["emfacResolvedModelYear"] = str(candidate.emfacResolvedModelYear)
+            updated["vehicleTypeId"] = f"{candidate.emfacId}--{candidate.oldVehicleTypeId}"
+            updated["sampleProbabilityWithinCategory"] = f"{float(candidate.base_probability) * share:.6f}"
             updated["sampleProbabilityString"] = _format_probability_string(
-                income_bin=income_bin,
+                income_bin=str(candidate.income_bin),
                 income_probability=income_split,
-                ridehail_bin=ridehail_bin,
+                ridehail_bin=str(candidate.ridehail_bin),
                 ridehail_probability=ridehail_split,
             )
             expanded_rows.append(updated)

@@ -14,7 +14,7 @@ from typing import Any
 
 import pandas as pd
 
-from impacts.emfac.config import read_table
+from impacts.emfac.config import build_model_category_fuel_mapping
 from impacts.emfac.config import resolve_workflow_path
 
 
@@ -111,7 +111,10 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
 
 
 def _load_emfac_category_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
-    frame = read_table(config["mappings"]["emfac_category_fuel_mapping_file"], dtype=None)
+    model_file = config.get("vehicle_type_assignment", {}).get("model_file")
+    if model_file in (None, ""):
+        raise ValueError("Fleet Step 2 requires vehicle_type_assignment.model_file in the EMFAC config.")
+    frame = build_model_category_fuel_mapping(str(model_file))
     for column_name in [
         "group",
         "emfac_vehicle_category",

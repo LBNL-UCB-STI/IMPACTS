@@ -412,10 +412,9 @@ def _run_step5_substep_load_rates_store(
         )
     if not duckdb_path.exists():
         raise FileNotFoundError(f"EMFAC rates store database not found: {duckdb_path}")
-    mappings = config.get("mappings", {})
-    metadata_path = mappings.get("vehicle_category_metadata_file") if isinstance(mappings, dict) else None
+    metadata_path = config.get("vehicle_category_attributes_file")
     if not metadata_path:
-        raise ValueError("Fleet Step 5 requires mappings.vehicle_category_metadata_file in the EMFAC config.")
+        raise ValueError("Fleet Step 5 requires vehicle_category_attributes_file in the EMFAC config.")
     shared_rates_store = {
         "store_root": str(store_root),
         "parquet_root": str(parquet_root),

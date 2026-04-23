@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from impacts.emfac.common import frame_summary
+from impacts.emfac.config import build_model_category_fuel_mapping
 from impacts.emfac.config import read_table
 from impacts.emfac.common import write_trace
 
@@ -205,11 +206,9 @@ def _run_step2_substep_load_inputs(workflow: dict[str, object]) -> tuple[pd.Data
         pd.read_parquet(Path(workflow["paths"]["project_analysis_source"]).expanduser().resolve()),
         pd.read_parquet(Path(workflow["paths"]["project_analysis_prdust"]).expanduser().resolve()),
         pd.read_parquet(Path(workflow["paths"]["emissions_inventory"]).expanduser().resolve()),
-        read_table(
-            workflow["inputs"]["emfac_category_fuel_mapping_file"],
-            dtype=None,
-            columns=["group", "emfac_vehicle_category", "emfac_fuel"],
-        ),
+        build_model_category_fuel_mapping(workflow["inputs"]["vehicle_type_assignment_model_settings"])[
+            ["group", "emfac_vehicle_category", "emfac_fuel"]
+        ],
     )
 
 

@@ -394,7 +394,7 @@ def _run_step1_substep_prepare_emissions_inventory(workflow: dict[str, object]) 
         region_label=workflow["run"]["region_label"],
         year=workflow["run"]["calendar_year"],
         pto_config=pto_config,
-        operation_days_path=str(workflow["inputs"]["vehicle_category_metadata_file"]),
+        operation_days_path=str(workflow["inputs"]["vehicle_category_attributes_file"]),
     )
     return emissions_inventory_path, pd.read_parquet(emissions_inventory_path)
 
