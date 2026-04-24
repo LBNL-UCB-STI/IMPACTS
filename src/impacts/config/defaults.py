@@ -8,15 +8,21 @@ No other module should define defaults independently.
 # Emissions
 # ---------------------------------------------------------------------------
 
-representative_days_per_year: float = 330.0
-"""Number of representative days per year used to convert per-day gram
-emissions to annual tons.  Matches the EMFAC/CARB modelling convention."""
+annualization_days_by_vehicle_group: dict[str, float] = {
+    "light_duty": 327.0,
+    "medium_heavy_duty": 312.0,
+}
+"""Default annualization-day fallbacks by EMFAC vehicle group when the vehicle
+metadata catalog does not provide operation_days_per_year for a vehicle category."""
 
 pollutants: list = ["NH3", "NOx", "PM2_5", "SOx", "ROG", "BC"]
 """Pollutants processed by default when no explicit list is configured."""
 
 grams_per_short_ton: float = 907_184.74
 """Grams in one U.S. short ton. Maintained preprocess/settings-driven ton conversions use this basis."""
+
+aermod_active_days_per_year: float = 365.0
+"""Days per year used when normalizing AERMOD pattern kernels from grams/second/m^2 to annual tons."""
 
 # ---------------------------------------------------------------------------
 # Dispersion

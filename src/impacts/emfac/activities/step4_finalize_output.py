@@ -12,7 +12,8 @@ from impacts.emfac.activities.step3_fill_project_analysis_rates import ACTIVITY_
 from impacts.emfac.activities.step3_fill_project_analysis_rates import POLLUTANT_COLUMNS
 from impacts.emfac.common import frame_summary
 from impacts.emfac.common import write_trace
-from impacts.emfac.model_year_groups import assign_model_year_groups
+from impacts.emfac.common import assign_model_year_groups
+from impacts.emfac.common import model_year_group_id_component
 
 ACTIVITY_JOIN_COLUMNS = ["county", "vehicleCategory", "fuel", "modelYear"]
 PTO_PROCESS_NAME = "PTOEX"
@@ -40,6 +41,26 @@ _RATES_STORE_NUMERIC_DIMENSION_COLUMNS = {
     "speed_mph_float_bins",
     "time_minutes_float_bins",
 }
+_RATES_SCHEMA_STRING_COLUMNS = [
+    "county",
+    "vehicleCategory",
+    "fuel",
+    "modelYear",
+    "process",
+    ACTIVITY_COLUMN,
+    "roadCategory",
+    "speedMph_timeMin",
+    "emfacId",
+]
+
+
+def _enforce_rates_schema(frame: pd.DataFrame) -> pd.DataFrame:
+    result = frame.copy()
+    for column in [column for column in _RATES_SCHEMA_STRING_COLUMNS if column in result.columns]:
+        result[column] = result[column].astype("string")
+    for column in [column for column in POLLUTANT_COLUMNS if column in result.columns]:
+        result[column] = pd.to_numeric(result[column], errors="coerce")
+    return result
 
 def _assign_model_year_groups(frame: pd.DataFrame, model_year_groups: dict[str, list[dict[str, object]]]) -> pd.DataFrame:
     return assign_model_year_groups(frame, model_year_groups)
@@ -95,6 +116,14 @@ def _build_study_area_wide_fleet(activity_weights: pd.DataFrame, model_year_grou
         fleet["total_vmt_vehicle_miles_per_year"] / total_vmt
         if pd.notna(total_vmt) and total_vmt > 0 else pd.NA
     )
+    if pd.notna(total_vmt) and total_vmt > 0 and not fleet.empty:
+        fleet["vmtShare"] = fleet["vmtShare"].round(12)
+        rounded_total = fleet["vmtShare"].sum(min_count=1)
+        if pd.notna(rounded_total):
+            remainder = round(1.0 - float(rounded_total), 12)
+            if remainder != 0.0:
+                max_idx = fleet["vmtShare"].idxmax()
+                fleet.loc[max_idx, "vmtShare"] = round(float(fleet.loc[max_idx, "vmtShare"]) + remainder, 12)
     return fleet.drop(columns=["total_vmt_vehicle_miles_per_year"])
 
 
@@ -256,7 +285,8 @@ def _build_final_rate_table(
     for aggregated in aggregated_frames[1:]:
         result = result.merge(aggregated, on=FINAL_RATE_GROUP_COLUMNS, how="outer")
     value_columns = [column for column in POLLUTANT_COLUMNS if column in result.columns]
-    return result.loc[result[value_columns].notna().any(axis=1)].reset_index(drop=True)
+    result = result.loc[result[value_columns].notna().any(axis=1)].reset_index(drop=True)
+    return _enforce_rates_schema(result)
 
 
 def _write_parquet(frame: pd.DataFrame, path: str) -> str:
@@ -299,7 +329,7 @@ def _print_model_year_group_stats(
     aggregated_activity: pd.DataFrame,
     fleet: pd.DataFrame,
 ) -> None:
-    print("    4.4 Model year group stats")
+    print("    4.5 Model year group stats")
     if "modelYear" in final_rates.columns:
         print("      Final rates rows by modelYear:")
         for model_year, count in final_rates["modelYear"].value_counts(dropna=False).sort_index().items():
@@ -319,7 +349,7 @@ def _build_emfac_id(*, vehicle_category: object, fuel: object, model_year: objec
         return "".join(ch for ch in str("" if pd.isna(value) else value).strip() if ch.isalnum())
 
     return (
-        f"{_sanitize_emfac_component(model_year)}"
+        f"{_sanitize_emfac_component(model_year_group_id_component(model_year))}"
         f"{_sanitize_emfac_component(vehicle_category)}"
         f"{_sanitize_emfac_component(fuel)}"
     )
@@ -463,14 +493,12 @@ def _write_rates_store_from_dataframe(
     }
 
 
-def _build_rates_store_substep(
+def _prepare_rates_store_frame(
     *,
-    workflow: dict[str, object],
     passenger_rates: pd.DataFrame,
     freight_rates: pd.DataFrame,
-) -> dict[str, object]:
-    rates = pd.concat([passenger_rates, freight_rates], ignore_index=True, sort=False)
-    rates = rates.copy()
+) -> pd.DataFrame:
+    rates = pd.concat([passenger_rates, freight_rates], ignore_index=True, sort=False).copy()
     rates["emfacId"] = rates.apply(
         lambda row: _build_emfac_id(
             vehicle_category=row["vehicleCategory"],
@@ -479,43 +507,39 @@ def _build_rates_store_substep(
         ),
         axis=1,
     )
-    return _write_rates_store_from_dataframe(
-        rates=rates,
-        output_dir=workflow["paths"]["emissions_store_root"],
-        compression="zstd",
-    )
+    return _enforce_rates_schema(rates)
 
 
-def _run_step4_substep_finalize_group(
+def _finalize_group_outputs(
     *,
-    workflow: dict[str, object],
     group_name: str,
+    surface: pd.DataFrame,
     activity_weights: pd.DataFrame,
+    model_year_groups: dict[str, list[dict[str, object]]],
 ) -> tuple[tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame], dict[str, object]]:
-    surface = _load_surface(workflow["paths"][f"project_analysis_{group_name}"])
     group_activity_weights = _filter_activity_weights_to_surface(activity_weights, surface)
     matching_activity = _build_matching_activity_table(
         group_activity_weights,
-        workflow["run"]["model_year_groups"],
+        model_year_groups,
     )
     final_rates = _build_final_rate_table(
         surface,
         group_activity_weights,
-        model_year_groups=workflow["run"]["model_year_groups"],
+        model_year_groups=model_year_groups,
     )
     aggregated_activity = _build_aggregated_activity_table(
         group_activity_weights,
         surface,
-        workflow["run"]["model_year_groups"],
+        model_year_groups,
     )
     activity_by_emfac_id = _build_activity_by_emfac_id_table(
         group_activity_weights,
         surface,
-        workflow["run"]["model_year_groups"],
+        model_year_groups,
     )
     fleet = _build_inventory_final_fleet_table(
         group_activity_weights,
-        workflow["run"]["model_year_groups"],
+        model_year_groups,
     )
     trace_payload = {
         f"{group_name}_filled_surface": frame_summary(surface, name=f"filled_project_analysis_{group_name}"),
@@ -530,27 +554,45 @@ def _run_step4_substep_finalize_group(
     return (final_rates, matching_activity, aggregated_activity, activity_by_emfac_id, fleet), trace_payload
 
 
-def _load_written_final_rates(workflow: dict[str, object], *, group_name: str) -> pd.DataFrame:
-    return pd.read_parquet(Path(str(workflow["paths"][f"final_output_{group_name}"])).expanduser().resolve())
-
-
 def run_step4(workflow: dict[str, object]) -> dict[str, object]:
     print("  Step 4. Finalize Output")
-    print("    4.1 Load filled project analysis surface and activity weights")
+    print("    4.1 Load filled project analysis surfaces and activity weights")
+    passenger_surface = _load_surface(workflow["paths"]["project_analysis_passenger"])
+    freight_surface = _load_surface(workflow["paths"]["project_analysis_freight"])
     activity_weights = _build_activity_weights(workflow["paths"]["emissions_inventory"])
-    print("    4.2 Aggregate final horizontal rates, inventory-final activity table, and inventory-final fleet shares")
+    model_year_groups = workflow["run"]["model_year_groups"]
     trace_payload = {
+        "passenger_filled_surface": frame_summary(passenger_surface, name="filled_project_analysis_passenger"),
+        "freight_filled_surface": frame_summary(freight_surface, name="filled_project_analysis_freight"),
         "activity_weights": frame_summary(activity_weights, name="activity_weights"),
     }
-    outputs: dict[str, tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]] = {}
-    for group_name in ("passenger", "freight"):
-        outputs[group_name], group_trace_payload = _run_step4_substep_finalize_group(
-            workflow=workflow,
-            group_name=group_name,
-            activity_weights=activity_weights,
-        )
-        trace_payload.update(group_trace_payload)
-    print("    4.3 Write final outputs")
+    print("    4.2 Finalize passenger outputs")
+    passenger_outputs, passenger_trace_payload = _finalize_group_outputs(
+        group_name="passenger",
+        surface=passenger_surface,
+        activity_weights=activity_weights,
+        model_year_groups=model_year_groups,
+    )
+    trace_payload.update(passenger_trace_payload)
+    print("    4.3 Finalize freight outputs")
+    freight_outputs, freight_trace_payload = _finalize_group_outputs(
+        group_name="freight",
+        surface=freight_surface,
+        activity_weights=activity_weights,
+        model_year_groups=model_year_groups,
+    )
+    trace_payload.update(freight_trace_payload)
+    outputs = {
+        "passenger": passenger_outputs,
+        "freight": freight_outputs,
+    }
+    print("    4.4 Build emissions rates store dataset")
+    rates_store_frame = _prepare_rates_store_frame(
+        passenger_rates=outputs["passenger"][0],
+        freight_rates=outputs["freight"][0],
+    )
+    trace_payload["rates_store_source"] = frame_summary(rates_store_frame, name="rates_store_source")
+    print("    4.5 Write final outputs and derived store")
     for group_name, (final_rates, matching_activity, aggregated_activity, activity_by_emfac_id, fleet) in outputs.items():
         _write_parquet(final_rates, workflow["paths"][f"final_output_{group_name}"])
         _write_parquet(matching_activity, workflow["paths"][f"matching_activity_output_{group_name}"])
@@ -558,11 +600,10 @@ def run_step4(workflow: dict[str, object]) -> dict[str, object]:
         _write_parquet(activity_by_emfac_id, workflow["paths"][f"final_activity_emfacid_output_{group_name}"])
         _write_parquet(fleet, workflow["paths"][f"final_fleet_output_{group_name}"])
         _print_model_year_group_stats(final_rates, aggregated_activity, fleet)
-    print("    4.5 Build emissions rates store")
-    rates_store = _build_rates_store_substep(
-        workflow=workflow,
-        passenger_rates=_load_written_final_rates(workflow, group_name="passenger"),
-        freight_rates=_load_written_final_rates(workflow, group_name="freight"),
+    rates_store = _write_rates_store_from_dataframe(
+        rates=rates_store_frame,
+        output_dir=workflow["paths"]["emissions_store_root"],
+        compression="zstd",
     )
     write_trace(
         workflow,

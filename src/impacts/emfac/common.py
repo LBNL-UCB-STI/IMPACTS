@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 import traceback
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+from impacts.emfac.config import resolve_workflow_path
+
+
+LIGHT_DUTY_VEHICLE_CATEGORIES = {"LDA", "LDT1", "LDT2"}
 
 
 def ensure_trace_dir(workflow: dict[str, object]) -> Path:
@@ -84,3 +90,279 @@ def _to_json_ready(value: Any) -> Any:
         except Exception:
             return str(value)
     return value
+
+
+def _normalize_model_year_group(group: dict[str, object] | str) -> dict[str, object]:
+    if isinstance(group, dict):
+        return group
+    token = str(group).strip()
+    if not token:
+        raise ValueError("Configured model_year_groups entries must not be empty.")
+    if token.isdigit() and len(token) == 4:
+        year = int(token)
+        return {"min_year": year, "max_year": year}
+    if token.startswith("<="):
+        return {"max_year": int(token[2:].strip())}
+    if token.startswith(">="):
+        return {"min_year": int(token[2:].strip())}
+    if "-" in token:
+        min_year, max_year = token.split("-", 1)
+        return {"min_year": int(min_year.strip()), "max_year": int(max_year.strip())}
+    raise ValueError(
+        "Configured model_year_groups string entries must use one of: '<=YYYY', 'YYYY-YYYY', '>=YYYY'."
+    )
+
+
+def model_year_group_string(group: dict[str, object] | str) -> str:
+    if isinstance(group, str):
+        token = str(group).strip()
+        if not token:
+            raise ValueError("Configured model_year_groups entries must not be empty.")
+        _normalize_model_year_group(token)
+        return token
+    normalized = _normalize_model_year_group(group)
+    min_year = normalized.get("min_year")
+    max_year = normalized.get("max_year")
+    if min_year is None:
+        return f"<={int(max_year)}"
+    if max_year is None:
+        return f">={int(min_year)}"
+    if int(min_year) == int(max_year):
+        return f"{int(min_year)}"
+    return f"{int(min_year)}-{int(max_year)}"
+
+
+def model_year_group_id_component(group: dict[str, object] | str) -> str:
+    group = _normalize_model_year_group(group)
+    min_year = group.get("min_year")
+    max_year = group.get("max_year")
+    if min_year is None:
+        return f"pre{int(max_year) + 1:02d}"
+    if max_year is None:
+        return f"post{int(min_year) - 1:02d}"
+    if int(min_year) == int(max_year):
+        return f"{int(min_year)}"
+    return f"{int(min_year)}to{int(max_year)}"
+
+
+def parse_model_year_group_interval(group: dict[str, object] | str) -> tuple[float, float]:
+    normalized = _normalize_model_year_group(group)
+    min_year = normalized.get("min_year")
+    max_year = normalized.get("max_year")
+    left = float("-inf") if min_year is None else float(int(min_year))
+    right = float("inf") if max_year is None else float(int(max_year))
+    return left, right
+
+
+def model_year_interval_distance(a: tuple[float, float], b: tuple[float, float]) -> float:
+    a_min, a_max = a
+    b_min, b_max = b
+    if a_max < b_min:
+        return b_min - a_max
+    if b_max < a_min:
+        return a_min - b_max
+    return 0.0
+
+
+def vehicle_group(vehicle_category: object) -> str:
+    vehicle_category = str(vehicle_category).strip()
+    if vehicle_category in LIGHT_DUTY_VEHICLE_CATEGORIES:
+        return "light_duty"
+    return "medium_heavy_duty"
+
+
+def _require_column(frame: pd.DataFrame, column_name: str, frame_name: str) -> None:
+    if column_name not in frame.columns:
+        raise ValueError(f"{frame_name} is missing required column '{column_name}'")
+
+
+def load_idle_time_fraction_lookup(metadata_path: str) -> dict[str, float]:
+    metadata = pd.read_csv(Path(resolve_workflow_path(metadata_path)))
+    required = {"emfac_vehicle_category", "idle_time_fraction"}
+    missing = sorted(required - set(metadata.columns))
+    if missing:
+        raise ValueError(
+            "Vehicle category metadata file is missing required columns for idleTimeFraction: "
+            f"{missing}"
+        )
+    prepared = metadata[["emfac_vehicle_category", "idle_time_fraction"]].copy()
+    prepared["emfac_vehicle_category"] = prepared["emfac_vehicle_category"].fillna("").astype(str).str.strip()
+    prepared["idle_time_fraction"] = pd.to_numeric(prepared["idle_time_fraction"], errors="coerce")
+    prepared = prepared.loc[
+        prepared["emfac_vehicle_category"].ne("") & prepared["idle_time_fraction"].notna()
+    ].copy()
+    return (
+        prepared.drop_duplicates(subset=["emfac_vehicle_category"], keep="first")
+        .set_index("emfac_vehicle_category")["idle_time_fraction"]
+        .to_dict()
+    )
+
+
+def _infer_emfac_vehicle_category_from_id(emfac_id: object, known_categories: list[str]) -> str:
+    emfac_id_token = str("" if pd.isna(emfac_id) else emfac_id).strip()
+    if emfac_id_token == "":
+        return ""
+    for category in sorted(known_categories, key=len, reverse=True):
+        if category and category in emfac_id_token:
+            return category
+    return ""
+
+
+def attach_idle_time_fraction(
+    vehicle_types: pd.DataFrame,
+    *,
+    idle_time_fraction_lookup: dict[str, float],
+) -> pd.DataFrame:
+    prepared = vehicle_types.copy()
+    if "emfacVehicleCategory" not in prepared.columns and "emfacId" not in prepared.columns:
+        raise ValueError(
+            "Vehicle types table is missing both 'emfacVehicleCategory' and 'emfacId' required for idleTimeFraction"
+        )
+
+    known_categories = [str(category).strip() for category in idle_time_fraction_lookup if str(category).strip()]
+    if "emfacVehicleCategory" in prepared.columns:
+        categories = prepared["emfacVehicleCategory"].fillna("").astype(str).str.strip()
+    else:
+        categories = pd.Series("", index=prepared.index, dtype="object")
+
+    if "emfacId" in prepared.columns:
+        missing_category_mask = categories.eq("")
+        if missing_category_mask.any():
+            categories.loc[missing_category_mask] = prepared.loc[missing_category_mask, "emfacId"].map(
+                lambda value: _infer_emfac_vehicle_category_from_id(value, known_categories)
+            )
+
+    prepared["idleTimeFraction"] = categories.map(idle_time_fraction_lookup)
+    prepared.loc[categories.ne("") & prepared["idleTimeFraction"].isna(), "idleTimeFraction"] = 0.0
+    return prepared
+
+
+def attach_idle_time_fraction_from_config(
+    vehicle_types: pd.DataFrame,
+    *,
+    config: dict[str, Any],
+    step_label: str,
+) -> pd.DataFrame:
+    metadata_path = config.get("vehicle_category_attributes_file")
+    if not metadata_path:
+        raise ValueError(f"{step_label} requires vehicle_category_attributes_file in the EMFAC config.")
+    return attach_idle_time_fraction(
+        vehicle_types,
+        idle_time_fraction_lookup=load_idle_time_fraction_lookup(str(metadata_path)),
+    )
+
+
+def load_rates_store_relative_paths(
+    *,
+    config: dict[str, Any],
+    scenario: object,
+    output_root: str | Path,
+    required_emfac_ids: list[str],
+    require_duckdb: bool = False,
+) -> dict[str, str]:
+    activities_output_root = Path(str(config["activities"]["outputs"])).expanduser().resolve()
+    frism_year = config["frism"]["year"]
+    scenario_name = str(scenario).strip()
+    store_root = activities_output_root / "emissions" / f"{frism_year}-{scenario_name}"
+    parquet_root = store_root / "dataset"
+    duckdb_path = store_root / "dataset.duckdb"
+    output_root_path = Path(str(output_root)).expanduser().resolve()
+
+    relative_paths: dict[str, str] = {}
+    for partition_dir in sorted(parquet_root.glob("emfacId=*")):
+        if not partition_dir.is_dir():
+            continue
+        emfac_id = partition_dir.name.removeprefix("emfacId=")
+        parquet_path = partition_dir / f"{emfac_id}.parquet"
+        if parquet_path.exists():
+            relative_paths[emfac_id] = os.path.relpath(parquet_path, output_root_path)
+
+    missing_store_ids = [emfac_id for emfac_id in required_emfac_ids if emfac_id and emfac_id not in relative_paths]
+    if missing_store_ids:
+        preview = ", ".join(missing_store_ids[:10])
+        raise FileNotFoundError(
+            "EMFAC rates store is missing parquet partitions for required emfacId values: "
+            f"{preview}{' ...' if len(missing_store_ids) > 10 else ''}"
+        )
+    if require_duckdb and not duckdb_path.exists():
+        raise FileNotFoundError(f"EMFAC rates store database not found: {duckdb_path}")
+    return relative_paths
+
+
+def attach_emissions_rates_filepaths(
+    vehicle_types: pd.DataFrame,
+    *,
+    relative_paths: dict[str, str],
+) -> pd.DataFrame:
+    prepared = vehicle_types.copy()
+    emfac_ids = prepared.get("emfacId", pd.Series(index=prepared.index, dtype="object")).fillna("").astype(str)
+    prepared["emfacId"] = emfac_ids
+    prepared["emissionsRatesFile"] = emfac_ids.map(relative_paths).fillna("")
+    return prepared
+
+
+def attach_emissions_rates_filepaths_from_config(
+    vehicle_types: pd.DataFrame,
+    *,
+    config: dict[str, Any],
+    scenario: object,
+    output_root: str | Path,
+    step_label: str,
+) -> pd.DataFrame:
+    required_emfac_ids = sorted(
+        [
+            emfac_id
+            for emfac_id in vehicle_types.get("emfacId", pd.Series(dtype="string")).fillna("").astype(str).unique().tolist()
+            if emfac_id
+        ]
+    )
+    relative_paths = load_rates_store_relative_paths(
+        config=config,
+        scenario=scenario,
+        output_root=output_root,
+        required_emfac_ids=required_emfac_ids,
+    )
+    try:
+        return attach_emissions_rates_filepaths(
+            vehicle_types,
+            relative_paths=relative_paths,
+        )
+    except Exception as error:
+        raise ValueError(f"{step_label} could not attach emissionsRatesFile from the EMFAC rates store: {error}") from error
+
+
+def assign_model_year_groups(
+    frame: pd.DataFrame,
+    model_year_groups: dict[str, list[dict[str, object] | str]],
+    *,
+    year_column: str = "modelYear",
+    category_column: str = "vehicleCategory",
+    output_column: str | None = None,
+) -> pd.DataFrame:
+    result = frame.copy()
+    target_column = output_column or year_column
+    labels = pd.Series(pd.NA, index=result.index, dtype="object")
+    model_year = pd.to_numeric(result[year_column], errors="raise").astype(int)
+    vehicle_groups = result[category_column].map(vehicle_group)
+    for current_group, groups in model_year_groups.items():
+        group_mask = vehicle_groups == current_group
+        if not group_mask.any():
+            continue
+        for group in groups:
+            group = _normalize_model_year_group(group)
+            min_year = group.get("min_year")
+            max_year = group.get("max_year")
+            mask = group_mask.copy()
+            if min_year is not None:
+                mask &= model_year >= int(min_year)
+            if max_year is not None:
+                mask &= model_year <= int(max_year)
+            labels.loc[mask] = model_year_group_string(group)
+    if labels.isna().any():
+        missing_rows = result.loc[labels.isna(), [category_column, year_column]].drop_duplicates()
+        raise ValueError(
+            "Some vehicleCategory/modelYear rows are not covered by the configured model_year_groups: "
+            f"{missing_rows.to_dict(orient='records')[:20]}"
+        )
+    result[target_column] = labels
+    return result

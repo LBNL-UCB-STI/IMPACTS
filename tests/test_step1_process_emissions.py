@@ -14,21 +14,21 @@ def test_inventory_targets_per_assignment_grouped_by_model_year_and_process(tmp_
         [
             {
                 "county": "Alameda",
-                "modelYear": "post2014",
+                "modelYear": ">=2015",
                 "process": "RUNEX",
                 "total_vmt_vehicle_miles_per_year": 100.0,
                 "trips_per_year": 20.0,
             },
             {
                 "county": "Alameda",
-                "modelYear": "post2014",
+                "modelYear": ">=2015",
                 "process": "RUNEX",
                 "total_vmt_vehicle_miles_per_year": 50.0,
                 "trips_per_year": 5.0,
             },
             {
                 "county": "Alameda",
-                "modelYear": "pre2004",
+                "modelYear": "<=2003",
                 "process": "STREX",
                 "total_vmt_vehicle_miles_per_year": 0.0,
                 "trips_per_year": 7.0,
@@ -42,7 +42,7 @@ def test_inventory_targets_per_assignment_grouped_by_model_year_and_process(tmp_
         [
             {
                 "county": "Alameda",
-                "modelYear": "2007to2009",
+                "modelYear": "2007-2009",
                 "process": "PRDUST",
                 "total_vmt_vehicle_miles_per_year": 40.0,
                 "trips_per_year": 4.0,
@@ -72,7 +72,7 @@ def test_inventory_targets_per_assignment_grouped_by_model_year_and_process(tmp_
         {
             "countyfp": "001",
             "assignment_group": "freight",
-            "modelYear": "2007to2009",
+            "modelYear": "2007-2009",
             "process": "PRDUST",
             "totVMT": 40.0,
             "totTrips": 4.0,
@@ -80,18 +80,18 @@ def test_inventory_targets_per_assignment_grouped_by_model_year_and_process(tmp_
         {
             "countyfp": "001",
             "assignment_group": "passenger",
-            "modelYear": "post2014",
-            "process": "RUNEX",
-            "totVMT": 150.0,
-            "totTrips": 25.0,
+            "modelYear": "<=2003",
+            "process": "STREX",
+            "totVMT": 0.0,
+            "totTrips": 7.0,
         },
         {
             "countyfp": "001",
             "assignment_group": "passenger",
-            "modelYear": "pre2004",
-            "process": "STREX",
-            "totVMT": 0.0,
-            "totTrips": 7.0,
+            "modelYear": ">=2015",
+            "process": "RUNEX",
+            "totVMT": 150.0,
+            "totTrips": 25.0,
         },
     ]
 
@@ -100,7 +100,7 @@ def test_inventory_targets_per_assignment_grouped_by_model_year_and_process(tmp_
             {
                 "countyfp": "001",
                 "assignment_group": "passenger",
-                "modelYear": "post2014",
+                "modelYear": ">=2015",
                 "process": "RUNEX",
                 "totVMT": 90.0,
                 "totTrips": 9.0,
@@ -108,7 +108,7 @@ def test_inventory_targets_per_assignment_grouped_by_model_year_and_process(tmp_
             {
                 "countyfp": "001",
                 "assignment_group": "passenger",
-                "modelYear": "pre2004",
+                "modelYear": "<=2003",
                 "process": "STREX",
                 "totVMT": 0.0,
                 "totTrips": 3.5,
@@ -116,7 +116,7 @@ def test_inventory_targets_per_assignment_grouped_by_model_year_and_process(tmp_
             {
                 "countyfp": "001",
                 "assignment_group": "freight",
-                "modelYear": "2007to2009",
+                "modelYear": "2007-2009",
                 "process": "PRDUST",
                 "totVMT": 30.0,
                 "totTrips": 3.0,
@@ -133,7 +133,7 @@ def test_inventory_targets_per_assignment_grouped_by_model_year_and_process(tmp_
         {
             "countyfp": "001",
             "assignment_group": "freight",
-            "modelYear": "2007to2009",
+            "modelYear": "2007-2009",
             "process": "PRDUST",
             "factor_totVMT": 40.0 / 30.0,
             "factor_totTrips": 4.0 / 3.0,
@@ -141,18 +141,18 @@ def test_inventory_targets_per_assignment_grouped_by_model_year_and_process(tmp_
         {
             "countyfp": "001",
             "assignment_group": "passenger",
-            "modelYear": "post2014",
-            "process": "RUNEX",
-            "factor_totVMT": 150.0 / 90.0,
-            "factor_totTrips": 25.0 / 9.0,
+            "modelYear": "<=2003",
+            "process": "STREX",
+            "factor_totVMT": 1.0,
+            "factor_totTrips": 2.0,
         },
         {
             "countyfp": "001",
             "assignment_group": "passenger",
-            "modelYear": "pre2004",
-            "process": "STREX",
-            "factor_totVMT": 1.0,
-            "factor_totTrips": 2.0,
+            "modelYear": ">=2015",
+            "process": "RUNEX",
+            "factor_totVMT": 150.0 / 90.0,
+            "factor_totTrips": 25.0 / 9.0,
         },
     ]
 

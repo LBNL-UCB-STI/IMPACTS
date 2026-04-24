@@ -15,34 +15,6 @@ GRAMS_PER_SHORT_TON = 907_184.74
 METRIC_TONS_PER_SHORT_TON = 0.90718474
 EMFAC_DAYS_PER_YEAR = 365.0
 PTO_PROCESS_NAME = "PTOEX"
-FUEL_LABEL_MAP = {
-    "Diesel": "Dsl",
-    "Electricity": "Elec",
-    "Gasoline": "Gas",
-    "Natural Gas": "NG",
-    "Plug-in Hybrid": "Phe",
-}
-EMFAC202X_VEHICLE_CATEGORY_ALIASES = {
-    "LHD1 Public": "LHD1",
-    "LHD1 Other": "LHD1",
-    "LHD2 Public": "LHD2",
-    "LHD2 Other": "LHD2",
-    "All Other Buses": "OBUS",
-}
-BEAM_TO_CARB_ROAD_CATEGORY = {
-    "motorway": "Freeway",
-    "motorway_link": "Freeway",
-    "trunk": "Freeway",
-    "trunk_link": "Major",
-    "primary": "Major",
-    "primary_link": "Major",
-    "secondary": "Collector",
-    "secondary_link": "Collector",
-    "tertiary": "Collector",
-    "tertiary_link": "Collector",
-    "unclassified": "Collector",
-    "residential": "Local Urban",
-}
 PROJECT_ANALYSIS_KEY_COLUMNS = ["county", "vehicleCategory", "fuel", "modelYear", "process", "speedMph_timeMin"]
 HEADER_DETECTION_COLUMNS = {
     "emissions-inventory": {"region", "calendar_year", "vehicle_category", "model_year", "speed", "fuel"},
@@ -177,8 +149,9 @@ def _calculate_road_dust_emissions_series(
 
 def _beam_road_mapping(*, supported_categories: list[str]) -> pd.DataFrame:
     supported_category_set = set(supported_categories)
+    road_category_mapping = _ACTIVITIES_MAPPINGS["road_category_map"]
     rows = []
-    for road_category, carb_road_category in BEAM_TO_CARB_ROAD_CATEGORY.items():
+    for road_category, carb_road_category in road_category_mapping.items():
         if carb_road_category not in supported_category_set:
             raise ValueError(f"Unsupported road type '{carb_road_category}' in beam road mapping.")
         rows.append({"roadCategory": road_category, "carb_road_category": carb_road_category})
@@ -362,7 +335,7 @@ def build_nh3_inventory_rows(
     return pd.concat(rates, ignore_index=True).drop_duplicates().reset_index(drop=True)
 
 
-def _run_step1_substep_prepare_project_analysis(workflow: dict[str, object]) -> tuple[str, pd.DataFrame]:
+def _prepare_project_analysis_source(workflow: dict[str, object]) -> tuple[str, pd.DataFrame]:
     pto_config = workflow["run"]["pto_as_process"]
     project_analysis_path = clean_emfac_to_parquet(
         input_path=workflow["inputs"]["project_analysis_raw"],
@@ -382,7 +355,7 @@ def _run_step1_substep_prepare_project_analysis(workflow: dict[str, object]) -> 
     return project_analysis_path, project_analysis
 
 
-def _run_step1_substep_prepare_emissions_inventory(workflow: dict[str, object]) -> tuple[str, pd.DataFrame]:
+def _prepare_emissions_inventory(workflow: dict[str, object]) -> tuple[str, pd.DataFrame]:
     pto_config = workflow["run"]["pto_as_process"]
     emissions_inventory_path = process_emissions_inventory(
         vmt_input=workflow["inputs"]["vmt_raw"],
@@ -399,7 +372,7 @@ def _run_step1_substep_prepare_emissions_inventory(workflow: dict[str, object]) 
     return emissions_inventory_path, pd.read_parquet(emissions_inventory_path)
 
 
-def _run_step1_substep_prepare_prdust(
+def _prepare_prdust_support(
     workflow: dict[str, object],
     *,
     project_analysis: pd.DataFrame,
@@ -427,7 +400,7 @@ def _run_step1_substep_prepare_prdust(
     return prdust_support_path, project_analysis_prdust
 
 
-def _run_step1_substep_prepare_bc(workflow: dict[str, object]) -> tuple[Path, pd.DataFrame]:
+def _prepare_bc_rates(workflow: dict[str, object]) -> tuple[Path, pd.DataFrame]:
     pto_config = workflow["run"]["pto_as_process"]
     project_analysis_bc = build_black_carbon_rows(
         workflow["inputs"]["black_carbon_raw"],
@@ -441,7 +414,7 @@ def _run_step1_substep_prepare_bc(workflow: dict[str, object]) -> tuple[Path, pd
     return bc_path, project_analysis_bc
 
 
-def _run_step1_substep_prepare_nh3(
+def _prepare_nh3_rates(
     workflow: dict[str, object],
     *,
     emissions_inventory_frame: pd.DataFrame,
@@ -459,10 +432,11 @@ def _run_step1_substep_prepare_nh3(
 
 def run_step1(workflow: dict[str, object]) -> dict[str, object]:
     print("  Step 1. Prepare Emissions And Activities Tables")
+    _set_activities_mappings(workflow.get("run", {}).get("mappings", {}) or {})
     print("    1.1 Clean raw project-analysis and write cleaned long-form source")
-    project_analysis_path, project_analysis = _run_step1_substep_prepare_project_analysis(workflow)
+    project_analysis_path, project_analysis = _prepare_project_analysis_source(workflow)
     print("    1.2 Build study-area and statewide emissions inventories")
-    emissions_inventory_path, emissions_inventory_frame = _run_step1_substep_prepare_emissions_inventory(workflow)
+    emissions_inventory_path, emissions_inventory_frame = _prepare_emissions_inventory(workflow)
     write_trace(
         workflow,
         "step1_2_emissions_inventory",
@@ -472,14 +446,14 @@ def run_step1(workflow: dict[str, object]) -> dict[str, object]:
         },
     )
     print("    1.3 Build PRDUST rates in project-analysis structure")
-    prdust_support_path, project_analysis_prdust = _run_step1_substep_prepare_prdust(
+    prdust_support_path, project_analysis_prdust = _prepare_prdust_support(
         workflow,
         project_analysis=project_analysis,
     )
     print("    1.4 Build BC rates in project-analysis structure")
-    bc_path, project_analysis_bc = _run_step1_substep_prepare_bc(workflow)
+    bc_path, project_analysis_bc = _prepare_bc_rates(workflow)
     print("    1.5 Build NH3 rates in project-analysis structure")
-    nh3_rates_path, project_analysis_nh3_rates = _run_step1_substep_prepare_nh3(
+    nh3_rates_path, project_analysis_nh3_rates = _prepare_nh3_rates(
         workflow,
         emissions_inventory_frame=emissions_inventory_frame,
     )
@@ -562,12 +536,24 @@ def _filter_and_normalize_region_label(frame: pd.DataFrame, region_label: str | 
     return filtered
 
 
+_ACTIVITIES_MAPPINGS: dict[str, dict[str, str] | list[dict[str, str]]] = {}
+
+
+def _set_activities_mappings(mappings: dict[str, object]) -> None:
+    global _ACTIVITIES_MAPPINGS
+    _ACTIVITIES_MAPPINGS = {
+        "fuel_map": dict(mappings.get("fuel_map", {}) or {}),
+        "road_category_map": dict(mappings.get("road_category_map", {}) or {}),
+    }
+
+
 def _normalize_emissions_inventory_fuel(frame: pd.DataFrame) -> pd.DataFrame:
-    unknown = sorted(set(frame["fuel"].dropna().astype(str)) - set(FUEL_LABEL_MAP))
+    fuel_map = _ACTIVITIES_MAPPINGS["fuel_map"]
+    unknown = sorted(set(frame["fuel"].dropna().astype(str)) - set(fuel_map))
     if unknown:
         raise ValueError(f"Unsupported emissions-inventory fuel values: {unknown}")
     frame = frame.copy()
-    frame["fuel"] = frame["fuel"].map(FUEL_LABEL_MAP)
+    frame["fuel"] = frame["fuel"].map(fuel_map)
     return frame
 
 
@@ -592,11 +578,6 @@ def _normalize_source_frame(frame: pd.DataFrame, source_type: str) -> pd.DataFra
             "pm2_5_pmbw": "pm25_pmbw",
         }
     )
-    if "vehicleCategory" in frame.columns:
-        categories = frame["vehicleCategory"].astype(str).str.strip()
-        frame["vehicleCategory"] = categories.map(
-            lambda value: EMFAC202X_VEHICLE_CATEGORY_ALIASES.get(value, value)
-        )
     return frame
 
 

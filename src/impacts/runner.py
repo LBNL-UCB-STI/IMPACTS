@@ -228,7 +228,7 @@ def _resolve_analysis_inventory_emfacid_activity_path(
 
 def _resolve_analysis_vehicle_category_metadata_path(settings_path: str | Path) -> Path:
     _, _, _, inputs = _load_analysis_context(settings_path)
-    for key in ("vehicle_category_metadata_file_input", "annualization_days_or_file_input"):
+    for key in ("vehicle_category_metadata_file_input",):
         try:
             resolved = Path(resolve_required_manifest_input(inputs, key=key)).resolve()
         except ValueError:

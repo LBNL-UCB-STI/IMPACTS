@@ -201,7 +201,7 @@ def _write_parquet(frame: pd.DataFrame, path: str) -> str:
     return str(target)
 
 
-def _run_step2_substep_load_inputs(workflow: dict[str, object]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def _load_step2_inputs(workflow: dict[str, object]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     return (
         pd.read_parquet(Path(workflow["paths"]["project_analysis_source"]).expanduser().resolve()),
         pd.read_parquet(Path(workflow["paths"]["project_analysis_prdust"]).expanduser().resolve()),
@@ -212,7 +212,7 @@ def _run_step2_substep_load_inputs(workflow: dict[str, object]) -> tuple[pd.Data
     )
 
 
-def _run_step2_substep_build_group_surface(
+def _build_group_surface(
     *,
     group_name: str,
     project_analysis: pd.DataFrame,
@@ -234,16 +234,12 @@ def _run_step2_substep_build_group_surface(
     )
 
 
-def _pto_vehicle_categories(workflow: dict[str, object]) -> list[str]:
-    return list(workflow["run"]["pto_as_process"]["targets"])
-
-
 def run_step2(workflow: dict[str, object]) -> dict[str, object]:
     print("  Step 2. Build Comprehensive Project Analysis")
-    print("    2.1 Build comprehensive output surface")
-    project_analysis, project_analysis_prdust, emissions_inventory, emfac_category_fuel_mapping = _run_step2_substep_load_inputs(workflow)
-    pto_vehicle_categories = _pto_vehicle_categories(workflow)
-    passenger_comprehensive = _run_step2_substep_build_group_surface(
+    project_analysis, project_analysis_prdust, emissions_inventory, emfac_category_fuel_mapping = _load_step2_inputs(workflow)
+    pto_vehicle_categories = list(workflow["run"]["pto_as_process"]["targets"])
+    print("    2.2 Build passenger comprehensive output surface")
+    passenger_comprehensive = _build_group_surface(
         group_name="passenger",
         project_analysis=project_analysis,
         project_analysis_prdust=project_analysis_prdust,
@@ -251,7 +247,8 @@ def run_step2(workflow: dict[str, object]) -> dict[str, object]:
         emfac_category_fuel_mapping=emfac_category_fuel_mapping,
         pto_vehicle_categories=pto_vehicle_categories,
     )
-    freight_comprehensive = _run_step2_substep_build_group_surface(
+    print("    2.3 Build freight comprehensive output surface")
+    freight_comprehensive = _build_group_surface(
         group_name="freight",
         project_analysis=project_analysis,
         project_analysis_prdust=project_analysis_prdust,

@@ -28,7 +28,6 @@ import shapely
 from shapely.geometry import LineString
 from tqdm import tqdm
 
-from .config.defaults import representative_days_per_year as default_representative_days_per_year
 from .config.defaults import chunk_size as default_chunk_size
 from .config.defaults import grams_per_short_ton
 from .config.defaults import meters_per_mile as _METERS_PER_MILE

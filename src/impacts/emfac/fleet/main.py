@@ -12,7 +12,6 @@ from impacts.emfac.fleet.step1_build_vehicle_types import run_step1
 from impacts.emfac.fleet.step2_map_emfac_bus_bike import run_step2
 from impacts.emfac.fleet.step3_map_emfac_atlas import run_step3
 from impacts.emfac.fleet.step4_map_emfac_frism import run_step4
-from impacts.emfac.fleet.step5_map_emfac_rates import run_step5
 
 
 def _configure_run(config_path: str | Path | None = None) -> dict[str, object]:
@@ -96,7 +95,6 @@ def run_workflow(workflow: dict[str, object]) -> dict[str, object]:
         workflow = _run_step(workflow, step_name="step2_map_emfac_bus_bike", runner=run_step2)
         workflow = _run_step(workflow, step_name="step3_map_emfac_atlas", runner=run_step3)
         workflow = _run_step(workflow, step_name="step4_map_emfac_frism", runner=run_step4)
-        workflow = _run_step(workflow, step_name="step5_map_emfac_rates", runner=run_step5)
     except Exception as error:
         if isinstance(error, RuntimeError):
             write_failure_trace(workflow, step="workflow", error=error, payload={"status": "failed"})
@@ -104,8 +102,8 @@ def run_workflow(workflow: dict[str, object]) -> dict[str, object]:
     write_trace(workflow, "workflow_success", {"status": "completed"})
     vehicles_output_file = workflow.get("mapped_passenger_vehicles_file", "")
     carriers_output_file = workflow.get("mapped_freight_carriers_file", "")
-    passenger_vehicle_types_output = workflow.get("passenger_vehicle_types_with_rates_file", "")
-    freight_vehicle_types_output = workflow.get("freight_vehicle_types_with_rates_file", "")
+    passenger_vehicle_types_output = workflow.get("built_vehicle_types_file", "")
+    freight_vehicle_types_output = workflow.get("built_freight_vehicle_types_file", "")
     if vehicles_output_file:
         print(f"  Passenger vehicles file: {vehicles_output_file}")
     if carriers_output_file:

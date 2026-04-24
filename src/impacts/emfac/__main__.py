@@ -18,11 +18,13 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run EMFAC activities, fleet, or the full EMFAC workflow.",
     )
     parser.add_argument(
-        "workflow",
-        nargs="?",
-        choices=("activities", "fleet"),
-        default=None,
-        help="Optional workflow to run. Omit to run the full EMFAC workflow.",
+        "args",
+        nargs="*",
+        help="Optional workflow name and/or config path. Supported forms: "
+        "'python -m impacts.emfac', "
+        "'python -m impacts.emfac examples/emfac/settings.yaml', "
+        "'python -m impacts.emfac activities examples/emfac/settings.yaml', "
+        "'python -m impacts.emfac fleet examples/emfac/settings.yaml'.",
     )
     parser.add_argument(
         "--config",
@@ -32,15 +34,31 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _parse_workflow_and_config(args: argparse.Namespace) -> tuple[str | None, str | None]:
+    workflow: str | None = None
+    config_path = args.config_path
+    positional = list(args.args or [])
+    if positional and positional[0] in {"activities", "fleet"}:
+        workflow = positional.pop(0)
+    if positional:
+        if config_path is not None:
+            raise SystemExit("Specify the EMFAC config path either positionally or with --config, not both.")
+        if len(positional) > 1:
+            raise SystemExit("Too many positional arguments. Expected at most one config path.")
+        config_path = positional[0]
+    return workflow, config_path
+
+
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
-    if args.workflow == "activities":
-        run_activities(args.config_path)
+    workflow, config_path = _parse_workflow_and_config(args)
+    if workflow == "activities":
+        run_activities(config_path)
         return
-    if args.workflow == "fleet":
-        run_fleet(args.config_path)
+    if workflow == "fleet":
+        run_fleet(config_path)
         return
-    fleet_workflow = load_fleet_workflow(args.config_path)
+    fleet_workflow = load_fleet_workflow(config_path)
     missing = _missing_activities_outputs(fleet_workflow)
     if missing:
         print("Running EMFAC activities first because required activities outputs are missing:")

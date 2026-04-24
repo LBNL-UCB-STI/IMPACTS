@@ -11,21 +11,16 @@ emfac:
   activities:
     model_year_groups:
       light_duty:
-        - max_year: 2003
-        - min_year: 2004
-          max_year: 2014
-        - min_year: 2015
+        - "<=2003"
+        - "2004-2014"
+        - ">=2015"
       medium_heavy_duty:
-        - max_year: 2002
-        - min_year: 2003
-          max_year: 2006
-        - min_year: 2007
-          max_year: 2009
-        - min_year: 2010
-          max_year: 2012
-        - min_year: 2013
-          max_year: 2015
-        - min_year: 2016
+        - "<=2002"
+        - "2003-2006"
+        - "2007-2009"
+        - "2010-2012"
+        - "2013-2015"
+        - ">=2016"
     project_analysis:
       - main:
           - folder: ~/Workspace/Models/emfac/raw/sfbay-emfac-project-analysis
@@ -43,16 +38,35 @@ emfac:
           - pollutant: BCh
       - paved_road_dust:
           - folder: ~/Workspace/Models/emfac/raw/statewide-carb-road-dust
+          - road_category_map:
+              motorway: Freeway
+              motorway_link: Freeway
+              trunk: Freeway
+              trunk_link: Major
+              primary: Major
+              primary_link: Major
+              secondary: Collector
+              secondary_link: Collector
+              tertiary: Collector
+              tertiary_link: Collector
+              unclassified: Collector
+              residential: Local Urban
     emissions_inventory:
-      - main: ~/Workspace/Models/emfac/raw/sfbay-emfac-emissions-inventory
-      - fallback: ~/Workspace/Models/emfac/raw/statewide-emfac-emissions-inventory
+      - inventory_folder: ~/Workspace/Models/emfac/raw/sfbay-emfac-emissions-inventory
+      - fallback_folder: ~/Workspace/Models/emfac/raw/statewide-emfac-emissions-inventory
       - vehicle_category_attributes_file: ~/Workspace/Models/emfac/raw/emfac_vehicle_category_attributes.csv
+      - fuel_map:
+          Dsl: [Diesel]
+          Elec: [Electricity]
+          Gas: [Gasoline]
+          NG: [Natural Gas]
+          Phe: [Plug-in Hybrid]
 
   fleet:
     # Single standardized vehicle-type assignment model file.
     # It contains the named freight and passenger assignment models,
     # including scoring weights and embedded evidence tables.
-    vehicle_type_assignment_model_settings: examples/emfac/vehicle_type_assignment_model.yaml
+    vehicle_type_assignment_model_settings: examples/emfac/fleet_assignment.yaml
 
     atlas:
       year: 2019
@@ -60,6 +74,11 @@ emfac:
       households_file: ~/Workspace/Simulation/sfbay/urbansim/households.parquet
       persons_file: ~/Workspace/Simulation/sfbay/urbansim/persons.parquet
       income_bins: [0, 30, 60, 100, 200, 9999]
+      fuel_map:
+        gasoline: [conv, hybrid, cng]
+        electricity: [ev]
+        hydrogen: [fuelcell]
+        electricity+gasoline: [phev]
 
     frism:
       year: 2018
@@ -67,9 +86,7 @@ emfac:
       payloads_file: ~/Workspace/Simulation/sfbay/beam-ft/20250730/2018-Baseline/payloads--2018-Baseline.parquet
       tours_file: ~/Workspace/Simulation/sfbay/beam-ft/20250730/2018-Baseline/tours--2018-Baseline.parquet
 
-    fastsim:
+    beam:
       passenger_vehicle_types_file: ~/Workspace/Simulation/sfbay/vehicle-tech/vehicleTypes_inventory.csv
       freight_vehicle_types_file: ~/Workspace/Simulation/sfbay/beam-ft/20250730/vehicle-tech/vehicletypes--frism--2018-Baseline.csv
-      fastsim_catalog_breakdown: ~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/fuel/fastsim_catalog_breakdown.csv
-      ldv_fastsim_data_folder: ~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/fuel/Baseline_FASTSimData_Representative_Vehicles_lookup_tables_output
-      mhdv_fastsim_data_folder: ~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/fuel/Freight_Baseline_FASTSimData_2020
+      fuel_consumption_catalog: ~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/_fuel_vehicle_catalog.csv

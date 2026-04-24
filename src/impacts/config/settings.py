@@ -9,7 +9,7 @@ from typing import List
 from typing import Optional
 
 from .defaults import pollutants as canonical_pollutants
-from ._coerce import _required_string, _optional_string, _required_int, _optional_int, _required_float, _optional_float, _required_bool, _coerce_string_list, _reject_unknown_keys, _required_float_or_string
+from ._coerce import _required_string, _optional_string, _required_int, _optional_int, _required_float, _optional_float, _required_bool, _coerce_string_list, _reject_unknown_keys
 
 
 def _coerce_string_map(value: Any) -> Dict[str, str]:
@@ -319,11 +319,49 @@ class EmissionsInventory:
 
 @dataclass(frozen=True)
 class Emissions:
+    @dataclass(frozen=True)
+    class Defaults:
+        @dataclass(frozen=True)
+        class AnnualizationDays:
+            light_duty: float
+            medium_heavy_duty: float
+
+            @classmethod
+            def from_dict(cls, payload: Dict[str, Any]) -> "Emissions.Defaults.AnnualizationDays":
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected mapping for impacts.emissions.defaults.annualization_days")
+                _reject_unknown_keys(
+                    payload,
+                    {"light_duty", "medium_heavy_duty"},
+                    "impacts.emissions.defaults.annualization_days",
+                )
+                return cls(
+                    light_duty=_required_float(
+                        payload.get("light_duty"),
+                        "impacts.emissions.defaults.annualization_days.light_duty",
+                    ),
+                    medium_heavy_duty=_required_float(
+                        payload.get("medium_heavy_duty"),
+                        "impacts.emissions.defaults.annualization_days.medium_heavy_duty",
+                    ),
+                )
+
+        annualization_days: "Emissions.Defaults.AnnualizationDays"
+
+        @classmethod
+        def from_dict(cls, payload: Dict[str, Any]) -> "Emissions.Defaults":
+            _reject_unknown_keys(payload, {"annualization_days"}, "impacts.emissions.defaults")
+            return cls(
+                annualization_days=Emissions.Defaults.AnnualizationDays.from_dict(
+                    dict(payload.get("annualization_days", {}) or {})
+                )
+            )
+
     osm_network_folder: str
     emissions_rates_folder: str
     inventory: EmissionsInventory
     vehicle_category_metadata_file: Optional[str]
-    annualization_days_or_file: float | str
+    defaults: "Emissions.Defaults"
     source_pollutants: List[str]
 
     @classmethod
@@ -335,7 +373,7 @@ class Emissions:
                 "emissions_rates_folder",
                 "inventory",
                 "vehicle_category_metadata_file",
-                "annualization_days_or_file",
+                "defaults",
                 "pollutants",
             },
             "impacts.emissions",
@@ -357,9 +395,8 @@ class Emissions:
             vehicle_category_metadata_file=_optional_string(
                 payload.get("vehicle_category_metadata_file")
             ),
-            annualization_days_or_file=_required_float_or_string(
-                payload.get("annualization_days_or_file"),
-                "impacts.emissions.annualization_days_or_file",
+            defaults=Emissions.Defaults.from_dict(
+                dict(payload.get("defaults", {}) or {})
             ),
             source_pollutants=source_pollutants,
         )
@@ -738,7 +775,12 @@ class ImpactsSettings:
                         "enable_freight_activity_correction": self.impacts.emissions.inventory.enable_freight_activity_correction,
                     },
                     "vehicle_category_metadata_file": self.impacts.emissions.vehicle_category_metadata_file,
-                    "annualization_days_or_file": self.impacts.emissions.annualization_days_or_file,
+                    "defaults": {
+                        "annualization_days": {
+                            "light_duty": self.impacts.emissions.defaults.annualization_days.light_duty,
+                            "medium_heavy_duty": self.impacts.emissions.defaults.annualization_days.medium_heavy_duty,
+                        }
+                    },
                     "pollutants": list(self.impacts.emissions.source_pollutants),
                 },
                 "dispersions": {

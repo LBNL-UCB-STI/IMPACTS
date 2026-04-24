@@ -31,8 +31,8 @@ def test_build_activity_by_emfac_id_table_aggregates_to_county_emfac_id_and_proc
     )
     model_year_groups = {
         "light_duty": [
-            {"name": "pre2004", "min_year": None, "max_year": 2003},
-            {"name": "post2014", "min_year": 2015, "max_year": None},
+            "<=2003",
+            ">=2015",
         ]
     }
 

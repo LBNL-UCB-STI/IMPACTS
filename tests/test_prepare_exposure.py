@@ -48,7 +48,8 @@ def _pipeline(tmp_path: Path, grid_path: Path) -> PipelineConfig:
             "prepared_skims_group_cols": ["hour", "linkId"],
             "pollutants": ["NOx", "PM2_5", "BC"],
             "source_pollutants": ["NOx", "PM2_5", "BC"],
-            "annualization_days_or_file": 330.0,
+            "vehicle_category_metadata_file": str(tmp_path / "vehicle_category_metadata.csv"),
+            "annualization_days": {"light_duty": 327.0, "medium_heavy_duty": 312.0},
             "population_sample": 0.1,
         }
     )

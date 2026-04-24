@@ -69,7 +69,6 @@ def build_inputs_manifest(
     )
     staged_passenger_inventory_file = step1_outputs["staged_passenger_inventory_file"]
     staged_freight_inventory_file = step1_outputs["staged_freight_inventory_file"]
-    staged_annualization_days_or_file = step1_outputs["staged_annualization_days_or_file"]
     staged_isrm = step1_outputs["staged_isrm"]
     staged_isrm_nox_to_no2_ratios_file = step1_outputs["staged_isrm_nox_to_no2_ratios_file"]
     staged_asrv_patterns_file = step1_outputs["staged_asrv_patterns_file"]
@@ -167,7 +166,15 @@ def build_inputs_manifest(
             "enable_freight_inventory_activity_correction": bool(emissions.inventory.enable_freight_activity_correction),
             "passenger_vehicle_types_file": resolve_required_manifest_input(manifest_inputs, key="passenger_vehicle_types_input"),
             "freight_vehicle_types_file": resolve_required_manifest_input(manifest_inputs, key="freight_vehicle_types_input"),
-            "annualization_days_or_file": staged_annualization_days_or_file,
+            "vehicle_category_metadata_file": (
+                resolve_required_manifest_input(manifest_inputs, key="vehicle_category_metadata_file_input")
+                if emissions.vehicle_category_metadata_file
+                else None
+            ),
+            "annualization_days": {
+                "light_duty": float(emissions.defaults.annualization_days.light_duty),
+                "medium_heavy_duty": float(emissions.defaults.annualization_days.medium_heavy_duty),
+            },
             "population_sample": float(beam_processing.population_sample),
             "transit_sample": float(beam_processing.transit_sample),
             "include_non_osm_car_links": bool(beam_processing.include_non_osm_car_links),

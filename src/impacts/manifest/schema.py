@@ -9,9 +9,9 @@ from typing import Dict
 from typing import List
 from typing import Optional
 
-from impacts.config.defaults import representative_days_per_year as default_representative_days_per_year
+from impacts.config.defaults import annualization_days_by_vehicle_group as default_annualization_days_by_vehicle_group
 from impacts.config.settings import build_pollutants_map_from_sources
-from ..config._coerce import _required_string, _optional_string, _required_int, _optional_int, _required_float, _optional_float, _required_bool, _coerce_string_list, _reject_unknown_keys, _required_float_or_string
+from ..config._coerce import _required_string, _optional_string, _required_int, _optional_int, _required_float, _optional_float, _required_bool, _coerce_string_list, _reject_unknown_keys
 
 
 def _required_dict(value: Any, label: str) -> Dict[str, Any]:
@@ -54,10 +54,13 @@ class PipelineConfig:
     enable_freight_inventory_activity_correction: bool = True
     passenger_vehicle_types_file: Optional[str] = None
     freight_vehicle_types_file: Optional[str] = None
+    vehicle_category_metadata_file: Optional[str] = None
     prepared_skims_group_cols: List[str] = field(default_factory=list)
     pollutants: List[str] = field(default_factory=list)
     source_pollutants: List[str] = field(default_factory=list)
-    annualization_days_or_file: float | str = default_representative_days_per_year
+    annualization_days: Dict[str, float] = field(
+        default_factory=lambda: dict(default_annualization_days_by_vehicle_group)
+    )
     population_sample: float = 1.0
     transit_sample: float = 1.0
     include_non_osm_car_links: bool = False
@@ -101,10 +104,11 @@ class PipelineConfig:
                 "enable_freight_inventory_activity_correction",
                 "passenger_vehicle_types_file",
                 "freight_vehicle_types_file",
+                "vehicle_category_metadata_file",
                 "prepared_skims_group_cols",
                 "pollutants",
                 "source_pollutants",
-                "annualization_days_or_file",
+                "annualization_days",
                 "population_sample",
                 "transit_sample",
                 "include_non_osm_car_links",
@@ -180,10 +184,11 @@ class PipelineConfig:
                 payload.get("freight_vehicle_types_file"),
                 "pipeline.freight_vehicle_types_file",
             ),
+            vehicle_category_metadata_file=_optional_string(payload.get("vehicle_category_metadata_file")),
             prepared_skims_group_cols=_coerce_string_list(payload.get("prepared_skims_group_cols")),
             pollutants=_coerce_string_list(payload.get("pollutants")),
             source_pollutants=_coerce_string_list(payload.get("source_pollutants")),
-            annualization_days_or_file=_required_float_or_string(payload.get("annualization_days_or_file"), "pipeline.annualization_days_or_file"),
+            annualization_days=_required_dict(payload.get("annualization_days"), "pipeline.annualization_days"),
             population_sample=_required_float(payload.get("population_sample"), "pipeline.population_sample"),
             transit_sample=(
                 _optional_float(payload.get("transit_sample"))
@@ -206,6 +211,10 @@ class PipelineConfig:
                 else True
             ),
         )
+        for key in ("light_duty", "medium_heavy_duty"):
+            if key not in result.annualization_days:
+                raise ValueError(f"Missing required value: pipeline.annualization_days.{key}")
+            result.annualization_days[key] = float(result.annualization_days[key])
         if not result.source_pollutants:
             raise ValueError("Missing required value: pipeline.source_pollutants")
         if not result.pollutants:

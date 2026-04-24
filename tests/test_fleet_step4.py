@@ -6,11 +6,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from impacts.emfac.fleet.step4_map_emfac_frism import _build_dag_log_score
+from impacts.emfac.fleet.step4_map_emfac_frism import _build_freight_bayesian_log_score
 from impacts.emfac.fleet.step4_map_emfac_frism import _build_freight_naics_sector_weight_lookup
 from impacts.emfac.fleet.step4_map_emfac_frism import _build_payload_mass_thresholds
 from impacts.emfac.fleet.step4_map_emfac_frism import _filter_required_port_classes
-from impacts.emfac.fleet.step4_map_emfac_frism import _build_freight_port_weight_lookup
 from impacts.emfac.fleet.step4_map_emfac_frism import _build_tour_port_weight_lookup
 from impacts.emfac.fleet.step4_map_emfac_frism import _load_configured_port_classes
 from impacts.emfac.fleet.step4_map_emfac_frism import _load_vehicle_type_assignment_table
@@ -20,7 +19,7 @@ from impacts.emfac.fleet.step4_map_emfac_frism import _normalize_zone_id
 
 
 def _write_model_file(tmp_path: Path, *, port_rows: list[str] | None = None) -> dict[str, dict[str, str]]:
-    model_file = tmp_path / "vehicle_type_assignment_model.yaml"
+    model_file = tmp_path / "fleet_assignment.yaml"
     port_entries = []
     for line in port_rows or ["zone,port_name,emfac_vehicle_category"]:
         if line == "zone,port_name,emfac_vehicle_category" or line == "zone,emfac_vehicle_category,port_name":
@@ -39,15 +38,26 @@ def _write_model_file(tmp_path: Path, *, port_rows: list[str] | None = None) -> 
     model_file.write_text(
         "\n".join(
             [
-                "models:",
-                "  freight_bayesian_dag:",
-                "    scoring:",
-                "      likelihood_floor: 0.01",
-                "      weights:",
-                "        prior_vmt_share: 1.0",
-                "        naics_sector: 1.0",
-                "        port_location: 1.0",
-                "    evidence:",
+                "fleet_assignment:",
+                "  models:",
+                "    freight_bayesian_dag:",
+                "      scoring:",
+                "        likelihood_floor: 0.01",
+                "        weights:",
+                "          fleet_vmt_prior: 1.0",
+                "          naics_sector: 1.0",
+                "          payload_mass: 1.0",
+                "          port_location: 1.0",
+                "      evidence: {}",
+                "    passenger_bayesian_dag:",
+                "      scoring:",
+                "        weights:",
+                "          bodytype: 1.0",
+                "          fuel: 1.0",
+                "          emfac_vmt: 0.0",
+                "      evidence: {}",
+                "  mappings:",
+                "    freight:",
                 "      vehicle_categories:",
                 "        Class12aVocational: [LDA, LDT1, LDT2]",
                 "      fuel_types:",
@@ -58,17 +68,13 @@ def _write_model_file(tmp_path: Path, *, port_rows: list[str] | None = None) -> 
                 "            - T7 Tractor Class 8",
                 "      port_location:",
                 port_rows_yaml.replace("    - ", "      - ").replace("      zone_codes:", "        zone_codes:").replace("      label:", "        label:").replace("      vehicle_category:", "        vehicle_category:").replace("        - ", "          - "),
-                "  passenger_bayesian_dag:",
-                "    scoring:",
-                "      weights:",
-                "        bodytype: 1.0",
-                "        fuel: 1.0",
-                "        emfac_vmt: 0.0",
-                "    evidence:",
-                "      vehicle_categories:",
+                "    passenger:",
+                "      body_types:",
                 "        car: [LDA]",
                 "      fuel_types:",
                 "        conv: [Gas]",
+                "      vehicle_categories:",
+                "        Car: [LDA]",
             ]
         ),
         encoding="utf-8",
@@ -76,21 +82,21 @@ def _write_model_file(tmp_path: Path, *, port_rows: list[str] | None = None) -> 
     return {"vehicle_type_assignment": {"model_file": str(model_file)}}
 
 
-def test_build_dag_log_score_uses_grouped_geometric_means() -> None:
+def test_build_freight_bayesian_log_score_uses_grouped_geometric_means() -> None:
     matched = pd.DataFrame(
         [
             {
                 "fleetShare": 0.25,
                 "naicsSectorLikelihood": 0.25,
-                "massLikelihood": 1.0,
+                "payloadMassLikelihood": 1.0,
                 "portLikelihood": 0.25,
             }
         ]
     )
 
-    score = _build_dag_log_score(
+    score = _build_freight_bayesian_log_score(
         matched=matched,
-        branch_weights={"prior": 1.0, "naics_sector": 2.0, "mass": 2.0, "port": 3.0},
+        branch_weights={"fleet_vmt_prior": 1.0, "naics_sector": 2.0, "payload_mass": 2.0, "port_location": 3.0},
     )
 
     expected = (
@@ -111,19 +117,26 @@ def test_normalize_zone_id_preserves_string_ids_and_strips_decimal_suffix() -> N
 
 
 def test_load_vehicle_type_assignment_table_expands_naics_code_lists(tmp_path: Path) -> None:
-    model_file = tmp_path / "vehicle_type_assignment_model.yaml"
+    model_file = tmp_path / "fleet_assignment.yaml"
     model_file.write_text(
         "\n".join(
             [
-                "models:",
-                "  freight_bayesian_dag:",
-                "    scoring:",
-                "      likelihood_floor: 0.01",
-                "      weights:",
-                "        prior_vmt_share: 1.0",
-                "        naics_sector: 1.0",
-                "        port_location: 1.0",
-                "    evidence:",
+                "fleet_assignment:",
+                "  models:",
+                "    freight_bayesian_dag:",
+                "      scoring:",
+                "        likelihood_floor: 0.01",
+                "        weights:",
+                "          fleet_vmt_prior: 1.0",
+                "          naics_sector: 1.0",
+                "          payload_mass: 1.0",
+                "          port_location: 1.0",
+                "      evidence: {}",
+                "    passenger_bayesian_dag:",
+                "      scoring: {}",
+                "      evidence: {}",
+                "  mappings:",
+                "    freight:",
                 "      vehicle_categories:",
                 "        Class12aVocational: [LDA, LDT1, LDT2]",
                 "      fuel_types:",
@@ -135,13 +148,13 @@ def test_load_vehicle_type_assignment_table_expands_naics_code_lists(tmp_path: P
                 "          vehicle_category:",
                 "            - T7 Tractor Class 8",
                 "      port_location: []",
-                "  passenger_bayesian_dag:",
-                "    scoring: {}",
-                "    evidence:",
-                "      vehicle_categories:",
+                "    passenger:",
+                "      body_types:",
                 "        car: [LDA]",
                 "      fuel_types:",
-                "        conv: [Gas]",
+                "        gasoline: [Gas]",
+                "      vehicle_categories:",
+                "        Car: [LDA]",
             ]
         ),
         encoding="utf-8",
@@ -157,38 +170,12 @@ def test_load_vehicle_type_assignment_table_expands_naics_code_lists(tmp_path: P
     ]
 
 
-def test_build_freight_port_weight_lookup_uses_only_payload_location_zone() -> None:
-    payload_profiles = pd.DataFrame(
-        [
-            {"oldVehicleTypeId": "HdtDsl", "locationZone": "060014017001"},
-            {"oldVehicleTypeId": "HdtDsl", "locationZone": "060014017001.0"},
-            {"oldVehicleTypeId": "HdtDsl", "locationZone": "060750101001"},
-            {"oldVehicleTypeId": "HdvDsl", "locationZone": "060750615001"},
-        ]
-    )
-    port_zone_mapping = pd.DataFrame(
-        [
-            {"zone": "060014017001", "emfac_vehicle_category": "T7 POAK Class 8", "port_name": "Port of Oakland"},
-            {"zone": "060750101001", "emfac_vehicle_category": "T7 Other Port Class 8", "port_name": "Port of San Francisco"},
-            {"zone": "060750615001", "emfac_vehicle_category": "T7 Other Port Class 8", "port_name": "Port of San Francisco"},
-        ]
-    )
-
-    lookup = _build_freight_port_weight_lookup(
-        payload_profiles=payload_profiles,
-        port_zone_mapping=port_zone_mapping,
-    )
-
-    assert lookup["HdtDsl"] == {"T7 POAK Class 8": 1.0, "T7 Other Port Class 8": 1.0}
-    assert lookup["HdvDsl"] == {"T7 Other Port Class 8": 1.0}
-
-
 def test_build_tour_port_weight_lookup_is_tour_specific() -> None:
     payload_profiles = pd.DataFrame(
         [
-            {"tourId": "t1", "oldVehicleTypeId": "HdtDsl", "locationZone": "060014017001"},
-            {"tourId": "t2", "oldVehicleTypeId": "HdtDsl", "locationZone": "060750101001"},
-            {"tourId": "t3", "oldVehicleTypeId": "HdtDsl", "locationZone": "999999999999"},
+            {"tourId": "t1", "frismVehicleTypeId": "HdtDsl", "locationZone": "060014017001"},
+            {"tourId": "t2", "frismVehicleTypeId": "HdtDsl", "locationZone": "060750101001"},
+            {"tourId": "t3", "frismVehicleTypeId": "HdtDsl", "locationZone": "999999999999"},
         ]
     )
     port_zone_mapping = pd.DataFrame(
@@ -213,7 +200,7 @@ def test_build_freight_naics_sector_weight_lookup_uses_naics_sector_only() -> No
         [
             {
                 "tourId": "t1",
-                "oldVehicleTypeId": "HdtDsl",
+                "frismVehicleTypeId": "HdtDsl",
                 "sequenceRank": 1,
                 "activityType": "loading",
                 "sellerNAICS": "111100",
@@ -224,7 +211,7 @@ def test_build_freight_naics_sector_weight_lookup_uses_naics_sector_only() -> No
             },
             {
                 "tourId": "t2",
-                "oldVehicleTypeId": "HdtDsl",
+                "frismVehicleTypeId": "HdtDsl",
                 "sequenceRank": 1,
                 "activityType": "loading",
                 "sellerNAICS": "111300",
@@ -235,7 +222,7 @@ def test_build_freight_naics_sector_weight_lookup_uses_naics_sector_only() -> No
             },
             {
                 "tourId": "t3",
-                "oldVehicleTypeId": "HdtDsl",
+                "frismVehicleTypeId": "HdtDsl",
                 "sequenceRank": 1,
                 "activityType": "loading",
                 "sellerNAICS": "311100",
@@ -271,12 +258,12 @@ def test_build_freight_naics_sector_weight_lookup_uses_naics_sector_only() -> No
 def test_build_payload_mass_thresholds_uses_peak_cumulative_onboard_payload() -> None:
     payload_profiles = pd.DataFrame(
         [
-            {"tourId": "t1", "oldVehicleTypeId": "HdtDsl", "sequenceRank": 1, "activityType": "loading", "weightInKg": 2000.0},
-            {"tourId": "t1", "oldVehicleTypeId": "HdtDsl", "sequenceRank": 2, "activityType": "loading", "weightInKg": 3000.0},
-            {"tourId": "t1", "oldVehicleTypeId": "HdtDsl", "sequenceRank": 3, "activityType": "unloading", "weightInKg": 1000.0},
-            {"tourId": "t2", "oldVehicleTypeId": "HdtDsl", "sequenceRank": 1, "activityType": "unloading", "weightInKg": 500.0},
-            {"tourId": "t2", "oldVehicleTypeId": "HdtDsl", "sequenceRank": 2, "activityType": "loading", "weightInKg": 2500.0},
-            {"tourId": "t2", "oldVehicleTypeId": "HdtDsl", "sequenceRank": 3, "activityType": "loading", "weightInKg": 500.0},
+            {"tourId": "t1", "frismVehicleTypeId": "HdtDsl", "sequenceRank": 1, "activityType": "loading", "weightInKg": 2000.0},
+            {"tourId": "t1", "frismVehicleTypeId": "HdtDsl", "sequenceRank": 2, "activityType": "loading", "weightInKg": 3000.0},
+            {"tourId": "t1", "frismVehicleTypeId": "HdtDsl", "sequenceRank": 3, "activityType": "unloading", "weightInKg": 1000.0},
+            {"tourId": "t2", "frismVehicleTypeId": "HdtDsl", "sequenceRank": 1, "activityType": "unloading", "weightInKg": 500.0},
+            {"tourId": "t2", "frismVehicleTypeId": "HdtDsl", "sequenceRank": 2, "activityType": "loading", "weightInKg": 2500.0},
+            {"tourId": "t2", "frismVehicleTypeId": "HdtDsl", "sequenceRank": 3, "activityType": "loading", "weightInKg": 500.0},
         ]
     )
 

@@ -42,8 +42,11 @@ impacts:
       freight_file: vehicle-tech/emissions/sf-emfac-2018-inventory-final-freight-activity.parquet
       enable_passenger_activity_correction: false
       enable_freight_activity_correction: false
-    vehicle_category_metadata_file: vehicle-tech/emissions/emfac_vehicle_category_attributes.csv
-    annualization_days_or_file: vehicle-tech/emissions/emfac_vehicle_category_attributes.csv
+    vehicle_category_metadata_file: vehicle-tech/_emissions_vehicle_catalog.csv
+    defaults:
+      annualization_days:
+        light_duty: 327.0
+        medium_heavy_duty: 312.0
     pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
   dispersions:
     inmap:

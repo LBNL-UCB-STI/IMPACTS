@@ -28,13 +28,9 @@ POLLUTANT_COLUMNS = [
     "tog_gram",
 ]
 GROUP_RATE_KEYS = ["county", "vehicleCategory", "fuel", "modelYear", "process"]
-CLASS_FUEL_ALTERNATIVES = {
-    ("T6 Instate Tractor Class 6", "NG"): ("T6 Instate Other Class 6", "NG"),
-    ("T6 Utility Class 5", "NG"): ("T6 Public Class 5", "NG"),
-    ("T6 Utility Class 6", "NG"): ("T6 Public Class 6", "NG"),
-    ("T6 Utility Class 7", "NG"): ("T6 Public Class 7", "NG"),
-    ("T7 POAK Class 8", "NG"): ("T7 POLA Class 8", "NG"),
-}
+SPEED_MPH_PROCESSES = {"RUNEX", "PMBW", "PTOEX"}
+TIME_PROCESSES = {"STREX"}
+OTHER_PROCESSES = {"DIURN", "HOTSOAK", "IDLEX", "PMTW", "RUNLOSS"}
 INVENTORY_POLLUTANT_MAP = {
     "ch4_gram": "ch4_{process}_short_tons_per_year",
     "co_gram": "co_{process}_short_tons_per_year",
@@ -50,9 +46,13 @@ INVENTORY_POLLUTANT_MAP = {
     "sox_gram": "sox_{process}_short_tons_per_year",
     "tog_gram": "tog_{process}_short_tons_per_year",
 }
-SPEED_MPH_PROCESSES = {"RUNEX", "PMBW", "PTOEX"}
-TIME_PROCESSES = {"STREX"}
-OTHER_PROCESSES = {"DIURN", "HOTSOAK", "IDLEX", "PMTW", "RUNLOSS"}
+
+_ACTIVITIES_RATE_MAPPINGS: dict[str, object] = {}
+
+
+def _set_activities_rate_mappings(mappings: dict[str, object]) -> None:
+    global _ACTIVITIES_RATE_MAPPINGS
+    _ACTIVITIES_RATE_MAPPINGS = {}
 
 
 def _format_numeric_series(values: pd.Series) -> pd.Series:
@@ -410,7 +410,7 @@ def fill_project_analysis_rates(
     return statewide_surface
 
 
-def _run_step3_substep_load_fill_inputs(
+def _load_step3_inputs(
     workflow: dict[str, object],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     return (
@@ -423,19 +423,18 @@ def _run_step3_substep_load_fill_inputs(
     )
 
 
-def _run_step3_substep_fill_group(
+def _fill_group_rates(
     *,
-    workflow: dict[str, object],
     group_name: str,
+    comprehensive_surface: pd.DataFrame,
     project_analysis_source: pd.DataFrame,
     project_analysis_nh3_rates: pd.DataFrame,
     project_analysis_bc: pd.DataFrame,
     project_analysis_prdust: pd.DataFrame,
     emissions_inventory: pd.DataFrame,
     statewide_inventory: pd.DataFrame,
-) -> dict[str, object]:
-    comprehensive_surface = _load_parquet(workflow["paths"][f"project_analysis_{group_name}"])
-    filled = fill_project_analysis_rates(
+) -> pd.DataFrame:
+    return fill_project_analysis_rates(
         comprehensive_surface,
         project_analysis_source=project_analysis_source,
         project_analysis_nh3_rates=project_analysis_nh3_rates,
@@ -444,27 +443,28 @@ def _run_step3_substep_fill_group(
         emissions_inventory=emissions_inventory,
         statewide_inventory=statewide_inventory,
     )
+
+
+def _impute_group_rates(
+    *,
+    workflow: dict[str, object],
+    group_name: str,
+    comprehensive_surface: pd.DataFrame,
+    initially_filled: pd.DataFrame,
+    project_analysis_source: pd.DataFrame,
+    project_analysis_nh3_rates: pd.DataFrame,
+    project_analysis_bc: pd.DataFrame,
+    project_analysis_prdust: pd.DataFrame,
+    emissions_inventory: pd.DataFrame,
+    statewide_inventory: pd.DataFrame,
+) -> dict[str, object]:
+    filled = initially_filled.copy()
     grouped_missing_summaries: list[dict[str, object]] = []
     grouped_missing_summaries.append(
         {"label": "initial fill", **_print_missing_rate_group_summary(filled, label=f"{group_name} initial fill")}
     )
     zero_row_cleanups: list[dict[str, object]] = []
-    print("    3.2 Apply EMFAC rate donor mapping for unresolved rows and refill")
-    filled = _fill_with_emfac_rate_donors(
-        filled,
-        project_analysis_source=project_analysis_source,
-        project_analysis_nh3_rates=project_analysis_nh3_rates,
-        project_analysis_bc=project_analysis_bc,
-        project_analysis_prdust=project_analysis_prdust,
-        emissions_inventory=emissions_inventory,
-        statewide_inventory=statewide_inventory,
-    )
-    filled, zero_summary = _replace_all_zero_pollutant_rows_with_missing(filled, label=f"{group_name} EMFAC rate donor refill")
-    zero_row_cleanups.append(zero_summary)
-    grouped_missing_summaries.append(
-        {"label": "EMFAC rate donor refill", **_print_missing_rate_group_summary(filled, label=f"{group_name} EMFAC rate donor refill")}
-    )
-    print("    3.3 Apply speed fallback for unresolved rows and refill")
+    print(f"      Apply speed fallback for unresolved {group_name} rows and refill")
     filled = _fill_with_speed_fallback(
         filled,
         reference_rates=project_analysis_source,
@@ -638,56 +638,6 @@ def _filter_unresolved_rows_without_source_coverage(
     }
 
 
-def _fill_with_emfac_rate_donors(
-    surface: pd.DataFrame,
-    *,
-    project_analysis_source: pd.DataFrame,
-    project_analysis_nh3_rates: pd.DataFrame,
-    project_analysis_bc: pd.DataFrame,
-    project_analysis_prdust: pd.DataFrame,
-    emissions_inventory: pd.DataFrame,
-    statewide_inventory: pd.DataFrame,
-) -> pd.DataFrame:
-    unresolved_mask = ~surface[POLLUTANT_COLUMNS].notna().any(axis=1)
-    if not unresolved_mask.any():
-        return surface
-
-    donor_surface = surface.loc[unresolved_mask].copy()
-    donor_surface["_surface_index"] = donor_surface.index
-    donor_keys = list(zip(donor_surface["vehicleCategory"], donor_surface["fuel"]))
-    replacements = pd.Series(donor_keys, index=donor_surface.index).map(CLASS_FUEL_ALTERNATIVES)
-    matched = replacements.notna()
-    if not matched.any():
-        return surface
-
-    replacement_frame = pd.DataFrame(
-        replacements.loc[matched].tolist(),
-        index=replacements.loc[matched].index,
-        columns=["vehicleCategory", "fuel"],
-    )
-    donor_surface.loc[matched, ["vehicleCategory", "fuel"]] = replacement_frame
-
-    donor_filled = fill_project_analysis_rates(
-        donor_surface.drop(columns="_surface_index"),
-        project_analysis_source=project_analysis_source,
-        project_analysis_nh3_rates=project_analysis_nh3_rates,
-        project_analysis_bc=project_analysis_bc,
-        project_analysis_prdust=project_analysis_prdust,
-        emissions_inventory=emissions_inventory,
-        statewide_inventory=statewide_inventory,
-    )
-    donor_filled["_surface_index"] = donor_surface["_surface_index"].to_numpy()
-
-    result = surface.copy()
-    for column in POLLUTANT_COLUMNS:
-        if column not in donor_filled.columns:
-            continue
-        refill = donor_filled.set_index("_surface_index")[column]
-        target_index = refill.index.intersection(result.index)
-        result.loc[target_index, column] = refill.loc[target_index].combine_first(result.loc[target_index, column])
-    return result
-
-
 def _apply_speed_fallback_keys(surface: pd.DataFrame, reference_rates: pd.DataFrame) -> pd.DataFrame:
     unresolved_mask = ~surface[POLLUTANT_COLUMNS].notna().any(axis=1)
     if not unresolved_mask.any():
@@ -769,7 +719,8 @@ def _write_parquet(frame: pd.DataFrame, path: str) -> str:
 
 def run_step3(workflow: dict[str, object]) -> dict[str, object]:
     print("  Step 3. Fill Project Analysis Rates")
-    print("    3.1 Fill rates from project analysis, study-area inventory, and statewide inventory")
+    _set_activities_rate_mappings(workflow.get("run", {}).get("mappings", {}) or {})
+    print("    3.1 Load rate sources and fallback inventories")
     (
         project_analysis_source,
         project_analysis_nh3_rates,
@@ -777,7 +728,7 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
         project_analysis_prdust,
         emissions_inventory,
         statewide_inventory,
-    ) = _run_step3_substep_load_fill_inputs(workflow)
+    ) = _load_step3_inputs(workflow)
     trace_payload: dict[str, object] = {
         "project_analysis_source": frame_summary(project_analysis_source, name="project_analysis_source"),
         "project_analysis_nh3_rates": frame_summary(project_analysis_nh3_rates, name="project_analysis_nh3_rates"),
@@ -786,19 +737,60 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
         "emissions_inventory": frame_summary(emissions_inventory, name="emissions_inventory"),
         "statewide_inventory": frame_summary(statewide_inventory, name="statewide_inventory"),
     }
-    for group_name in ("passenger", "freight"):
-        trace_payload.update(
-            _run_step3_substep_fill_group(
-                workflow=workflow,
-                group_name=group_name,
-                project_analysis_source=project_analysis_source,
-                project_analysis_nh3_rates=project_analysis_nh3_rates,
-                project_analysis_bc=project_analysis_bc,
-                project_analysis_prdust=project_analysis_prdust,
-                emissions_inventory=emissions_inventory,
-                statewide_inventory=statewide_inventory,
-            )
+    passenger_comprehensive_surface = _load_parquet(workflow["paths"]["project_analysis_passenger"])
+    print("    3.2 Initial fill passenger rates")
+    passenger_initial_fill = _fill_group_rates(
+        group_name="passenger",
+        comprehensive_surface=passenger_comprehensive_surface,
+        project_analysis_source=project_analysis_source,
+        project_analysis_nh3_rates=project_analysis_nh3_rates,
+        project_analysis_bc=project_analysis_bc,
+        project_analysis_prdust=project_analysis_prdust,
+        emissions_inventory=emissions_inventory,
+        statewide_inventory=statewide_inventory,
+    )
+    print("    3.3 Impute passenger rates")
+    trace_payload.update(
+        _impute_group_rates(
+            workflow=workflow,
+            group_name="passenger",
+            comprehensive_surface=passenger_comprehensive_surface,
+            initially_filled=passenger_initial_fill,
+            project_analysis_source=project_analysis_source,
+            project_analysis_nh3_rates=project_analysis_nh3_rates,
+            project_analysis_bc=project_analysis_bc,
+            project_analysis_prdust=project_analysis_prdust,
+            emissions_inventory=emissions_inventory,
+            statewide_inventory=statewide_inventory,
         )
+    )
+    freight_comprehensive_surface = _load_parquet(workflow["paths"]["project_analysis_freight"])
+    print("    3.4 Initial fill freight rates")
+    freight_initial_fill = _fill_group_rates(
+        group_name="freight",
+        comprehensive_surface=freight_comprehensive_surface,
+        project_analysis_source=project_analysis_source,
+        project_analysis_nh3_rates=project_analysis_nh3_rates,
+        project_analysis_bc=project_analysis_bc,
+        project_analysis_prdust=project_analysis_prdust,
+        emissions_inventory=emissions_inventory,
+        statewide_inventory=statewide_inventory,
+    )
+    print("    3.5 Impute freight rates")
+    trace_payload.update(
+        _impute_group_rates(
+            workflow=workflow,
+            group_name="freight",
+            comprehensive_surface=freight_comprehensive_surface,
+            initially_filled=freight_initial_fill,
+            project_analysis_source=project_analysis_source,
+            project_analysis_nh3_rates=project_analysis_nh3_rates,
+            project_analysis_bc=project_analysis_bc,
+            project_analysis_prdust=project_analysis_prdust,
+            emissions_inventory=emissions_inventory,
+            statewide_inventory=statewide_inventory,
+        )
+    )
     write_trace(
         workflow,
         "step3_fill_project_analysis_rates",

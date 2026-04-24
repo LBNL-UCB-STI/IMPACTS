@@ -17,7 +17,10 @@ impacts:
       enable_passenger_activity_correction: true
       enable_freight_activity_correction: true
     vehicle_category_metadata_file: vehicle-tech/emissions/emfac_vehicle_category_attributes.csv
-    annualization_days_or_file: vehicle-tech/emissions/emfac_vehicle_category_attributes.csv
+    defaults:
+      annualization_days:
+        light_duty: 327.0
+        medium_heavy_duty: 312.0
     pollutants:
       - NH3
       - NOx

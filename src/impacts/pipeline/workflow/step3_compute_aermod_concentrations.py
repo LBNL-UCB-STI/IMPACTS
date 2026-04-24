@@ -18,7 +18,7 @@ from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import read_table
 from ...common import read_vector
-from ...config.defaults import representative_days_per_year as default_representative_days_per_year
+from ...config.defaults import aermod_active_days_per_year as default_aermod_active_days_per_year
 from ...config.defaults import grams_per_short_ton
 from ...manifest.schema import PipelineConfig
 from . import _step_label
@@ -49,7 +49,7 @@ _POLLUTANT_TO_CONCENTRATION_COLUMN: dict[str, str] = {
 
 _KERNEL_RADIUS_METERS = 4500.0
 _ASRV_SOURCE_RATE_G_PER_S_M2 = 0.1
-_ASRV_ACTIVE_DAYS_PER_YEAR = default_representative_days_per_year
+_ASRV_ACTIVE_DAYS_PER_YEAR = default_aermod_active_days_per_year
 
 
 class _Kernel(TypedDict):

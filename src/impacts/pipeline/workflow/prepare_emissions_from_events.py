@@ -269,7 +269,8 @@ def _calculate_emissions(
     *,
     rates_folder: str,
     pollutants_map: Dict[str, str],
-    annualization_days_or_file: float | str,
+    vehicle_category_metadata_file: str,
+    annualization_days: dict[str, float],
     passenger_vehicle_types_path: Optional[str],
     freight_vehicle_types_path: Optional[str],
     population_sample: float,
@@ -282,7 +283,7 @@ def _calculate_emissions(
                parkingDurationInSecond_{zone}, and tripCount_{zone} columns.
         rates_folder: directory of emission rate CSV/parquet files.
         pollutants_map: canonical_pollutant → rate_file_pollutant_name mapping.
-        annualization_days_or_file: representative days per year or a CSV path.
+        vehicle_category_metadata_file: vehicle metadata catalog with optional operation_days_per_year.
         population_sample: simulation sample fraction for non-transit rows.
         transit_sample: simulation sample fraction for BUS vehicle types.
     """
@@ -317,7 +318,8 @@ def _calculate_emissions(
 
     annualization_factors = resolve_skims_annualization_factors(
         skims,
-        annualization_days_or_file=annualization_days_or_file,
+        vehicle_category_metadata_file=vehicle_category_metadata_file,
+        annualization_days=annualization_days,
         passenger_vehicle_types_path=passenger_vehicle_types_path,
         freight_vehicle_types_path=freight_vehicle_types_path,
     )
@@ -435,7 +437,8 @@ def build_skims_from_events(
     intersection_path: str,
     rates_folder: Optional[str] = None,
     pollutants_map: Optional[Dict[str, str]] = None,
-    annualization_days_or_file: Optional[float | str] = None,
+    vehicle_category_metadata_file: Optional[str] = None,
+    annualization_days: Optional[dict[str, float]] = None,
     passenger_vehicle_types_path: Optional[str] = None,
     freight_vehicle_types_path: Optional[str] = None,
     population_sample: Optional[float] = None,
@@ -474,7 +477,8 @@ def build_skims_from_events(
     if (
         rates_folder
         and pollutants_map
-        and annualization_days_or_file is not None
+        and vehicle_category_metadata_file is not None
+        and annualization_days is not None
         and population_sample is not None
         and transit_sample is not None
     ):
@@ -482,7 +486,8 @@ def build_skims_from_events(
             skims,
             rates_folder=rates_folder,
             pollutants_map=pollutants_map,
-            annualization_days_or_file=annualization_days_or_file,
+            vehicle_category_metadata_file=vehicle_category_metadata_file,
+            annualization_days=annualization_days,
             passenger_vehicle_types_path=passenger_vehicle_types_path,
             freight_vehicle_types_path=freight_vehicle_types_path,
             population_sample=population_sample,
@@ -558,7 +563,8 @@ def prepare_events_inputs(
     prepared_skims_group_cols: List[str],
     pollutants: List[str],
     pollutants_map: Dict[str, str],
-    annualization_days_or_file: float | str,
+    vehicle_category_metadata_file: str,
+    annualization_days: dict[str, float],
     population_sample: float,
     transit_sample: float,
 ) -> Optional[Dict[str, Any]]:
@@ -610,7 +616,8 @@ def prepare_events_inputs(
         prepared_skims_group_cols=list(prepared_skims_group_cols),
         pollutants=list(pollutants),
         pollutants_map=dict(pollutants_map),
-        annualization_days_or_file=annualization_days_or_file,
+        vehicle_category_metadata_file=vehicle_category_metadata_file,
+        annualization_days=annualization_days,
         population_sample=float(population_sample),
         transit_sample=float(transit_sample),
     )

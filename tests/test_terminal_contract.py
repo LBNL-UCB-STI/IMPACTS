@@ -54,7 +54,8 @@ def _pipeline_payload(tmp_path: Path) -> dict:
         "prepared_skims_group_cols": ["hour", "linkId"],
         "pollutants": ["NOx", "PM2_5"],
         "source_pollutants": ["NOx", "PM2_5"],
-        "annualization_days_or_file": 330.0,
+        "vehicle_category_metadata_file": str(tmp_path / "vehicle_category_metadata.csv"),
+        "annualization_days": {"light_duty": 327.0, "medium_heavy_duty": 312.0},
         "population_sample": 0.1,
         "include_passenger": True,
         "include_freight": True,
@@ -106,7 +107,9 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.beam.passenger_vehicle_types_file == "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
     assert config.impacts.beam.freight_vehicle_types_file == "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
     assert len(config.impacts.analysis.sector_targets) == 6
-    assert config.impacts.emissions.vehicle_category_metadata_file == "vehicle-tech/emissions/emfac_vehicle_category_attributes.csv"
+    assert config.impacts.emissions.vehicle_category_metadata_file == "vehicle-tech/_emissions_vehicle_catalog.csv"
+    assert config.impacts.emissions.defaults.annualization_days.light_duty == 327.0
+    assert config.impacts.emissions.defaults.annualization_days.medium_heavy_duty == 312.0
     assert config.impacts.analysis.sector_targets[0].source == "mobile_onroad"
     assert config.impacts.analysis.sector_targets[0].sector == "passenger_cars"
     assert config.impacts.analysis.sector_targets[0].annual_pm25_short_tons == 714.26
@@ -131,7 +134,7 @@ def test_top_level_emfac_command_defaults_to_all(monkeypatch, tmp_path: Path) ->
     assert captured["argv"] == ["--config", str(config_path)]
 
 
-def test_settings_and_pipeline_allow_annualization_days_or_file_csv_path(tmp_path: Path):
+def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_defaults(tmp_path: Path):
     days_csv = tmp_path / "vehicle_operation_days_per_year.csv"
     days_csv.write_text("vehicleCategory,operation_days_per_year\nLDA,347\n", encoding="utf-8")
     settings_yaml = tmp_path / "settings.yaml"
@@ -169,7 +172,10 @@ def test_settings_and_pipeline_allow_annualization_days_or_file_csv_path(tmp_pat
                 "      enable_passenger_activity_correction: true",
                 "      enable_freight_activity_correction: false",
                 f"    vehicle_category_metadata_file: {days_csv.name}",
-                f"    annualization_days_or_file: {days_csv.name}",
+                "    defaults:",
+                "      annualization_days:",
+                "        light_duty: 327.0",
+                "        medium_heavy_duty: 312.0",
                 "    pollutants: [NOx, PM25]",
                 "  dispersions:",
                 "    inmap:",
@@ -183,7 +189,8 @@ def test_settings_and_pipeline_allow_annualization_days_or_file_csv_path(tmp_pat
         encoding="utf-8",
     )
     config = load_settings_from_yaml(settings_yaml)
-    assert config.impacts.emissions.annualization_days_or_file == days_csv.name
+    assert config.impacts.emissions.defaults.annualization_days.light_duty == 327.0
+    assert config.impacts.emissions.defaults.annualization_days.medium_heavy_duty == 312.0
     assert config.impacts.emissions.vehicle_category_metadata_file == days_csv.name
     assert config.impacts.emissions.inventory.passenger_file.endswith("passenger_inventory.parquet")
     assert config.impacts.emissions.inventory.freight_file.endswith("freight_inventory.parquet")
@@ -195,9 +202,11 @@ def test_settings_and_pipeline_allow_annualization_days_or_file_csv_path(tmp_pat
     assert config.impacts.beam.freight_vehicle_types_file.endswith("vehicleTypes--frism--2018-Baseline--EM.csv")
 
     payload = _pipeline_payload(tmp_path)
-    payload["annualization_days_or_file"] = str(days_csv)
+    payload["vehicle_category_metadata_file"] = str(days_csv)
+    payload["annualization_days"] = {"light_duty": 327.0, "medium_heavy_duty": 312.0}
     pipeline = PipelineConfig.from_dict(payload)
-    assert pipeline.annualization_days_or_file == str(days_csv)
+    assert pipeline.vehicle_category_metadata_file == str(days_csv)
+    assert pipeline.annualization_days == {"light_duty": 327.0, "medium_heavy_duty": 312.0}
     assert pipeline.include_passenger is True
     assert pipeline.include_freight is True
 

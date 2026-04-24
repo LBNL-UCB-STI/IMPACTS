@@ -8,10 +8,10 @@ import numpy as np
 import pandas as pd
 
 from ...common import read_table
+from ...config.defaults import annualization_days_by_vehicle_group as default_annualization_days_by_vehicle_group
 from ...config.defaults import grams_per_short_ton
 from ...config.defaults import meters_per_mile as _METERS_PER_MILE
 from ...config.defaults import pollutants as default_prepared_pollutants
-from ...config.defaults import representative_days_per_year as default_representative_days_per_year
 
 
 _SKIMS_DIMENSION_COLS = {
@@ -67,7 +67,8 @@ def annualize_prepared_skims_for_grid_allocation(
     beam_length_col: str,
     group_cols: Optional[list[str]] = None,
     required_pollutants: Optional[list[str]] = None,
-    annualization_days_or_file: float | str = default_representative_days_per_year,
+    vehicle_category_metadata_file: Optional[str] = None,
+    annualization_days: Optional[dict[str, float]] = None,
     passenger_vehicle_types_path: Optional[str] = None,
     freight_vehicle_types_path: Optional[str] = None,
     population_sample: float = 1.0,
@@ -101,7 +102,8 @@ def annualize_prepared_skims_for_grid_allocation(
     )
     annualization_factors = resolve_skims_annualization_factors(
         prepared,
-        annualization_days_or_file=annualization_days_or_file,
+        vehicle_category_metadata_file=vehicle_category_metadata_file,
+        annualization_days=annualization_days,
         passenger_vehicle_types_path=passenger_vehicle_types_path,
         freight_vehicle_types_path=freight_vehicle_types_path,
     )
@@ -135,6 +137,18 @@ def _sanitize_emfac_token(value: object) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", str("" if pd.isna(value) else value).strip())
 
 
+def _default_annualization_days(annualization_days: Optional[dict[str, float]]) -> dict[str, float]:
+    merged = dict(default_annualization_days_by_vehicle_group)
+    if annualization_days:
+        merged.update({str(key): float(value) for key, value in annualization_days.items()})
+    for key in ("light_duty", "medium_heavy_duty"):
+        value = float(merged[key])
+        if value <= 0:
+            raise ValueError(f"Annualization days must be positive for vehicle group {key}, got {value}")
+        merged[key] = value
+    return merged
+
+
 def _load_vehicle_operation_days_lookup(csv_path: str) -> tuple[dict[str, float], list[tuple[str, str]]]:
     frame = read_table(csv_path)
     category_column = None
@@ -142,24 +156,37 @@ def _load_vehicle_operation_days_lookup(csv_path: str) -> tuple[dict[str, float]
         if candidate in frame.columns:
             category_column = candidate
             break
-    if category_column is None or "operation_days_per_year" not in frame.columns:
+    if category_column is None:
         raise ValueError(
-            "Vehicle operation days CSV is missing required columns: one of "
-            "['emfac_vehicle_category', 'vehicleCategory'] and 'operation_days_per_year'"
+            "Vehicle category metadata CSV is missing required columns: one of "
+            "['emfac_vehicle_category', 'vehicleCategory']"
         )
     lookup: dict[str, float] = {}
     sanitized_categories: list[tuple[str, str]] = []
-    for row in frame[[category_column, "operation_days_per_year"]].itertuples(index=False):
-        category = str(row[0]).strip()
+    for category in frame[category_column].astype(str).str.strip():
         if not category:
             continue
-        days = float(row[1])
-        if days <= 0:
-            raise ValueError(f"Operation days must be positive for vehicle category={category!r}")
-        lookup[category] = days
         sanitized_categories.append((category, _sanitize_emfac_token(category)))
+    if "operation_days_per_year" in frame.columns:
+        for row in frame[[category_column, "operation_days_per_year"]].itertuples(index=False):
+            category = str(row[0]).strip()
+            if not category:
+                continue
+            if pd.isna(row[1]) or str(row[1]).strip() == "":
+                continue
+            days = float(row[1])
+            if days <= 0:
+                raise ValueError(f"Operation days must be positive for vehicle category={category!r}")
+            lookup[category] = days
     sanitized_categories.sort(key=lambda item: len(item[1]), reverse=True)
     return lookup, sanitized_categories
+
+
+def _vehicle_group_for_emfac_category(category: object) -> str:
+    category_token = str("" if pd.isna(category) else category).strip()
+    if category_token in {"LDA", "LDT1", "LDT2"}:
+        return "light_duty"
+    return "medium_heavy_duty"
 
 
 def _infer_emfac_vehicle_category_from_emfac_id(
@@ -222,7 +249,8 @@ def _load_vehicle_type_category_lookup(
 
     if "emfacId" not in prepared.columns:
         raise ValueError(
-            "Vehicle types input must include emfacVehicleCategory or emfacId when annualization_days_or_file is a CSV path."
+            "Vehicle types input must include emfacVehicleCategory or emfacId when resolving "
+            "annualization days from vehicle_category_metadata_file."
         )
 
     prepared["resolved_emfac_category"] = prepared["emfacId"].map(
@@ -242,40 +270,45 @@ def _load_vehicle_type_category_lookup(
 def resolve_skims_annualization_factors(
     prepared: pd.DataFrame,
     *,
-    annualization_days_or_file: float | str,
+    vehicle_category_metadata_file: Optional[str],
+    annualization_days: Optional[dict[str, float]] = None,
     passenger_vehicle_types_path: Optional[str] = None,
     freight_vehicle_types_path: Optional[str] = None,
 ) -> pd.Series:
-    if isinstance(annualization_days_or_file, str):
-        csv_path = str(annualization_days_or_file).strip()
-        if not csv_path:
-            raise ValueError("Annualization days file path must be non-empty.")
-        if "vehicleTypeId" not in prepared.columns:
-            raise ValueError("Prepared skims must include vehicleTypeId when annualization_days_or_file is a CSV path.")
-        if not passenger_vehicle_types_path or not freight_vehicle_types_path:
-            raise ValueError("A vehicle types input is required when annualization_days_or_file is a CSV path.")
-        category_lookup, sanitized_categories = _load_vehicle_operation_days_lookup(csv_path)
-        vehicle_type_category_lookup = _load_vehicle_type_category_lookup(
-            passenger_vehicle_types_path,
-            freight_vehicle_types_path,
-            category_lookup=category_lookup,
-            sanitized_categories=sanitized_categories,
+    defaults = _default_annualization_days(annualization_days)
+    if not vehicle_category_metadata_file:
+        raise ValueError("vehicle_category_metadata_file is required to resolve annualization factors.")
+    if "vehicleTypeId" not in prepared.columns:
+        raise ValueError("Prepared skims must include vehicleTypeId to resolve annualization factors.")
+    if not passenger_vehicle_types_path or not freight_vehicle_types_path:
+        raise ValueError("Passenger and freight vehicle types inputs are required to resolve annualization factors.")
+    csv_path = str(vehicle_category_metadata_file).strip()
+    if not csv_path:
+        raise ValueError("vehicle_category_metadata_file must be non-empty.")
+    category_lookup, sanitized_categories = _load_vehicle_operation_days_lookup(csv_path)
+    vehicle_type_category_lookup = _load_vehicle_type_category_lookup(
+        passenger_vehicle_types_path,
+        freight_vehicle_types_path,
+        category_lookup=category_lookup,
+        sanitized_categories=sanitized_categories,
+    )
+    categories = prepared["vehicleTypeId"].astype(str).map(vehicle_type_category_lookup)
+    missing_vehicle_types = (
+        prepared.loc[categories.isna(), "vehicleTypeId"]
+        .astype(str)
+        .drop_duplicates()
+        .tolist()
+    )
+    if missing_vehicle_types:
+        raise ValueError(
+            "Could not resolve EMFAC vehicle category for some skim vehicleTypeId values using "
+            "the configured passenger/freight vehicle types files: "
+            f"sample={missing_vehicle_types[:10]}"
         )
-        categories = prepared["vehicleTypeId"].astype(str).map(vehicle_type_category_lookup)
-        missing_vehicle_types = (
-            prepared.loc[categories.isna(), "vehicleTypeId"]
-            .astype(str)
-            .drop_duplicates()
-            .tolist()
+    resolved = categories.map(category_lookup)
+    fallback_mask = resolved.isna()
+    if fallback_mask.any():
+        resolved.loc[fallback_mask] = categories.loc[fallback_mask].map(
+            lambda category: defaults[_vehicle_group_for_emfac_category(category)]
         )
-        if missing_vehicle_types:
-            raise ValueError(
-                "Could not resolve EMFAC vehicle category for some skim vehicleTypeId values using "
-                "the configured passenger/freight vehicle types files: "
-                f"sample={missing_vehicle_types[:10]}"
-            )
-        return categories.map(category_lookup).astype(float)
-    days = float(annualization_days_or_file)
-    if days <= 0:
-        raise ValueError(f"Annualization days must be positive, got {annualization_days_or_file}")
-    return pd.Series(np.full(len(prepared), days, dtype=float), index=prepared.index)
+    return resolved.astype(float)

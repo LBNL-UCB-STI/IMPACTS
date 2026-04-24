@@ -281,24 +281,6 @@ def run(
         relative_target=str(beam_processing.freight_vehicle_types_file),
         metadata={"artifact_family": "freight_vehicle_types_input"},
     )
-    staged_annualization_days_or_file = emissions.annualization_days_or_file
-    if isinstance(emissions.annualization_days_or_file, str):
-        annualization_days_source = required_local_path(
-            _resolve_region_or_absolute_path(
-                emissions.annualization_days_or_file,
-                region_input_root=region_input_root,
-                config_path=config_path,
-            ),
-            "impacts.emissions.annualization_days_or_file",
-        )
-        staged_annualization_days_or_file = _register_manifest_input(
-            manifest_inputs,
-            input_root=input_root,
-            key="annualization_days_or_file_input",
-            source_path=annualization_days_source,
-            relative_target=Path(annualization_days_source).name,
-            metadata={"artifact_family": "annualization_days_or_file_input"},
-        )
     if emissions.vehicle_category_metadata_file:
         vehicle_category_metadata_source = required_local_path(
             _resolve_region_or_absolute_path(
@@ -411,7 +393,6 @@ def run(
         "staged_inmap_grid": staged_inmap_grid,
         "staged_passenger_inventory_file": staged_passenger_inventory_file,
         "staged_freight_inventory_file": staged_freight_inventory_file,
-        "staged_annualization_days_or_file": staged_annualization_days_or_file,
         "staged_isrm": staged_isrm,
         "staged_isrm_nox_to_no2_ratios_file": staged_isrm_nox_to_no2_ratios_file,
         "staged_asrv_patterns_file": staged_asrv_patterns_file,
