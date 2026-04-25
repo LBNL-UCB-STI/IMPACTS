@@ -19,6 +19,7 @@ from impacts.emfac.common import attach_emissions_rates_filepaths_from_config
 from impacts.emfac.common import attach_idle_time_fraction_from_config
 from impacts.emfac.common import model_year_interval_distance
 from impacts.emfac.common import model_year_group_id_component
+from impacts.emfac.common import normalize_probabilities_to_fixed_precision
 from impacts.emfac.common import parse_model_year_group_interval
 from impacts.emfac.fleet.step1_build_vehicle_types import _extract_model_year_from_vehicle_type_id
 from impacts.emfac.fleet.step1_build_vehicle_types import _normalize_energy_file_columns
@@ -64,6 +65,8 @@ _FREIGHT_FUEL_CONSUMPTION_TEMPLATE_SCHEMA = {
     "primaryVehicleEnergyFile": "string",
     "secondaryVehicleEnergyFile": "string",
 }
+
+
 def _require_column(frame: pd.DataFrame, column_name: str, frame_name: str) -> None:
     if column_name not in frame.columns:
         raise ValueError(f"{frame_name} is missing required column '{column_name}'")
@@ -92,6 +95,8 @@ def _normalize_zone_id(value: object) -> str:
         return ""
     if token.endswith(".0") and token[:-2].isdigit():
         token = token[:-2]
+    if token.isdigit() and len(token) == 11:
+        token = f"0{token}"
     return token
 
 
@@ -116,18 +121,6 @@ def _build_emfac_id(*, vehicle_category: object, fuel: object, model_year: objec
         f"{_sanitize_emfac_component(vehicle_category)}"
         f"{_sanitize_emfac_component(fuel)}"
     )
-
-
-def _normalize_probability_vector(series: pd.Series, *, decimals: int = 6) -> pd.Series:
-    numeric = pd.to_numeric(series, errors="coerce").fillna(0.0)
-    rounded = numeric.round(decimals)
-    if rounded.empty:
-        return rounded
-    remainder = round(1.0 - float(rounded.sum()), decimals)
-    if remainder != 0:
-        target_index = rounded[rounded.gt(0)].index[-1] if rounded.gt(0).any() else rounded.index[-1]
-        rounded.loc[target_index] = max(0.0, round(float(rounded.loc[target_index]) + remainder, decimals))
-    return rounded
 
 
 def _normalize_freight_vehicle_type_id(value: object) -> str:
@@ -187,9 +180,15 @@ def _build_valid_freight_emfac_candidates(config: dict[str, Any]) -> pd.DataFram
         candidates["total_vmt_vehicle_miles_per_year"], errors="coerce"
     ).fillna(0.0).sum()
     if total_vmt <= 0:
-        raise ValueError("Freight EMFAC candidates have zero total_vmt_vehicle_miles_per_year; cannot derive fleetShare")
-    candidates["fleetShare"] = (
+        raise ValueError("Freight EMFAC candidates have zero total_vmt_vehicle_miles_per_year; cannot derive fleetVmtPrior")
+    total_population = pd.to_numeric(candidates["population_vehicles"], errors="coerce").fillna(0.0).sum()
+    if total_population <= 0:
+        raise ValueError("Freight EMFAC candidates have zero population_vehicles; cannot derive fleetPopulationPrior")
+    candidates["fleetVmtPrior"] = (
         pd.to_numeric(candidates["total_vmt_vehicle_miles_per_year"], errors="coerce").fillna(0.0) / total_vmt
+    )
+    candidates["fleetPopulationPrior"] = (
+        pd.to_numeric(candidates["population_vehicles"], errors="coerce").fillna(0.0) / total_population
     )
     candidates["emfacId"] = candidates.apply(
         lambda row: _build_emfac_id(
@@ -323,13 +322,14 @@ def _load_model_spec(config: dict[str, Any]) -> dict[str, Any]:
 def _load_vehicle_type_assignment_table(config: dict[str, Any], evidence_source: str) -> pd.DataFrame:
     model_spec = _load_model_spec(config)
     fleet_assignment = model_spec.get("fleet_assignment", {})
-    mappings = fleet_assignment.get("mappings", {}) if isinstance(fleet_assignment, dict) else {}
-    freight_mapping = mappings.get("freight", {}) if isinstance(mappings, dict) else {}
+    models = fleet_assignment.get("models", {}) if isinstance(fleet_assignment, dict) else {}
+    freight_model = models.get("freight_bayesian_dag", {}) if isinstance(models, dict) else {}
+    freight_evidence = freight_model.get("evidence", {}) if isinstance(freight_model, dict) else {}
     if evidence_source == "naics_sector":
-        rows = freight_mapping.get("naics_sector", [])
+        rows = freight_evidence.get("naics_sector", [])
         if not isinstance(rows, list):
             raise ValueError(
-                "Vehicle type assignment model file mappings.freight.naics_sector must be a list."
+                "Vehicle type assignment model file models.freight_bayesian_dag.evidence.naics_sector must be a list."
             )
         expanded_rows: list[dict[str, Any]] = []
         for row in rows:
@@ -356,10 +356,10 @@ def _load_vehicle_type_assignment_table(config: dict[str, Any], evidence_source:
                     expanded_rows.append(expanded)
         return pd.DataFrame(expanded_rows).fillna("")
     if evidence_source == "port_zone":
-        port_evidence = freight_mapping.get("port_location", [])
+        port_evidence = freight_evidence.get("port_location", [])
         if not isinstance(port_evidence, list):
             raise ValueError(
-                "Vehicle type assignment model file mappings.freight.port_location must be a list."
+                "Vehicle type assignment model file models.freight_bayesian_dag.evidence.port_location must be a list."
             )
         expanded_rows: list[dict[str, Any]] = []
         for item in port_evidence:
@@ -501,13 +501,16 @@ def _build_freight_bayesian_log_score(
     normalized to sum to 1 so every coefficient lives on the same scale.
     """
     weights = _normalize_branch_weights(branch_weights)
-    fleet_share = pd.to_numeric(matched["fleetShare"], errors="coerce").fillna(0.0)
-    prior_log = np.log(fleet_share.clip(lower=1e-9))
+    fleet_vmt_prior = pd.to_numeric(matched["fleetVmtPrior"], errors="coerce").fillna(0.0)
+    fleet_population_prior = pd.to_numeric(matched["fleetPopulationPrior"], errors="coerce").fillna(0.0)
+    vmt_prior_log = np.log(fleet_vmt_prior.clip(lower=1e-9))
+    population_prior_log = np.log(fleet_population_prior.clip(lower=1e-9))
     naics_sector_log = np.log(pd.to_numeric(matched["naicsSectorLikelihood"], errors="coerce").fillna(1.0).clip(lower=1e-9))
     mass_log = np.log(pd.to_numeric(matched["payloadMassLikelihood"], errors="coerce").fillna(1.0).clip(lower=1e-9))
     port_log = np.log(pd.to_numeric(matched["portLikelihood"], errors="coerce").fillna(1.0).clip(lower=1e-9))
     return (
-        (float(weights["fleet_vmt_prior"]) * prior_log)
+        (float(weights["fleet_vmt_prior"]) * vmt_prior_log)
+        + (float(weights["fleet_population_prior"]) * population_prior_log)
         + (float(weights["naics_sector"]) * naics_sector_log)
         + (float(weights["payload_mass"]) * mass_log)
         + (float(weights["port_location"]) * port_log)
@@ -518,12 +521,12 @@ def _build_freight_naics_weight_lookup(
     payload_profiles: pd.DataFrame,
     sector_mapping: pd.DataFrame,
 ) -> dict[str, dict[str, float]]:
-    """Return P(NAICS signal | vehicle_type) for each old vehicle type id.
+    """Return P(NAICS signal | category) for each tour.
 
-    The returned dictionary maps frismVehicleTypeId to a normalized conditional
-    probability distribution over EMFAC vehicle categories.  Absent categories
-    receive the likelihood_floor value at scoring time rather than here so that the
-    distribution remains proper (sums to 1) over the observed categories.
+    The returned dictionary maps tourId to a normalized conditional probability
+    distribution over EMFAC vehicle categories. Absent categories receive the
+    likelihood_floor value at scoring time rather than here so that the
+    distribution remains proper over the observed categories for that tour.
     """
     if payload_profiles.empty:
         return {}
@@ -538,7 +541,7 @@ def _build_freight_naics_weight_lookup(
             }
 
     lookup: dict[str, dict[str, float]] = {}
-    for old_vehicle_type_id, group in payload_profiles.groupby("frismVehicleTypeId", sort=False):
+    for tour_id, group in payload_profiles.groupby("tourId", sort=False):
         category_totals: dict[str, float] = {}
         for row in group.itertuples(index=False):
             for source_name in ("seller", "buyer"):
@@ -560,7 +563,7 @@ def _build_freight_naics_weight_lookup(
                     if combined_weight > 0:
                         category_totals[vehicle_category] = category_totals.get(vehicle_category, 0.0) + combined_weight
         if category_totals:
-            lookup[str(old_vehicle_type_id)] = _normalize_likelihoods(category_totals)
+            lookup[str(tour_id)] = _normalize_likelihoods(category_totals)
     return lookup
 
 
@@ -569,7 +572,7 @@ def _build_freight_naics_sector_weight_lookup(
     payload_profiles: pd.DataFrame,
     sector_mapping: pd.DataFrame,
 ) -> dict[str, dict[str, float]]:
-    """Return P(NAICS-sector evidence | vehicle_type) from coarse NAICS sectors only."""
+    """Return P(NAICS-sector evidence | category) from coarse NAICS sectors per tour."""
     return _build_freight_naics_weight_lookup(
         payload_profiles=payload_profiles,
         sector_mapping=sector_mapping,
@@ -816,10 +819,13 @@ def _build_freight_emfac_candidates(
             f"vehicleTypeId={vehicle_type_id}, freight_beam_category={beam_vehicle_category}, "
             f"adopt_fuel={adopt_fuel}"
         )
-    fleet_share = pd.to_numeric(matched["fleetShare"], errors="coerce").fillna(0.0)
-    matched = matched[fleet_share.gt(0)].copy()
+    fleet_vmt_prior = pd.to_numeric(matched["fleetVmtPrior"], errors="coerce").fillna(0.0)
+    fleet_population_prior = pd.to_numeric(matched["fleetPopulationPrior"], errors="coerce").fillna(0.0)
+    matched = matched[fleet_vmt_prior.gt(0) | fleet_population_prior.gt(0)].copy()
     if matched.empty:
-        raise ValueError(f"No freight EMFAC candidates have positive fleetShare for vehicleTypeId={vehicle_type_id}")
+        raise ValueError(
+            f"No freight EMFAC candidates have positive fleetVmtPrior or fleetPopulationPrior for vehicleTypeId={vehicle_type_id}"
+        )
     return matched.sort_values(
         by=[
             "total_vmt_vehicle_miles_per_year",
@@ -831,18 +837,6 @@ def _build_freight_emfac_candidates(
         ascending=[False, False, True, True, True],
         kind="mergesort",
     ).reset_index(drop=True)
-
-
-def _normalize_written_freight_probabilities(frame: pd.DataFrame) -> pd.DataFrame:
-    prepared = frame.copy()
-    prepared["sampleProbabilityWithinCategory"] = _normalize_probability_vector(prepared["sampleProbabilityWithinCategory"])
-    prepared["sampleProbabilityWithinCategory"] = prepared["sampleProbabilityWithinCategory"].map(
-        lambda value: f"{float(value):.6f}"
-    )
-    prepared["sampleProbabilityString"] = prepared["sampleProbabilityWithinCategory"].map(
-        lambda value: f"income | 0-999999:{float(value):.6f}"
-    )
-    return prepared
 
 
 def _build_freight_vehicle_types_with_emfac(
@@ -876,14 +870,30 @@ def _build_freight_vehicle_types_with_emfac(
             category_mapping=category_mapping,
             fuel_mapping=fuel_mapping,
         )
-        base_probability = float(pd.to_numeric(pd.Series([row.sampleProbabilityWithinCategory]), errors="coerce").fillna(0.0).iloc[0])
-        fleet_share = pd.to_numeric(candidates["fleetShare"], errors="coerce").fillna(0.0)
-        fleet_share_total = float(fleet_share.sum())
-        if fleet_share_total <= 0.0:
-            raise ValueError(f"No freight EMFAC candidates have positive fleetShare for vehicleTypeId={row.vehicleTypeId}")
-        split_shares = fleet_share / fleet_share_total
+        base_probability = float(
+            pd.to_numeric(pd.Series([row.sampleProbabilityWithinCategory]), errors="coerce").fillna(0.0).iloc[0]
+        )
+        fleet_vmt_prior = pd.to_numeric(candidates["fleetVmtPrior"], errors="coerce").fillna(0.0)
+        fleet_population_prior = pd.to_numeric(candidates["fleetPopulationPrior"], errors="coerce").fillna(0.0)
+        fleet_vmt_total = float(fleet_vmt_prior.sum())
+        fleet_population_total = float(fleet_population_prior.sum())
+        if fleet_vmt_total <= 0.0:
+            raise ValueError(
+                f"No freight EMFAC candidates have positive fleetVmtPrior for vehicleTypeId={row.vehicleTypeId}"
+            )
+        if fleet_population_total <= 0.0:
+            raise ValueError(
+                f"No freight EMFAC candidates have positive fleetPopulationPrior for vehicleTypeId={row.vehicleTypeId}"
+            )
         row_payload = row._asdict()
-        for candidate, split_share in zip(candidates.itertuples(index=False), split_shares.tolist(), strict=False):
+        normalized_vmt_prior = (fleet_vmt_prior / fleet_vmt_total).tolist()
+        normalized_population_prior = (fleet_population_prior / fleet_population_total).tolist()
+        for candidate, vmt_prior_value, population_prior_value in zip(
+            candidates.itertuples(index=False),
+            normalized_vmt_prior,
+            normalized_population_prior,
+            strict=False,
+        ):
             updated = dict(row_payload)
             updated["frismVehicleTypeId"] = str(row.vehicleTypeId)
             updated["vehicleCategory"] = str(row.freight_beam_category)
@@ -892,7 +902,9 @@ def _build_freight_vehicle_types_with_emfac(
             updated["emfacFuel"] = str(candidate.fuel)
             updated["emfacResolvedModelYear"] = str(candidate.modelYear)
             updated["vehicleTypeId"] = f"{candidate.emfacId}--{row.vehicleTypeId}"
-            updated["sampleProbabilityWithinCategory"] = float(base_probability) * float(split_share)
+            updated["fleetVmtPrior"] = float(base_probability) * float(vmt_prior_value)
+            updated["fleetPopulationPrior"] = float(base_probability) * float(population_prior_value)
+            updated["sampleProbabilityWithinCategory"] = "0.000000"
             updated["sampleProbabilityString"] = ""
             expanded_rows.append(updated)
 
@@ -904,7 +916,7 @@ def _build_freight_vehicle_types_with_emfac(
             + "\n".join(duplicate_vehicle_type_ids.astype(str).tolist())
         )
     mapped = mapped.drop(columns=["freight_beam_category"], errors="ignore").reset_index(drop=True)
-    return _normalize_written_freight_probabilities(mapped)
+    return mapped
 
 
 def _build_freight_mapping_context(
@@ -924,23 +936,24 @@ def _build_freight_mapping_context(
 def _build_freight_sampling_table(mapped_freight_vehicle_types: pd.DataFrame) -> dict[str, pd.DataFrame]:
     _require_column(mapped_freight_vehicle_types, "vehicleTypeId", "Mapped freight vehicle types file")
     _require_column(mapped_freight_vehicle_types, "frismVehicleTypeId", "Mapped freight vehicle types file")
-    _require_column(mapped_freight_vehicle_types, "sampleProbabilityWithinCategory", "Mapped freight vehicle types file")
+    _require_column(mapped_freight_vehicle_types, "fleetVmtPrior", "Mapped freight vehicle types file")
+    _require_column(mapped_freight_vehicle_types, "fleetPopulationPrior", "Mapped freight vehicle types file")
     _require_column(mapped_freight_vehicle_types, "emfacVehicleCategory", "Mapped freight vehicle types file")
 
     prepared = mapped_freight_vehicle_types[
-        ["vehicleTypeId", "frismVehicleTypeId", "emfacVehicleCategory", "sampleProbabilityWithinCategory"]
+        ["vehicleTypeId", "frismVehicleTypeId", "emfacVehicleCategory", "fleetVmtPrior", "fleetPopulationPrior"]
     ].copy()
-    prepared["sampleProbabilityWithinCategory"] = pd.to_numeric(
-        prepared["sampleProbabilityWithinCategory"], errors="coerce"
-    ).fillna(0.0)
+    prepared["fleetVmtPrior"] = pd.to_numeric(prepared["fleetVmtPrior"], errors="coerce").fillna(0.0)
+    prepared["fleetPopulationPrior"] = pd.to_numeric(prepared["fleetPopulationPrior"], errors="coerce").fillna(0.0)
     sampling_groups: dict[str, pd.DataFrame] = {}
     for old_vehicle_type_id, group in prepared.groupby("frismVehicleTypeId", sort=False):
         sampling_groups[str(old_vehicle_type_id)] = group.rename(
             columns={
                 "emfacVehicleCategory": "vehicleCategory",
-                "sampleProbabilityWithinCategory": "baseProbability",
+                "fleetVmtPrior": "fleetVmtPrior",
+                "fleetPopulationPrior": "fleetPopulationPrior",
             }
-        )[["vehicleTypeId", "vehicleCategory", "baseProbability"]].reset_index(drop=True)
+        )[["vehicleTypeId", "vehicleCategory", "fleetVmtPrior", "fleetPopulationPrior"]].reset_index(drop=True)
     return sampling_groups
 
 
@@ -951,7 +964,14 @@ def _build_freight_bayesian_sampling_context(
     payloads: pd.DataFrame,
 ) -> dict[str, Any]:
     freight_dag = config.get("freight_bayesian_dag", {}) or {}
-    required_keys = ("likelihood_floor", "fleet_vmt_prior", "naics_sector", "payload_mass", "port_location")
+    required_keys = (
+        "likelihood_floor",
+        "fleet_vmt_prior",
+        "fleet_population_prior",
+        "naics_sector",
+        "payload_mass",
+        "port_location",
+    )
     missing = [key for key in required_keys if key not in freight_dag]
     if missing:
         raise ValueError(
@@ -963,6 +983,7 @@ def _build_freight_bayesian_sampling_context(
     return {
         "likelihood_floor": float(freight_dag["likelihood_floor"]),
         "fleet_vmt_prior": float(freight_dag["fleet_vmt_prior"]),
+        "fleet_population_prior": float(freight_dag["fleet_population_prior"]),
         "naics_sector": float(freight_dag["naics_sector"]),
         "payload_mass": float(freight_dag["payload_mass"]),
         "port_location": float(freight_dag["port_location"]),
@@ -999,10 +1020,11 @@ def _score_freight_sampling_candidates(
     freight_dag: dict[str, float],
 ) -> pd.DataFrame:
     prepared = candidates.copy()
-    prepared["baseProbability"] = pd.to_numeric(prepared["baseProbability"], errors="coerce").fillna(0.0)
-    prepared = prepared[prepared["baseProbability"].gt(0.0)].copy()
+    prepared["fleetVmtPrior"] = pd.to_numeric(prepared["fleetVmtPrior"], errors="coerce").fillna(0.0)
+    prepared["fleetPopulationPrior"] = pd.to_numeric(prepared["fleetPopulationPrior"], errors="coerce").fillna(0.0)
+    prepared = prepared[prepared["fleetVmtPrior"].gt(0.0) | prepared["fleetPopulationPrior"].gt(0.0)].copy()
     if prepared.empty:
-        raise ValueError("Freight Step 4.4 cannot score candidates with non-positive base probabilities")
+        raise ValueError("Freight Step 4.4 cannot score candidates with non-positive fleet priors")
 
     likelihood_floor = float(freight_dag["likelihood_floor"])
     prepared["naicsSectorLikelihood"] = (
@@ -1040,9 +1062,10 @@ def _score_freight_sampling_candidates(
         )
     )
     log_score = _build_freight_bayesian_log_score(
-        matched=prepared.rename(columns={"baseProbability": "fleetShare"}),
+        matched=prepared,
         branch_weights={
             "fleet_vmt_prior": float(freight_dag["fleet_vmt_prior"]),
+            "fleet_population_prior": float(freight_dag["fleet_population_prior"]),
             "naics_sector": float(freight_dag["naics_sector"]),
             "payload_mass": float(freight_dag["payload_mass"]),
             "port_location": float(freight_dag["port_location"]),
@@ -1076,6 +1099,7 @@ def _attach_freight_fuel_consumption_templates(
     templates["template_modelyear"] = _extract_model_year_from_vehicle_type_id(templates["vehicleTypeId"])
 
     rewritten_rows: list[pd.Series] = []
+    fallback_warnings: dict[str, list[tuple[str, str, str]]] = {}
     template_columns = [column for column in source_vehicle_types.columns if column != "vehicleTypeId"]
 
     def _has_baseline_fuel_consumption_values(row: Any) -> bool:
@@ -1108,12 +1132,13 @@ def _attach_freight_fuel_consumption_templates(
             + "--"
             + str(getattr(row, "frismVehicleTypeId", ""))
         )
-        print(
-            "WARNING: Freight Step 4.3 leaving fuel-consumption template fields empty for "
-            f"vehicleTypeId={getattr(row, 'vehicleTypeId', '')}, "
-            f"frismVehicleTypeId={getattr(row, 'frismVehicleTypeId', '')}, "
-            f"emfacVehicleCategory={getattr(row, 'emfacVehicleCategory', '')}, "
-            f"emfacFuel={getattr(row, 'emfacFuel', '')}: {reason}"
+        warning_key = reason
+        fallback_warnings.setdefault(warning_key, []).append(
+            (
+                str(getattr(row, "frismVehicleTypeId", "")),
+                str(getattr(row, "emfacVehicleCategory", "")),
+                str(getattr(row, "emfacFuel", "")),
+            )
         )
         return updated
 
@@ -1212,6 +1237,31 @@ def _attach_freight_fuel_consumption_templates(
         updated["vehicleCategory"] = getattr(row, "vehicleCategory", updated.get("vehicleCategory", ""))
         rewritten_rows.append(updated)
 
+    if fallback_warnings:
+        for reason, warning_rows in sorted(
+            fallback_warnings.items(),
+            key=lambda item: item[0],
+        ):
+            grouped_frism_types: dict[str, dict[tuple[str, str], int]] = {}
+            for frism_vehicle_type_id, emfac_vehicle_category, emfac_fuel in warning_rows:
+                pair_counts = grouped_frism_types.setdefault(frism_vehicle_type_id, {})
+                pair_key = (emfac_vehicle_category, emfac_fuel)
+                pair_counts[pair_key] = pair_counts.get(pair_key, 0) + 1
+            detail_blocks: list[str] = []
+            for frism_vehicle_type_id, pair_counts in sorted(grouped_frism_types.items()):
+                pair_lines = [
+                    f"    - emfacVehicleCategory={emfac_vehicle_category}, emfacFuel={emfac_fuel}: {count} vehicleTypeIds"
+                    for (emfac_vehicle_category, emfac_fuel), count in sorted(pair_counts.items())
+                ]
+                detail_blocks.append(
+                    f"  frismVehicleTypeId={frism_vehicle_type_id}\n" + "\n".join(pair_lines)
+                )
+            print(
+                "WARNING: Freight Step 4.3 leaving fuel-consumption template fields empty: "
+                f"{reason}\n"
+                + "\n".join(detail_blocks)
+            )
+
     return pd.DataFrame(rewritten_rows).reset_index(drop=True)
 
 
@@ -1258,7 +1308,7 @@ def _map_freight_carriers_and_tours(
         )
         scored = _score_freight_sampling_candidates(
             candidates=filtered,
-            naics_sector_weights=freight_dag["naics_sector_weight_lookup"].get(str(row.frismVehicleTypeId), {}),
+            naics_sector_weights=freight_dag["naics_sector_weight_lookup"].get(str(row.tourId), {}),
             median_mass_kg=median_mass_kg,
             heavy_mass_kg=heavy_mass_kg,
             port_weights=freight_dag["tour_port_weight_lookup"].get(str(row.tourId), {}),
@@ -1366,6 +1416,44 @@ def _sample_mapped_freight_vehicle_type_ids_for_carriers(
     )
 
 
+def _finalize_freight_vehicle_type_probabilities(
+    *,
+    mapped_freight_vehicle_types: pd.DataFrame,
+    mapped_carriers: pd.DataFrame,
+) -> pd.DataFrame:
+    prepared = mapped_freight_vehicle_types.copy()
+    if prepared.empty:
+        return prepared
+
+    category_lookup = prepared[["vehicleTypeId", "vehicleCategory"]].drop_duplicates().copy()
+    assigned = mapped_carriers[["vehicleTypeId"]].copy()
+    assigned["vehicleTypeId"] = assigned["vehicleTypeId"].astype(str)
+    assigned = assigned.merge(category_lookup, on="vehicleTypeId", how="left")
+    counts = (
+        assigned.groupby(["vehicleCategory", "vehicleTypeId"], dropna=False)
+        .size()
+        .reset_index(name="vehicleCount")
+    )
+    counts = normalize_probabilities_to_fixed_precision(
+        counts,
+        group_columns=["vehicleCategory"],
+        weight_column="vehicleCount",
+        output_column="sampleProbabilityWithinCategory",
+    )
+    probability_lookup = {
+        (str(row.vehicleCategory), str(row.vehicleTypeId)): float(row.sampleProbabilityWithinCategory)
+        for row in counts.itertuples(index=False)
+    }
+    prepared["sampleProbabilityWithinCategory"] = prepared.apply(
+        lambda row: f"{probability_lookup.get((str(row['vehicleCategory']), str(row['vehicleTypeId'])), 0.0):.6f}",
+        axis=1,
+    )
+    prepared["sampleProbabilityString"] = prepared["sampleProbabilityWithinCategory"].map(
+        lambda value: f"income | 0-999999:{float(value):.6f}"
+    )
+    return prepared
+
+
 def _write_mapped_freight_outputs(
     *,
     workflow: dict[str, Any],
@@ -1423,6 +1511,10 @@ def run_step4(workflow: dict[str, Any]) -> dict[str, Any]:
         carriers=carriers,
         payloads=payloads,
         mapped_freight_vehicle_types=mapped_freight_vehicle_types,
+    )
+    mapped_freight_vehicle_types = _finalize_freight_vehicle_type_probabilities(
+        mapped_freight_vehicle_types=mapped_freight_vehicle_types,
+        mapped_carriers=mapped_carriers,
     )
 
     print("=== Step 4.5: write mapped freight vehicle types and carriers ===")

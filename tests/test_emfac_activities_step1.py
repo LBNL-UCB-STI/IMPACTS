@@ -4,6 +4,8 @@ import pandas as pd
 import pytest
 
 from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import _complete_sparse_inventory_counties
+from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import _normalize_emissions_inventory_fuel
+from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import _set_activities_mappings
 
 
 def _base_complete_county_frame() -> list[dict[str, object]]:
@@ -77,3 +79,27 @@ def test_complete_sparse_inventory_counties_imputes_missing_sf_counties(source_t
     for column, expected in expected_values.items():
         assert sparse_slice[column].tolist() == [expected, sparse_slice.iloc[1][column], sparse_slice.iloc[2][column]]
     assert sparse_slice["is_imputed_county"].tolist() == [True, False, False]
+
+
+def test_normalize_emissions_inventory_fuel_accepts_alias_list_mapping() -> None:
+    _set_activities_mappings(
+        {
+            "fuel_map": {
+                "Dsl": ["Diesel"],
+                "Elec": ["Electricity"],
+                "Gas": ["Gasoline"],
+                "NG": ["Natural Gas"],
+                "Phe": ["Plug-in Hybrid"],
+            }
+        }
+    )
+
+    frame = pd.DataFrame(
+        {
+            "fuel": ["Diesel", "Electricity", "Gasoline", "Natural Gas", "Plug-in Hybrid"],
+        }
+    )
+
+    result = _normalize_emissions_inventory_fuel(frame)
+
+    assert result["fuel"].tolist() == ["Dsl", "Elec", "Gas", "NG", "Phe"]

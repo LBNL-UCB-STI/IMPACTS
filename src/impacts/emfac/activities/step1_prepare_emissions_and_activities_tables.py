@@ -11,6 +11,7 @@ import pandas as pd
 from impacts.emfac.common import frame_summary
 from impacts.emfac.common import write_trace
 from impacts.emfac.config import _apply_table_schema
+from impacts.emfac.config import _normalize_alias_mapping
 from impacts.emfac.config import read_table
 
 GRAMS_PER_SHORT_TON = 907_184.74
@@ -563,7 +564,7 @@ _ACTIVITIES_MAPPINGS: dict[str, dict[str, str] | list[dict[str, str]]] = {}
 def _set_activities_mappings(mappings: dict[str, object]) -> None:
     global _ACTIVITIES_MAPPINGS
     _ACTIVITIES_MAPPINGS = {
-        "fuel_map": dict(mappings.get("fuel_map", {}) or {}),
+        "fuel_map": _normalize_alias_mapping(mappings.get("fuel_map", {})),
         "road_category_map": dict(mappings.get("road_category_map", {}) or {}),
     }
 

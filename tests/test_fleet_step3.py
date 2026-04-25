@@ -9,6 +9,7 @@ from impacts.emfac.fleet.step1_build_vehicle_types import _build_atlas_vehicle_t
 from impacts.emfac.fleet.step1_build_vehicle_types import _build_passenger_vehicle_types_from_atlas_targets
 from impacts.emfac.fleet.step3_map_emfac_atlas import _assign_passenger_fuel_consumption_fields
 from impacts.emfac.fleet.step3_map_emfac_atlas import _build_passenger_emfac_candidates
+from impacts.emfac.fleet.step3_map_emfac_atlas import _finalize_passenger_vehicle_type_probabilities
 from impacts.emfac.fleet.step3_map_emfac_atlas import _prepare_mapped_passenger_vehicles_output
 from impacts.emfac.fleet.step3_map_emfac_atlas import _sample_passenger_vehicle_type_ids_for_vehicles
 
@@ -135,7 +136,8 @@ def test_build_passenger_emfac_candidates_matches_grouped_model_year_exactly() -
                 "vehicleCategory": "LDA",
                 "fuel": "Gas",
                 "modelYear": "<=2003",
-                "fleetShare": 0.1,
+                "fleetVmtPrior": 0.1,
+                "fleetPopulationPrior": 0.1,
                 "total_vmt_vehicle_miles_per_year": 10.0,
                 "population_vehicles": 5.0,
             },
@@ -143,7 +145,8 @@ def test_build_passenger_emfac_candidates_matches_grouped_model_year_exactly() -
                 "vehicleCategory": "LDA",
                 "fuel": "Gas",
                 "modelYear": "2004-2014",
-                "fleetShare": 0.7,
+                "fleetVmtPrior": 0.7,
+                "fleetPopulationPrior": 0.7,
                 "total_vmt_vehicle_miles_per_year": 70.0,
                 "population_vehicles": 35.0,
             },
@@ -151,7 +154,8 @@ def test_build_passenger_emfac_candidates_matches_grouped_model_year_exactly() -
                 "vehicleCategory": "LDA",
                 "fuel": "Gas",
                 "modelYear": ">=2015",
-                "fleetShare": 0.2,
+                "fleetVmtPrior": 0.2,
+                "fleetPopulationPrior": 0.2,
                 "total_vmt_vehicle_miles_per_year": 20.0,
                 "population_vehicles": 10.0,
             },
@@ -176,7 +180,8 @@ def test_build_passenger_emfac_candidates_matches_grouped_model_year_exactly() -
     )
 
     assert result["modelYear"].tolist() == ["<=2003"]
-    assert result["splitShare"].iloc[0] == 1.0
+    assert result["fleetVmtPrior"].iloc[0] == 1.0
+    assert result["fleetPopulationPrior"].iloc[0] == 1.0
 
 
 def test_build_passenger_emfac_candidates_uses_configured_fuel_fallback_when_exact_year_match_is_missing() -> None:
@@ -186,7 +191,8 @@ def test_build_passenger_emfac_candidates_uses_configured_fuel_fallback_when_exa
                 "vehicleCategory": "LDA",
                 "fuel": "Gas",
                 "modelYear": "<=2003",
-                "fleetShare": 0.8,
+                "fleetVmtPrior": 0.8,
+                "fleetPopulationPrior": 0.8,
                 "total_vmt_vehicle_miles_per_year": 80.0,
                 "population_vehicles": 40.0,
             },
@@ -194,7 +200,8 @@ def test_build_passenger_emfac_candidates_uses_configured_fuel_fallback_when_exa
                 "vehicleCategory": "LDA",
                 "fuel": "Phe",
                 "modelYear": "2004-2014",
-                "fleetShare": 0.4,
+                "fleetVmtPrior": 0.4,
+                "fleetPopulationPrior": 0.4,
                 "total_vmt_vehicle_miles_per_year": 40.0,
                 "population_vehicles": 20.0,
             },
@@ -202,7 +209,8 @@ def test_build_passenger_emfac_candidates_uses_configured_fuel_fallback_when_exa
                 "vehicleCategory": "LDA",
                 "fuel": "Phe",
                 "modelYear": ">=2015",
-                "fleetShare": 0.6,
+                "fleetVmtPrior": 0.6,
+                "fleetPopulationPrior": 0.6,
                 "total_vmt_vehicle_miles_per_year": 60.0,
                 "population_vehicles": 30.0,
             },
@@ -236,7 +244,8 @@ def test_build_passenger_emfac_candidates_uses_configured_fuel_fallback_when_exa
 
     assert result["fuel"].tolist() == ["Gas"]
     assert result["modelYear"].tolist() == ["<=2003"]
-    assert result["splitShare"].iloc[0] == 1.0
+    assert result["fleetVmtPrior"].iloc[0] == 1.0
+    assert result["fleetPopulationPrior"].iloc[0] == 1.0
 
 
 def test_build_passenger_emfac_candidates_maps_hybrid_to_gasoline_emfac_candidates() -> None:
@@ -246,7 +255,8 @@ def test_build_passenger_emfac_candidates_maps_hybrid_to_gasoline_emfac_candidat
                 "vehicleCategory": "LDA",
                 "fuel": "Gas",
                 "modelYear": "2004-2014",
-                "fleetShare": 0.7,
+                "fleetVmtPrior": 0.7,
+                "fleetPopulationPrior": 0.7,
                 "total_vmt_vehicle_miles_per_year": 70.0,
                 "population_vehicles": 35.0,
             },
@@ -254,7 +264,8 @@ def test_build_passenger_emfac_candidates_maps_hybrid_to_gasoline_emfac_candidat
                 "vehicleCategory": "LDA",
                 "fuel": "Phe",
                 "modelYear": "2004-2014",
-                "fleetShare": 0.3,
+                "fleetVmtPrior": 0.3,
+                "fleetPopulationPrior": 0.3,
                 "total_vmt_vehicle_miles_per_year": 30.0,
                 "population_vehicles": 15.0,
             },
@@ -293,7 +304,8 @@ def test_build_passenger_emfac_candidates_splits_by_fleet_share() -> None:
                 "vehicleCategory": "LDA",
                 "fuel": "Gas",
                 "modelYear": "2004-2014",
-                "fleetShare": 0.9,
+                "fleetVmtPrior": 0.9,
+                "fleetPopulationPrior": 0.1,
                 "total_vmt_vehicle_miles_per_year": 90.0,
                 "population_vehicles": 10.0,
             },
@@ -302,7 +314,8 @@ def test_build_passenger_emfac_candidates_splits_by_fleet_share() -> None:
                 "vehicleCategory": "LDA",
                 "fuel": "Gas",
                 "modelYear": "2004-2014",
-                "fleetShare": 0.1,
+                "fleetVmtPrior": 0.1,
+                "fleetPopulationPrior": 0.9,
                 "total_vmt_vehicle_miles_per_year": 10.0,
                 "population_vehicles": 90.0,
             },
@@ -326,8 +339,10 @@ def test_build_passenger_emfac_candidates_splits_by_fleet_share() -> None:
         passenger_mapping={},
     )
 
-    split_share = dict(zip(result["emfacId"], result["splitShare"]))
-    assert split_share["post2014LDAGas"] > split_share["pre2004LDAGas"]
+    fleet_vmt_prior = dict(zip(result["emfacId"], result["fleetVmtPrior"]))
+    fleet_population_prior = dict(zip(result["emfacId"], result["fleetPopulationPrior"]))
+    assert fleet_vmt_prior["post2014LDAGas"] > fleet_vmt_prior["pre2004LDAGas"]
+    assert fleet_population_prior["post2014LDAGas"] < fleet_population_prior["pre2004LDAGas"]
 
 
 def test_build_passenger_emfac_candidates_errors_when_exact_year_match_is_missing_without_fallback() -> None:
@@ -337,7 +352,8 @@ def test_build_passenger_emfac_candidates_errors_when_exact_year_match_is_missin
                 "vehicleCategory": "MDV",
                 "fuel": "Gas",
                 "modelYear": "2003-2006",
-                "fleetShare": 0.2,
+                "fleetVmtPrior": 0.2,
+                "fleetPopulationPrior": 0.2,
                 "total_vmt_vehicle_miles_per_year": 20.0,
                 "population_vehicles": 10.0,
             },
@@ -345,7 +361,8 @@ def test_build_passenger_emfac_candidates_errors_when_exact_year_match_is_missin
                 "vehicleCategory": "MDV",
                 "fuel": "Gas",
                 "modelYear": "2007-2009",
-                "fleetShare": 0.3,
+                "fleetVmtPrior": 0.3,
+                "fleetPopulationPrior": 0.3,
                 "total_vmt_vehicle_miles_per_year": 30.0,
                 "population_vehicles": 15.0,
             },
@@ -353,7 +370,8 @@ def test_build_passenger_emfac_candidates_errors_when_exact_year_match_is_missin
                 "vehicleCategory": "MDV",
                 "fuel": "Gas",
                 "modelYear": "2010-2012",
-                "fleetShare": 0.4,
+                "fleetVmtPrior": 0.4,
+                "fleetPopulationPrior": 0.4,
                 "total_vmt_vehicle_miles_per_year": 40.0,
                 "population_vehicles": 20.0,
             },
@@ -361,7 +379,8 @@ def test_build_passenger_emfac_candidates_errors_when_exact_year_match_is_missin
                 "vehicleCategory": "MDV",
                 "fuel": "Gas",
                 "modelYear": "2013-2015",
-                "fleetShare": 0.5,
+                "fleetVmtPrior": 0.5,
+                "fleetPopulationPrior": 0.5,
                 "total_vmt_vehicle_miles_per_year": 50.0,
                 "population_vehicles": 25.0,
             },
@@ -369,7 +388,8 @@ def test_build_passenger_emfac_candidates_errors_when_exact_year_match_is_missin
                 "vehicleCategory": "MDV",
                 "fuel": "Gas",
                 "modelYear": "<=2002",
-                "fleetShare": 0.1,
+                "fleetVmtPrior": 0.1,
+                "fleetPopulationPrior": 0.1,
                 "total_vmt_vehicle_miles_per_year": 10.0,
                 "population_vehicles": 5.0,
             },
@@ -377,7 +397,8 @@ def test_build_passenger_emfac_candidates_errors_when_exact_year_match_is_missin
                 "vehicleCategory": "MDV",
                 "fuel": "Gas",
                 "modelYear": ">=2016",
-                "fleetShare": 0.6,
+                "fleetVmtPrior": 0.6,
+                "fleetPopulationPrior": 0.6,
                 "total_vmt_vehicle_miles_per_year": 60.0,
                 "population_vehicles": 30.0,
             },
@@ -483,6 +504,7 @@ def _write_step3_test_model_file(model_file: Path) -> None:
                 "        likelihood_floor: 0.001",
                 "        weights:",
                 "          fleet_vmt_prior: 1.0",
+                "          fleet_population_prior: 1.0",
                 "          income: 1.0",
                 "      evidence:",
                 "        income:",
@@ -697,6 +719,69 @@ def test_assign_passenger_fuel_consumption_fields_keep_baseline_values_when_mapp
     assert "WARNING: Passenger Step 3.3 leaving fuel-consumption template fields empty" in capsys.readouterr().out
 
 
+def test_finalize_passenger_vehicle_type_probabilities_normalizes_within_vehicle_category() -> None:
+    passenger_vehicle_types = pd.DataFrame(
+        [
+            {
+                "vehicleTypeId": "car-a",
+                "vehicleCategory": "Car",
+                "sampleProbabilityWithinCategory": "0.000000",
+                "sampleProbabilityString": "",
+            },
+            {
+                "vehicleTypeId": "car-b",
+                "vehicleCategory": "Car",
+                "sampleProbabilityWithinCategory": "0.000000",
+                "sampleProbabilityString": "",
+            },
+            {
+                "vehicleTypeId": "suv-a",
+                "vehicleCategory": "SUV",
+                "sampleProbabilityWithinCategory": "0.000000",
+                "sampleProbabilityString": "",
+            },
+            {
+                "vehicleTypeId": "suv-b",
+                "vehicleCategory": "SUV",
+                "sampleProbabilityWithinCategory": "0.000000",
+                "sampleProbabilityString": "",
+            },
+        ]
+    )
+    sampled_vehicles = pd.DataFrame(
+        [
+            {"vehicleTypeId": "car-a", "income_in_thousands": 50.0},
+            {"vehicleTypeId": "car-a", "income_in_thousands": 50.0},
+            {"vehicleTypeId": "car-b", "income_in_thousands": 50.0},
+            {"vehicleTypeId": "suv-a", "income_in_thousands": 50.0},
+            {"vehicleTypeId": "suv-b", "income_in_thousands": 50.0},
+            {"vehicleTypeId": "suv-b", "income_in_thousands": 50.0},
+        ]
+    )
+
+    result = _finalize_passenger_vehicle_type_probabilities(
+        passenger_car_vehicle_types=passenger_vehicle_types,
+        sampled_vehicles=sampled_vehicles,
+        config={"income_bins": [0, 100]},
+    )
+
+    probabilities = result.set_index("vehicleTypeId")["sampleProbabilityWithinCategory"].to_dict()
+    assert probabilities == {
+        "car-a": "0.666667",
+        "car-b": "0.333333",
+        "suv-a": "0.333333",
+        "suv-b": "0.666667",
+    }
+
+    probability_strings = result.set_index("vehicleTypeId")["sampleProbabilityString"].to_dict()
+    assert probability_strings == {
+        "car-a": "income | all:0.666667",
+        "car-b": "income | all:0.333333",
+        "suv-a": "income | all:0.333333",
+        "suv-b": "income | all:0.666667",
+    }
+
+
 def test_sample_passenger_vehicle_type_ids_for_vehicles_uses_canonical_atlas_vehicle_type_id() -> None:
     vehicles = pd.DataFrame(
         [
@@ -715,7 +800,8 @@ def test_sample_passenger_vehicle_type_ids_for_vehicles_uses_canonical_atlas_veh
             {
                 "vehicleTypeId": expected_vehicle_type_id,
                 "atlasVehicleTypeId": "CarConv2008",
-                "sampleProbabilityWithinCategory": "1.000000",
+                "fleetVmtPrior": "1.000000",
+                "fleetPopulationPrior": "1.000000",
                 "msrp_usd": 24000.0,
             }
         ]
@@ -729,6 +815,7 @@ def test_sample_passenger_vehicle_type_ids_for_vehicles_uses_canonical_atlas_veh
             "passenger_bayesian_dag": {
                 "likelihood_floor": 0.001,
                 "fleet_vmt_prior_weight": 1.0,
+                "fleet_population_prior_weight": 1.0,
                 "income_weight": 1.0,
                 "income_enabled": True,
                 "income_center_ratio": 0.30,
@@ -757,7 +844,8 @@ def test_sample_passenger_vehicle_type_ids_for_vehicles_skips_income_when_disabl
             {
                 "vehicleTypeId": "vt-1",
                 "atlasVehicleTypeId": "CarConv2008",
-                "sampleProbabilityWithinCategory": "1.000000",
+                "fleetVmtPrior": "1.000000",
+                "fleetPopulationPrior": "1.000000",
             }
         ]
     )
@@ -770,6 +858,7 @@ def test_sample_passenger_vehicle_type_ids_for_vehicles_skips_income_when_disabl
             "passenger_bayesian_dag": {
                 "likelihood_floor": 0.001,
                 "fleet_vmt_prior_weight": 1.0,
+                "fleet_population_prior_weight": 1.0,
                 "income_weight": 1.0,
                 "income_enabled": False,
             }

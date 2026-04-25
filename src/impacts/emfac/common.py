@@ -6,6 +6,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from impacts.emfac.config import read_table
@@ -14,6 +15,59 @@ from impacts.emfac.config import VEHICLE_CATEGORY_METADATA_SCHEMA
 
 
 LIGHT_DUTY_VEHICLE_CATEGORIES = {"LDA", "LDT1", "LDT2"}
+
+
+def normalize_probabilities_to_fixed_precision(
+    frame: pd.DataFrame,
+    *,
+    group_columns: list[str],
+    weight_column: str,
+    output_column: str,
+    decimals: int = 6,
+) -> pd.DataFrame:
+    prepared = frame.copy()
+    if prepared.empty:
+        prepared[output_column] = pd.Series(dtype="float64")
+        return prepared
+
+    scale = 10**decimals
+    values = pd.to_numeric(prepared[weight_column], errors="coerce").fillna(0.0)
+    prepared[weight_column] = values
+    prepared[output_column] = 0.0
+
+    if group_columns:
+        grouping_key: str | list[str]
+        grouping_key = group_columns[0] if len(group_columns) == 1 else group_columns
+        group_iterator = prepared.groupby(grouping_key, dropna=False, sort=False).groups.items()
+    else:
+        group_iterator = [((), prepared.index)]
+
+    for _, group_index in group_iterator:
+        group_positions = list(group_index)
+        group_weights = prepared.loc[group_positions, weight_column].to_numpy(dtype=float)
+        total_weight = float(group_weights.sum())
+        if total_weight <= 0.0:
+            prepared.loc[group_positions, output_column] = 0.0
+            continue
+        raw_scaled = group_weights / total_weight * scale
+        base_units = np.floor(raw_scaled).astype(int)
+        remainder_units = int(scale - base_units.sum())
+        if remainder_units > 0:
+            fractional_units = raw_scaled - base_units
+            allocation_order = np.argsort(-fractional_units, kind="mergesort")
+            base_units[allocation_order[:remainder_units]] += 1
+        elif remainder_units < 0:
+            fractional_units = raw_scaled - base_units
+            allocation_order = np.argsort(fractional_units, kind="mergesort")
+            for idx in allocation_order:
+                if remainder_units == 0:
+                    break
+                if base_units[idx] <= 0:
+                    continue
+                base_units[idx] -= 1
+                remainder_units += 1
+        prepared.loc[group_positions, output_column] = base_units.astype(float) / scale
+    return prepared
 
 
 def ensure_trace_dir(workflow: dict[str, object]) -> Path:

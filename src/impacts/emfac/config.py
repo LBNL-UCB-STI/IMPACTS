@@ -391,6 +391,35 @@ def _normalize_string_mapping(mapping: object, *, lower_keys: bool = False, lowe
     return normalized
 
 
+def _normalize_alias_mapping(
+    mapping: object,
+    *,
+    normalize_keys=None,
+    normalize_values=None,
+) -> dict[str, str]:
+    if mapping in (None, ""):
+        return {}
+    if not isinstance(mapping, dict):
+        raise ValueError("Expected a mapping")
+    if normalize_keys is None:
+        normalize_keys = lambda value: str(value).strip()
+    if normalize_values is None:
+        normalize_values = lambda value: str(value).strip()
+
+    normalized: dict[str, str] = {}
+    for canonical_value, aliases in mapping.items():
+        canonical_token = normalize_keys(canonical_value)
+        if not canonical_token:
+            continue
+        candidates = aliases if isinstance(aliases, (list, tuple, set)) else [aliases]
+        for alias in candidates:
+            alias_token = normalize_values(alias)
+            if not alias_token:
+                continue
+            normalized[alias_token] = canonical_token
+    return normalized
+
+
 def _expand_activities_paths(raw: dict) -> dict:
     raw = deepcopy(raw)
     raw["pto_as_process"] = _normalize_pto_as_process(raw)
@@ -456,19 +485,7 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
         )
     if not isinstance(emissions_inventory, dict):
         emissions_inventory = {}
-    raw_fuel_map = emissions_inventory.get("fuel_map", {})
-    normalized_fuel_map: dict[str, str] = {}
-    if isinstance(raw_fuel_map, dict):
-        for normalized_fuel, raw_fuels in raw_fuel_map.items():
-            normalized_token = str(normalized_fuel).strip()
-            if not normalized_token:
-                continue
-            candidates = raw_fuels if isinstance(raw_fuels, (list, tuple, set)) else [raw_fuels]
-            for raw_fuel in candidates:
-                raw_token = str(raw_fuel).strip()
-                if not raw_token:
-                    continue
-                normalized_fuel_map[raw_token] = normalized_token
+    normalized_fuel_map = _normalize_alias_mapping(emissions_inventory.get("fuel_map", {}))
 
     year = int(raw["calendar_year"])
     region = str(raw["region_label"])
@@ -808,7 +825,9 @@ def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str
             "It must contain models.freight_bayesian_dag.scoring.weights."
         )
     missing_freight_weights = [
-        key for key in ("fleet_vmt_prior", "naics_sector", "payload_mass", "port_location") if key not in freight_weights
+        key
+        for key in ("fleet_vmt_prior", "fleet_population_prior", "naics_sector", "payload_mass", "port_location")
+        if key not in freight_weights
     ]
     if missing_freight_weights:
         raise ValueError(
@@ -853,10 +872,16 @@ def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str
             f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
             "It must contain mappings.freight."
         )
-    naics_evidence = freight_mapping.get("naics_sector")
+    freight_evidence = model_section.get("evidence", {})
+    if not isinstance(freight_evidence, dict):
+        raise ValueError(
+            f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
+            "models.freight_bayesian_dag.evidence must be a mapping."
+        )
+    naics_evidence = freight_evidence.get("naics_sector")
     if not isinstance(naics_evidence, list) or not naics_evidence:
         raise ValueError(
-            f"Configured fleet path '{path_label}' has no mappings.freight.naics_sector entries in {model_spec_path}. "
+            f"Configured fleet path '{path_label}' has no models.freight_bayesian_dag.evidence.naics_sector entries in {model_spec_path}. "
             "It should contain the NAICS-sector-to-vehicle-category evidence mappings."
         )
     freight_vehicle_categories = freight_mapping.get("vehicle_categories")
@@ -891,10 +916,10 @@ def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str
             f"Configured fleet path '{path_label}' has invalid mappings.freight.fuel_types entries in {model_spec_path}: "
             + ", ".join(sorted(str(key) for key in invalid_freight_fuel_types))
         )
-    port_evidence = freight_mapping.get("port_location")
+    port_evidence = freight_evidence.get("port_location")
     if not isinstance(port_evidence, list) or not port_evidence:
         raise ValueError(
-            f"Configured fleet path '{path_label}' has no mappings.freight.port_location entries in {model_spec_path}. "
+            f"Configured fleet path '{path_label}' has no models.freight_bayesian_dag.evidence.port_location entries in {model_spec_path}. "
             "It should contain the zone-to-vehicle-category evidence mappings for port assignments."
         )
     passenger_model = _extract_named_model(
@@ -915,7 +940,7 @@ def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str
             "It must contain models.passenger_bayesian_dag.scoring.weights."
         )
     missing_passenger_weights = [
-        key for key in ("fleet_vmt_prior", "income") if key not in passenger_weights
+        key for key in ("fleet_vmt_prior", "fleet_population_prior", "income") if key not in passenger_weights
     ]
     if missing_passenger_weights:
         raise ValueError(
@@ -1114,21 +1139,7 @@ def _ingest_fleet_sources(config: dict) -> dict:
                     "activities.emissions_inventory.fuel_map must be a mapping of "
                     "normalized fuel tokens to one or more raw EMFAC fuel labels"
                 )
-            normalized_fuel_map: dict[str, str] = {}
-            for normalized_fuel, raw_fuels in raw_fuel_map.items():
-                normalized_token = str(normalized_fuel).strip()
-                if not normalized_token:
-                    continue
-                if isinstance(raw_fuels, (list, tuple, set)):
-                    candidates = raw_fuels
-                else:
-                    candidates = [raw_fuels]
-                for raw_fuel in candidates:
-                    raw_token = str(raw_fuel).strip()
-                    if not raw_token:
-                        continue
-                    normalized_fuel_map[raw_token] = normalized_token
-            emissions_inventory["fuel_map"] = normalized_fuel_map
+            emissions_inventory["fuel_map"] = _normalize_alias_mapping(raw_fuel_map)
             activities["emissions_inventory"] = emissions_inventory
         activities = _derive_emfac_output_paths(activities)
         config["activities"] = activities
@@ -1179,7 +1190,7 @@ def _ingest_fleet_sources(config: dict) -> dict:
             weights = scoring.get("weights", {})
             missing_weights = [
                 key
-                for key in ("fleet_vmt_prior", "naics_sector", "payload_mass", "port_location")
+                for key in ("fleet_vmt_prior", "fleet_population_prior", "naics_sector", "payload_mass", "port_location")
                 if key not in weights
             ]
             if missing_weights:
@@ -1187,13 +1198,11 @@ def _ingest_fleet_sources(config: dict) -> dict:
                     "vehicle_type_assignment.model_file must define models.freight_bayesian_dag.scoring.weights for: "
                     + ", ".join(missing_weights)
                 )
-            for key in ("fleet_vmt_prior", "naics_sector", "payload_mass", "port_location"):
+            for key in ("fleet_vmt_prior", "fleet_population_prior", "naics_sector", "payload_mass", "port_location"):
                 value = float(weights[key])
                 if value < 0.0:
                     raise ValueError(f"vehicle_type_assignment {key} weight must be non-negative, got {value}")
                 vta[key] = value
-            vta["emfac_population_bias"] = float(scoring.get("emfac_population_bias", 1.0))
-            vta["emfac_vmt_bias"] = float(scoring.get("emfac_vmt_bias", 0.0))
             fleet_assignment = _extract_fleet_assignment_root(model_spec, model_spec_path=Path(model_file))
             mappings = fleet_assignment.get("mappings", {})
             freight_mapping = mappings.get("freight", {}) if isinstance(mappings, dict) else {}
@@ -1202,11 +1211,10 @@ def _ingest_fleet_sources(config: dict) -> dict:
             config["freight_bayesian_dag"] = {
                 "likelihood_floor": floor_value,
                 "fleet_vmt_prior": float(weights["fleet_vmt_prior"]),
+                "fleet_population_prior": float(weights["fleet_population_prior"]),
                 "naics_sector": float(weights["naics_sector"]),
                 "payload_mass": float(weights["payload_mass"]),
                 "port_location": float(weights["port_location"]),
-                "emfac_population": float(scoring.get("emfac_population_bias", 1.0)),
-                "emfac_vmt": float(scoring.get("emfac_vmt_bias", 0.0)),
                 "payload_mass_enabled": isinstance(evidence.get("payload_mass"), dict),
                 "payload_mass_source": str(evidence.get("payload_mass", {}).get("source", "")).strip(),
                 "payload_mass_unit": str(evidence.get("payload_mass", {}).get("unit", "")).strip(),
@@ -1233,8 +1241,6 @@ def _ingest_fleet_sources(config: dict) -> dict:
                     for fuel, emfac_fuels in freight_fuel_types.items()
                     if str(fuel).strip()
                 },
-                "naics_sector": deepcopy(freight_mapping.get("naics_sector", [])),
-                "port_location": deepcopy(freight_mapping.get("port_location", [])),
             }
             passenger_model = _extract_named_model(
                 model_spec,
@@ -1251,6 +1257,7 @@ def _ingest_fleet_sources(config: dict) -> dict:
             config["passenger_bayesian_dag"] = {
                 "likelihood_floor": float(passenger_scoring.get("likelihood_floor", 1e-3)),
                 "fleet_vmt_prior_weight": float(passenger_weights.get("fleet_vmt_prior", 1.0)),
+                "fleet_population_prior_weight": float(passenger_weights.get("fleet_population_prior", 1.0)),
                 "income_weight": float(passenger_weights.get("income", 1.0)),
                 "income_enabled": isinstance(passenger_income_evidence, dict) and bool(passenger_income_evidence),
                 "income_center_ratio": float(passenger_income_evidence.get("center_ratio", 0.30)),
@@ -1331,21 +1338,11 @@ def _ingest_fleet_sources(config: dict) -> dict:
                 "atlas.fuel_map must be a mapping of normalized BEAM fuel tokens "
                 "to one or more source ATLAS fuel tokens"
             )
-        normalized_fuel_map: dict[str, str] = {}
-        for beam_fuel, raw_fuels in fuel_map.items():
-            beam_fuel_token = str(beam_fuel).strip().lower()
-            if not beam_fuel_token:
-                continue
-            if isinstance(raw_fuels, (list, tuple, set)):
-                candidates = raw_fuels
-            else:
-                candidates = [raw_fuels]
-            for raw_fuel in candidates:
-                raw_fuel_token = str(raw_fuel).strip().lower()
-                if not raw_fuel_token:
-                    continue
-                normalized_fuel_map[raw_fuel_token] = beam_fuel_token
-        atlas["fuel_map"] = normalized_fuel_map
+        atlas["fuel_map"] = _normalize_alias_mapping(
+            fuel_map,
+            normalize_keys=lambda value: str(value).strip().lower(),
+            normalize_values=lambda value: str(value).strip().lower(),
+        )
         config["atlas"] = atlas
     return config
 

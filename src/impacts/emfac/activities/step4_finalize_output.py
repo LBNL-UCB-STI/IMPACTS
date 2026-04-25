@@ -351,23 +351,24 @@ def _missing_rate_summary(frame: pd.DataFrame) -> dict[str, object]:
 
 
 def _print_model_year_group_stats(
+    group_name: str,
     final_rates: pd.DataFrame,
     aggregated_activity: pd.DataFrame,
     fleet: pd.DataFrame,
 ) -> None:
-    print("    4.5 Model year group stats")
+    print(f"      {group_name.capitalize()}:")
     if "modelYear" in final_rates.columns:
-        print("      Final rates rows by modelYear:")
+        print("        Final rates rows by modelYear:")
         for model_year, count in final_rates["modelYear"].value_counts(dropna=False).sort_index().items():
-            print(f"        {model_year}: {int(count):,}")
+            print(f"          {model_year}: {int(count):,}")
     if "modelYear" in aggregated_activity.columns:
-        print("      Activity rows by modelYear:")
+        print("        Activity rows by modelYear:")
         for model_year, count in aggregated_activity["modelYear"].value_counts(dropna=False).sort_index().items():
-            print(f"        {model_year}: {int(count):,}")
+            print(f"          {model_year}: {int(count):,}")
     if "modelYear" in fleet.columns:
-        print("      Fleet rows by modelYear:")
+        print("        Fleet rows by modelYear:")
         for model_year, count in fleet["modelYear"].value_counts(dropna=False).sort_index().items():
-            print(f"        {model_year}: {int(count):,}")
+            print(f"          {model_year}: {int(count):,}")
 
 
 def _build_emfac_id(*, vehicle_category: object, fuel: object, model_year: object) -> str:
@@ -619,13 +620,14 @@ def run_step4(workflow: dict[str, object]) -> dict[str, object]:
     )
     trace_payload["rates_store_source"] = frame_summary(rates_store_frame, name="rates_store_source")
     print("    4.5 Write final outputs and derived store")
+    print("    4.5 Passenger/Freight model year group stats")
     for group_name, (final_rates, matching_activity, aggregated_activity, activity_by_emfac_id, fleet) in outputs.items():
         _write_parquet(final_rates, workflow["paths"][f"final_output_{group_name}"])
         _write_parquet(matching_activity, workflow["paths"][f"matching_activity_output_{group_name}"])
         _write_parquet(aggregated_activity, workflow["paths"][f"final_activity_output_{group_name}"])
         _write_parquet(activity_by_emfac_id, workflow["paths"][f"final_activity_emfacid_output_{group_name}"])
         _write_parquet(fleet, workflow["paths"][f"final_fleet_output_{group_name}"])
-        _print_model_year_group_stats(final_rates, aggregated_activity, fleet)
+        _print_model_year_group_stats(group_name, final_rates, aggregated_activity, fleet)
     rates_store = _write_rates_store_from_dataframe(
         rates=rates_store_frame,
         output_dir=workflow["paths"]["emissions_store_root"],

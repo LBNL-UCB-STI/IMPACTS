@@ -56,11 +56,11 @@ emfac:
       - fallback_folder: ~/Workspace/Models/emfac/raw/statewide-emfac-emissions-inventory
       - vehicle_category_attributes_file: ~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/_emissions_vehicle_catalog.csv
       - fuel_map:
-          Dsl: [Diesel]
-          Elec: [Electricity]
-          Gas: [Gasoline]
-          NG: [Natural Gas]
-          Phe: [Plug-in Hybrid]
+          Dsl: ["Diesel"]
+          Elec: ["Electricity"]
+          Gas: ["Gasoline"]
+          NG: ["Natural Gas"]
+          Phe: ["Plug-in Hybrid"]
 
   fleet:
     # Single standardized vehicle-type assignment model file.

@@ -12,6 +12,7 @@ from impacts.emfac.fleet.step4_map_emfac_frism import _build_payload_mass_thresh
 from impacts.emfac.fleet.step4_map_emfac_frism import _filter_required_port_classes
 from impacts.emfac.fleet.step4_map_emfac_frism import _build_tour_port_weight_lookup
 from impacts.emfac.fleet.step4_map_emfac_frism import _attach_freight_fuel_consumption_templates
+from impacts.emfac.fleet.step4_map_emfac_frism import _finalize_freight_vehicle_type_probabilities
 from impacts.emfac.fleet.step4_map_emfac_frism import _payload_mass_gvwr_likelihood
 from impacts.emfac.fleet.step4_map_emfac_frism import _load_configured_port_classes
 from impacts.emfac.fleet.step4_map_emfac_frism import _load_vehicle_type_assignment_table
@@ -34,9 +35,17 @@ def _write_model_file(tmp_path: Path, *, port_rows: list[str] | None = None) -> 
             else:
                 zone, port_name, emfac_vehicle_category = parts
             port_entries.append(
-                f"    - vehicle_category:\n        - \"{emfac_vehicle_category}\"\n      zone_codes:\n        - '{zone}'\n      label: \"{port_name}\""
+                "\n".join(
+                    [
+                        "          - vehicle_category:",
+                        f"              - \"{emfac_vehicle_category}\"",
+                        "            zone_codes:",
+                        f"              - '{zone}'",
+                        f"            label: \"{port_name}\"",
+                    ]
+                )
             )
-    port_rows_yaml = "\n".join(port_entries) if port_entries else "    []"
+    port_rows_yaml = "\n".join(port_entries) if port_entries else "          []"
     model_file.write_text(
         "\n".join(
             [
@@ -47,6 +56,7 @@ def _write_model_file(tmp_path: Path, *, port_rows: list[str] | None = None) -> 
                 "        likelihood_floor: 0.01",
                 "        weights:",
                 "          fleet_vmt_prior: 1.0",
+                "          fleet_population_prior: 1.0",
                 "          naics_sector: 1.0",
                 "          payload_mass: 1.0",
                 "          port_location: 1.0",
@@ -55,25 +65,31 @@ def _write_model_file(tmp_path: Path, *, port_rows: list[str] | None = None) -> 
                 "          source: gvwr_lbs",
                 "          unit: lbs",
                 "          overload_penalty_power: 2.0",
+                "        naics_sector:",
+                "          - naics_code_2: '11'",
+                "            vehicle_category:",
+                "              - T7 Tractor Class 8",
+                "        port_location:",
+                port_rows_yaml,
                 "    passenger_bayesian_dag:",
                 "      scoring:",
                 "        weights:",
                 "          bodytype: 1.0",
                 "          fuel: 1.0",
-                "          emfac_vmt: 0.0",
-                "      evidence: {}",
+                "      evidence:",
+                "        naics_sector:",
+                "          - naics_code_2:",
+                "              - '31'",
+                "              - '32'",
+                "            vehicle_category:",
+                "              - T7 Tractor Class 8",
+                "        port_location: []",
                 "  mappings:",
                 "    freight:",
                 "      vehicle_categories:",
                 "        Class12aVocational: [LDA, LDT1, LDT2]",
                 "      fuel_types:",
                 "        diesel: [Dsl]",
-                "      naics_sector:",
-                "        - naics_code_2: '11'",
-                "          vehicle_category:",
-                "            - T7 Tractor Class 8",
-                "      port_location:",
-                port_rows_yaml.replace("    - ", "      - ").replace("      zone_codes:", "        zone_codes:").replace("      label:", "        label:").replace("      vehicle_category:", "        vehicle_category:").replace("        - ", "          - "),
                 "    passenger:",
                 "      body_types:",
                 "        car: [LDA]",
@@ -92,7 +108,8 @@ def test_build_freight_bayesian_log_score_uses_grouped_geometric_means() -> None
     matched = pd.DataFrame(
         [
             {
-                "fleetShare": 0.25,
+                "fleetVmtPrior": 0.25,
+                "fleetPopulationPrior": 0.5,
                 "naicsSectorLikelihood": 0.25,
                 "payloadMassLikelihood": 1.0,
                 "portLikelihood": 0.25,
@@ -102,23 +119,24 @@ def test_build_freight_bayesian_log_score_uses_grouped_geometric_means() -> None
 
     score = _build_freight_bayesian_log_score(
         matched=matched,
-        branch_weights={"fleet_vmt_prior": 1.0, "naics_sector": 2.0, "payload_mass": 2.0, "port_location": 3.0},
+        branch_weights={"fleet_vmt_prior": 1.0, "fleet_population_prior": 1.0, "naics_sector": 2.0, "payload_mass": 2.0, "port_location": 3.0},
     )
 
     expected = (
-        (1.0 / 8.0) * math.log(0.25)
-        + (2.0 / 8.0) * math.log(0.25)
-        + (2.0 / 8.0) * math.log(1.0)
-        + (3.0 / 8.0) * math.log(0.25)
+        (1.0 / 9.0) * math.log(0.25)
+        + (1.0 / 9.0) * math.log(0.5)
+        + (2.0 / 9.0) * math.log(0.25)
+        + (2.0 / 9.0) * math.log(1.0)
+        + (3.0 / 9.0) * math.log(0.25)
     )
     assert score.iloc[0] == expected
 
 
 def test_normalize_zone_id_preserves_string_ids_and_strips_decimal_suffix() -> None:
     assert _normalize_zone_id("060014017001") == "060014017001"
-    assert _normalize_zone_id("60014014003") == "60014014003"
-    assert _normalize_zone_id("60014014003.0") == "60014014003"
-    assert _normalize_zone_id(60014014003.0) == "60014014003"
+    assert _normalize_zone_id("60014014003") == "060014014003"
+    assert _normalize_zone_id("60014014003.0") == "060014014003"
+    assert _normalize_zone_id(60014014003.0) == "060014014003"
     assert _normalize_zone_id("") == ""
 
 
@@ -137,7 +155,14 @@ def test_load_vehicle_type_assignment_table_expands_naics_code_lists(tmp_path: P
                 "          naics_sector: 1.0",
                 "          payload_mass: 1.0",
                 "          port_location: 1.0",
-                "      evidence: {}",
+                "      evidence:",
+                "        naics_sector:",
+                "          - naics_code_2:",
+                "              - '31'",
+                "              - '32'",
+                "            vehicle_category:",
+                "              - T7 Tractor Class 8",
+                "        port_location: []",
                 "    passenger_bayesian_dag:",
                 "      scoring: {}",
                 "      evidence: {}",
@@ -147,13 +172,6 @@ def test_load_vehicle_type_assignment_table_expands_naics_code_lists(tmp_path: P
                 "        Class12aVocational: [LDA, LDT1, LDT2]",
                 "      fuel_types:",
                 "        diesel: [Dsl]",
-                "      naics_sector:",
-                "        - naics_code_2:",
-                "            - '31'",
-                "            - '32'",
-                "          vehicle_category:",
-                "            - T7 Tractor Class 8",
-                "      port_location: []",
                 "    passenger:",
                 "      body_types:",
                 "        car: [LDA]",
@@ -201,7 +219,7 @@ def test_build_tour_port_weight_lookup_is_tour_specific() -> None:
     assert "t3" not in lookup
 
 
-def test_build_freight_naics_sector_weight_lookup_uses_naics_sector_only() -> None:
+def test_build_freight_naics_sector_weight_lookup_is_tour_specific() -> None:
     payload_profiles = pd.DataFrame(
         [
             {
@@ -227,7 +245,7 @@ def test_build_freight_naics_sector_weight_lookup_uses_naics_sector_only() -> No
                 "locationZone": "",
             },
             {
-                "tourId": "t3",
+                "tourId": "t2",
                 "frismVehicleTypeId": "HdtDsl",
                 "sequenceRank": 1,
                 "activityType": "loading",
@@ -252,13 +270,20 @@ def test_build_freight_naics_sector_weight_lookup_uses_naics_sector_only() -> No
         sector_mapping=naics_sector_mapping,
     )
 
-    assert "HdtDsl" in lookup
-    assert set(lookup["HdtDsl"].keys()) == {
+    assert set(lookup.keys()) == {"t1", "t2"}
+    assert set(lookup["t1"].keys()) == {
+        "T7 Tractor Class 8",
+        "T7 Single Dump Class 8",
+    }
+    assert set(lookup["t2"].keys()) == {
         "T7 Tractor Class 8",
         "T7 Single Dump Class 8",
         "T7 Single Other Class 8",
     }
-    assert lookup["HdtDsl"]["T7 Tractor Class 8"] == lookup["HdtDsl"]["T7 Single Other Class 8"]
+    assert lookup["t1"]["T7 Tractor Class 8"] == lookup["t1"]["T7 Single Dump Class 8"] == 0.5
+    assert lookup["t2"]["T7 Tractor Class 8"] == 0.25
+    assert lookup["t2"]["T7 Single Dump Class 8"] == 0.25
+    assert lookup["t2"]["T7 Single Other Class 8"] == 0.5
 
 
 def test_build_payload_mass_thresholds_uses_peak_cumulative_onboard_payload() -> None:
@@ -599,3 +624,50 @@ def test_attach_freight_fuel_consumption_templates_still_errors_without_baseline
         assert "No fuel-consumption freight assignment matched EMFAC-assigned class/fuel" in str(error)
     else:
         raise AssertionError("Expected ValueError when no freight baseline fuel-consumption values are present")
+
+
+def test_finalize_freight_vehicle_type_probabilities_normalizes_within_vehicle_category() -> None:
+    mapped_vehicle_types = pd.DataFrame(
+        [
+            {
+                "vehicleTypeId": "vt-a1",
+                "vehicleCategory": "Class456Vocational",
+                "sampleProbabilityWithinCategory": "0.000000",
+                "sampleProbabilityString": "",
+            },
+            {
+                "vehicleTypeId": "vt-a2",
+                "vehicleCategory": "Class456Vocational",
+                "sampleProbabilityWithinCategory": "0.000000",
+                "sampleProbabilityString": "",
+            },
+            {
+                "vehicleTypeId": "vt-b1",
+                "vehicleCategory": "Class78Tractor",
+                "sampleProbabilityWithinCategory": "0.000000",
+                "sampleProbabilityString": "",
+            },
+        ]
+    )
+    mapped_carriers = pd.DataFrame(
+        [
+            {"vehicleTypeId": "vt-a1"},
+            {"vehicleTypeId": "vt-a1"},
+            {"vehicleTypeId": "vt-a2"},
+            {"vehicleTypeId": "vt-b1"},
+            {"vehicleTypeId": "vt-b1"},
+        ]
+    )
+
+    result = _finalize_freight_vehicle_type_probabilities(
+        mapped_freight_vehicle_types=mapped_vehicle_types,
+        mapped_carriers=mapped_carriers,
+    )
+
+    probs = {
+        row.vehicleTypeId: row.sampleProbabilityWithinCategory
+        for row in result.itertuples(index=False)
+    }
+    assert probs["vt-a1"] == "0.666667"
+    assert probs["vt-a2"] == "0.333333"
+    assert probs["vt-b1"] == "1.000000"

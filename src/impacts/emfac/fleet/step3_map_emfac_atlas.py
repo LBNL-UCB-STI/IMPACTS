@@ -32,16 +32,20 @@ from impacts.emfac.common import attach_idle_time_fraction_from_config
 from impacts.emfac.common import assign_model_year_groups
 from impacts.emfac.common import model_year_interval_distance
 from impacts.emfac.common import model_year_group_id_component
+from impacts.emfac.common import normalize_probabilities_to_fixed_precision
 from impacts.emfac.common import parse_model_year_group_interval
 from impacts.emfac.fleet.step1_build_vehicle_types import _build_atlas_vehicle_type_ids
 from impacts.emfac.fleet.step1_build_vehicle_types import _apply_atlas_fuel_aliases
 from impacts.emfac.fleet.step1_build_vehicle_types import _extract_model_year_from_vehicle_type_id
+from impacts.emfac.fleet.step1_build_vehicle_types import _format_configured_income_bin_labels
 from impacts.emfac.fleet.step1_build_vehicle_types import _normalize_energy_file_columns
+from impacts.emfac.fleet.step1_build_vehicle_types import _validate_income_bins
 
 
 _EMFAC_KEY_COLUMNS = ["vehicleCategory", "fuel", "modelYear"]
 _PASSENGER_SOURCE_VEHICLE_TYPES_SCHEMA = {
     "vehicleTypeId": "string",
+    "vehicleCategory": "string",
     "bodytype": "string",
     "adopt_fuel": "string",
     "modelyear": "Int64",
@@ -187,9 +191,17 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
         candidates["total_vmt_vehicle_miles_per_year"], errors="coerce"
     ).fillna(0.0).sum()
     if total_vmt <= 0:
-        raise ValueError("Passenger EMFAC candidates have zero total_vmt_vehicle_miles_per_year; cannot derive fleetShare")
-    candidates["fleetShare"] = (
+        raise ValueError(
+            "Passenger EMFAC candidates have zero total_vmt_vehicle_miles_per_year; cannot derive fleetVmtPrior"
+        )
+    total_population = pd.to_numeric(candidates["population_vehicles"], errors="coerce").fillna(0.0).sum()
+    if total_population <= 0:
+        raise ValueError("Passenger EMFAC candidates have zero population_vehicles; cannot derive fleetPopulationPrior")
+    candidates["fleetVmtPrior"] = (
         pd.to_numeric(candidates["total_vmt_vehicle_miles_per_year"], errors="coerce").fillna(0.0) / total_vmt
+    )
+    candidates["fleetPopulationPrior"] = (
+        pd.to_numeric(candidates["population_vehicles"], errors="coerce").fillna(0.0) / total_population
     )
     candidates["emfacId"] = candidates.apply(
         lambda row: _build_emfac_id(
@@ -326,100 +338,10 @@ def _extract_emfac_fuel_candidates(
     return base_matches["emfac_fuel"].astype(str).drop_duplicates().tolist()
 
 
-def _parse_probability_string(probability_string: object) -> tuple[str, float | None, str, float | None]:
-    text = _normalize_text(probability_string)
-    if not text:
-        return ("all", None, "all", None)
-
-    income_bin = "all"
-    income_probability: float | None = None
-    ridehail_bin = "all"
-    ridehail_probability: float | None = None
-
-    for part in [token.strip() for token in text.split(";") if token.strip()]:
-        side, _, remainder = part.partition("|")
-        bucket, _, probability_token = remainder.strip().partition(":")
-        probability_value = pd.to_numeric(pd.Series([probability_token.strip()]), errors="coerce").iloc[0]
-        if side.strip().lower() == "income":
-            income_bin = bucket.strip() or "all"
-            income_probability = None if pd.isna(probability_value) else float(probability_value)
-        elif side.strip().lower() == "ridehail":
-            ridehail_bin = bucket.strip() or "all"
-            ridehail_probability = None if pd.isna(probability_value) else float(probability_value)
-    return income_bin, income_probability, ridehail_bin, ridehail_probability
-
-
-def _format_probability_string(
-    *,
-    income_bin: str,
-    income_probability: float | None,
-    ridehail_bin: str,
-    ridehail_probability: float | None,
-) -> str:
-    parts: list[str] = []
-    if ridehail_probability is not None:
-        parts.append(f"ridehail | {ridehail_bin}:{ridehail_probability:.6f}")
-    if income_probability is not None:
-        parts.append(f"income | {income_bin}:{income_probability:.6f}")
-    return "; ".join(parts)
-
-
-def _normalize_probability_vector(series: pd.Series, *, decimals: int = 6) -> pd.Series:
-    numeric = pd.to_numeric(series, errors="coerce").fillna(0.0)
-    rounded = numeric.round(decimals)
-    if rounded.empty:
-        return rounded
-    remainder = round(1.0 - float(rounded.sum()), decimals)
-    if remainder != 0:
-        target_index = rounded[rounded.gt(0)].index[-1] if rounded.gt(0).any() else rounded.index[-1]
-        rounded.loc[target_index] = round(float(rounded.loc[target_index]) + remainder, decimals)
-    return rounded
-
-
 def _coerce_random_generator(seed: int | np.random.Generator) -> np.random.Generator:
     if isinstance(seed, np.random.Generator):
         return seed
     return np.random.default_rng(int(seed))
-
-
-def _normalize_written_passenger_probabilities(frame: pd.DataFrame) -> pd.DataFrame:
-    prepared = frame.copy()
-    prepared["sampleProbabilityWithinCategory"] = _normalize_probability_vector(
-        prepared["sampleProbabilityWithinCategory"]
-    )
-
-    parsed = prepared["sampleProbabilityString"].apply(_parse_probability_string)
-    prepared["incomeBinKey"] = parsed.apply(lambda value: value[0])
-    prepared["incomeProbabilityValue"] = parsed.apply(lambda value: value[1])
-    prepared["ridehailBinKey"] = parsed.apply(lambda value: value[2])
-    prepared["ridehailProbabilityValue"] = parsed.apply(lambda value: value[3])
-
-    for income_bin in prepared["incomeBinKey"].dropna().unique():
-        mask = prepared["incomeBinKey"] == income_bin
-        prepared.loc[mask, "incomeProbabilityValue"] = _normalize_probability_vector(
-            prepared.loc[mask, "incomeProbabilityValue"]
-        ).to_numpy()
-    for ridehail_bin in prepared["ridehailBinKey"].dropna().unique():
-        mask = prepared["ridehailBinKey"] == ridehail_bin
-        prepared.loc[mask, "ridehailProbabilityValue"] = _normalize_probability_vector(
-            prepared.loc[mask, "ridehailProbabilityValue"]
-        ).to_numpy()
-
-    prepared["sampleProbabilityWithinCategory"] = prepared["sampleProbabilityWithinCategory"].map(
-        lambda value: f"{float(value):.6f}"
-    )
-    prepared["sampleProbabilityString"] = prepared.apply(
-        lambda row: _format_probability_string(
-            income_bin=str(row["incomeBinKey"]),
-            income_probability=None if pd.isna(row["incomeProbabilityValue"]) else float(row["incomeProbabilityValue"]),
-            ridehail_bin=str(row["ridehailBinKey"]),
-            ridehail_probability=None if pd.isna(row["ridehailProbabilityValue"]) else float(row["ridehailProbabilityValue"]),
-        ),
-        axis=1,
-    )
-    return prepared.drop(
-        columns=["incomeBinKey", "incomeProbabilityValue", "ridehailBinKey", "ridehailProbabilityValue"]
-    )
 
 
 def _attach_vehicle_household_income(
@@ -463,26 +385,27 @@ def _build_passenger_vehicle_sampling_table(
 ) -> pd.DataFrame:
     _require_column(passenger_car_vehicle_types, "vehicleTypeId", "Passenger car vehicle types file")
     _require_column(passenger_car_vehicle_types, "atlasVehicleTypeId", "Passenger car vehicle types file")
-    _require_column(passenger_car_vehicle_types, "sampleProbabilityWithinCategory", "Passenger car vehicle types file")
+    _require_column(passenger_car_vehicle_types, "fleetVmtPrior", "Passenger car vehicle types file")
+    _require_column(passenger_car_vehicle_types, "fleetPopulationPrior", "Passenger car vehicle types file")
     if require_msrp:
         _require_column(passenger_car_vehicle_types, "msrp_usd", "Passenger car vehicle types file")
 
-    selected_columns = ["vehicleTypeId", "atlasVehicleTypeId", "sampleProbabilityWithinCategory"]
+    selected_columns = ["vehicleTypeId", "atlasVehicleTypeId", "fleetVmtPrior", "fleetPopulationPrior"]
     if "msrp_usd" in passenger_car_vehicle_types.columns:
         selected_columns.append("msrp_usd")
     prepared = passenger_car_vehicle_types[selected_columns].copy()
     prepared["atlasVehicleTypeToken"] = prepared["atlasVehicleTypeId"].astype(str)
-    prepared["priorProbability"] = pd.to_numeric(
-        prepared["sampleProbabilityWithinCategory"],
-        errors="coerce",
-    ).fillna(0.0)
+    prepared["fleetVmtPrior"] = pd.to_numeric(prepared["fleetVmtPrior"], errors="coerce").fillna(0.0)
+    prepared["fleetPopulationPrior"] = pd.to_numeric(prepared["fleetPopulationPrior"], errors="coerce").fillna(0.0)
     if "msrp_usd" in prepared.columns:
         prepared["msrp_usd"] = pd.to_numeric(prepared["msrp_usd"], errors="coerce")
     else:
         prepared["msrp_usd"] = pd.Series(pd.NA, index=prepared.index, dtype="Float64")
     if require_msrp and prepared["msrp_usd"].isna().any():
         raise ValueError("Passenger car vehicle types file is missing msrp_usd required for passenger_bayesian_dag")
-    return prepared[["vehicleTypeId", "atlasVehicleTypeToken", "priorProbability", "msrp_usd"]].copy()
+    return prepared[
+        ["vehicleTypeId", "atlasVehicleTypeToken", "fleetVmtPrior", "fleetPopulationPrior", "msrp_usd"]
+    ].copy()
 
 
 def _load_passenger_bayesian_dag(config: dict[str, Any]) -> dict[str, float]:
@@ -490,6 +413,7 @@ def _load_passenger_bayesian_dag(config: dict[str, Any]) -> dict[str, float]:
     required = [
         "likelihood_floor",
         "fleet_vmt_prior_weight",
+        "fleet_population_prior_weight",
         "income_weight",
         "income_enabled",
     ]
@@ -502,6 +426,7 @@ def _load_passenger_bayesian_dag(config: dict[str, Any]) -> dict[str, float]:
     result = {
         "likelihood_floor": float(dag["likelihood_floor"]),
         "fleet_vmt_prior_weight": float(dag["fleet_vmt_prior_weight"]),
+        "fleet_population_prior_weight": float(dag["fleet_population_prior_weight"]),
         "income_weight": float(dag["income_weight"]),
         "income_enabled": bool(dag["income_enabled"]),
     }
@@ -791,50 +716,165 @@ def _sample_passenger_vehicle_type_ids_for_vehicles(
     )
 
     sampling_groups = {
-        group_key: group[["vehicleTypeId", "priorProbability", "msrp_usd"]].reset_index(drop=True)
-        for group_key, group in sampling_table.groupby(["atlasVehicleTypeToken"], dropna=False, sort=False)
+        group_key: group[["vehicleTypeId", "fleetVmtPrior", "fleetPopulationPrior", "msrp_usd"]].reset_index(drop=True)
+        for group_key, group in sampling_table.groupby("atlasVehicleTypeToken", dropna=False, sort=False)
     }
     sampled_vehicle_type_ids = pd.Series(index=prepared.index, dtype="object")
     random = _coerce_random_generator(seed)
 
     group_columns = ["atlasVehicleTypeToken"]
     for group_key, group in prepared.groupby(group_columns, dropna=False, sort=False):
-        candidates = sampling_groups.get(group_key)
+        candidates = sampling_groups.get(group_key[0])
         if candidates is None or candidates.empty:
             raise ValueError(
                 "No passenger car vehicle-type candidates available for atlas vehicle type "
                 f"atlasVehicleTypeId={group_key[0]}"
             )
         candidates = candidates.copy()
-        prior = pd.to_numeric(candidates["priorProbability"], errors="coerce").fillna(0.0).clip(lower=0.0)
-        prior = prior / float(prior.sum()) if float(prior.sum()) > 0.0 else pd.Series(
+        vmt_prior = pd.to_numeric(candidates["fleetVmtPrior"], errors="coerce").fillna(0.0).clip(lower=0.0)
+        vmt_prior = vmt_prior / float(vmt_prior.sum()) if float(vmt_prior.sum()) > 0.0 else pd.Series(
             np.full(len(candidates), 1.0 / len(candidates)),
             index=candidates.index,
             dtype="float64",
         )
-        log_prior = np.log(np.maximum(prior.to_numpy(dtype="float64"), 1e-12))
-        posterior_log = float(dag["fleet_vmt_prior_weight"]) * log_prior
+        population_prior = pd.to_numeric(candidates["fleetPopulationPrior"], errors="coerce").fillna(0.0).clip(lower=0.0)
+        population_prior = population_prior / float(population_prior.sum()) if float(population_prior.sum()) > 0.0 else pd.Series(
+            np.full(len(candidates), 1.0 / len(candidates)),
+            index=candidates.index,
+            dtype="float64",
+        )
+        log_vmt_prior = np.log(np.maximum(vmt_prior.to_numpy(dtype="float64"), 1e-12))
+        log_population_prior = np.log(np.maximum(population_prior.to_numpy(dtype="float64"), 1e-12))
+        base_posterior_log = (
+            float(dag["fleet_vmt_prior_weight"]) * log_vmt_prior
+            + float(dag["fleet_population_prior_weight"]) * log_population_prior
+        )
         if bool(dag["income_enabled"]):
-            income_usd = float(pd.to_numeric(group["income_in_thousands"], errors="coerce").iloc[0]) * 1000.0
-            income_usd = max(income_usd, 1.0)
-            affordability_ratio = pd.to_numeric(candidates["msrp_usd"], errors="coerce").fillna(0.0) / income_usd
+            income_usd = (
+                pd.to_numeric(group["income_in_thousands"], errors="coerce").fillna(0.0).clip(lower=1e-3).to_numpy(dtype="float64")
+                * 1000.0
+            )
+            affordability_ratio = (
+                pd.to_numeric(candidates["msrp_usd"], errors="coerce").fillna(0.0).to_numpy(dtype="float64")[None, :]
+                / income_usd[:, None]
+            )
             sigma_ratio = max(float(dag["income_sigma_ratio"]), 1e-9)
             standardized = (affordability_ratio - float(dag["income_center_ratio"])) / sigma_ratio
             income_likelihood = np.exp(-0.5 * np.square(standardized))
             income_likelihood = np.maximum(income_likelihood, float(dag["likelihood_floor"]))
             log_income = np.log(np.maximum(income_likelihood, 1e-12))
-            posterior_log = posterior_log + float(dag["income_weight"]) * log_income
-        posterior = np.exp(posterior_log - float(np.max(posterior_log)))
-        posterior_sum = float(posterior.sum())
-        probabilities = posterior / posterior_sum if posterior_sum > 0.0 else np.full(len(candidates), 1.0 / len(candidates))
+            posterior_log = base_posterior_log[None, :] + float(dag["income_weight"]) * log_income
+            posterior = np.exp(posterior_log - np.max(posterior_log, axis=1, keepdims=True))
+            posterior_sum = posterior.sum(axis=1, keepdims=True)
+            probabilities = np.divide(
+                posterior,
+                posterior_sum,
+                out=np.full_like(posterior, 1.0 / len(candidates)),
+                where=posterior_sum > 0.0,
+            )
+            cumulative_probabilities = np.cumsum(probabilities, axis=1)
+            draws = random.random(len(group))
+            sampled_indexes = (draws[:, None] > cumulative_probabilities).sum(axis=1)
+            sampled_vehicle_type_ids.loc[group.index] = candidates["vehicleTypeId"].to_numpy()[sampled_indexes]
+            continue
         sampled_vehicle_type_ids.loc[group.index] = random.choice(
             candidates["vehicleTypeId"].to_numpy(),
             size=len(group),
-            p=probabilities,
+            p=np.exp(base_posterior_log - float(np.max(base_posterior_log)))
+            / float(np.exp(base_posterior_log - float(np.max(base_posterior_log))).sum()),
         )
 
     prepared["vehicleTypeId"] = sampled_vehicle_type_ids.astype(str)
-    return prepared.drop(columns=["income_in_thousands", "atlasVehicleTypeToken"])
+    return prepared.drop(columns=["atlasVehicleTypeToken"])
+
+
+def _assign_income_bin_labels(
+    income_in_thousands: pd.Series,
+    *,
+    config: dict[str, Any],
+) -> pd.Series:
+    normalized_income_bins = _validate_income_bins(config.get("atlas", {}).get("income_bins"))
+    numeric_income = pd.to_numeric(income_in_thousands, errors="coerce")
+    if normalized_income_bins is None:
+        return pd.Series("all", index=income_in_thousands.index, dtype="string")
+    labels = _format_configured_income_bin_labels(normalized_income_bins)
+    return pd.cut(
+        numeric_income,
+        bins=normalized_income_bins,
+        labels=labels,
+        include_lowest=True,
+        right=False,
+    ).astype("string").fillna(labels[0])
+
+
+def _format_probability_entries(entries: list[tuple[str, float]]) -> str:
+    return "; ".join(f"income | {income_bin}:{probability:.6f}" for income_bin, probability in entries)
+
+
+def _finalize_passenger_vehicle_type_probabilities(
+    *,
+    passenger_car_vehicle_types: pd.DataFrame,
+    sampled_vehicles: pd.DataFrame,
+    config: dict[str, Any],
+) -> pd.DataFrame:
+    prepared = passenger_car_vehicle_types.copy()
+    if prepared.empty:
+        return prepared
+
+    category_lookup = prepared[["vehicleTypeId", "vehicleCategory"]].drop_duplicates().copy()
+    assigned = sampled_vehicles[["vehicleTypeId"]].copy()
+    assigned["vehicleTypeId"] = assigned["vehicleTypeId"].astype(str)
+    assigned = assigned.merge(category_lookup, on="vehicleTypeId", how="left")
+    counts = (
+        assigned.groupby(["vehicleCategory", "vehicleTypeId"], dropna=False)
+        .size()
+        .reset_index(name="vehicleCount")
+    )
+    counts = normalize_probabilities_to_fixed_precision(
+        counts,
+        group_columns=["vehicleCategory"],
+        weight_column="vehicleCount",
+        output_column="sampleProbabilityWithinCategory",
+    )
+    probability_lookup = {
+        (str(row.vehicleCategory), str(row.vehicleTypeId)): float(row.sampleProbabilityWithinCategory)
+        for row in counts.itertuples(index=False)
+    }
+    prepared["sampleProbabilityWithinCategory"] = prepared.apply(
+        lambda row: f"{probability_lookup.get((str(row['vehicleCategory']), str(row['vehicleTypeId'])), 0.0):.6f}",
+        axis=1,
+    )
+
+    income_assignments = sampled_vehicles[["vehicleTypeId", "income_in_thousands"]].copy()
+    income_assignments["vehicleTypeId"] = income_assignments["vehicleTypeId"].astype(str)
+    income_assignments = income_assignments.merge(category_lookup, on="vehicleTypeId", how="left")
+    income_assignments["incomeBin"] = _assign_income_bin_labels(
+        income_assignments["income_in_thousands"],
+        config=config,
+    )
+    income_counts = (
+        income_assignments.groupby(["vehicleCategory", "incomeBin", "vehicleTypeId"], dropna=False)
+        .size()
+        .reset_index(name="vehicleCount")
+    )
+    income_counts = normalize_probabilities_to_fixed_precision(
+        income_counts,
+        group_columns=["vehicleCategory", "incomeBin"],
+        weight_column="vehicleCount",
+        output_column="incomeProbability",
+    )
+    income_lookup: dict[tuple[str, str], list[tuple[str, float]]] = {}
+    for row in income_counts.sort_values(["vehicleCategory", "incomeBin", "vehicleTypeId"], kind="mergesort").itertuples(index=False):
+        income_lookup.setdefault((str(row.vehicleCategory), str(row.vehicleTypeId)), []).append(
+            (str(row.incomeBin), float(row.incomeProbability))
+        )
+    prepared["sampleProbabilityString"] = prepared.apply(
+        lambda row: _format_probability_entries(
+            income_lookup.get((str(row["vehicleCategory"]), str(row["vehicleTypeId"])), [])
+        ),
+        axis=1,
+    )
+    return prepared
 
 
 def _prepare_mapped_passenger_vehicles_output(vehicles: pd.DataFrame) -> pd.DataFrame:
@@ -964,14 +1004,22 @@ def _build_passenger_emfac_candidates(
             )
     else:
         matched = exact_matched
-    matched["splitShare"] = pd.to_numeric(matched["fleetShare"], errors="coerce").fillna(0.0)
-    split_total = float(matched["splitShare"].sum())
-    if split_total <= 0.0:
+    matched["fleetVmtPrior"] = pd.to_numeric(matched["fleetVmtPrior"], errors="coerce").fillna(0.0)
+    matched["fleetPopulationPrior"] = pd.to_numeric(matched["fleetPopulationPrior"], errors="coerce").fillna(0.0)
+    vmt_total = float(matched["fleetVmtPrior"].sum())
+    population_total = float(matched["fleetPopulationPrior"].sum())
+    if vmt_total <= 0.0:
         raise ValueError(
-            "Passenger EMFAC candidates have zero fleetShare after mapping for "
+            "Passenger EMFAC candidates have zero fleetVmtPrior after mapping for "
             f"vehicleTypeId={vehicle_type_id}"
         )
-    matched["splitShare"] = matched["splitShare"] / split_total
+    if population_total <= 0.0:
+        raise ValueError(
+            "Passenger EMFAC candidates have zero fleetPopulationPrior after mapping for "
+            f"vehicleTypeId={vehicle_type_id}"
+        )
+    matched["fleetVmtPrior"] = matched["fleetVmtPrior"] / vmt_total
+    matched["fleetPopulationPrior"] = matched["fleetPopulationPrior"] / population_total
     matched = matched.sort_values(
         by=[
             "total_vmt_vehicle_miles_per_year",
@@ -992,7 +1040,13 @@ def _build_passenger_car_emfac_mapping(
     mapping_context: dict[str, Any],
     model_year_groups: dict[str, list[dict[str, object] | str]],
 ) -> pd.DataFrame:
-    for column_name in ["vehicleTypeId", "adopt_fuel", "sampleProbabilityWithinCategory", "sampleProbabilityString"]:
+    for column_name in [
+        "vehicleTypeId",
+        "vehicleCategory",
+        "adopt_fuel",
+        "sampleProbabilityWithinCategory",
+        "sampleProbabilityString",
+    ]:
         _require_column(passenger_car_vehicle_types, column_name, "Passenger car vehicle types file")
     for column_name in ["bodytype", "modelyear"]:
         _require_column(passenger_car_vehicle_types, column_name, "Passenger car vehicle types file")
@@ -1002,22 +1056,20 @@ def _build_passenger_car_emfac_mapping(
     fuel_mapping = mapping_context["fuel_mapping"]
     passenger_mapping = mapping_context["passenger_mapping"]
     prepared = passenger_car_vehicle_types.copy()
-    prepared["vehicleCategory"] = "LDA"
+    prepared["emfacGroupingVehicleCategory"] = "LDA"
     prepared = assign_model_year_groups(
         prepared,
         model_year_groups,
         year_column="modelyear",
-        category_column="vehicleCategory",
+        category_column="emfacGroupingVehicleCategory",
         output_column="emfacModelYearGroup",
     )
-    prepared = prepared.drop(columns=["vehicleCategory"])
+    prepared = prepared.drop(columns=["emfacGroupingVehicleCategory"])
 
     expanded_rows: list[dict[str, Any]] = []
     for row in prepared.itertuples(index=False):
         row_payload = row._asdict()
         atlas_vehicle_type_id = str(getattr(row, "atlasVehicleTypeId", getattr(row, "vehicleTypeId")))
-        base_probability = float(pd.to_numeric(pd.Series([row.sampleProbabilityWithinCategory]), errors="coerce").fillna(0.0).iloc[0])
-        income_bin, income_probability, ridehail_bin, ridehail_probability = _parse_probability_string(row.sampleProbabilityString)
         candidates = _build_passenger_emfac_candidates(
             vehicle_type_id=str(row.vehicleTypeId),
             bodytype=row.bodytype,
@@ -1029,23 +1081,17 @@ def _build_passenger_car_emfac_mapping(
             passenger_mapping=passenger_mapping,
         )
         for candidate in candidates.itertuples(index=False):
-            share = float(candidate.splitShare)
-            income_split = None if income_probability is None else float(income_probability) * share
-            ridehail_split = None if ridehail_probability is None else float(ridehail_probability) * share
             updated = dict(row_payload)
             updated["atlasVehicleTypeId"] = atlas_vehicle_type_id
             updated["emfacId"] = str(candidate.emfacId)
             updated["emfacVehicleCategory"] = str(candidate.vehicleCategory)
             updated["emfacFuel"] = str(candidate.fuel)
             updated["emfacResolvedModelYear"] = str(candidate.modelYear)
+            updated["fleetVmtPrior"] = f"{float(candidate.fleetVmtPrior):.6f}"
+            updated["fleetPopulationPrior"] = f"{float(candidate.fleetPopulationPrior):.6f}"
             updated["vehicleTypeId"] = f"{candidate.emfacId}--{atlas_vehicle_type_id}"
-            updated["sampleProbabilityWithinCategory"] = f"{base_probability * share:.6f}"
-            updated["sampleProbabilityString"] = _format_probability_string(
-                income_bin=str(income_bin),
-                income_probability=income_split,
-                ridehail_bin=str(ridehail_bin),
-                ridehail_probability=ridehail_split,
-            )
+            updated["sampleProbabilityWithinCategory"] = "0.000000"
+            updated["sampleProbabilityString"] = ""
             expanded_rows.append(updated)
 
     prepared = pd.DataFrame(expanded_rows)
@@ -1055,7 +1101,7 @@ def _build_passenger_car_emfac_mapping(
             "Passenger car Step 3 generated duplicate vehicleTypeId values:\n"
             + "\n".join(duplicate_vehicle_type_ids.astype(str).tolist())
         )
-    return _normalize_written_passenger_probabilities(prepared)
+    return prepared
 
 
 def _write_vehicle_types(frame: pd.DataFrame, path_like: str) -> str:
@@ -1089,7 +1135,7 @@ def _sample_mapped_passenger_vehicles(
     workflow: dict[str, Any],
     passenger_car_with_emfac: pd.DataFrame,
     seed: int | np.random.Generator,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     config = workflow["config"]
     atlas_config = config["atlas"]
     atlas_vehicles = read_table(atlas_config["vehicles_file"], schema=ATLAS_VEHICLES_SCHEMA)
@@ -1105,8 +1151,13 @@ def _sample_mapped_passenger_vehicles(
         config=config,
         seed=seed,
     )
+    passenger_car_with_emfac = _finalize_passenger_vehicle_type_probabilities(
+        passenger_car_vehicle_types=passenger_car_with_emfac,
+        sampled_vehicles=vehicles_with_em,
+        config=config,
+    )
     vehicles_with_em = _prepare_mapped_passenger_vehicles_output(vehicles_with_em)
-    return vehicles_with_em
+    return vehicles_with_em, passenger_car_with_emfac
 
 
 def _write_mapped_passenger_vehicle_types(
@@ -1168,11 +1219,12 @@ def run_step3(workflow: dict[str, Any]) -> dict[str, Any]:
     workflow["built_vehicle_types"] = passenger_car_with_emfac
 
     print("=== Step 3.4: sample mapped passenger vehicleTypeId values for ATLAS vehicles ===")
-    vehicles_with_em = _sample_mapped_passenger_vehicles(
+    vehicles_with_em, passenger_car_with_emfac = _sample_mapped_passenger_vehicles(
         workflow=workflow,
         passenger_car_with_emfac=passenger_car_with_emfac,
         seed=random,
     )
+    workflow["built_vehicle_types"] = passenger_car_with_emfac
 
     print("=== Step 3.5: write mapped passenger vehicle types and ATLAS vehicles ===")
     built_vehicle_types_file = _write_mapped_passenger_vehicle_types(
