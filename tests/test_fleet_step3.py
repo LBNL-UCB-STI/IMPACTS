@@ -7,7 +7,7 @@ import pytest
 
 from impacts.emfac.fleet.step1_build_vehicle_types import _build_atlas_vehicle_type_targets
 from impacts.emfac.fleet.step1_build_vehicle_types import _build_passenger_vehicle_types_from_atlas_targets
-from impacts.emfac.fleet.step3_map_emfac_atlas import _assign_passenger_fuel_consumption_ids
+from impacts.emfac.fleet.step3_map_emfac_atlas import _assign_passenger_fuel_consumption_fields
 from impacts.emfac.fleet.step3_map_emfac_atlas import _build_passenger_emfac_candidates
 from impacts.emfac.fleet.step3_map_emfac_atlas import _prepare_mapped_passenger_vehicles_output
 from impacts.emfac.fleet.step3_map_emfac_atlas import _sample_passenger_vehicle_type_ids_for_vehicles
@@ -172,15 +172,24 @@ def test_build_passenger_emfac_candidates_matches_grouped_model_year_exactly() -
         emfac_candidates=candidates,
         body_type_mapping=body_type_mapping,
         fuel_mapping=fuel_mapping,
+        passenger_mapping={},
     )
 
     assert result["modelYear"].tolist() == ["<=2003"]
     assert result["splitShare"].iloc[0] == 1.0
 
 
-def test_build_passenger_emfac_candidates_requires_exact_model_year_group_match() -> None:
+def test_build_passenger_emfac_candidates_uses_configured_fuel_fallback_when_exact_year_match_is_missing() -> None:
     candidates = pd.DataFrame(
         [
+            {
+                "vehicleCategory": "LDA",
+                "fuel": "Gas",
+                "modelYear": "<=2003",
+                "fleetShare": 0.8,
+                "total_vmt_vehicle_miles_per_year": 80.0,
+                "population_vehicles": 40.0,
+            },
             {
                 "vehicleCategory": "LDA",
                 "fuel": "Phe",
@@ -206,16 +215,28 @@ def test_build_passenger_emfac_candidates_requires_exact_model_year_group_match(
         [{"emfac_vehicle_category": "LDA", "emfac_fuel": "Phe", "adopt_fuel": "electricity+gasoline"}]
     )
 
-    with pytest.raises(ValueError, match="No passenger EMFAC candidates matched the configured modelYear group"):
-        _build_passenger_emfac_candidates(
-            vehicle_type_id="CarPhev<=2003",
-            bodytype="car",
-            model_year_group="<=2003",
-            adopt_fuel="electricity+gasoline",
-            emfac_candidates=candidates,
-            body_type_mapping=body_type_mapping,
-            fuel_mapping=fuel_mapping,
-        )
+    result = _build_passenger_emfac_candidates(
+        vehicle_type_id="CarPhev<=2003",
+        bodytype="car",
+        model_year_group="<=2003",
+        adopt_fuel="electricity+gasoline",
+        emfac_candidates=candidates,
+        body_type_mapping=body_type_mapping,
+        fuel_mapping=fuel_mapping,
+        passenger_mapping={
+            "fuel_fallbacks": [
+                {
+                    "source_fuel": "electricity+gasoline",
+                    "if_model_year": "<=2003",
+                    "fallback_emfac_fuels": ["Gas"],
+                }
+            ]
+        },
+    )
+
+    assert result["fuel"].tolist() == ["Gas"]
+    assert result["modelYear"].tolist() == ["<=2003"]
+    assert result["splitShare"].iloc[0] == 1.0
 
 
 def test_build_passenger_emfac_candidates_maps_hybrid_to_gasoline_emfac_candidates() -> None:
@@ -257,6 +278,7 @@ def test_build_passenger_emfac_candidates_maps_hybrid_to_gasoline_emfac_candidat
         emfac_candidates=candidates,
         body_type_mapping=body_type_mapping,
         fuel_mapping=fuel_mapping,
+        passenger_mapping={},
     )
 
     assert result["fuel"].tolist() == ["Gas"]
@@ -301,13 +323,14 @@ def test_build_passenger_emfac_candidates_splits_by_fleet_share() -> None:
         emfac_candidates=candidates,
         body_type_mapping=body_type_mapping,
         fuel_mapping=fuel_mapping,
+        passenger_mapping={},
     )
 
     split_share = dict(zip(result["emfacId"], result["splitShare"]))
     assert split_share["post2014LDAGas"] > split_share["pre2004LDAGas"]
 
 
-def test_build_passenger_emfac_candidates_requires_exact_model_year_group_without_overlap_fallback() -> None:
+def test_build_passenger_emfac_candidates_errors_when_exact_year_match_is_missing_without_fallback() -> None:
     candidates = pd.DataFrame(
         [
             {
@@ -367,7 +390,7 @@ def test_build_passenger_emfac_candidates_requires_exact_model_year_group_withou
         [{"emfac_vehicle_category": "MDV", "emfac_fuel": "Gas", "adopt_fuel": "gasoline"}]
     )
 
-    with pytest.raises(ValueError, match="No passenger EMFAC candidates matched the configured modelYear group"):
+    try:
         _build_passenger_emfac_candidates(
             vehicle_type_id="CarConv2004-2014",
             bodytype="car",
@@ -376,7 +399,12 @@ def test_build_passenger_emfac_candidates_requires_exact_model_year_group_withou
             emfac_candidates=candidates,
             body_type_mapping=body_type_mapping,
             fuel_mapping=fuel_mapping,
+            passenger_mapping={},
         )
+    except ValueError as error:
+        assert "No passenger EMFAC candidates matched the configured modelYear group" in str(error)
+    else:
+        raise AssertionError("Expected ValueError when no exact passenger EMFAC modelYear match exists")
 
 
 def test_prepare_mapped_passenger_vehicles_output_writes_required_columns() -> None:
@@ -515,7 +543,7 @@ def _write_step3_test_source_vehicle_types(source_file: Path) -> None:
     ).to_csv(source_file, index=False)
 
 
-def test_assign_passenger_fuel_consumption_ids_attaches_fastsim_id_and_rewrites_vehicle_type_id(tmp_path: Path) -> None:
+def test_assign_passenger_fuel_consumption_fields_attach_fastsim_id_and_rewrite_vehicle_type_id(tmp_path: Path) -> None:
     model_file = tmp_path / "fleet_assignment.yaml"
     catalog_file = tmp_path / "fuel_catalog.csv"
     source_vehicle_types_file = tmp_path / "passenger_vehicle_types.csv"
@@ -537,7 +565,7 @@ def test_assign_passenger_fuel_consumption_ids_attaches_fastsim_id_and_rewrites_
         ]
     )
 
-    result = _assign_passenger_fuel_consumption_ids(
+    result = _assign_passenger_fuel_consumption_fields(
         passenger_car_vehicle_types=passenger_vehicle_types,
         config={
             "vehicle_type_assignment": {"model_file": str(model_file)},
@@ -556,17 +584,17 @@ def test_assign_passenger_fuel_consumption_ids_attaches_fastsim_id_and_rewrites_
         seed=0,
     )
 
-    assert result.loc[0, "fastsimId"] == "2015_gasoline_Chrysler_200"
+    assert result.loc[0, "fuelConsumptionId"] == "2015_gasoline_Chrysler_200"
     assert result.loc[0, "msrp_usd"] == 24000.0
     assert result.loc[0, "primaryVehicleEnergyFile"] == "test.csv"
     assert result.loc[0, "secondaryVehicleEnergyFile"] == ""
-    expected_mapping_id = "2004to2014LDAGas--2015gasolineChrysler200--CarConv2008"
+    expected_mapping_id = "2015gasolineChrysler200--2004to2014LDAGas--CarConv2008"
     expected_vehicle_type_id = f"paxcar-{hashlib.sha256(expected_mapping_id.encode('utf-8')).hexdigest()[:12]}"
     assert result.loc[0, "mappingVehicleTypeId"] == expected_mapping_id
     assert result.loc[0, "vehicleTypeId"] == expected_vehicle_type_id
 
 
-def test_assign_passenger_fuel_consumption_ids_raises_when_no_match_exists(tmp_path: Path) -> None:
+def test_assign_passenger_fuel_consumption_fields_raise_when_no_match_exists(tmp_path: Path) -> None:
     model_file = tmp_path / "fleet_assignment.yaml"
     catalog_file = tmp_path / "fuel_catalog.csv"
     source_vehicle_types_file = tmp_path / "passenger_vehicle_types.csv"
@@ -588,8 +616,8 @@ def test_assign_passenger_fuel_consumption_ids_raises_when_no_match_exists(tmp_p
         ]
     )
 
-    with pytest.raises(ValueError, match="No fuel-consumption fastsimId matched"):
-        _assign_passenger_fuel_consumption_ids(
+    with pytest.raises(ValueError, match="No fuel-consumption mapping matched"):
+        _assign_passenger_fuel_consumption_fields(
             passenger_car_vehicle_types=passenger_vehicle_types,
             config={
                 "vehicle_type_assignment": {"model_file": str(model_file)},
@@ -609,6 +637,66 @@ def test_assign_passenger_fuel_consumption_ids_raises_when_no_match_exists(tmp_p
         )
 
 
+def test_assign_passenger_fuel_consumption_fields_keep_baseline_values_when_mapping_missing(
+    tmp_path: Path, capsys
+) -> None:
+    model_file = tmp_path / "fleet_assignment.yaml"
+    catalog_file = tmp_path / "fuel_catalog.csv"
+    source_vehicle_types_file = tmp_path / "passenger_vehicle_types.csv"
+    _write_step3_test_model_file(model_file)
+    _write_step3_test_catalog(catalog_file)
+    _write_step3_test_source_vehicle_types(source_vehicle_types_file)
+    passenger_vehicle_types = pd.DataFrame(
+        [
+            {
+                "vehicleTypeId": "2004to2014LDAPhe--CarPhev2008",
+                "atlasVehicleTypeId": "CarPhev2008",
+                "emfacId": "2004to2014LDAPhe",
+                "emfacVehicleCategory": "LDA",
+                "emfacFuel": "Phe",
+                "emfacResolvedModelYear": "2004-2014",
+                "sampleProbabilityWithinCategory": "1.000000",
+                "sampleProbabilityString": "income | 100-200:1.000000",
+                "primaryFuelType": "electricity",
+                "primaryFuelConsumptionInJoulePerMeter": 1.0,
+                "primaryFuelCapacityInJoule": 4.0e10,
+                "msrp_usd": 30000.0,
+                "primaryVehicleEnergyFile": "",
+                "secondaryVehicleEnergyFile": "",
+            }
+        ]
+    )
+
+    result = _assign_passenger_fuel_consumption_fields(
+        passenger_car_vehicle_types=passenger_vehicle_types,
+        config={
+            "vehicle_type_assignment": {"model_file": str(model_file)},
+            "beam": {
+                "fuel_consumption_catalog": str(catalog_file),
+                "passenger_vehicle_types_file": str(source_vehicle_types_file),
+            },
+            "fuel_consumption_mapping": [
+                {
+                    "fastsim_id": "2015_gasoline_Chrysler_200",
+                    "vehicle_categories": ["LDA"],
+                    "fuel_types": ["Gas"],
+                }
+            ],
+        },
+        seed=0,
+    )
+
+    assert result.loc[0, "fuelConsumptionId"] == ""
+    assert result.loc[0, "msrp_usd"] == 30000.0
+    assert result.loc[0, "primaryVehicleEnergyFile"] == ""
+    assert result.loc[0, "secondaryVehicleEnergyFile"] == ""
+    expected_mapping_id = "unmapped--2004to2014LDAPhe--CarPhev2008"
+    expected_vehicle_type_id = f"paxcar-{hashlib.sha256(expected_mapping_id.encode('utf-8')).hexdigest()[:12]}"
+    assert result.loc[0, "mappingVehicleTypeId"] == expected_mapping_id
+    assert result.loc[0, "vehicleTypeId"] == expected_vehicle_type_id
+    assert "WARNING: Passenger Step 3.3 leaving fuel-consumption template fields empty" in capsys.readouterr().out
+
+
 def test_sample_passenger_vehicle_type_ids_for_vehicles_uses_canonical_atlas_vehicle_type_id() -> None:
     vehicles = pd.DataFrame(
         [
@@ -620,7 +708,7 @@ def test_sample_passenger_vehicle_type_ids_for_vehicles_uses_canonical_atlas_veh
             {"household_id": 1, "income_in_thousands": 120},
         ]
     )
-    expected_mapping_id = "2004to2014LDAGas--2015gasolineChrysler200--CarConv2008"
+    expected_mapping_id = "2015gasolineChrysler200--2004to2014LDAGas--CarConv2008"
     expected_vehicle_type_id = f"paxcar-{hashlib.sha256(expected_mapping_id.encode('utf-8')).hexdigest()[:12]}"
     passenger_car_vehicle_types = pd.DataFrame(
         [
@@ -642,6 +730,7 @@ def test_sample_passenger_vehicle_type_ids_for_vehicles_uses_canonical_atlas_veh
                 "likelihood_floor": 0.001,
                 "fleet_vmt_prior_weight": 1.0,
                 "income_weight": 1.0,
+                "income_enabled": True,
                 "income_center_ratio": 0.30,
                 "income_sigma_ratio": 0.10,
             }
@@ -650,3 +739,42 @@ def test_sample_passenger_vehicle_type_ids_for_vehicles_uses_canonical_atlas_veh
     )
 
     assert result.loc[0, "vehicleTypeId"] == expected_vehicle_type_id
+
+
+def test_sample_passenger_vehicle_type_ids_for_vehicles_skips_income_when_disabled() -> None:
+    vehicles = pd.DataFrame(
+        [
+            {"household_id": 1, "bodytype": "car", "modelyear": 2008, "adopt_fuel": "conv"},
+        ]
+    )
+    households = pd.DataFrame(
+        [
+            {"household_id": 1, "income_in_thousands": 120},
+        ]
+    )
+    passenger_car_vehicle_types = pd.DataFrame(
+        [
+            {
+                "vehicleTypeId": "vt-1",
+                "atlasVehicleTypeId": "CarConv2008",
+                "sampleProbabilityWithinCategory": "1.000000",
+            }
+        ]
+    )
+
+    result = _sample_passenger_vehicle_type_ids_for_vehicles(
+        vehicles=vehicles,
+        passenger_car_vehicle_types=passenger_car_vehicle_types,
+        households=households,
+        config={
+            "passenger_bayesian_dag": {
+                "likelihood_floor": 0.001,
+                "fleet_vmt_prior_weight": 1.0,
+                "income_weight": 1.0,
+                "income_enabled": False,
+            }
+        },
+        seed=0,
+    )
+
+    assert result.loc[0, "vehicleTypeId"] == "vt-1"

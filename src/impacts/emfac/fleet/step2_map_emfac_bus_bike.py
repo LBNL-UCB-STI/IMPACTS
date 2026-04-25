@@ -16,6 +16,8 @@ from typing import Any
 import pandas as pd
 
 from impacts.emfac.config import build_model_category_fuel_mapping
+from impacts.emfac.config import EMFAC_ACTIVITY_SCHEMA
+from impacts.emfac.config import EMFAC_KEY_SCHEMA
 from impacts.emfac.config import read_table
 from impacts.emfac.config import resolve_workflow_path
 from impacts.emfac.common import attach_emissions_rates_filepaths_from_config
@@ -24,6 +26,14 @@ from impacts.emfac.common import model_year_group_id_component
 
 
 _EMFAC_KEY_COLUMNS = ["vehicleCategory", "fuel", "modelYear"]
+_STEP2_REQUIRED_VEHICLE_TYPES_SCHEMA = {
+    "vehicleTypeId": "string",
+    "adopt_fuel": "string",
+}
+_STEP2_OPTIONAL_VEHICLE_TYPES_SCHEMA = {
+    "sampleProbabilityWithinCategory": "string",
+    "sampleProbabilityString": "string",
+}
 
 
 def _require_column(frame: pd.DataFrame, column_name: str, frame_name: str) -> None:
@@ -80,18 +90,15 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
     emfac_config = config["activities"]
     rates = read_table(
         emfac_config["passenger_rates_file"],
-        dtype=None,
-        columns=_EMFAC_KEY_COLUMNS,
+        schema=EMFAC_KEY_SCHEMA,
     )[_EMFAC_KEY_COLUMNS].drop_duplicates()
     activity = read_table(
         emfac_config["passenger_activity_file"],
-        dtype=None,
-        columns=_EMFAC_KEY_COLUMNS + ["population_vehicles", "total_vmt_vehicle_miles_per_year"],
+        schema=EMFAC_ACTIVITY_SCHEMA,
     )
     fleet = read_table(
         emfac_config["passenger_fleet_file"],
-        dtype=None,
-        columns=_EMFAC_KEY_COLUMNS,
+        schema=EMFAC_KEY_SCHEMA,
     )[_EMFAC_KEY_COLUMNS].drop_duplicates()
 
     activity_agg = (
@@ -268,6 +275,19 @@ def _write_vehicle_types(frame: pd.DataFrame, path_like: str) -> str:
     return str(output_path)
 
 
+def _read_step2_vehicle_types(path_like: str) -> pd.DataFrame:
+    resolved = Path(resolve_workflow_path(path_like))
+    if resolved.suffix.lower() == ".parquet":
+        available_columns = list(pd.read_parquet(resolved).columns)
+    else:
+        available_columns = pd.read_csv(resolved, nrows=0).columns.tolist()
+    schema = dict(_STEP2_REQUIRED_VEHICLE_TYPES_SCHEMA)
+    for column_name, dtype_name in _STEP2_OPTIONAL_VEHICLE_TYPES_SCHEMA.items():
+        if column_name in available_columns:
+            schema[column_name] = dtype_name
+    return read_table(str(path_like), schema=schema)
+
+
 def _ensure_empty_emfac_id_column(vehicle_types: pd.DataFrame) -> pd.DataFrame:
     prepared = vehicle_types.copy()
     prepared["emfacId"] = ""
@@ -284,7 +304,7 @@ def _assign_and_write_vehicle_types(
     emfac_vehicle_category: str,
     category_fuel_map: pd.DataFrame,
 ) -> tuple[pd.DataFrame, str]:
-    vehicle_types = read_table(str(input_file), dtype=None)
+    vehicle_types = _read_step2_vehicle_types(str(input_file))
     vehicle_types_with_emfac = _assign_emfac_ids_to_vehicle_types(
         vehicle_types=vehicle_types,
         emfac_vehicle_category=emfac_vehicle_category,
@@ -313,7 +333,7 @@ def _prepare_and_write_other_vehicle_types(
     scenario: object,
     output_root: str,
 ) -> tuple[pd.DataFrame, str]:
-    other_vehicle_types = read_table(str(other_file), dtype=None)
+    other_vehicle_types = _read_step2_vehicle_types(str(other_file))
     other_with_emfac = _ensure_empty_emfac_id_column(other_vehicle_types)
     other_with_emfac = attach_idle_time_fraction_from_config(
         other_with_emfac,

@@ -8,7 +8,9 @@ from typing import Any
 
 import pandas as pd
 
+from impacts.emfac.config import read_table
 from impacts.emfac.config import resolve_workflow_path
+from impacts.emfac.config import VEHICLE_CATEGORY_METADATA_SCHEMA
 
 
 LIGHT_DUTY_VEHICLE_CATEGORIES = {"LDA", "LDT1", "LDT2"}
@@ -177,7 +179,7 @@ def _require_column(frame: pd.DataFrame, column_name: str, frame_name: str) -> N
 
 
 def load_idle_time_fraction_lookup(metadata_path: str) -> dict[str, float]:
-    metadata = pd.read_csv(Path(resolve_workflow_path(metadata_path)))
+    metadata = read_table(metadata_path, schema=VEHICLE_CATEGORY_METADATA_SCHEMA)
     required = {"emfac_vehicle_category", "idle_time_fraction"}
     missing = sorted(required - set(metadata.columns))
     if missing:
@@ -186,8 +188,7 @@ def load_idle_time_fraction_lookup(metadata_path: str) -> dict[str, float]:
             f"{missing}"
         )
     prepared = metadata[["emfac_vehicle_category", "idle_time_fraction"]].copy()
-    prepared["emfac_vehicle_category"] = prepared["emfac_vehicle_category"].fillna("").astype(str).str.strip()
-    prepared["idle_time_fraction"] = pd.to_numeric(prepared["idle_time_fraction"], errors="coerce")
+    prepared["emfac_vehicle_category"] = prepared["emfac_vehicle_category"].fillna("").str.strip()
     prepared = prepared.loc[
         prepared["emfac_vehicle_category"].ne("") & prepared["idle_time_fraction"].notna()
     ].copy()

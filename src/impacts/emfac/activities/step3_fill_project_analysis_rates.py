@@ -6,6 +6,7 @@ import pandas as pd
 
 from impacts.emfac.common import frame_summary
 from impacts.emfac.common import write_trace
+from impacts.emfac.config import _apply_table_schema
 
 ACTIVITY_COLUMN = "speedMph_timeMin"
 SURFACE_KEYS = ["county", "vehicleCategory", "fuel", "modelYear", "process", ACTIVITY_COLUMN, "roadCategory"]
@@ -45,6 +46,27 @@ INVENTORY_POLLUTANT_MAP = {
     "rog_gram": "rog_{process}_short_tons_per_year",
     "sox_gram": "sox_{process}_short_tons_per_year",
     "tog_gram": "tog_{process}_short_tons_per_year",
+}
+_SURFACE_BASE_SCHEMA = {
+    "county": "string",
+    "vehicleCategory": "string",
+    "fuel": "string",
+    "modelYear": "Int64",
+    "process": "string",
+    ACTIVITY_COLUMN: "string",
+}
+_INVENTORY_BASE_SCHEMA = {
+    "county": "string",
+    "vehicleCategory": "string",
+    "fuel": "string",
+    "modelYear": "Int64",
+    "speed": "Float64",
+}
+_STATEWIDE_INVENTORY_BASE_SCHEMA = {
+    "vehicleCategory": "string",
+    "fuel": "string",
+    "modelYear": "Int64",
+    "speed": "Float64",
 }
 
 _ACTIVITIES_RATE_MAPPINGS: dict[str, object] = {}
@@ -196,8 +218,38 @@ def _normalize_activity_column(frame: pd.DataFrame, *, column: str = ACTIVITY_CO
     return result
 
 
-def _load_parquet(path: str) -> pd.DataFrame:
-    return pd.read_parquet(Path(path).expanduser().resolve())
+def _enforce_surface_schema(frame: pd.DataFrame) -> pd.DataFrame:
+    schema = dict(_SURFACE_BASE_SCHEMA)
+    if "roadCategory" in frame.columns:
+        schema["roadCategory"] = "string"
+    for column in [column for column in POLLUTANT_COLUMNS if column in frame.columns]:
+        schema[column] = "Float64"
+    return _apply_table_schema(frame, schema, frame_name="EMFAC step3 surface")
+
+
+def _enforce_inventory_schema(frame: pd.DataFrame) -> pd.DataFrame:
+    schema = dict(_INVENTORY_BASE_SCHEMA)
+    for column in [column for column in frame.columns if column.endswith("_short_tons_per_year")]:
+        schema[column] = "Float64"
+    return _apply_table_schema(frame, schema, frame_name="EMFAC step3 inventory")
+
+
+def _enforce_statewide_inventory_schema(frame: pd.DataFrame) -> pd.DataFrame:
+    schema = dict(_STATEWIDE_INVENTORY_BASE_SCHEMA)
+    for column in [column for column in frame.columns if column.endswith("_short_tons_per_year")]:
+        schema[column] = "Float64"
+    return _apply_table_schema(frame, schema, frame_name="EMFAC step3 statewide inventory")
+
+
+def _load_parquet(path: str, *, kind: str) -> pd.DataFrame:
+    frame = pd.read_parquet(Path(path).expanduser().resolve())
+    if kind == "surface":
+        return _enforce_surface_schema(frame)
+    if kind == "inventory":
+        return _enforce_inventory_schema(frame)
+    if kind == "statewide_inventory":
+        return _enforce_statewide_inventory_schema(frame)
+    raise ValueError(f"Unsupported step3 parquet kind: {kind}")
 
 
 def _missing_rate_summary(frame: pd.DataFrame) -> dict[str, object]:
@@ -325,13 +377,6 @@ def _merge_rate_columns(surface: pd.DataFrame, rates: pd.DataFrame, *, keys: lis
 
 def _build_inventory_fill_frame(inventory: pd.DataFrame, *, include_county: bool) -> pd.DataFrame:
     frame = inventory.copy()
-    if include_county:
-        frame["county"] = frame["county"].astype(str)
-    frame["vehicleCategory"] = frame["vehicleCategory"].astype(str)
-    frame["fuel"] = frame["fuel"].astype(str)
-    frame["modelYear"] = pd.to_numeric(frame["modelYear"], errors="raise").astype(int)
-    frame["speed"] = pd.to_numeric(frame["speed"], errors="coerce")
-
     outputs: list[pd.DataFrame] = []
     id_columns = ["vehicleCategory", "fuel", "modelYear"]
     if include_county:
@@ -414,12 +459,12 @@ def _load_step3_inputs(
     workflow: dict[str, object],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     return (
-        _load_parquet(workflow["paths"]["project_analysis_source"]),
-        _load_parquet(workflow["paths"]["project_analysis_nh3_rates"]),
-        _load_parquet(workflow["paths"]["project_analysis_bc"]),
-        _load_parquet(workflow["paths"]["project_analysis_prdust"]),
-        _load_parquet(workflow["paths"]["emissions_inventory"]),
-        _load_parquet(workflow["paths"]["statewide_inventory"]),
+        _load_parquet(workflow["paths"]["project_analysis_source"], kind="surface"),
+        _load_parquet(workflow["paths"]["project_analysis_nh3_rates"], kind="surface"),
+        _load_parquet(workflow["paths"]["project_analysis_bc"], kind="surface"),
+        _load_parquet(workflow["paths"]["project_analysis_prdust"], kind="surface"),
+        _load_parquet(workflow["paths"]["emissions_inventory"], kind="inventory"),
+        _load_parquet(workflow["paths"]["statewide_inventory"], kind="statewide_inventory"),
     )
 
 
@@ -737,7 +782,7 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
         "emissions_inventory": frame_summary(emissions_inventory, name="emissions_inventory"),
         "statewide_inventory": frame_summary(statewide_inventory, name="statewide_inventory"),
     }
-    passenger_comprehensive_surface = _load_parquet(workflow["paths"]["project_analysis_passenger"])
+    passenger_comprehensive_surface = _load_parquet(workflow["paths"]["project_analysis_passenger"], kind="surface")
     print("    3.2 Initial fill passenger rates")
     passenger_initial_fill = _fill_group_rates(
         group_name="passenger",
@@ -764,7 +809,7 @@ def run_step3(workflow: dict[str, object]) -> dict[str, object]:
             statewide_inventory=statewide_inventory,
         )
     )
-    freight_comprehensive_surface = _load_parquet(workflow["paths"]["project_analysis_freight"])
+    freight_comprehensive_surface = _load_parquet(workflow["paths"]["project_analysis_freight"], kind="surface")
     print("    3.4 Initial fill freight rates")
     freight_initial_fill = _fill_group_rates(
         group_name="freight",

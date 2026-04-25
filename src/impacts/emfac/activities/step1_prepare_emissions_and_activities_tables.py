@@ -10,6 +10,8 @@ import pandas as pd
 
 from impacts.emfac.common import frame_summary
 from impacts.emfac.common import write_trace
+from impacts.emfac.config import _apply_table_schema
+from impacts.emfac.config import read_table
 
 GRAMS_PER_SHORT_TON = 907_184.74
 METRIC_TONS_PER_SHORT_TON = 0.90718474
@@ -26,6 +28,25 @@ ANNUAL_ACTIVITY_COLUMN_MAP = {
     "trips": "trips_per_year",
     "population": "population_vehicles",
     "pto_total_vmt": "pto_total_vmt_vehicle_miles_per_year",
+}
+_PROJECT_ANALYSIS_SURFACE_SCHEMA = {
+    "county": "string",
+    "vehicleCategory": "string",
+    "fuel": "string",
+    "modelYear": "Int64",
+    "process": "string",
+    "speedMph_timeMin": "string",
+}
+_EMISSIONS_INVENTORY_BASE_SCHEMA = {
+    "county": "string",
+    "vehicleCategory": "string",
+    "fuel": "string",
+    "modelYear": "Int64",
+    "speed": "Float64",
+}
+_OPERATION_DAYS_METADATA_SCHEMA = {
+    "emfac_vehicle_category": "string",
+    "operation_days_per_year": "Float64",
 }
 
 
@@ -344,7 +365,7 @@ def _prepare_project_analysis_source(workflow: dict[str, object]) -> tuple[str, 
         region_label=workflow["run"]["region_label"],
         year=workflow["run"]["calendar_year"],
     )
-    project_analysis = _normalize_project_analysis_activity(pd.read_parquet(project_analysis_path))
+    project_analysis = _normalize_project_analysis_activity(_read_project_analysis_surface(project_analysis_path))
     project_analysis = expand_pto_vehicle_category(
         project_analysis,
         pto_config,
@@ -369,7 +390,7 @@ def _prepare_emissions_inventory(workflow: dict[str, object]) -> tuple[str, pd.D
         pto_config=pto_config,
         operation_days_path=str(workflow["inputs"]["vehicle_category_attributes_file"]),
     )
-    return emissions_inventory_path, pd.read_parquet(emissions_inventory_path)
+    return emissions_inventory_path, _read_emissions_inventory(emissions_inventory_path)
 
 
 def _prepare_prdust_support(
@@ -837,6 +858,28 @@ def clean_emfac_to_parquet(
     return destination
 
 
+def _enforce_project_analysis_surface_schema(frame: pd.DataFrame) -> pd.DataFrame:
+    schema = dict(_PROJECT_ANALYSIS_SURFACE_SCHEMA)
+    for column in [column for column in frame.columns if column.endswith("_gram")]:
+        schema[column] = "Float64"
+    return _apply_table_schema(frame, schema, frame_name="EMFAC step1 project analysis surface")
+
+
+def _enforce_emissions_inventory_schema(frame: pd.DataFrame) -> pd.DataFrame:
+    schema = dict(_EMISSIONS_INVENTORY_BASE_SCHEMA)
+    for column in [column for column in frame.columns if column.endswith("_per_year")]:
+        schema[column] = "Float64"
+    return _apply_table_schema(frame, schema, frame_name="EMFAC step1 emissions inventory")
+
+
+def _read_project_analysis_surface(path: str | Path) -> pd.DataFrame:
+    return _enforce_project_analysis_surface_schema(pd.read_parquet(Path(path).expanduser().resolve()).copy())
+
+
+def _read_emissions_inventory(path: str | Path) -> pd.DataFrame:
+    return _enforce_emissions_inventory_schema(pd.read_parquet(Path(path).expanduser().resolve()).copy())
+
+
 def _read_parquet(path: Path) -> pd.DataFrame:
     return pd.read_parquet(path).copy()
 
@@ -856,14 +899,8 @@ def _annualize_daily_series(series: pd.Series) -> pd.Series:
 
 @lru_cache(maxsize=None)
 def _load_operation_days_lookup(operation_days_path: str) -> dict[str, float]:
-    frame = pd.read_csv(Path(operation_days_path).expanduser().resolve())
-    category_column = "vehicleCategory" if "vehicleCategory" in frame.columns else "emfac_vehicle_category" if "emfac_vehicle_category" in frame.columns else None
-    if category_column is None:
-        raise ValueError(
-            "Vehicle category metadata CSV must include one of ['vehicleCategory', 'emfac_vehicle_category'] "
-            "and 'operation_days_per_year'"
-        )
-    _require_columns(frame, {category_column, "operation_days_per_year"}, "Vehicle category metadata CSV")
+    frame = read_table(operation_days_path, schema=_OPERATION_DAYS_METADATA_SCHEMA)
+    category_column = "emfac_vehicle_category"
     result: dict[str, float] = {}
     for row in frame.itertuples(index=False):
         result[str(getattr(row, category_column)).strip()] = float(row.operation_days_per_year)

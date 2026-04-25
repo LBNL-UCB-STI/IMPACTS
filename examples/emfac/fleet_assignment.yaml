@@ -3,13 +3,17 @@ fleet_assignment:
 
     freight_bayesian_dag:
       scoring:
-        likelihood_floor: 0.01
+        likelihood_floor: 0.001
         weights:
           fleet_vmt_prior: 0.5
           naics_sector: 0.25
           payload_mass: 1.0
           port_location: 2.0
-      evidence: {}
+      evidence:
+        payload_mass:
+          source: gvwr_lbs
+          unit: lbs
+          overload_penalty_power: 2.0
 
     passenger_bayesian_dag:
       scoring:
@@ -19,7 +23,7 @@ fleet_assignment:
           income: 1.0
       evidence:
         income:
-          center_ratio: 0.30
+          center_ratio: 0.25
           sigma_ratio: 0.10
 
   mappings:
@@ -69,6 +73,11 @@ fleet_assignment:
         electricity+diesel: [ Phe ]
         hydrogen: [ Elec ]
         naturalgas: [ NG ]
+      fuel_fallbacks:
+        - source_fuel: electricity+gasoline
+          if_model_year: "<=2003"
+          fallback_emfac_fuels: [ Gas ]
+          reason: old_phev_treat_as_gas
       vehicle_categories:
         Car: [ LDA, LDT1, LDT2, MDV ]
         Bike: [ MCY ]

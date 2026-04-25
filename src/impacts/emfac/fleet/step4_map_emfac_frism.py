@@ -11,6 +11,8 @@ import pandas as pd
 import yaml
 
 from impacts.emfac.config import build_fuel_consumption_emfac_assignment_catalog
+from impacts.emfac.config import EMFAC_ACTIVITY_SCHEMA
+from impacts.emfac.config import EMFAC_KEY_SCHEMA
 from impacts.emfac.config import read_table
 from impacts.emfac.config import resolve_workflow_path
 from impacts.emfac.common import attach_emissions_rates_filepaths_from_config
@@ -24,6 +26,44 @@ from impacts.emfac.fleet.step1_build_vehicle_types import _normalize_energy_file
 
 
 _EMFAC_KEY_COLUMNS = ["vehicleCategory", "fuel", "modelYear"]
+_FRISM_CARRIERS_SCHEMA = {
+    "tourId": "string",
+    "vehicleTypeId": "string",
+}
+_FRISM_PAYLOADS_SCHEMA = {
+    "tourId": "string",
+    "sellerNAICS": "string",
+    "buyerNAICS": "string",
+    "payloadType": "string",
+    "weightInKg": "Float64",
+    "sequenceRank": "Float64",
+    "activityType": "string",
+    "locationZone": "string",
+}
+_FRISM_TOURS_SCHEMA = {
+    "tourId": "string",
+}
+_GVWR_METADATA_SCHEMA = {
+    "emfac_vehicle_category": "string",
+    "gvwr_lbs": "string",
+}
+_FREIGHT_VEHICLE_TYPES_SCHEMA = {
+    "vehicleTypeId": "string",
+    "vehicleCategory": "string",
+    "adopt_fuel": "string",
+    "sampleProbabilityWithinCategory": "string",
+    "sampleProbabilityString": "string",
+    "primaryFuelType": "string",
+    "primaryFuelConsumptionInJoulePerMeter": "Float64",
+    "primaryFuelCapacityInJoule": "Float64",
+    "primaryVehicleEnergyFile": "string",
+    "secondaryVehicleEnergyFile": "string",
+}
+_FREIGHT_FUEL_CONSUMPTION_TEMPLATE_SCHEMA = {
+    "vehicleTypeId": "string",
+    "primaryVehicleEnergyFile": "string",
+    "secondaryVehicleEnergyFile": "string",
+}
 def _require_column(frame: pd.DataFrame, column_name: str, frame_name: str) -> None:
     if column_name not in frame.columns:
         raise ValueError(f"{frame_name} is missing required column '{column_name}'")
@@ -63,6 +103,10 @@ def _extract_naics_sector_code(value: object) -> str:
 
 
 def _sanitize_emfac_component(value: object) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "", _normalize_text(value))
+
+
+def _sanitize_vehicle_type_component(value: object) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", _normalize_text(value))
 
 
@@ -119,13 +163,12 @@ def _build_valid_freight_emfac_candidates(config: dict[str, Any]) -> pd.DataFram
         raise ValueError("Freight Bayesian DAG model has no freight vehicle_categories mappings")
 
     emfac_config = config["activities"]
-    rates = read_table(emfac_config["freight_rates_file"], dtype=None, columns=_EMFAC_KEY_COLUMNS)[_EMFAC_KEY_COLUMNS].drop_duplicates()
+    rates = read_table(emfac_config["freight_rates_file"], schema=EMFAC_KEY_SCHEMA)[_EMFAC_KEY_COLUMNS].drop_duplicates()
     activity = read_table(
         emfac_config["freight_activity_file"],
-        dtype=None,
-        columns=_EMFAC_KEY_COLUMNS + ["population_vehicles", "total_vmt_vehicle_miles_per_year"],
+        schema=EMFAC_ACTIVITY_SCHEMA,
     )
-    fleet = read_table(emfac_config["freight_fleet_file"], dtype=None, columns=_EMFAC_KEY_COLUMNS)[_EMFAC_KEY_COLUMNS].drop_duplicates()
+    fleet = read_table(emfac_config["freight_fleet_file"], schema=EMFAC_KEY_SCHEMA)[_EMFAC_KEY_COLUMNS].drop_duplicates()
 
     candidates = (
         activity.groupby(_EMFAC_KEY_COLUMNS, dropna=False, as_index=False)[
@@ -619,33 +662,53 @@ def _build_tour_port_weight_lookup(
     return lookup
 
 
-def _payload_mass_category_weight(*, vehicle_category: str, median_mass_kg: float, heavy_mass_kg: float) -> float:
-    category = _normalize_text(vehicle_category)
-    if heavy_mass_kg >= 3000:
-        if category.startswith("T7") or category in {"T6 Instate Tractor Class 7", "T6 Instate Delivery Class 7", "T6 Instate Other Class 7"}:
-            return 1.0
-        if category.startswith("T6"):
-            return 0.55
-        return 0.08
-    if median_mass_kg >= 800:
-        if category.startswith("T7"):
-            return 0.55
-        if category.startswith("T6"):
-            return 1.0
-        return 0.30
-    if median_mass_kg >= 200:
-        if category.startswith("T6"):
-            return 1.0
-        if category in {"LHD1", "LHD2", "MDV"}:
-            return 0.75
-        if category.startswith("T7"):
-            return 0.30
-        return 0.45
-    if category in {"LDA", "LDT1", "LDT2", "LHD1", "LHD2", "MDV"}:
+def _parse_gvwr_lbs_upper_bound(value: object) -> float | None:
+    token = _normalize_text(value).replace(",", "")
+    if token == "":
+        return None
+    matches = re.findall(r"\d+(?:\.\d+)?", token)
+    if not matches:
+        return None
+    return max(float(item) for item in matches)
+
+
+def _load_emfac_gvwr_kg_lookup(config: dict[str, Any]) -> dict[str, float]:
+    metadata_path = config.get("vehicle_category_attributes_file")
+    if metadata_path in (None, ""):
+        raise ValueError("Freight Step 4.4 requires vehicle_category_attributes_file in the EMFAC config.")
+    metadata = read_table(str(metadata_path), schema=_GVWR_METADATA_SCHEMA)
+    prepared = metadata[["emfac_vehicle_category", "gvwr_lbs"]].copy()
+    prepared["emfac_vehicle_category"] = prepared["emfac_vehicle_category"].fillna("").str.strip()
+    prepared["gvwr_lbs_upper"] = prepared["gvwr_lbs"].map(_parse_gvwr_lbs_upper_bound)
+    prepared = prepared.loc[
+        prepared["emfac_vehicle_category"].ne("") & prepared["gvwr_lbs_upper"].notna()
+    ].copy()
+    pounds_to_kg = 0.45359237
+    return (
+        prepared.drop_duplicates(subset=["emfac_vehicle_category"], keep="first")
+        .assign(gvwr_kg=lambda df: df["gvwr_lbs_upper"] * pounds_to_kg)
+        .set_index("emfac_vehicle_category")["gvwr_kg"]
+        .to_dict()
+    )
+
+
+def _payload_mass_gvwr_likelihood(
+    *,
+    vehicle_category: str,
+    observed_peak_payload_kg: float,
+    gvwr_kg_lookup: dict[str, float],
+    likelihood_floor: float,
+    overload_penalty_power: float,
+) -> float:
+    if observed_peak_payload_kg <= 0.0:
         return 1.0
-    if category.startswith("T6"):
-        return 0.45
-    return 0.08
+    gvwr_kg = gvwr_kg_lookup.get(_normalize_text(vehicle_category))
+    if gvwr_kg is None or gvwr_kg <= 0.0:
+        return likelihood_floor
+    if observed_peak_payload_kg <= gvwr_kg:
+        return max(likelihood_floor, observed_peak_payload_kg / gvwr_kg)
+    penalty_power = max(float(overload_penalty_power), 1e-9)
+    return max(likelihood_floor, (gvwr_kg / observed_peak_payload_kg) ** penalty_power)
 
 
 def _port_category_weight(
@@ -903,6 +966,15 @@ def _build_freight_bayesian_sampling_context(
         "naics_sector": float(freight_dag["naics_sector"]),
         "payload_mass": float(freight_dag["payload_mass"]),
         "port_location": float(freight_dag["port_location"]),
+        "payload_mass_enabled": bool(freight_dag.get("payload_mass_enabled", False)),
+        "payload_mass_source": str(freight_dag.get("payload_mass_source", "")).strip(),
+        "payload_mass_unit": str(freight_dag.get("payload_mass_unit", "")).strip(),
+        "payload_mass_overload_penalty_power": float(freight_dag.get("payload_mass_overload_penalty_power", 2.0)),
+        "gvwr_kg_lookup": (
+            _load_emfac_gvwr_kg_lookup(config)
+            if bool(freight_dag.get("payload_mass_enabled", False))
+            else {}
+        ),
         "naics_sector_weight_lookup": _build_freight_naics_sector_weight_lookup(
             payload_profiles=payload_profiles,
             sector_mapping=_load_naics_sector_mapping(config),
@@ -938,13 +1010,27 @@ def _score_freight_sampling_candidates(
         if naics_sector_weights
         else 1.0
     )
-    prepared["payloadMassLikelihood"] = prepared["vehicleCategory"].map(
-        lambda vehicle_category: _payload_mass_category_weight(
-            vehicle_category=str(vehicle_category),
-            median_mass_kg=median_mass_kg,
-            heavy_mass_kg=heavy_mass_kg,
+    if bool(freight_dag.get("payload_mass_enabled", False)):
+        if str(freight_dag.get("payload_mass_source", "")).strip() != "gvwr_lbs":
+            raise ValueError(
+                "Freight Step 4.4 currently supports only payload_mass.source=gvwr_lbs"
+            )
+        if str(freight_dag.get("payload_mass_unit", "")).strip().lower() != "lbs":
+            raise ValueError(
+                "Freight Step 4.4 currently supports only payload_mass.unit=lbs"
+            )
+        observed_peak_payload_kg = max(float(median_mass_kg), float(heavy_mass_kg))
+        prepared["payloadMassLikelihood"] = prepared["vehicleCategory"].map(
+            lambda vehicle_category: _payload_mass_gvwr_likelihood(
+                vehicle_category=str(vehicle_category),
+                observed_peak_payload_kg=observed_peak_payload_kg,
+                gvwr_kg_lookup=freight_dag["gvwr_kg_lookup"],
+                likelihood_floor=likelihood_floor,
+                overload_penalty_power=float(freight_dag["payload_mass_overload_penalty_power"]),
+            )
         )
-    )
+    else:
+        prepared["payloadMassLikelihood"] = 1.0
     prepared["portLikelihood"] = prepared["vehicleCategory"].map(
         lambda vehicle_category: _port_category_weight(
             vehicle_category=str(vehicle_category),
@@ -991,6 +1077,46 @@ def _attach_freight_fuel_consumption_templates(
 
     rewritten_rows: list[pd.Series] = []
     template_columns = [column for column in source_vehicle_types.columns if column != "vehicleTypeId"]
+
+    def _has_baseline_fuel_consumption_values(row: Any) -> bool:
+        primary_fuel_type = _normalize_text(getattr(row, "primaryFuelType", ""))
+        primary_consumption = pd.to_numeric(
+            pd.Series([getattr(row, "primaryFuelConsumptionInJoulePerMeter", np.nan)]),
+            errors="coerce",
+        ).iloc[0]
+        primary_capacity = pd.to_numeric(
+            pd.Series([getattr(row, "primaryFuelCapacityInJoule", np.nan)]),
+            errors="coerce",
+        ).iloc[0]
+        return (
+            primary_fuel_type != ""
+            and pd.notna(primary_consumption)
+            and float(primary_consumption) > 0.0
+            and pd.notna(primary_capacity)
+            and float(primary_capacity) > 0.0
+        )
+
+    def _build_unassigned_template_row(row: Any, *, reason: str) -> pd.Series:
+        updated = pd.Series(row._asdict()).copy()
+        updated["fuelConsumptionId"] = ""
+        for column_name in ["primaryVehicleEnergyFile", "secondaryVehicleEnergyFile"]:
+            if column_name in updated.index:
+                updated[column_name] = ""
+        updated["vehicleTypeId"] = (
+            "unmapped--"
+            + str(getattr(row, "emfacId", ""))
+            + "--"
+            + str(getattr(row, "frismVehicleTypeId", ""))
+        )
+        print(
+            "WARNING: Freight Step 4.3 leaving fuel-consumption template fields empty for "
+            f"vehicleTypeId={getattr(row, 'vehicleTypeId', '')}, "
+            f"frismVehicleTypeId={getattr(row, 'frismVehicleTypeId', '')}, "
+            f"emfacVehicleCategory={getattr(row, 'emfacVehicleCategory', '')}, "
+            f"emfacFuel={getattr(row, 'emfacFuel', '')}: {reason}"
+        )
+        return updated
+
     for row in mapped_freight_vehicle_types.itertuples(index=False):
         emfac_vehicle_category = str(getattr(row, "emfacVehicleCategory", "")).strip()
         emfac_fuel = str(getattr(row, "emfacFuel", "")).strip()
@@ -1002,6 +1128,15 @@ def _attach_freight_fuel_consumption_templates(
             & assignment_catalog["emfac_fuel"].astype(str).eq(emfac_fuel)
         ][["fastsim_relative_path"]].drop_duplicates().copy()
         if candidates.empty:
+            if _has_baseline_fuel_consumption_values(row):
+                rewritten_rows.append(
+                    _build_unassigned_template_row(
+                        row,
+                        reason="no fuel-consumption mapping matched this EMFAC class/fuel, but the source freight "
+                        "vehicle type already carries baseline primary fuel consumption and capacity values",
+                    )
+                )
+                continue
             raise ValueError(
                 "No fuel-consumption freight assignment matched EMFAC-assigned class/fuel for "
                 f"vehicleTypeId={getattr(row, 'vehicleTypeId', '')}, emfacVehicleCategory={emfac_vehicle_category}, "
@@ -1024,6 +1159,15 @@ def _attach_freight_fuel_consumption_templates(
                     f"source freight vehicle types for vehicleTypeId={getattr(row, 'vehicleTypeId', '')}"
                 )
         if candidates.empty:
+            if _has_baseline_fuel_consumption_values(row):
+                rewritten_rows.append(
+                    _build_unassigned_template_row(
+                        row,
+                        reason="the configured fuel-consumption mapping matched, but no source freight template row "
+                        "matched the assigned class/fuel; keeping baseline fuel consumption and capacity values only",
+                    )
+                )
+                continue
             raise ValueError(
                 "No freight fuel-consumption template row matched the configured assignment for "
                 f"vehicleTypeId={getattr(row, 'vehicleTypeId', '')}, emfacVehicleCategory={emfac_vehicle_category}, "
@@ -1050,7 +1194,14 @@ def _attach_freight_fuel_consumption_templates(
         updated = pd.Series(row._asdict()).copy()
         for column in template_columns:
             updated[column] = selected[column]
-        updated["vehicleTypeId"] = getattr(row, "vehicleTypeId")
+        updated["fuelConsumptionId"] = str(selected["fuelConsumptionId"])
+        updated["vehicleTypeId"] = (
+            _sanitize_vehicle_type_component(selected["fuelConsumptionId"])
+            + "--"
+            + str(getattr(row, "emfacId"))
+            + "--"
+            + str(getattr(row, "frismVehicleTypeId"))
+        )
         updated["frismVehicleTypeId"] = getattr(row, "frismVehicleTypeId")
         updated["sampleProbabilityWithinCategory"] = getattr(row, "sampleProbabilityWithinCategory")
         updated["sampleProbabilityString"] = getattr(row, "sampleProbabilityString")
@@ -1058,7 +1209,7 @@ def _attach_freight_fuel_consumption_templates(
         updated["emfacVehicleCategory"] = getattr(row, "emfacVehicleCategory")
         updated["emfacFuel"] = getattr(row, "emfacFuel")
         updated["emfacResolvedModelYear"] = getattr(row, "emfacResolvedModelYear")
-        updated["vehicleCategory"] = getattr(row, "vehicleCategory")
+        updated["vehicleCategory"] = getattr(row, "vehicleCategory", updated.get("vehicleCategory", ""))
         rewritten_rows.append(updated)
 
     return pd.DataFrame(rewritten_rows).reset_index(drop=True)
@@ -1158,10 +1309,10 @@ def _write_mapped_freight_carriers(frame: pd.DataFrame, path_like: str) -> str:
 def _build_freight_emfac_mapping_context(
     workflow: dict[str, Any],
 ) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame]:
-    carriers = read_table(workflow["config"]["frism"]["carriers_file"], dtype=None)
+    carriers = read_table(workflow["config"]["frism"]["carriers_file"], schema=_FRISM_CARRIERS_SCHEMA)
     payloads = workflow.get("source_frism_payloads")
     if payloads is None:
-        payloads = read_table(workflow["config"]["frism"]["payloads_file"], dtype=None)
+        payloads = read_table(workflow["config"]["frism"]["payloads_file"], schema=_FRISM_PAYLOADS_SCHEMA)
     mapping_context = _build_freight_mapping_context(
         config=workflow["config"],
     )
@@ -1176,7 +1327,7 @@ def _map_freight_vehicle_types_to_emfac(
     freight_vehicle_types_file = workflow.get("built_freight_vehicle_types_file")
     if not freight_vehicle_types_file:
         raise ValueError("Step 4 requires freight vehicle types from Step 1")
-    freight_vehicle_types = read_table(str(freight_vehicle_types_file), dtype=None)
+    freight_vehicle_types = read_table(str(freight_vehicle_types_file), schema=_FREIGHT_VEHICLE_TYPES_SCHEMA)
     return _build_freight_vehicle_types_with_emfac(
         freight_vehicle_types=freight_vehicle_types,
         mapping_context=mapping_context,
@@ -1204,7 +1355,7 @@ def _sample_mapped_freight_vehicle_type_ids_for_carriers(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     tours = workflow.get("source_frism_tours")
     if tours is None:
-        tours = read_table(workflow["config"]["frism"]["tours_file"], dtype=None)
+        tours = read_table(workflow["config"]["frism"]["tours_file"], schema=_FRISM_TOURS_SCHEMA)
     return _map_freight_carriers_and_tours(
         carriers=carriers,
         tours=tours,

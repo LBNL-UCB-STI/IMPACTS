@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from impacts.emfac.common import frame_summary
+from impacts.emfac.config import _apply_table_schema
 from impacts.emfac.config import build_model_category_fuel_mapping
 from impacts.emfac.config import read_table
 from impacts.emfac.common import write_trace
@@ -29,6 +30,20 @@ POLLUTANT_COLUMNS = [
     "tog_gram",
 ]
 GROUP_KEYS = ["county", "vehicleCategory", "fuel", "modelYear", "process"]
+_PROJECT_ANALYSIS_SCHEMA = {
+    "county": "string",
+    "vehicleCategory": "string",
+    "fuel": "string",
+    "modelYear": "Int64",
+    "process": "string",
+    ACTIVITY_COLUMN: "string",
+}
+_INVENTORY_SCHEMA = {
+    "county": "string",
+    "vehicleCategory": "string",
+    "fuel": "string",
+    "modelYear": "Int64",
+}
 
 
 def _format_numeric_series(values: pd.Series) -> pd.Series:
@@ -39,8 +54,6 @@ def _summarize_category_fuel_pairs(frame: pd.DataFrame) -> dict[str, object]:
     if not {"vehicleCategory", "fuel"}.issubset(frame.columns):
         return {"pair_count": 0, "category_count": 0, "fuel_count": 0, "sample_pairs": []}
     pairs = frame[["vehicleCategory", "fuel"]].drop_duplicates().copy()
-    pairs["vehicleCategory"] = pairs["vehicleCategory"].astype(str)
-    pairs["fuel"] = pairs["fuel"].astype(str)
     pairs = pairs.sort_values(["vehicleCategory", "fuel"], kind="mergesort")
     return {
         "pair_count": int(len(pairs)),
@@ -48,6 +61,22 @@ def _summarize_category_fuel_pairs(frame: pd.DataFrame) -> dict[str, object]:
         "fuel_count": int(pairs["fuel"].nunique()),
         "sample_pairs": pairs.head(10).to_dict(orient="records"),
     }
+
+
+def _enforce_project_analysis_schema(frame: pd.DataFrame) -> pd.DataFrame:
+    schema = dict(_PROJECT_ANALYSIS_SCHEMA)
+    if "roadCategory" in frame.columns:
+        schema["roadCategory"] = "string"
+    for column in [column for column in POLLUTANT_COLUMNS if column in frame.columns]:
+        schema[column] = "Float64"
+    return _apply_table_schema(frame, schema, frame_name="EMFAC step2 project analysis")
+
+
+def _enforce_inventory_schema(frame: pd.DataFrame) -> pd.DataFrame:
+    schema = dict(_INVENTORY_SCHEMA)
+    for column in [column for column in frame.columns if column.endswith("_short_tons_per_year")]:
+        schema[column] = "Float64"
+    return _apply_table_schema(frame, schema, frame_name="EMFAC step2 inventory")
 
 
 def _filter_to_supported_process_groups(
@@ -203,9 +232,15 @@ def _write_parquet(frame: pd.DataFrame, path: str) -> str:
 
 def _load_step2_inputs(workflow: dict[str, object]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     return (
-        pd.read_parquet(Path(workflow["paths"]["project_analysis_source"]).expanduser().resolve()),
-        pd.read_parquet(Path(workflow["paths"]["project_analysis_prdust"]).expanduser().resolve()),
-        pd.read_parquet(Path(workflow["paths"]["emissions_inventory"]).expanduser().resolve()),
+        _enforce_project_analysis_schema(
+            pd.read_parquet(Path(workflow["paths"]["project_analysis_source"]).expanduser().resolve())
+        ),
+        _enforce_project_analysis_schema(
+            pd.read_parquet(Path(workflow["paths"]["project_analysis_prdust"]).expanduser().resolve())
+        ),
+        _enforce_inventory_schema(
+            pd.read_parquet(Path(workflow["paths"]["emissions_inventory"]).expanduser().resolve())
+        ),
         build_model_category_fuel_mapping(workflow["inputs"]["vehicle_type_assignment_model_settings"])[
             ["group", "emfac_vehicle_category", "emfac_fuel"]
         ],

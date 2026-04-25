@@ -54,7 +54,7 @@ emfac:
     emissions_inventory:
       - inventory_folder: ~/Workspace/Models/emfac/raw/sfbay-emfac-emissions-inventory
       - fallback_folder: ~/Workspace/Models/emfac/raw/statewide-emfac-emissions-inventory
-      - vehicle_category_attributes_file: ~/Workspace/Models/emfac/raw/emfac_vehicle_category_attributes.csv
+      - vehicle_category_attributes_file: ~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/_emissions_vehicle_catalog.csv
       - fuel_map:
           Dsl: [Diesel]
           Elec: [Electricity]

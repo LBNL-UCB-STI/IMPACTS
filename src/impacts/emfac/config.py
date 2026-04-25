@@ -10,6 +10,76 @@ CONFIG_DIR = Path(__file__).resolve().parent
 REPO_ROOT = CONFIG_DIR.parents[2]
 DEFAULT_CONFIG_PATH = CONFIG_DIR / "config.yaml"
 
+EMFAC_KEY_SCHEMA = {
+    "vehicleCategory": "string",
+    "fuel": "string",
+    "modelYear": "string",
+}
+EMFAC_ACTIVITY_SCHEMA = {
+    **EMFAC_KEY_SCHEMA,
+    "population_vehicles": "Float64",
+    "total_vmt_vehicle_miles_per_year": "Float64",
+}
+ATLAS_VEHICLES_SCHEMA = {
+    "vehicle_id": "Int64",
+    "household_id": "Int64",
+    "bodytype": "string",
+    "modelyear": "Int64",
+    "adopt_fuel": "string",
+}
+ATLAS_HOUSEHOLDS_SCHEMA = {
+    "household_id": "Int64",
+    "income_segment": "Float64",
+    "income_in_thousands": "Float64",
+}
+ATLAS_PERSONS_SCHEMA = {
+    "household_id": "Int64",
+}
+FUEL_CONSUMPTION_CATALOG_SCHEMA = {
+    "fastsim_id": "string",
+    "model_year": "Float64",
+    "fuel": "string",
+    "charge_behavior": "string",
+    "model_trim": "string",
+    "msrp_usd": "Float64",
+    "fastsim_relative_path": "string",
+}
+VEHICLE_CATEGORY_METADATA_SCHEMA = {
+    "emfac_vehicle_category": "string",
+    "idle_time_fraction": "Float64",
+}
+
+
+def _schema_columns(schema: dict[str, str] | None) -> list[str] | None:
+    if not schema:
+        return None
+    return list(schema.keys())
+
+
+def _apply_table_schema(frame: pd.DataFrame, schema: dict[str, str] | None, *, frame_name: str) -> pd.DataFrame:
+    if not schema:
+        return frame
+    result = frame.copy()
+    missing = [column for column in schema if column not in result.columns]
+    index_names = [name for name in result.index.names if name is not None]
+    if missing and any(column in index_names for column in missing):
+        result = result.reset_index()
+        missing = [column for column in schema if column not in result.columns]
+    if missing:
+        raise ValueError(f"{frame_name} is missing schema columns: {missing}")
+    for column, dtype_name in schema.items():
+        if dtype_name == "string":
+            result[column] = result[column].astype("string")
+            continue
+        if dtype_name == "Float64":
+            result[column] = pd.to_numeric(result[column], errors="raise").astype("Float64")
+            continue
+        if dtype_name == "Int64":
+            result[column] = pd.to_numeric(result[column], errors="raise").astype("Int64")
+            continue
+        raise ValueError(f"Unsupported EMFAC table schema dtype '{dtype_name}' for column '{column}'")
+    return result
+
 
 def _load_yaml_path(path: Path, *sections: str) -> dict:
     with path.open() as handle:
@@ -122,16 +192,23 @@ def read_table(
     *,
     dtype: str | None = "str",
     columns: list[str] | tuple[str, ...] | None = None,
+    schema: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     resolved = Path(resolve_workflow_path(path_like))
+    read_columns = list(columns) if columns is not None else _schema_columns(schema)
     if resolved.suffix.lower() == ".parquet":
-        frame = pd.read_parquet(resolved, columns=list(columns) if columns is not None else None)
+        frame = pd.read_parquet(resolved, columns=read_columns)
+        if schema is not None:
+            return _apply_table_schema(frame, schema, frame_name=str(resolved))
         if dtype == "str":
             return frame.fillna("").astype(str)
         return frame
     read_kwargs = {"dtype": dtype}
-    if columns is not None:
-        read_kwargs["usecols"] = list(columns)
+    if read_columns is not None:
+        read_kwargs["usecols"] = read_columns
+    if schema is not None:
+        read_kwargs.pop("dtype", None)
+        return _apply_table_schema(pd.read_csv(resolved, **read_kwargs), schema, frame_name=str(resolved))
     return pd.read_csv(resolved, **read_kwargs).fillna("")
 
 
@@ -614,6 +691,13 @@ def _normalize_fastsim_catalog_id(value: object) -> str:
     return token
 
 
+def _normalize_fuel_consumption_relative_path(value: object) -> str:
+    token = str(value or "").strip()
+    if token.startswith("fuel/"):
+        token = token[len("fuel/") :]
+    return token
+
+
 def build_fuel_consumption_emfac_assignment_catalog(
     model_spec_path: str | Path,
     breakdown_path: str | Path,
@@ -630,24 +714,13 @@ def build_fuel_consumption_emfac_assignment_catalog(
 
     breakdown = read_table(
         str(breakdown_path),
-        dtype=None,
-        columns=[
-            "fastsim_id",
-            "model_year",
-            "fuel",
-            "charge_behavior",
-            "model_trim",
-            "msrp_usd",
-            "fastsim_relative_path",
-        ],
+        schema=FUEL_CONSUMPTION_CATALOG_SCHEMA,
     ).copy()
     breakdown["fastsim_id"] = breakdown["fastsim_id"].map(_normalize_fastsim_catalog_id)
-    breakdown["model_year"] = pd.to_numeric(breakdown["model_year"], errors="coerce")
-    breakdown["fuel"] = breakdown["fuel"].fillna("").astype(str).str.strip().str.lower()
-    breakdown["charge_behavior"] = breakdown["charge_behavior"].fillna("").astype(str).str.strip().str.lower()
-    breakdown["model_trim"] = breakdown["model_trim"].fillna("").astype(str).str.strip()
-    breakdown["fastsim_relative_path"] = breakdown["fastsim_relative_path"].fillna("").astype(str).str.strip()
-    breakdown["msrp_usd"] = pd.to_numeric(breakdown["msrp_usd"], errors="coerce")
+    breakdown["fuel"] = breakdown["fuel"].fillna("").str.strip().str.lower()
+    breakdown["charge_behavior"] = breakdown["charge_behavior"].fillna("").str.strip().str.lower()
+    breakdown["model_trim"] = breakdown["model_trim"].fillna("").str.strip()
+    breakdown["fastsim_relative_path"] = breakdown["fastsim_relative_path"].map(_normalize_fuel_consumption_relative_path)
 
     rows: list[dict[str, object]] = []
     for item in assignments:
@@ -722,6 +795,51 @@ def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str
         model_name="freight_bayesian_dag",
         model_spec_path=model_spec_path,
     )
+    freight_scoring = model_section.get("scoring")
+    if not isinstance(freight_scoring, dict):
+        raise ValueError(
+            f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
+            "It must contain models.freight_bayesian_dag.scoring."
+        )
+    freight_weights = freight_scoring.get("weights")
+    if not isinstance(freight_weights, dict):
+        raise ValueError(
+            f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
+            "It must contain models.freight_bayesian_dag.scoring.weights."
+        )
+    missing_freight_weights = [
+        key for key in ("fleet_vmt_prior", "naics_sector", "payload_mass", "port_location") if key not in freight_weights
+    ]
+    if missing_freight_weights:
+        raise ValueError(
+            f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
+            "models.freight_bayesian_dag.scoring.weights is missing: "
+            + ", ".join(sorted(missing_freight_weights))
+        )
+    freight_evidence = model_section.get("evidence", {})
+    if freight_evidence not in (None, "") and not isinstance(freight_evidence, dict):
+        raise ValueError(
+            f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
+            "models.freight_bayesian_dag.evidence must be a mapping when provided."
+        )
+    payload_mass_evidence = freight_evidence.get("payload_mass") if isinstance(freight_evidence, dict) else None
+    if payload_mass_evidence not in (None, ""):
+        if not isinstance(payload_mass_evidence, dict):
+            raise ValueError(
+                f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
+                "models.freight_bayesian_dag.evidence.payload_mass must be a mapping when provided."
+            )
+        missing_payload_mass_evidence = [
+            key
+            for key in ("source", "unit", "overload_penalty_power")
+            if key not in payload_mass_evidence
+        ]
+        if missing_payload_mass_evidence:
+            raise ValueError(
+                f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
+                "models.freight_bayesian_dag.evidence.payload_mass is missing: "
+                + ", ".join(sorted(missing_payload_mass_evidence))
+            )
     fleet_assignment = _extract_fleet_assignment_root(model_spec, model_spec_path=model_spec_path)
     mappings = fleet_assignment.get("mappings")
     if not isinstance(mappings, dict):
@@ -806,26 +924,27 @@ def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str
             + ", ".join(sorted(missing_passenger_weights))
         )
     passenger_evidence = passenger_model.get("evidence")
-    if not isinstance(passenger_evidence, dict):
+    if passenger_evidence is not None and not isinstance(passenger_evidence, dict):
         raise ValueError(
             f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
-            "It must contain models.passenger_bayesian_dag.evidence."
+            "models.passenger_bayesian_dag.evidence must be a mapping when provided."
         )
-    income_evidence = passenger_evidence.get("income")
-    if not isinstance(income_evidence, dict):
-        raise ValueError(
-            f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
-            "It must contain models.passenger_bayesian_dag.evidence.income."
-        )
-    missing_income_evidence = [
-        key for key in ("center_ratio", "sigma_ratio") if key not in income_evidence
-    ]
-    if missing_income_evidence:
-        raise ValueError(
-            f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
-            "models.passenger_bayesian_dag.evidence.income is missing: "
-            + ", ".join(sorted(missing_income_evidence))
-        )
+    income_evidence = passenger_evidence.get("income") if isinstance(passenger_evidence, dict) else None
+    if income_evidence is not None:
+        if not isinstance(income_evidence, dict):
+            raise ValueError(
+                f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
+                "models.passenger_bayesian_dag.evidence.income must be a mapping when provided."
+            )
+        missing_income_evidence = [
+            key for key in ("center_ratio", "sigma_ratio") if key not in income_evidence
+        ]
+        if missing_income_evidence:
+            raise ValueError(
+                f"Configured fleet path '{path_label}' has an invalid model spec file at {model_spec_path}. "
+                "models.passenger_bayesian_dag.evidence.income is missing: "
+                + ", ".join(sorted(missing_income_evidence))
+            )
     mappings = fleet_assignment.get("mappings")
     if not isinstance(mappings, dict):
         raise ValueError(
@@ -876,6 +995,33 @@ def _normalize_model_spec_path(path_like: str | None, *, path_label: str) -> str
             f"Configured fleet path '{path_label}' has invalid mappings.passenger.fuel_types entries in {model_spec_path}: "
             + ", ".join(sorted(str(key) for key in invalid_passenger_fuel_types))
         )
+    passenger_fuel_fallbacks = passenger_mapping.get("fuel_fallbacks", [])
+    if passenger_fuel_fallbacks not in (None, ""):
+        if not isinstance(passenger_fuel_fallbacks, list):
+            raise ValueError(
+                f"Configured fleet path '{path_label}' has invalid mappings.passenger.fuel_fallbacks in {model_spec_path}. "
+                "It must be a list when provided."
+            )
+        invalid_fallbacks = []
+        for index, item in enumerate(passenger_fuel_fallbacks):
+            if not isinstance(item, dict):
+                invalid_fallbacks.append(str(index))
+                continue
+            source_fuel = str(item.get("source_fuel", "")).strip()
+            model_year = str(item.get("if_model_year", "")).strip()
+            fallback_fuels = item.get("fallback_emfac_fuels")
+            if (
+                source_fuel == ""
+                or model_year == ""
+                or not isinstance(fallback_fuels, list)
+                or not [str(value).strip() for value in fallback_fuels if str(value).strip()]
+            ):
+                invalid_fallbacks.append(str(index))
+        if invalid_fallbacks:
+            raise ValueError(
+                f"Configured fleet path '{path_label}' has invalid mappings.passenger.fuel_fallbacks rows in {model_spec_path}: "
+                + ", ".join(invalid_fallbacks)
+            )
     passenger_vehicle_categories = passenger_mapping.get("vehicle_categories")
     if not isinstance(passenger_vehicle_categories, dict) or not passenger_vehicle_categories:
         raise ValueError(
@@ -941,6 +1087,7 @@ def _ingest_fleet_sources(config: dict) -> dict:
     config["output"] = _normalize_configured_path(config.get("output"), path_label="output", must_exist=False)
     activities = config.get("activities", {})
     if isinstance(activities, dict):
+        activities = _expand_activities_paths(activities)
         activities["outputs"] = _normalize_configured_path(
             activities.get("outputs"),
             path_label="activities.outputs",
@@ -953,6 +1100,11 @@ def _ingest_fleet_sources(config: dict) -> dict:
             raise ValueError("activities.mappings must be a mapping")
         activities["mappings"] = mappings
         emissions_inventory = activities.get("emissions_inventory", {})
+        if isinstance(emissions_inventory, list):
+            emissions_inventory = _flatten_input_groups({"emissions_inventory": emissions_inventory}).get(
+                "emissions_inventory",
+                {},
+            )
         if isinstance(emissions_inventory, dict):
             raw_fuel_map = emissions_inventory.get("fuel_map", {})
             if raw_fuel_map in (None, ""):
@@ -980,6 +1132,7 @@ def _ingest_fleet_sources(config: dict) -> dict:
             activities["emissions_inventory"] = emissions_inventory
         activities = _derive_emfac_output_paths(activities)
         config["activities"] = activities
+        config["vehicle_category_attributes_file"] = activities.get("vehicle_category_attributes_file")
     frism = config.get("frism", {})
     if isinstance(frism, dict):
         for key in ("carriers_file", "payloads_file", "tours_file"):
@@ -1012,6 +1165,7 @@ def _ingest_fleet_sources(config: dict) -> dict:
                 model_spec_path=Path(model_file),
             )
             scoring = freight_model.get("scoring", {})
+            evidence = freight_model.get("evidence", {}) if isinstance(freight_model.get("evidence", {}), dict) else {}
             if "likelihood_floor" not in scoring:
                 raise ValueError(
                     "vehicle_type_assignment.model_file must define models.freight_bayesian_dag.scoring.likelihood_floor"
@@ -1053,6 +1207,12 @@ def _ingest_fleet_sources(config: dict) -> dict:
                 "port_location": float(weights["port_location"]),
                 "emfac_population": float(scoring.get("emfac_population_bias", 1.0)),
                 "emfac_vmt": float(scoring.get("emfac_vmt_bias", 0.0)),
+                "payload_mass_enabled": isinstance(evidence.get("payload_mass"), dict),
+                "payload_mass_source": str(evidence.get("payload_mass", {}).get("source", "")).strip(),
+                "payload_mass_unit": str(evidence.get("payload_mass", {}).get("unit", "")).strip(),
+                "payload_mass_overload_penalty_power": float(
+                    evidence.get("payload_mass", {}).get("overload_penalty_power", 2.0)
+                ),
             }
             config["freight_mapping"] = {
                 "vehicle_categories": {
@@ -1092,6 +1252,7 @@ def _ingest_fleet_sources(config: dict) -> dict:
                 "likelihood_floor": float(passenger_scoring.get("likelihood_floor", 1e-3)),
                 "fleet_vmt_prior_weight": float(passenger_weights.get("fleet_vmt_prior", 1.0)),
                 "income_weight": float(passenger_weights.get("income", 1.0)),
+                "income_enabled": isinstance(passenger_income_evidence, dict) and bool(passenger_income_evidence),
                 "income_center_ratio": float(passenger_income_evidence.get("center_ratio", 0.30)),
                 "income_sigma_ratio": float(passenger_income_evidence.get("sigma_ratio", 0.10)),
             }
@@ -1114,6 +1275,20 @@ def _ingest_fleet_sources(config: dict) -> dict:
                     for fuel, emfac_fuels in passenger_fuel_types.items()
                     if str(fuel).strip()
                 },
+                "fuel_fallbacks": [
+                    {
+                        "source_fuel": str(item.get("source_fuel", "")).strip().lower(),
+                        "if_model_year": str(item.get("if_model_year", "")).strip(),
+                        "fallback_emfac_fuels": [
+                            str(emfac_fuel).strip()
+                            for emfac_fuel in item.get("fallback_emfac_fuels", [])
+                            if str(emfac_fuel).strip()
+                        ],
+                        "reason": str(item.get("reason", "")).strip(),
+                    }
+                    for item in passenger_mapping.get("fuel_fallbacks", [])
+                    if isinstance(item, dict) and str(item.get("source_fuel", "")).strip()
+                ],
                 "vehicle_categories": {
                     str(beam_category).strip(): [
                         str(category).strip()
@@ -1229,6 +1404,7 @@ def load_fleet_workflow(config_path: str | Path | None = None) -> dict:
     config = {
         "seed": raw["seed"],
         "output": output_root,
+        "vehicle_category_attributes_file": raw.get("vehicle_category_attributes_file"),
         "activities": raw["activities"],
         "atlas": raw["atlas"],
         "frism": raw["frism"],
@@ -1237,6 +1413,9 @@ def load_fleet_workflow(config_path: str | Path | None = None) -> dict:
         "vehicle_type_assignment": raw.get("vehicle_type_assignment", {}),
         "freight_bayesian_dag": raw.get("freight_bayesian_dag", {}),
         "passenger_bayesian_dag": raw.get("passenger_bayesian_dag", {}),
+        "freight_mapping": raw.get("freight_mapping", {}),
+        "passenger_mapping": raw.get("passenger_mapping", {}),
+        "fuel_consumption_mapping": raw.get("fuel_consumption_mapping", []),
     }
     return {
         "area": raw["region"],

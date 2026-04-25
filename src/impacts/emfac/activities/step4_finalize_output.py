@@ -8,6 +8,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from impacts.emfac.config import _apply_table_schema
 from impacts.emfac.activities.step3_fill_project_analysis_rates import ACTIVITY_COLUMN
 from impacts.emfac.activities.step3_fill_project_analysis_rates import POLLUTANT_COLUMNS
 from impacts.emfac.common import frame_summary
@@ -52,6 +53,42 @@ _RATES_SCHEMA_STRING_COLUMNS = [
     "speedMph_timeMin",
     "emfacId",
 ]
+_SURFACE_BASE_SCHEMA = {
+    "county": "string",
+    "vehicleCategory": "string",
+    "fuel": "string",
+    "modelYear": "Int64",
+    "process": "string",
+}
+_ACTIVITY_WEIGHTS_BASE_SCHEMA = {
+    "county": "string",
+    "vehicleCategory": "string",
+    "fuel": "string",
+    "modelYear": "Int64",
+}
+
+
+def _enforce_surface_schema(frame: pd.DataFrame) -> pd.DataFrame:
+    schema = dict(_SURFACE_BASE_SCHEMA)
+    if ACTIVITY_COLUMN in frame.columns:
+        schema[ACTIVITY_COLUMN] = "string"
+    if "roadCategory" in frame.columns:
+        schema["roadCategory"] = "string"
+    if "speed" in frame.columns:
+        schema["speed"] = "Float64"
+    numeric_columns = [column for column in POLLUTANT_COLUMNS if column in frame.columns]
+    for column in numeric_columns:
+        schema[column] = "Float64"
+    return _apply_table_schema(frame, schema, frame_name="EMFAC finalization surface")
+
+
+def _enforce_activity_weights_schema(frame: pd.DataFrame) -> pd.DataFrame:
+    schema = dict(_ACTIVITY_WEIGHTS_BASE_SCHEMA)
+    if "speed" in frame.columns:
+        schema["speed"] = "Float64"
+    for column in [column for column in ACTIVITY_COLUMNS if column in frame.columns]:
+        schema[column] = "Float64"
+    return _apply_table_schema(frame, schema, frame_name="EMFAC activity weights")
 
 
 def _enforce_rates_schema(frame: pd.DataFrame) -> pd.DataFrame:
@@ -67,24 +104,17 @@ def _assign_model_year_groups(frame: pd.DataFrame, model_year_groups: dict[str, 
 
 
 def _load_surface(path: str) -> pd.DataFrame:
-    return pd.read_parquet(Path(path).expanduser().resolve())
+    return _enforce_surface_schema(pd.read_parquet(Path(path).expanduser().resolve()))
 
 
 def _build_activity_weights(emissions_inventory_path: str) -> pd.DataFrame:
     source = pd.read_parquet(Path(emissions_inventory_path).expanduser().resolve())
     available_columns = [column for column in ["county", "vehicleCategory", "fuel", "modelYear", "speed", *ACTIVITY_COLUMNS] if column in source.columns]
-    weights = source[available_columns].copy()
-    weights["county"] = weights["county"].astype(str)
-    weights["vehicleCategory"] = weights["vehicleCategory"].astype(str)
-    weights["fuel"] = weights["fuel"].astype(str)
-    weights["modelYear"] = pd.to_numeric(weights["modelYear"], errors="raise").astype(int)
+    weights = _enforce_activity_weights_schema(source[available_columns].copy())
     if "speed" in weights.columns:
-        weights["speed"] = pd.to_numeric(weights["speed"], errors="coerce")
         weights = weights.drop_duplicates(["county", "vehicleCategory", "fuel", "modelYear", "speed"])
     else:
         weights = weights.drop_duplicates(ACTIVITY_JOIN_COLUMNS)
-    for column in [column for column in ACTIVITY_COLUMNS if column in weights.columns]:
-        weights[column] = pd.to_numeric(weights[column], errors="coerce")
     grouped = (
         weights.groupby(ACTIVITY_JOIN_COLUMNS, dropna=False)[[column for column in ACTIVITY_COLUMNS if column in weights.columns]]
         .sum(min_count=1)
@@ -129,10 +159,6 @@ def _build_study_area_wide_fleet(activity_weights: pd.DataFrame, model_year_grou
 
 def _prepare_surface_keys(surface: pd.DataFrame, model_year_groups: dict[str, list[dict[str, object]]]) -> pd.DataFrame:
     keys = surface[["county", "vehicleCategory", "fuel", "modelYear", "process"]].drop_duplicates().copy()
-    keys["county"] = keys["county"].astype(str)
-    keys["vehicleCategory"] = keys["vehicleCategory"].astype(str)
-    keys["fuel"] = keys["fuel"].astype(str)
-    keys["modelYear"] = pd.to_numeric(keys["modelYear"], errors="raise").astype(int)
     return _assign_model_year_groups(keys, model_year_groups).drop_duplicates()
 
 
@@ -212,10 +238,14 @@ def _aggregation_weight_for_process(process: pd.Series, frame: pd.DataFrame) -> 
     prdust_mask = process_values == "PRDUST"
     weights.loc[vmt_mask] = pd.to_numeric(
         frame.loc[vmt_mask, "total_vmt_vehicle_miles_per_year"], errors="coerce"
-    )
-    weights.loc[prdust_mask] = pd.to_numeric(frame.loc[prdust_mask, "population_vehicles"], errors="coerce")
+    ).to_numpy(dtype="float64", na_value=np.nan)
+    weights.loc[prdust_mask] = pd.to_numeric(
+        frame.loc[prdust_mask, "population_vehicles"], errors="coerce"
+    ).to_numpy(dtype="float64", na_value=np.nan)
     other_mask = ~vmt_mask & ~prdust_mask
-    weights.loc[other_mask] = pd.to_numeric(frame.loc[other_mask, "trips_per_year"], errors="coerce")
+    weights.loc[other_mask] = pd.to_numeric(
+        frame.loc[other_mask, "trips_per_year"], errors="coerce"
+    ).to_numpy(dtype="float64", na_value=np.nan)
     return weights
 
 
@@ -264,10 +294,6 @@ def _build_final_rate_table(
     model_year_groups: dict[str, list[dict[str, object]]],
 ) -> pd.DataFrame:
     frame = surface.copy()
-    frame["county"] = frame["county"].astype(str)
-    frame["vehicleCategory"] = frame["vehicleCategory"].astype(str)
-    frame["fuel"] = frame["fuel"].astype(str)
-    frame["modelYear"] = pd.to_numeric(frame["modelYear"], errors="raise").astype(int)
     frame = frame.merge(activity_weights, on=ACTIVITY_JOIN_COLUMNS, how="left")
     frame = _assign_model_year_groups(frame, model_year_groups)
     frame["aggregation_weight"] = _aggregation_weight_for_process(frame["process"], frame)

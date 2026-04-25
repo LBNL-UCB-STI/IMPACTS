@@ -3,7 +3,7 @@
 Substeps:
 3.1 Build passenger EMFAC candidate surface.
 3.2 Map passenger car vehicle types to EMFAC.
-3.3 Assign fuel-consumption fastsimId values to mapped passenger vehicle types.
+3.3 Assign fuel-consumption fields to mapped passenger vehicle types.
 3.4 Sample mapped passenger vehicleTypeId values onto ATLAS vehicles.
 3.5 Write mapped passenger vehicle types and mapped ATLAS vehicles.
 """
@@ -20,7 +20,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from impacts.emfac.config import ATLAS_HOUSEHOLDS_SCHEMA
+from impacts.emfac.config import ATLAS_VEHICLES_SCHEMA
 from impacts.emfac.config import build_fuel_consumption_emfac_assignment_catalog
+from impacts.emfac.config import EMFAC_ACTIVITY_SCHEMA
+from impacts.emfac.config import EMFAC_KEY_SCHEMA
 from impacts.emfac.config import read_table
 from impacts.emfac.config import resolve_workflow_path
 from impacts.emfac.common import attach_emissions_rates_filepaths_from_config
@@ -36,6 +40,19 @@ from impacts.emfac.fleet.step1_build_vehicle_types import _normalize_energy_file
 
 
 _EMFAC_KEY_COLUMNS = ["vehicleCategory", "fuel", "modelYear"]
+_PASSENGER_SOURCE_VEHICLE_TYPES_SCHEMA = {
+    "vehicleTypeId": "string",
+    "bodytype": "string",
+    "adopt_fuel": "string",
+    "modelyear": "Int64",
+    "sampleProbabilityWithinCategory": "string",
+    "sampleProbabilityString": "string",
+}
+_PASSENGER_FUEL_CONSUMPTION_TEMPLATE_SCHEMA = {
+    "vehicleTypeId": "string",
+    "primaryVehicleEnergyFile": "string",
+    "secondaryVehicleEnergyFile": "string",
+}
 
 
 def _require_column(frame: pd.DataFrame, column_name: str, frame_name: str) -> None:
@@ -144,18 +161,15 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
     emfac_config = config["activities"]
     rates = read_table(
         emfac_config["passenger_rates_file"],
-        dtype=None,
-        columns=_EMFAC_KEY_COLUMNS,
+        schema=EMFAC_KEY_SCHEMA,
     )[_EMFAC_KEY_COLUMNS].drop_duplicates()
     activity = read_table(
         emfac_config["passenger_activity_file"],
-        dtype=None,
-        columns=_EMFAC_KEY_COLUMNS + ["population_vehicles", "total_vmt_vehicle_miles_per_year"],
+        schema=EMFAC_ACTIVITY_SCHEMA,
     )
     fleet = read_table(
         emfac_config["passenger_fleet_file"],
-        dtype=None,
-        columns=_EMFAC_KEY_COLUMNS,
+        schema=EMFAC_KEY_SCHEMA,
     )[_EMFAC_KEY_COLUMNS].drop_duplicates()
 
     candidates = (
@@ -196,6 +210,7 @@ def _build_passenger_mapping_context(config: dict[str, Any]) -> dict[str, Any]:
         "emfac_candidates": emfac_candidates,
         "body_type_mapping": body_type_mapping,
         "fuel_mapping": fuel_mapping,
+        "passenger_mapping": config.get("passenger_mapping", {}) or {},
     }
 
 
@@ -441,22 +456,31 @@ def _attach_vehicle_household_income(
     return vehicle_income
 
 
-def _build_passenger_vehicle_sampling_table(passenger_car_vehicle_types: pd.DataFrame) -> pd.DataFrame:
+def _build_passenger_vehicle_sampling_table(
+    passenger_car_vehicle_types: pd.DataFrame,
+    *,
+    require_msrp: bool,
+) -> pd.DataFrame:
     _require_column(passenger_car_vehicle_types, "vehicleTypeId", "Passenger car vehicle types file")
     _require_column(passenger_car_vehicle_types, "atlasVehicleTypeId", "Passenger car vehicle types file")
     _require_column(passenger_car_vehicle_types, "sampleProbabilityWithinCategory", "Passenger car vehicle types file")
-    _require_column(passenger_car_vehicle_types, "msrp_usd", "Passenger car vehicle types file")
+    if require_msrp:
+        _require_column(passenger_car_vehicle_types, "msrp_usd", "Passenger car vehicle types file")
 
-    prepared = passenger_car_vehicle_types[
-        ["vehicleTypeId", "atlasVehicleTypeId", "sampleProbabilityWithinCategory", "msrp_usd"]
-    ].copy()
+    selected_columns = ["vehicleTypeId", "atlasVehicleTypeId", "sampleProbabilityWithinCategory"]
+    if "msrp_usd" in passenger_car_vehicle_types.columns:
+        selected_columns.append("msrp_usd")
+    prepared = passenger_car_vehicle_types[selected_columns].copy()
     prepared["atlasVehicleTypeToken"] = prepared["atlasVehicleTypeId"].astype(str)
     prepared["priorProbability"] = pd.to_numeric(
         prepared["sampleProbabilityWithinCategory"],
         errors="coerce",
     ).fillna(0.0)
-    prepared["msrp_usd"] = pd.to_numeric(prepared["msrp_usd"], errors="coerce")
-    if prepared["msrp_usd"].isna().any():
+    if "msrp_usd" in prepared.columns:
+        prepared["msrp_usd"] = pd.to_numeric(prepared["msrp_usd"], errors="coerce")
+    else:
+        prepared["msrp_usd"] = pd.Series(pd.NA, index=prepared.index, dtype="Float64")
+    if require_msrp and prepared["msrp_usd"].isna().any():
         raise ValueError("Passenger car vehicle types file is missing msrp_usd required for passenger_bayesian_dag")
     return prepared[["vehicleTypeId", "atlasVehicleTypeToken", "priorProbability", "msrp_usd"]].copy()
 
@@ -467,8 +491,7 @@ def _load_passenger_bayesian_dag(config: dict[str, Any]) -> dict[str, float]:
         "likelihood_floor",
         "fleet_vmt_prior_weight",
         "income_weight",
-        "income_center_ratio",
-        "income_sigma_ratio",
+        "income_enabled",
     ]
     missing = [key for key in required if key not in dag]
     if missing:
@@ -476,7 +499,22 @@ def _load_passenger_bayesian_dag(config: dict[str, Any]) -> dict[str, float]:
             "Passenger Bayesian DAG config is missing required keys for Step 3.4: "
             + ", ".join(sorted(missing))
         )
-    return {key: float(dag[key]) for key in required}
+    result = {
+        "likelihood_floor": float(dag["likelihood_floor"]),
+        "fleet_vmt_prior_weight": float(dag["fleet_vmt_prior_weight"]),
+        "income_weight": float(dag["income_weight"]),
+        "income_enabled": bool(dag["income_enabled"]),
+    }
+    if result["income_enabled"]:
+        for key in ("income_center_ratio", "income_sigma_ratio"):
+            if key not in dag:
+                raise ValueError(
+                    "Passenger Bayesian DAG config is missing required income evidence keys for Step 3.4: "
+                    + ", ".join(sorted(key for key in ("income_center_ratio", "income_sigma_ratio") if key not in dag))
+                )
+        result["income_center_ratio"] = float(dag["income_center_ratio"])
+        result["income_sigma_ratio"] = float(dag["income_sigma_ratio"])
+    return result
 
 
 def _load_fuel_consumption_msrp_lookup(config: dict[str, Any]) -> dict[str, float]:
@@ -532,7 +570,7 @@ def _load_passenger_fuel_consumption_mapping(config: dict[str, Any]) -> pd.DataF
                     continue
                 rows.append(
                     {
-                        "fastsimId": fastsim_id,
+                        "fuelConsumptionId": fastsim_id,
                         "emfacVehicleCategory": normalized_vehicle_category,
                         "emfacFuel": normalized_fuel,
                     }
@@ -540,12 +578,12 @@ def _load_passenger_fuel_consumption_mapping(config: dict[str, Any]) -> pd.DataF
     mapping = pd.DataFrame(rows)
     if mapping.empty:
         raise ValueError(
-            "Passenger fuel-consumption assignment produced no fastsimId/category/fuel rows."
+            "Passenger fuel-consumption assignment produced no fuel-consumption-id/category/fuel rows."
         )
     return mapping.drop_duplicates().reset_index(drop=True)
 
 
-def _assign_passenger_fuel_consumption_ids(
+def _assign_passenger_fuel_consumption_fields(
     *,
     passenger_car_vehicle_types: pd.DataFrame,
     config: dict[str, Any],
@@ -565,7 +603,9 @@ def _assign_passenger_fuel_consumption_ids(
             "Passenger fuel-consumption assignment requires beam.passenger_vehicle_types_file, "
             "beam.fuel_consumption_catalog, and vehicle_type_assignment.model_file"
         )
-    source_vehicle_types = _normalize_energy_file_columns(read_table(source_vehicle_types_path, dtype=None))
+    source_vehicle_types = _normalize_energy_file_columns(
+        read_table(source_vehicle_types_path, schema=_PASSENGER_FUEL_CONSUMPTION_TEMPLATE_SCHEMA)
+    )
     assignment_catalog = build_fuel_consumption_emfac_assignment_catalog(model_file, breakdown_path)
     source_vehicle_types["fuelConsumptionId"] = source_vehicle_types["vehicleTypeId"].astype(str)
     source_vehicle_types["template_modelyear"] = _extract_model_year_from_vehicle_type_id(
@@ -573,31 +613,76 @@ def _assign_passenger_fuel_consumption_ids(
     )
     random = _coerce_random_generator(seed)
     prepared = passenger_car_vehicle_types.copy()
-    assigned_fastsim_ids: list[str] = []
+    assigned_fuel_consumption_ids: list[str] = []
     selected_template_rows: list[pd.Series] = []
+
+    def _has_passenger_baseline_values(row: Any) -> bool:
+        primary_fuel_type = str(getattr(row, "primaryFuelType", "") or "").strip()
+        primary_consumption = pd.to_numeric(
+            pd.Series([getattr(row, "primaryFuelConsumptionInJoulePerMeter", np.nan)]),
+            errors="coerce",
+        ).iloc[0]
+        primary_capacity = pd.to_numeric(
+            pd.Series([getattr(row, "primaryFuelCapacityInJoule", np.nan)]),
+            errors="coerce",
+        ).iloc[0]
+        msrp_usd = pd.to_numeric(pd.Series([getattr(row, "msrp_usd", np.nan)]), errors="coerce").iloc[0]
+        return (
+            primary_fuel_type != ""
+            and pd.notna(primary_consumption)
+            and float(primary_consumption) > 0.0
+            and pd.notna(primary_capacity)
+            and float(primary_capacity) > 0.0
+            and pd.notna(msrp_usd)
+            and float(msrp_usd) > 0.0
+        )
+
+    def _build_unassigned_row(row: Any, *, reason: str) -> pd.Series:
+        updated = pd.Series(row._asdict()).copy()
+        updated["fuelConsumptionId"] = ""
+        for column_name in ["primaryVehicleEnergyFile", "secondaryVehicleEnergyFile"]:
+            if column_name in updated.index:
+                updated[column_name] = ""
+        print(
+            "WARNING: Passenger Step 3.3 leaving fuel-consumption template fields empty for "
+            f"vehicleTypeId={getattr(row, 'vehicleTypeId', '')}, "
+            f"atlasVehicleTypeId={getattr(row, 'atlasVehicleTypeId', '')}, "
+            f"emfacVehicleCategory={getattr(row, 'emfacVehicleCategory', '')}, "
+            f"emfacFuel={getattr(row, 'emfacFuel', '')}: {reason}"
+        )
+        return updated
 
     for row in prepared.itertuples(index=False):
         matches = mapping[
             mapping["emfacVehicleCategory"].astype(str).eq(str(row.emfacVehicleCategory))
             & mapping["emfacFuel"].astype(str).eq(str(row.emfacFuel))
-        ]["fastsimId"].astype(str).drop_duplicates()
+        ]["fuelConsumptionId"].astype(str).drop_duplicates()
         if matches.empty:
+            if _has_passenger_baseline_values(row):
+                assigned_fuel_consumption_ids.append("")
+                selected_template_rows.append(
+                    _build_unassigned_row(
+                        row,
+                        reason="no fuel-consumption mapping matched this EMFAC class/fuel, but the passenger "
+                        "vehicle type already carries baseline fuel consumption, capacity, and msrp values",
+                    )
+                )
+                continue
             raise ValueError(
-                "No fuel-consumption fastsimId matched EMFAC-assigned passenger vehicle type "
+                "No fuel-consumption mapping matched EMFAC-assigned passenger vehicle type "
                 f"vehicleTypeId={getattr(row, 'vehicleTypeId', '')}, "
                 f"emfacVehicleCategory={getattr(row, 'emfacVehicleCategory', '')}, "
                 f"emfacFuel={getattr(row, 'emfacFuel', '')}"
             )
-        fastsim_id = str(random.choice(matches.to_numpy(), size=1)[0])
-        assigned_fastsim_ids.append(fastsim_id)
+        fuel_consumption_id = str(random.choice(matches.to_numpy(), size=1)[0])
 
         candidate_paths = assignment_catalog[
-            assignment_catalog["fastsim_id"].astype(str).eq(fastsim_id)
+            assignment_catalog["fastsim_id"].astype(str).eq(fuel_consumption_id)
         ]["fastsim_relative_path"].astype(str).drop_duplicates()
         if candidate_paths.empty:
             raise ValueError(
-                "No fuel-consumption catalog row matched passenger fastsimId "
-                f"fastsimId={fastsim_id}, vehicleTypeId={getattr(row, 'vehicleTypeId', '')}"
+                "No fuel-consumption catalog row matched passenger fuel-consumption id "
+                f"fuelConsumptionId={fuel_consumption_id}, vehicleTypeId={getattr(row, 'vehicleTypeId', '')}"
             )
         template_candidates = source_vehicle_types[
             source_vehicle_types["primaryVehicleEnergyFile"].astype(str).isin(candidate_paths.tolist())
@@ -609,12 +694,22 @@ def _assign_passenger_fuel_consumption_ids(
             if template_candidates.empty:
                 raise ValueError(
                     "Passenger PHEV fuel-consumption assignment requires a secondaryVehicleEnergyFile in the "
-                    f"source passenger vehicle types for fastsimId={fastsim_id}"
+                    f"source passenger vehicle types for fuelConsumptionId={fuel_consumption_id}"
                 )
         if template_candidates.empty:
+            if _has_passenger_baseline_values(row):
+                assigned_fuel_consumption_ids.append("")
+                selected_template_rows.append(
+                    _build_unassigned_row(
+                        row,
+                        reason="the configured passenger fuel-consumption mapping matched, but no source passenger "
+                        "template row matched the assignment; keeping baseline fuel consumption, capacity, and msrp values only",
+                    )
+                )
+                continue
             raise ValueError(
                 "No passenger fuel-consumption template row matched the configured assignment for "
-                f"fastsimId={fastsim_id}, vehicleTypeId={getattr(row, 'vehicleTypeId', '')}"
+                f"fuelConsumptionId={fuel_consumption_id}, vehicleTypeId={getattr(row, 'vehicleTypeId', '')}"
             )
         requested_interval = parse_model_year_group_interval(getattr(row, "emfacResolvedModelYear", ""))
         template_candidates["yearDistance"] = template_candidates["template_modelyear"].map(
@@ -629,35 +724,34 @@ def _assign_passenger_fuel_consumption_ids(
                 kind="mergesort",
             ).iloc[0]
         )
+        assigned_fuel_consumption_ids.append(fuel_consumption_id)
 
-    prepared["fastsimId"] = assigned_fastsim_ids
-    prepared["msrp_usd"] = prepared["fastsimId"].map(msrp_lookup)
-    if prepared["msrp_usd"].isna().any():
-        missing_fastsim_ids = prepared.loc[prepared["msrp_usd"].isna(), "fastsimId"].drop_duplicates().tolist()
+    prepared["fuelConsumptionId"] = assigned_fuel_consumption_ids
+    mapped_msrp = prepared["fuelConsumptionId"].map(msrp_lookup)
+    if "msrp_usd" in prepared.columns:
+        existing_msrp = pd.to_numeric(prepared["msrp_usd"], errors="coerce")
+    else:
+        existing_msrp = pd.Series(pd.NA, index=prepared.index, dtype="Float64")
+    prepared["msrp_usd"] = existing_msrp.fillna(mapped_msrp)
+    unresolved_msrp = prepared["fuelConsumptionId"].astype(str).str.strip().ne("") & prepared["msrp_usd"].isna()
+    if unresolved_msrp.any():
+        missing_fuel_consumption_ids = prepared.loc[
+            unresolved_msrp, "fuelConsumptionId"
+        ].drop_duplicates().tolist()
         raise ValueError(
-            "No msrp_usd value was found in the fuel-consumption catalog for passenger fastsimId values:\n"
-            + "\n".join(str(value) for value in missing_fastsim_ids)
+            "No msrp_usd value was found in the fuel-consumption catalog for passenger fuelConsumptionId values:\n"
+            + "\n".join(str(value) for value in missing_fuel_consumption_ids)
         )
-    atlas_vehicle_type_id = prepared["atlasVehicleTypeId"].astype(str)
-    prepared["vehicleTypeId"] = (
-        prepared["emfacId"].astype(str)
-        + "--"
-        + prepared["fastsimId"].map(_sanitize_vehicle_type_component).astype(str)
-        + "--"
-        + atlas_vehicle_type_id
-    )
     template_columns = [column for column in source_vehicle_types.columns if column != "vehicleTypeId"]
-    for template_row, index in zip(selected_template_rows, prepared.index, strict=False):
-        for column in template_columns:
-            prepared.at[index, column] = template_row[column]
-    prepared["fastsimId"] = assigned_fastsim_ids
-    prepared["msrp_usd"] = prepared["fastsimId"].map(msrp_lookup)
+    template_frame = pd.DataFrame(selected_template_rows).reset_index(drop=True)
+    template_frame = template_frame.reindex(columns=template_columns)
+    for column in template_columns:
+        prepared[column] = template_frame[column].to_numpy()
+    atlas_vehicle_type_id = prepared["atlasVehicleTypeId"].astype(str)
+    fuel_consumption_prefix = prepared["fuelConsumptionId"].map(_sanitize_vehicle_type_component).astype(str)
+    fuel_consumption_prefix = fuel_consumption_prefix.where(fuel_consumption_prefix != "", "unmapped")
     prepared["vehicleTypeId"] = (
-        prepared["emfacId"].astype(str)
-        + "--"
-        + prepared["fastsimId"].map(_sanitize_vehicle_type_component).astype(str)
-        + "--"
-        + atlas_vehicle_type_id
+        fuel_consumption_prefix + "--" + prepared["emfacId"].astype(str) + "--" + atlas_vehicle_type_id
     )
     prepared = _build_hashed_vehicle_type_ids(prepared)
     duplicate_vehicle_type_ids = prepared["vehicleTypeId"][prepared["vehicleTypeId"].duplicated()].drop_duplicates()
@@ -690,8 +784,11 @@ def _sample_passenger_vehicle_type_ids_for_vehicles(
         pd.to_numeric(prepared["modelyear"], errors="coerce").round().astype("Int64").astype(str),
     )
 
-    sampling_table = _build_passenger_vehicle_sampling_table(passenger_car_vehicle_types)
     dag = _load_passenger_bayesian_dag(config)
+    sampling_table = _build_passenger_vehicle_sampling_table(
+        passenger_car_vehicle_types,
+        require_msrp=bool(dag["income_enabled"]),
+    )
 
     sampling_groups = {
         group_key: group[["vehicleTypeId", "priorProbability", "msrp_usd"]].reset_index(drop=True)
@@ -709,25 +806,24 @@ def _sample_passenger_vehicle_type_ids_for_vehicles(
                 f"atlasVehicleTypeId={group_key[0]}"
             )
         candidates = candidates.copy()
-        income_usd = float(pd.to_numeric(group["income_in_thousands"], errors="coerce").iloc[0]) * 1000.0
-        income_usd = max(income_usd, 1.0)
         prior = pd.to_numeric(candidates["priorProbability"], errors="coerce").fillna(0.0).clip(lower=0.0)
         prior = prior / float(prior.sum()) if float(prior.sum()) > 0.0 else pd.Series(
             np.full(len(candidates), 1.0 / len(candidates)),
             index=candidates.index,
             dtype="float64",
         )
-        affordability_ratio = pd.to_numeric(candidates["msrp_usd"], errors="coerce").fillna(0.0) / income_usd
-        sigma_ratio = max(float(dag["income_sigma_ratio"]), 1e-9)
-        standardized = (affordability_ratio - float(dag["income_center_ratio"])) / sigma_ratio
-        income_likelihood = np.exp(-0.5 * np.square(standardized))
-        income_likelihood = np.maximum(income_likelihood, float(dag["likelihood_floor"]))
         log_prior = np.log(np.maximum(prior.to_numpy(dtype="float64"), 1e-12))
-        log_income = np.log(np.maximum(income_likelihood, 1e-12))
-        posterior_log = (
-            float(dag["fleet_vmt_prior_weight"]) * log_prior
-            + float(dag["income_weight"]) * log_income
-        )
+        posterior_log = float(dag["fleet_vmt_prior_weight"]) * log_prior
+        if bool(dag["income_enabled"]):
+            income_usd = float(pd.to_numeric(group["income_in_thousands"], errors="coerce").iloc[0]) * 1000.0
+            income_usd = max(income_usd, 1.0)
+            affordability_ratio = pd.to_numeric(candidates["msrp_usd"], errors="coerce").fillna(0.0) / income_usd
+            sigma_ratio = max(float(dag["income_sigma_ratio"]), 1e-9)
+            standardized = (affordability_ratio - float(dag["income_center_ratio"])) / sigma_ratio
+            income_likelihood = np.exp(-0.5 * np.square(standardized))
+            income_likelihood = np.maximum(income_likelihood, float(dag["likelihood_floor"]))
+            log_income = np.log(np.maximum(income_likelihood, 1e-12))
+            posterior_log = posterior_log + float(dag["income_weight"]) * log_income
         posterior = np.exp(posterior_log - float(np.max(posterior_log)))
         posterior_sum = float(posterior.sum())
         probabilities = posterior / posterior_sum if posterior_sum > 0.0 else np.full(len(candidates), 1.0 / len(candidates))
@@ -787,6 +883,7 @@ def _build_passenger_emfac_candidates(
     emfac_candidates: pd.DataFrame,
     body_type_mapping: pd.DataFrame,
     fuel_mapping: pd.DataFrame,
+    passenger_mapping: dict[str, Any],
 ) -> pd.DataFrame:
     vehicle_category_candidates = _extract_emfac_bodytype_candidates(
         bodytype=bodytype,
@@ -818,17 +915,55 @@ def _build_passenger_emfac_candidates(
         )
 
     requested_model_year_group = str(model_year_group).strip()
-    available = [
-        str(value).strip()
-        for value in matched["modelYear"].dropna().astype(str).drop_duplicates().tolist()
-        if str(value).strip()
-    ]
-    matched = matched[matched["modelYear"].astype(str).eq(requested_model_year_group)].copy()
-    if matched.empty:
-        raise ValueError(
-            "No passenger EMFAC candidates matched the configured modelYear group for "
-            f"vehicleTypeId={vehicle_type_id}, modelYearGroup={requested_model_year_group}, available={available}"
-        )
+    exact_matched = matched[matched["modelYear"].astype(str).eq(requested_model_year_group)].copy()
+    if exact_matched.empty:
+        fallback_candidates = []
+        for item in passenger_mapping.get("fuel_fallbacks", []):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("source_fuel", "")).strip().lower() != str(adopt_fuel).strip().lower():
+                continue
+            if str(item.get("if_model_year", "")).strip() != requested_model_year_group:
+                continue
+            fallback_candidates.extend(
+                [
+                    str(value).strip()
+                    for value in item.get("fallback_emfac_fuels", [])
+                    if str(value).strip()
+                ]
+            )
+        if fallback_candidates:
+            fallback_matched = emfac_candidates[
+                emfac_candidates["vehicleCategory"].isin(vehicle_category_candidates)
+                & emfac_candidates["fuel"].isin(sorted(set(fallback_candidates)))
+                & emfac_candidates["modelYear"].astype(str).eq(requested_model_year_group)
+            ].copy()
+            if not fallback_matched.empty:
+                matched = fallback_matched
+            else:
+                available = [
+                    str(value).strip()
+                    for value in matched["modelYear"].dropna().astype(str).drop_duplicates().tolist()
+                    if str(value).strip()
+                ]
+                raise ValueError(
+                    "Passenger fuel fallback matched but no EMFAC candidates remained for "
+                    f"vehicleTypeId={vehicle_type_id}, adopt_fuel={adopt_fuel}, "
+                    f"modelYearGroup={requested_model_year_group}, fallback_emfac_fuels={sorted(set(fallback_candidates))}, "
+                    f"available={available}"
+                )
+        else:
+            available = [
+                str(value).strip()
+                for value in matched["modelYear"].dropna().astype(str).drop_duplicates().tolist()
+                if str(value).strip()
+            ]
+            raise ValueError(
+                "No passenger EMFAC candidates matched the configured modelYear group for "
+                f"vehicleTypeId={vehicle_type_id}, modelYearGroup={requested_model_year_group}, available={available}"
+            )
+    else:
+        matched = exact_matched
     matched["splitShare"] = pd.to_numeric(matched["fleetShare"], errors="coerce").fillna(0.0)
     split_total = float(matched["splitShare"].sum())
     if split_total <= 0.0:
@@ -865,6 +1000,7 @@ def _build_passenger_car_emfac_mapping(
     emfac_candidates = mapping_context["emfac_candidates"]
     body_type_mapping = mapping_context["body_type_mapping"]
     fuel_mapping = mapping_context["fuel_mapping"]
+    passenger_mapping = mapping_context["passenger_mapping"]
     prepared = passenger_car_vehicle_types.copy()
     prepared["vehicleCategory"] = "LDA"
     prepared = assign_model_year_groups(
@@ -890,6 +1026,7 @@ def _build_passenger_car_emfac_mapping(
             emfac_candidates=emfac_candidates,
             body_type_mapping=body_type_mapping,
             fuel_mapping=fuel_mapping,
+            passenger_mapping=passenger_mapping,
         )
         for candidate in candidates.itertuples(index=False):
             share = float(candidate.splitShare)
@@ -939,7 +1076,7 @@ def _map_passenger_car_vehicle_types(workflow: dict[str, Any], *, mapping_contex
     passenger_car_file = workflow.get("built_vehicle_types_file")
     if not passenger_car_file:
         raise ValueError("Step 3 requires passenger car vehicle types from Step 1")
-    passenger_car_vehicle_types = read_table(str(passenger_car_file), dtype=None)
+    passenger_car_vehicle_types = read_table(str(passenger_car_file), schema=_PASSENGER_SOURCE_VEHICLE_TYPES_SCHEMA)
     return _build_passenger_car_emfac_mapping(
         passenger_car_vehicle_types=passenger_car_vehicle_types,
         mapping_context=mapping_context,
@@ -955,12 +1092,11 @@ def _sample_mapped_passenger_vehicles(
 ) -> pd.DataFrame:
     config = workflow["config"]
     atlas_config = config["atlas"]
-    atlas_vehicles = read_table(atlas_config["vehicles_file"], dtype=None, columns=None)
+    atlas_vehicles = read_table(atlas_config["vehicles_file"], schema=ATLAS_VEHICLES_SCHEMA)
     atlas_vehicles = _apply_atlas_fuel_aliases(atlas_vehicles, config)
     atlas_households = read_table(
         atlas_config["households_file"],
-        dtype=None,
-        columns=None,
+        schema=ATLAS_HOUSEHOLDS_SCHEMA,
     )
     vehicles_with_em = _sample_passenger_vehicle_type_ids_for_vehicles(
         vehicles=atlas_vehicles,
@@ -1023,8 +1159,8 @@ def run_step3(workflow: dict[str, Any]) -> dict[str, Any]:
         mapping_context=mapping_context,
     )
 
-    print("=== Step 3.3: assign fuel-consumption fastsimId values to mapped passenger vehicle types ===")
-    passenger_car_with_emfac = _assign_passenger_fuel_consumption_ids(
+    print("=== Step 3.3: assign fuel-consumption fields to mapped passenger vehicle types ===")
+    passenger_car_with_emfac = _assign_passenger_fuel_consumption_fields(
         passenger_car_vehicle_types=passenger_car_with_emfac,
         config=workflow["config"],
         seed=random,

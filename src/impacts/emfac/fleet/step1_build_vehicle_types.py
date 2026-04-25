@@ -17,12 +17,20 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from impacts.emfac.config import ATLAS_HOUSEHOLDS_SCHEMA
+from impacts.emfac.config import ATLAS_PERSONS_SCHEMA
+from impacts.emfac.config import ATLAS_VEHICLES_SCHEMA
 from impacts.emfac.config import read_table
 from impacts.emfac.config import resolve_workflow_path
 
 
-def _read_csv(path_like: str, *, columns: list[str] | tuple[str, ...] | None = None) -> pd.DataFrame:
-    return read_table(path_like, columns=columns)
+def _read_csv(
+    path_like: str,
+    *,
+    columns: list[str] | tuple[str, ...] | None = None,
+    schema: dict[str, str] | None = None,
+) -> pd.DataFrame:
+    return read_table(path_like, columns=columns, schema=schema)
 
 
 def _require_column(frame: pd.DataFrame, column_name: str, frame_name: str) -> None:
@@ -93,7 +101,9 @@ def _step1_tmp_dir(output_dir: str) -> Path:
 
 
 def _normalize_energy_file_path(value: Any) -> str:
-    token = str(value or "").strip()
+    if pd.isna(value):
+        return ""
+    token = str(value).strip()
     if not token:
         return ""
     return token.replace("\\", "/").lstrip("/")
@@ -194,14 +204,17 @@ def _load_atlas_inputs(config: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFra
     atlas_vehicles = _read_csv(
         config["atlas"]["vehicles_file"],
         columns=["household_id", "bodytype", "modelyear", "adopt_fuel"],
+        schema={key: ATLAS_VEHICLES_SCHEMA[key] for key in ["household_id", "bodytype", "modelyear", "adopt_fuel"]},
     )
     atlas_households = _read_csv(
         config["atlas"]["households_file"],
         columns=["household_id", "income_segment", "income_in_thousands"],
+        schema=ATLAS_HOUSEHOLDS_SCHEMA,
     )
     atlas_persons = _read_csv(
         config["atlas"]["persons_file"],
         columns=["household_id"],
+        schema=ATLAS_PERSONS_SCHEMA,
     )
     return atlas_vehicles, atlas_households, atlas_persons
 
@@ -779,7 +792,6 @@ def _build_passenger_car_vehicle_types(
     atlas_vehicle_type_targets = _build_atlas_vehicle_type_targets(
         atlas_vehicles,
         config=config,
-        model_year_groups=model_year_groups,
     )
     atlas_income_bin_targets = _build_atlas_income_bin_targets(
         atlas_vehicles,
