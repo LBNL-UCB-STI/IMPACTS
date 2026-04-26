@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from impacts.emfac.common import read_atlas_vehicles_input
 from impacts.emfac.fleet.step1_build_vehicle_types import _build_atlas_vehicle_type_targets
 from impacts.emfac.fleet.step1_build_vehicle_types import _build_passenger_vehicle_types_from_atlas_targets
 from impacts.emfac.fleet.step3_map_emfac_atlas import _assign_passenger_fuel_consumption_fields
@@ -12,7 +13,6 @@ from impacts.emfac.fleet.step3_map_emfac_atlas import _build_passenger_emfac_can
 from impacts.emfac.fleet.step3_map_emfac_atlas import _combine_passenger_vehicle_types_for_output
 from impacts.emfac.fleet.step3_map_emfac_atlas import _finalize_passenger_vehicle_type_probabilities
 from impacts.emfac.fleet.step3_map_emfac_atlas import _prepare_mapped_passenger_vehicles_output
-from impacts.emfac.fleet.step3_map_emfac_atlas import _read_step3_atlas_vehicles
 from impacts.emfac.fleet.step3_map_emfac_atlas import _read_step3_passenger_vehicle_types
 from impacts.emfac.fleet.step3_map_emfac_atlas import _sample_passenger_vehicle_type_ids_for_vehicles
 
@@ -610,7 +610,7 @@ def test_prepare_mapped_passenger_vehicles_output_normalizes_beam_alias_ids() ->
     assert result.loc[1, "vehicleId"] == "100000-3"
 
 
-def test_read_step3_atlas_vehicles_preserves_full_schema(tmp_path: Path) -> None:
+def test_read_atlas_vehicles_input_preserves_full_schema(tmp_path: Path) -> None:
     vehicles_file = tmp_path / "vehicles.csv"
     pd.DataFrame(
         [
@@ -626,7 +626,7 @@ def test_read_step3_atlas_vehicles_preserves_full_schema(tmp_path: Path) -> None
         ]
     ).to_csv(vehicles_file, index=False)
 
-    loaded = _read_step3_atlas_vehicles(str(vehicles_file))
+    loaded = read_atlas_vehicles_input(str(vehicles_file))
 
     assert list(loaded.columns) == ["vehicle_id", "household_id", "bodytype", "modelyear", "adopt_fuel", "extraFlag", "weight"]
     assert loaded.loc[0, "extraFlag"] == "keep-me"

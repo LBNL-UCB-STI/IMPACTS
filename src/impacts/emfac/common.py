@@ -12,11 +12,57 @@ import pandas as pd
 
 from impacts.emfac.config import read_table
 from impacts.emfac.config import resolve_workflow_path
+from impacts.emfac.config import ATLAS_VEHICLES_SCHEMA
 from impacts.emfac.config import VEHICLE_CATEGORY_METADATA_SCHEMA
 
 
 LIGHT_DUTY_VEHICLE_CATEGORIES = {"LDA", "LDT1", "LDT2"}
 VEHICLE_TYPE_ID_HASH_HEX_LENGTH = 6
+
+
+def _read_full_input_table(path_like: str) -> pd.DataFrame:
+    resolved = Path(resolve_workflow_path(path_like))
+    if resolved.suffix.lower() == ".parquet":
+        return pd.read_parquet(resolved)
+    return pd.read_csv(resolved, low_memory=False)
+
+
+def read_atlas_vehicles_input(path_like: str) -> pd.DataFrame:
+    vehicles = _read_full_input_table(path_like)
+
+    rename_map: dict[str, str] = {}
+    if "household_id" not in vehicles.columns and "householdId" in vehicles.columns:
+        rename_map["householdId"] = "household_id"
+    if "vehicle_id" not in vehicles.columns:
+        if "sourceVehicleId" in vehicles.columns:
+            rename_map["sourceVehicleId"] = "vehicle_id"
+        elif "vehicleId" in vehicles.columns:
+            rename_map["vehicleId"] = "vehicle_id"
+    prepared = vehicles.rename(columns=rename_map).copy()
+
+    for column_name, dtype_name in ATLAS_VEHICLES_SCHEMA.items():
+        if column_name not in prepared.columns:
+            raise ValueError(f"ATLAS vehicles file is missing required column '{column_name}'")
+        if dtype_name == "string":
+            prepared[column_name] = prepared[column_name].astype("string")
+        elif dtype_name == "Float64":
+            prepared[column_name] = pd.to_numeric(prepared[column_name], errors="raise").astype("Float64")
+        elif dtype_name == "Int64":
+            prepared[column_name] = pd.to_numeric(prepared[column_name], errors="raise").astype("Int64")
+        else:
+            raise ValueError(f"Unsupported ATLAS vehicles dtype '{dtype_name}' for column '{column_name}'")
+    return prepared
+
+
+def read_frism_carriers_input(path_like: str) -> pd.DataFrame:
+    carriers = _read_full_input_table(path_like)
+    for column_name in ["tourId", "vehicleTypeId"]:
+        if column_name not in carriers.columns:
+            raise ValueError(f"FRISM carriers file is missing required column '{column_name}'")
+    prepared = carriers.copy()
+    prepared["tourId"] = prepared["tourId"].astype("string")
+    prepared["vehicleTypeId"] = prepared["vehicleTypeId"].astype("string")
+    return prepared
 
 
 def normalize_probabilities_to_fixed_precision(

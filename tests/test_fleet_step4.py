@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from impacts.emfac.common import read_frism_carriers_input
 from impacts.emfac.fleet.step4_map_emfac_frism import _build_freight_bayesian_log_score
 from impacts.emfac.fleet.step4_map_emfac_frism import _build_freight_naics_sector_weight_lookup
 from impacts.emfac.fleet.step4_map_emfac_frism import _build_payload_mass_thresholds
@@ -18,7 +19,6 @@ from impacts.emfac.fleet.step4_map_emfac_frism import _load_configured_port_clas
 from impacts.emfac.fleet.step4_map_emfac_frism import _load_vehicle_type_assignment_table
 from impacts.emfac.fleet.step4_map_emfac_frism import _load_port_zone_mapping
 from impacts.emfac.fleet.step4_map_emfac_frism import _port_category_weight
-from impacts.emfac.fleet.step4_map_emfac_frism import _read_step4_carriers
 from impacts.emfac.fleet.step4_map_emfac_frism import _read_step4_freight_vehicle_types
 from impacts.emfac.fleet.step4_map_emfac_frism import _normalize_zone_id
 
@@ -213,7 +213,7 @@ def test_read_step4_carriers_preserves_full_schema(tmp_path: Path) -> None:
     )
     source.to_parquet(carriers_file, index=False)
 
-    loaded = _read_step4_carriers(str(carriers_file))
+    loaded = read_frism_carriers_input(str(carriers_file))
 
     assert list(loaded.columns) == list(source.columns)
     assert loaded.loc[0, "carrierId"] == "c1"

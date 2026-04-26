@@ -20,6 +20,7 @@ from impacts.emfac.common import attach_idle_time_fraction_from_config
 from impacts.emfac.common import build_hashed_vehicle_type_ids
 from impacts.emfac.common import model_year_group_id_component
 from impacts.emfac.common import normalize_probabilities_to_fixed_precision
+from impacts.emfac.common import read_frism_carriers_input
 from impacts.emfac.fleet.step1_build_vehicle_types import _freight_vehicle_types_output_file
 from impacts.emfac.fleet.step1_build_vehicle_types import _normalize_energy_file_columns
 from impacts.emfac.fleet.step1_build_vehicle_types import _normalize_energy_file_path
@@ -27,10 +28,6 @@ from impacts.emfac.fleet.step3_map_emfac_atlas import _coerce_random_generator
 
 
 _EMFAC_KEY_COLUMNS = ["vehicleCategory", "fuel", "modelYear"]
-_FRISM_CARRIERS_SCHEMA = {
-    "tourId": "string",
-    "vehicleTypeId": "string",
-}
 _FRISM_PAYLOADS_SCHEMA = {
     "tourId": "string",
     "sellerNAICS": "string",
@@ -1357,26 +1354,16 @@ def _read_step4_freight_vehicle_types(path_like: str) -> pd.DataFrame:
 
 
 def _read_step4_carriers(path_like: str) -> pd.DataFrame:
-    resolved = Path(resolve_workflow_path(path_like))
-    if resolved.suffix.lower() == ".parquet":
-        carriers = pd.read_parquet(resolved)
-    else:
-        carriers = pd.read_csv(resolved, low_memory=False)
-
-    for column_name in _FRISM_CARRIERS_SCHEMA:
-        if column_name not in carriers.columns:
-            raise ValueError(f"FRISM carriers file is missing required column '{column_name}'")
-
-    prepared = carriers.copy()
-    for column_name in _FRISM_CARRIERS_SCHEMA:
-        prepared[column_name] = prepared[column_name].astype("string")
-    return prepared
+    return read_frism_carriers_input(path_like)
 
 
 def _build_freight_emfac_mapping_context(
     workflow: dict[str, Any],
 ) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame]:
-    carriers = _read_step4_carriers(workflow["config"]["frism"]["carriers_file"])
+    carriers = workflow.get("source_frism_carriers")
+    if carriers is None:
+        carriers = _read_step4_carriers(workflow["config"]["frism"]["carriers_file"])
+        workflow["source_frism_carriers"] = carriers
     payloads = workflow.get("source_frism_payloads")
     if payloads is None:
         payloads = read_table(workflow["config"]["frism"]["payloads_file"], schema=_FRISM_PAYLOADS_SCHEMA)

@@ -19,9 +19,10 @@ import pandas as pd
 
 from impacts.emfac.config import ATLAS_HOUSEHOLDS_SCHEMA
 from impacts.emfac.config import ATLAS_PERSONS_SCHEMA
-from impacts.emfac.config import ATLAS_VEHICLES_SCHEMA
 from impacts.emfac.config import read_table
 from impacts.emfac.config import resolve_workflow_path
+from impacts.emfac.common import read_atlas_vehicles_input
+from impacts.emfac.common import read_frism_carriers_input
 
 
 def _read_csv(
@@ -224,11 +225,7 @@ def _align_vehicle_types_to_source_schema(
 
 
 def _load_atlas_inputs(config: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    atlas_vehicles = _read_csv(
-        config["atlas"]["vehicles_file"],
-        columns=["household_id", "bodytype", "modelyear", "adopt_fuel"],
-        schema={key: ATLAS_VEHICLES_SCHEMA[key] for key in ["household_id", "bodytype", "modelyear", "adopt_fuel"]},
-    )
+    atlas_vehicles = read_atlas_vehicles_input(config["atlas"]["vehicles_file"])
     atlas_households = _read_csv(
         config["atlas"]["households_file"],
         columns=["household_id", "income_segment", "income_in_thousands"],
@@ -1014,10 +1011,7 @@ def _run_step1_freight_substeps(
 ) -> dict[str, Any]:
     source_vehicle_types_config = config["beam"]
     print("=== Step 1.4: build freight vehicle-type targets from FRISM carriers and tours ===")
-    frism_carriers = _read_csv(
-        config["frism"]["carriers_file"],
-        columns=["tourId", "vehicleTypeId"],
-    )
+    frism_carriers = read_frism_carriers_input(config["frism"]["carriers_file"])
     frism_tours = _read_csv(
         config["frism"]["tours_file"],
         columns=["tourId"],

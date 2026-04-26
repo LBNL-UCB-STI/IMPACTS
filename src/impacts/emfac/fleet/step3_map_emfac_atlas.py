@@ -20,7 +20,6 @@ import numpy as np
 import pandas as pd
 
 from impacts.emfac.config import ATLAS_HOUSEHOLDS_SCHEMA
-from impacts.emfac.config import ATLAS_VEHICLES_SCHEMA
 from impacts.emfac.config import build_fuel_consumption_emfac_assignment_catalog
 from impacts.emfac.config import EMFAC_ACTIVITY_SCHEMA
 from impacts.emfac.config import EMFAC_KEY_SCHEMA
@@ -32,6 +31,7 @@ from impacts.emfac.common import assign_model_year_groups
 from impacts.emfac.common import build_hashed_vehicle_type_ids
 from impacts.emfac.common import model_year_group_id_component
 from impacts.emfac.common import normalize_probabilities_to_fixed_precision
+from impacts.emfac.common import read_atlas_vehicles_input
 from impacts.emfac.fleet.step1_build_vehicle_types import _build_atlas_vehicle_type_ids
 from impacts.emfac.fleet.step1_build_vehicle_types import _apply_atlas_fuel_aliases
 from impacts.emfac.fleet.step1_build_vehicle_types import _format_configured_income_bin_labels
@@ -1081,27 +1081,6 @@ def _read_step3_passenger_vehicle_types(path_like: str) -> pd.DataFrame:
     return read_table(str(path_like), schema=schema)
 
 
-def _read_step3_atlas_vehicles(path_like: str) -> pd.DataFrame:
-    resolved = Path(resolve_workflow_path(path_like))
-    if resolved.suffix.lower() == ".parquet":
-        vehicles = pd.read_parquet(resolved)
-    else:
-        vehicles = pd.read_csv(resolved, low_memory=False)
-
-    for column_name, dtype_name in ATLAS_VEHICLES_SCHEMA.items():
-        if column_name not in vehicles.columns:
-            raise ValueError(f"ATLAS vehicles file is missing required column '{column_name}'")
-        if dtype_name == "string":
-            vehicles[column_name] = vehicles[column_name].astype("string")
-        elif dtype_name == "Float64":
-            vehicles[column_name] = pd.to_numeric(vehicles[column_name], errors="raise").astype("Float64")
-        elif dtype_name == "Int64":
-            vehicles[column_name] = pd.to_numeric(vehicles[column_name], errors="raise").astype("Int64")
-        else:
-            raise ValueError(f"Unsupported ATLAS vehicles dtype '{dtype_name}' for column '{column_name}'")
-    return vehicles
-
-
 def _combine_passenger_vehicle_types_for_output(
     *,
     passenger_car_with_emfac: pd.DataFrame,
@@ -1173,12 +1152,18 @@ def _sample_mapped_passenger_vehicles(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     config = workflow["config"]
     atlas_config = config["atlas"]
-    atlas_vehicles = _read_step3_atlas_vehicles(atlas_config["vehicles_file"])
+    atlas_vehicles = workflow.get("source_atlas_vehicles")
+    if atlas_vehicles is None:
+        atlas_vehicles = read_atlas_vehicles_input(atlas_config["vehicles_file"])
+        workflow["source_atlas_vehicles"] = atlas_vehicles
     atlas_vehicles = _apply_atlas_fuel_aliases(atlas_vehicles, config)
-    atlas_households = read_table(
-        atlas_config["households_file"],
-        schema=ATLAS_HOUSEHOLDS_SCHEMA,
-    )
+    atlas_households = workflow.get("source_atlas_households")
+    if atlas_households is None:
+        atlas_households = read_table(
+            atlas_config["households_file"],
+            schema=ATLAS_HOUSEHOLDS_SCHEMA,
+        )
+        workflow["source_atlas_households"] = atlas_households
     vehicles_with_em = _sample_passenger_vehicle_type_ids_for_vehicles(
         vehicles=atlas_vehicles,
         passenger_car_vehicle_types=passenger_car_with_emfac,
