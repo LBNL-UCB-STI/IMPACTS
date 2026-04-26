@@ -3,7 +3,9 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+import impacts.emfac.activities.step1_prepare_emissions_and_activities_tables as step1
 from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import _complete_sparse_inventory_counties
+from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import build_road_dust_rows
 from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import _normalize_emissions_inventory_fuel
 from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import _set_activities_mappings
 
@@ -103,3 +105,70 @@ def test_normalize_emissions_inventory_fuel_accepts_alias_list_mapping() -> None
     result = _normalize_emissions_inventory_fuel(frame)
 
     assert result["fuel"].tolist() == ["Dsl", "Elec", "Gas", "NG", "Phe"]
+
+
+def test_set_activities_mappings_preserves_residential_link_road_category_mapping() -> None:
+    _set_activities_mappings(
+        {
+            "road_category_map": {
+                "residential": "Local Urban",
+                "residential_link": "Local Urban",
+            }
+        }
+    )
+
+    assert step1._ACTIVITIES_MAPPINGS["road_category_map"]["residential"] == "Local Urban"
+    assert step1._ACTIVITIES_MAPPINGS["road_category_map"]["residential_link"] == "Local Urban"
+
+
+def test_build_road_dust_rows_generates_residential_link_rows(tmp_path) -> None:
+    _set_activities_mappings(
+        {
+            "road_category_map": {
+                "residential": "Local Urban",
+                "residential_link": "Local Urban",
+            }
+        }
+    )
+    rainy_days_file = tmp_path / "rainy_days.csv"
+    silt_loading_file = tmp_path / "silt_loading.csv"
+    rainy_days_file.write_text(
+        "\n".join(
+            [
+                "County,Air Basin,Annual Rainfall Days",
+                "San Francisco,San Francisco Bay,60",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    silt_loading_file.write_text(
+        "\n".join(
+            [
+                "County,Air Basin,Local Urban,Collector,Major,Freeway",
+                "San Francisco,San Francisco Bay,0.2,0.3,0.4,0.5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    project_analysis = pd.DataFrame(
+        [
+            {
+                "county": "San Francisco",
+                "vehicleCategory": "LDA",
+                "fuel": "Gas",
+                "modelYear": 2018,
+            }
+        ]
+    )
+
+    result = build_road_dust_rows(
+        project_analysis,
+        rainy_days_file=str(rainy_days_file),
+        silt_loading_file=str(silt_loading_file),
+        air_basins=["San Francisco Bay"],
+    )
+
+    residential_link = result[result["roadCategory"].astype(str) == "residential_link"]
+    assert not residential_link.empty
+    assert set(residential_link["process"].astype(str)) == {"PRDUST"}
+    assert set(residential_link["pollutant"].astype(str)) == {"PM", "PM10", "PM2_5"}

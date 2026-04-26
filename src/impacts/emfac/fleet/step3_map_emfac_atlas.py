@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from decimal import Decimal
 from decimal import InvalidOperation
-import hashlib
 from pathlib import Path
 import re
 from typing import Any
@@ -30,15 +29,14 @@ from impacts.emfac.config import resolve_workflow_path
 from impacts.emfac.common import attach_emissions_rates_filepaths_from_config
 from impacts.emfac.common import attach_idle_time_fraction_from_config
 from impacts.emfac.common import assign_model_year_groups
-from impacts.emfac.common import model_year_interval_distance
+from impacts.emfac.common import build_hashed_vehicle_type_ids
 from impacts.emfac.common import model_year_group_id_component
 from impacts.emfac.common import normalize_probabilities_to_fixed_precision
-from impacts.emfac.common import parse_model_year_group_interval
 from impacts.emfac.fleet.step1_build_vehicle_types import _build_atlas_vehicle_type_ids
 from impacts.emfac.fleet.step1_build_vehicle_types import _apply_atlas_fuel_aliases
-from impacts.emfac.fleet.step1_build_vehicle_types import _extract_model_year_from_vehicle_type_id
 from impacts.emfac.fleet.step1_build_vehicle_types import _format_configured_income_bin_labels
 from impacts.emfac.fleet.step1_build_vehicle_types import _normalize_energy_file_columns
+from impacts.emfac.fleet.step1_build_vehicle_types import _passenger_vehicle_types_output_file
 from impacts.emfac.fleet.step1_build_vehicle_types import _validate_income_bins
 
 
@@ -52,13 +50,39 @@ _PASSENGER_SOURCE_VEHICLE_TYPES_SCHEMA = {
     "sampleProbabilityWithinCategory": "string",
     "sampleProbabilityString": "string",
 }
-_PASSENGER_FUEL_CONSUMPTION_TEMPLATE_SCHEMA = {
-    "vehicleTypeId": "string",
+_PASSENGER_OPTIONAL_VEHICLE_TYPES_SCHEMA = {
+    "curbWeightInKg": "Float64",
+    "seatingCapacity": "Int64",
+    "standingRoomCapacity": "Int64",
+    "lengthInMeter": "Float64",
+    "primaryFuelType": "string",
+    "primaryFuelConsumptionInJoulePerMeter": "Float64",
+    "primaryFuelCapacityInJoule": "Float64",
     "primaryVehicleEnergyFile": "string",
+    "secondaryFuelType": "string",
+    "secondaryFuelConsumptionInJoulePerMeter": "Float64",
     "secondaryVehicleEnergyFile": "string",
+    "secondaryFuelCapacityInJoule": "Float64",
+    "automationLevel": "Float64",
+    "maxVelocity": "Float64",
+    "passengerCarUnit": "string",
+    "rechargeLevel2RateLimitInWatts": "Float64",
+    "rechargeLevel3RateLimitInWatts": "Float64",
+    "emfacModelYearGroup": "string",
+    "atlasVehicleTypeId": "string",
+    "emfacId": "string",
+    "emfacVehicleCategory": "string",
+    "emfacFuel": "string",
+    "emfacResolvedModelYear": "string",
+    "fleetVmtPrior": "Float64",
+    "fleetPopulationPrior": "Float64",
+    "fuelConsumptionId": "string",
+    "msrp_usd": "Float64",
+    "template_modelyear": "Int64",
+    "mappingVehicleTypeId": "string",
+    "emissionsRatesFile": "string",
+    "idleTimeFraction": "Float64",
 }
-
-
 def _require_column(frame: pd.DataFrame, column_name: str, frame_name: str) -> None:
     if column_name not in frame.columns:
         raise ValueError(f"{frame_name} is missing required column '{column_name}'")
@@ -110,39 +134,6 @@ def _sanitize_output_component(value: object) -> str:
 
 def _sanitize_vehicle_type_component(value: object) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", _normalize_text(value))
-
-
-def _build_hashed_vehicle_type_ids(
-    frame: pd.DataFrame,
-    *,
-    source_column: str = "vehicleTypeId",
-    mapping_column: str = "mappingVehicleTypeId",
-    prefix: str = "paxcar",
-    hash_hex_length: int = 12,
-) -> pd.DataFrame:
-    prepared = frame.copy()
-    _require_non_null_column(prepared, source_column, "Passenger car vehicle types file")
-    prepared[mapping_column] = prepared[source_column].astype(str)
-
-    seen_short_to_long: dict[str, str] = {}
-    hashed_ids: list[str] = []
-    for mapping_vehicle_type_id in prepared[mapping_column].tolist():
-        mapping_vehicle_type_id = str(mapping_vehicle_type_id)
-        digest = hashlib.sha256(mapping_vehicle_type_id.encode("utf-8")).hexdigest()
-        hashed_vehicle_type_id = f"{prefix}-{digest[:hash_hex_length]}"
-        existing = seen_short_to_long.get(hashed_vehicle_type_id)
-        if existing is not None and existing != mapping_vehicle_type_id:
-            raise ValueError(
-                "Passenger Step 3 vehicleTypeId hash collision detected for "
-                f"{mapping_vehicle_type_id} and {existing} using prefix={prefix} length={hash_hex_length}"
-            )
-        seen_short_to_long[hashed_vehicle_type_id] = mapping_vehicle_type_id
-        hashed_ids.append(hashed_vehicle_type_id)
-
-    if len(set(hashed_ids)) != len(hashed_ids):
-        raise ValueError("Passenger Step 3 generated duplicate hashed vehicleTypeId values")
-    prepared[source_column] = hashed_ids
-    return prepared
 
 
 def _build_year_scenario_token(*, year: object, scenario: object) -> str:
@@ -520,26 +511,17 @@ def _assign_passenger_fuel_consumption_fields(
 
     mapping = _load_passenger_fuel_consumption_mapping(config)
     msrp_lookup = _load_fuel_consumption_msrp_lookup(config)
-    source_vehicle_types_path = str(config.get("beam", {}).get("passenger_vehicle_types_file", "")).strip()
     breakdown_path = str(config.get("beam", {}).get("fuel_consumption_catalog", "")).strip()
     model_file = str(config.get("vehicle_type_assignment", {}).get("model_file", "")).strip()
-    if not source_vehicle_types_path or not breakdown_path or not model_file:
+    if not breakdown_path or not model_file:
         raise ValueError(
-            "Passenger fuel-consumption assignment requires beam.passenger_vehicle_types_file, "
-            "beam.fuel_consumption_catalog, and vehicle_type_assignment.model_file"
+            "Passenger fuel-consumption assignment requires beam.fuel_consumption_catalog "
+            "and vehicle_type_assignment.model_file"
         )
-    source_vehicle_types = _normalize_energy_file_columns(
-        read_table(source_vehicle_types_path, schema=_PASSENGER_FUEL_CONSUMPTION_TEMPLATE_SCHEMA)
-    )
     assignment_catalog = build_fuel_consumption_emfac_assignment_catalog(model_file, breakdown_path)
-    source_vehicle_types["fuelConsumptionId"] = source_vehicle_types["vehicleTypeId"].astype(str)
-    source_vehicle_types["template_modelyear"] = _extract_model_year_from_vehicle_type_id(
-        source_vehicle_types["vehicleTypeId"]
-    )
     random = _coerce_random_generator(seed)
     prepared = passenger_car_vehicle_types.copy()
-    assigned_fuel_consumption_ids: list[str] = []
-    selected_template_rows: list[pd.Series] = []
+    prepared = _normalize_energy_file_columns(prepared)
 
     def _has_passenger_baseline_values(row: Any) -> bool:
         primary_fuel_type = str(getattr(row, "primaryFuelType", "") or "").strip()
@@ -566,8 +548,7 @@ def _assign_passenger_fuel_consumption_fields(
         updated = pd.Series(row._asdict()).copy()
         updated["fuelConsumptionId"] = ""
         for column_name in ["primaryVehicleEnergyFile", "secondaryVehicleEnergyFile"]:
-            if column_name in updated.index:
-                updated[column_name] = ""
+            updated[column_name] = ""
         print(
             "WARNING: Passenger Step 3.3 leaving fuel-consumption template fields empty for "
             f"vehicleTypeId={getattr(row, 'vehicleTypeId', '')}, "
@@ -577,6 +558,7 @@ def _assign_passenger_fuel_consumption_fields(
         )
         return updated
 
+    assigned_rows: list[pd.Series] = []
     for row in prepared.itertuples(index=False):
         matches = mapping[
             mapping["emfacVehicleCategory"].astype(str).eq(str(row.emfacVehicleCategory))
@@ -584,8 +566,7 @@ def _assign_passenger_fuel_consumption_fields(
         ]["fuelConsumptionId"].astype(str).drop_duplicates()
         if matches.empty:
             if _has_passenger_baseline_values(row):
-                assigned_fuel_consumption_ids.append("")
-                selected_template_rows.append(
+                assigned_rows.append(
                     _build_unassigned_row(
                         row,
                         reason="no fuel-consumption mapping matched this EMFAC class/fuel, but the passenger "
@@ -601,57 +582,24 @@ def _assign_passenger_fuel_consumption_fields(
             )
         fuel_consumption_id = str(random.choice(matches.to_numpy(), size=1)[0])
 
-        candidate_paths = assignment_catalog[
+        assignment_matches = assignment_catalog[
             assignment_catalog["fastsim_id"].astype(str).eq(fuel_consumption_id)
-        ]["fastsim_relative_path"].astype(str).drop_duplicates()
-        if candidate_paths.empty:
+        ][["fastsim_id", "fastsim_relative_path"]].drop_duplicates().copy()
+        if assignment_matches.empty:
             raise ValueError(
                 "No fuel-consumption catalog row matched passenger fuel-consumption id "
                 f"fuelConsumptionId={fuel_consumption_id}, vehicleTypeId={getattr(row, 'vehicleTypeId', '')}"
             )
-        template_candidates = source_vehicle_types[
-            source_vehicle_types["primaryVehicleEnergyFile"].astype(str).isin(candidate_paths.tolist())
-        ].copy()
-        if str(getattr(row, "emfacFuel", "")).strip() == "Phe":
-            template_candidates = template_candidates[
-                template_candidates["secondaryVehicleEnergyFile"].astype(str).str.strip().ne("")
-            ].copy()
-            if template_candidates.empty:
-                raise ValueError(
-                    "Passenger PHEV fuel-consumption assignment requires a secondaryVehicleEnergyFile in the "
-                    f"source passenger vehicle types for fuelConsumptionId={fuel_consumption_id}"
-                )
-        if template_candidates.empty:
-            if _has_passenger_baseline_values(row):
-                assigned_fuel_consumption_ids.append("")
-                selected_template_rows.append(
-                    _build_unassigned_row(
-                        row,
-                        reason="the configured passenger fuel-consumption mapping matched, but no source passenger "
-                        "template row matched the assignment; keeping baseline fuel consumption, capacity, and msrp values only",
-                    )
-                )
-                continue
-            raise ValueError(
-                "No passenger fuel-consumption template row matched the configured assignment for "
-                f"fuelConsumptionId={fuel_consumption_id}, vehicleTypeId={getattr(row, 'vehicleTypeId', '')}"
-            )
-        requested_interval = parse_model_year_group_interval(getattr(row, "emfacResolvedModelYear", ""))
-        template_candidates["yearDistance"] = template_candidates["template_modelyear"].map(
-            lambda value: float("inf")
-            if pd.isna(value)
-            else model_year_interval_distance((float(value), float(value)), requested_interval)
-        )
-        selected_template_rows.append(
-            template_candidates.sort_values(
-                ["yearDistance", "template_modelyear", "fuelConsumptionId"],
-                ascending=[True, True, True],
-                kind="mergesort",
-            ).iloc[0]
-        )
-        assigned_fuel_consumption_ids.append(fuel_consumption_id)
+        selected_path = str(
+            assignment_matches.sort_values(["fastsim_relative_path"], kind="mergesort").iloc[0]["fastsim_relative_path"]
+        ).strip()
+        updated = pd.Series(row._asdict()).copy()
+        updated["fuelConsumptionId"] = fuel_consumption_id
+        updated["primaryVehicleEnergyFile"] = selected_path
+        updated["secondaryVehicleEnergyFile"] = ""
+        assigned_rows.append(updated)
 
-    prepared["fuelConsumptionId"] = assigned_fuel_consumption_ids
+    prepared = pd.DataFrame(assigned_rows).reset_index(drop=True)
     mapped_msrp = prepared["fuelConsumptionId"].map(msrp_lookup)
     if "msrp_usd" in prepared.columns:
         existing_msrp = pd.to_numeric(prepared["msrp_usd"], errors="coerce")
@@ -667,18 +615,17 @@ def _assign_passenger_fuel_consumption_fields(
             "No msrp_usd value was found in the fuel-consumption catalog for passenger fuelConsumptionId values:\n"
             + "\n".join(str(value) for value in missing_fuel_consumption_ids)
         )
-    template_columns = [column for column in source_vehicle_types.columns if column != "vehicleTypeId"]
-    template_frame = pd.DataFrame(selected_template_rows).reset_index(drop=True)
-    template_frame = template_frame.reindex(columns=template_columns)
-    for column in template_columns:
-        prepared[column] = template_frame[column].to_numpy()
     atlas_vehicle_type_id = prepared["atlasVehicleTypeId"].astype(str)
     fuel_consumption_prefix = prepared["fuelConsumptionId"].map(_sanitize_vehicle_type_component).astype(str)
     fuel_consumption_prefix = fuel_consumption_prefix.where(fuel_consumption_prefix != "", "unmapped")
     prepared["vehicleTypeId"] = (
         fuel_consumption_prefix + "--" + prepared["emfacId"].astype(str) + "--" + atlas_vehicle_type_id
     )
-    prepared = _build_hashed_vehicle_type_ids(prepared)
+    prepared = build_hashed_vehicle_type_ids(
+        prepared,
+        frame_name="Passenger Step 3 vehicle types",
+        prefix="paxcar",
+    )
     duplicate_vehicle_type_ids = prepared["vehicleTypeId"][prepared["vehicleTypeId"].duplicated()].drop_duplicates()
     if not duplicate_vehicle_type_ids.empty:
         raise ValueError(
@@ -1111,6 +1058,76 @@ def _write_vehicle_types(frame: pd.DataFrame, path_like: str) -> str:
     return str(output_path)
 
 
+def _read_step3_passenger_vehicle_types(path_like: str) -> pd.DataFrame:
+    resolved = Path(resolve_workflow_path(path_like))
+    if resolved.suffix.lower() == ".parquet":
+        available_columns = list(pd.read_parquet(resolved).columns)
+    else:
+        available_columns = pd.read_csv(resolved, nrows=0).columns.tolist()
+    missing_required = [
+        column_name for column_name in _PASSENGER_SOURCE_VEHICLE_TYPES_SCHEMA if column_name not in available_columns
+    ]
+    if missing_required:
+        raise ValueError(
+            "Passenger car vehicle types file is missing required columns: "
+            + ", ".join(sorted(missing_required))
+        )
+    schema = {
+        column_name: dtype_name
+        for column_name, dtype_name in _PASSENGER_SOURCE_VEHICLE_TYPES_SCHEMA.items()
+        if column_name in available_columns
+    }
+    for column_name in available_columns:
+        if column_name in schema:
+            continue
+        schema[column_name] = _PASSENGER_OPTIONAL_VEHICLE_TYPES_SCHEMA.get(column_name, "string")
+    return read_table(str(path_like), schema=schema)
+
+
+def _combine_passenger_vehicle_types_for_output(
+    *,
+    passenger_car_with_emfac: pd.DataFrame,
+    passenger_bus_with_emfac: pd.DataFrame,
+    passenger_bike_with_emfac: pd.DataFrame,
+    passenger_other_with_emfac: pd.DataFrame,
+) -> pd.DataFrame:
+    sections = [
+        passenger_car_with_emfac.copy(),
+        passenger_bus_with_emfac.copy(),
+        passenger_bike_with_emfac.copy(),
+        passenger_other_with_emfac.copy(),
+    ]
+    ordered_columns: list[str] = []
+    for section in sections:
+        for column_name in section.columns.tolist():
+            if column_name not in ordered_columns:
+                ordered_columns.append(column_name)
+    if "emfacId" not in ordered_columns:
+        ordered_columns.append("emfacId")
+    if "emissionsRatesFile" not in ordered_columns:
+        ordered_columns.append("emissionsRatesFile")
+    if "idleTimeFraction" not in ordered_columns:
+        ordered_columns.append("idleTimeFraction")
+
+    passenger_other_prepared = passenger_other_with_emfac.copy()
+    for column_name in [
+        "emfacId",
+        "emfacVehicleCategory",
+        "emfacFuel",
+        "emfacResolvedModelYear",
+        "emissionsRatesFile",
+        "idleTimeFraction",
+    ]:
+        passenger_other_prepared[column_name] = ""
+    sections[-1] = passenger_other_prepared
+
+    aligned_sections = [
+        section.reindex(columns=ordered_columns, fill_value="")
+        for section in sections
+    ]
+    return pd.concat(aligned_sections, ignore_index=True)
+
+
 def _write_parquet(frame: pd.DataFrame, path_like: str) -> str:
     output_path = Path(resolve_workflow_path(path_like))
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1119,10 +1136,10 @@ def _write_parquet(frame: pd.DataFrame, path_like: str) -> str:
 
 
 def _map_passenger_car_vehicle_types(workflow: dict[str, Any], *, mapping_context: dict[str, Any]) -> pd.DataFrame:
-    passenger_car_file = workflow.get("built_vehicle_types_file")
+    passenger_car_file = workflow.get("built_passenger_car_vehicle_types_file")
     if not passenger_car_file:
         raise ValueError("Step 3 requires passenger car vehicle types from Step 1")
-    passenger_car_vehicle_types = read_table(str(passenger_car_file), schema=_PASSENGER_SOURCE_VEHICLE_TYPES_SCHEMA)
+    passenger_car_vehicle_types = _read_step3_passenger_vehicle_types(str(passenger_car_file))
     return _build_passenger_car_emfac_mapping(
         passenger_car_vehicle_types=passenger_car_vehicle_types,
         mapping_context=mapping_context,
@@ -1177,9 +1194,25 @@ def _write_mapped_passenger_vehicle_types(
         config=workflow["config"],
         step_label="Fleet Step 3",
     )
+    passenger_bus_with_emfac = workflow.get("built_passenger_bus_vehicle_types")
+    passenger_bike_with_emfac = workflow.get("built_passenger_bike_vehicle_types")
+    passenger_other_with_emfac = workflow.get("built_passenger_other_vehicle_types")
+    if passenger_bus_with_emfac is None or passenger_bike_with_emfac is None or passenger_other_with_emfac is None:
+        raise ValueError("Step 3 requires passenger bus, bike, and other vehicle types from Step 2")
+    passenger_vehicle_types = _combine_passenger_vehicle_types_for_output(
+        passenger_car_with_emfac=passenger_car_with_emfac,
+        passenger_bus_with_emfac=passenger_bus_with_emfac,
+        passenger_bike_with_emfac=passenger_bike_with_emfac,
+        passenger_other_with_emfac=passenger_other_with_emfac,
+    )
+    workflow["built_vehicle_types"] = passenger_vehicle_types
     passenger_vehicle_types_file = _write_vehicle_types(
-        passenger_car_with_emfac,
-        str(workflow["built_vehicle_types_file"]),
+        passenger_vehicle_types,
+        _passenger_vehicle_types_output_file(
+            str(workflow["config"]["output"]),
+            year=workflow["config"]["atlas"]["year"],
+            scenario=workflow["scenario"],
+        ),
     )
     return passenger_vehicle_types_file
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import traceback
@@ -15,6 +16,7 @@ from impacts.emfac.config import VEHICLE_CATEGORY_METADATA_SCHEMA
 
 
 LIGHT_DUTY_VEHICLE_CATEGORIES = {"LDA", "LDT1", "LDT2"}
+VEHICLE_TYPE_ID_HASH_HEX_LENGTH = 6
 
 
 def normalize_probabilities_to_fixed_precision(
@@ -67,6 +69,45 @@ def normalize_probabilities_to_fixed_precision(
                 base_units[idx] -= 1
                 remainder_units += 1
         prepared.loc[group_positions, output_column] = base_units.astype(float) / scale
+    return prepared
+
+
+def build_hashed_vehicle_type_ids(
+    frame: pd.DataFrame,
+    *,
+    frame_name: str,
+    source_column: str = "vehicleTypeId",
+    mapping_column: str = "mappingVehicleTypeId",
+    prefix: str,
+    hash_hex_length: int = VEHICLE_TYPE_ID_HASH_HEX_LENGTH,
+) -> pd.DataFrame:
+    prepared = frame.copy()
+    if source_column not in prepared.columns:
+        raise ValueError(f"{frame_name} is missing required column '{source_column}'")
+    if prepared[source_column].isna().any():
+        raise ValueError(f"{frame_name} contains null values in required column '{source_column}'")
+
+    prepared[mapping_column] = prepared[source_column].astype(str)
+    seen_short_to_long: dict[str, str] = {}
+    hashed_ids: list[str] = []
+
+    for mapping_vehicle_type_id in prepared[mapping_column].tolist():
+        mapping_vehicle_type_id = str(mapping_vehicle_type_id)
+        digest = hashlib.sha256(mapping_vehicle_type_id.encode("utf-8")).hexdigest()
+        hashed_vehicle_type_id = f"{prefix}-{digest[:hash_hex_length]}"
+        existing = seen_short_to_long.get(hashed_vehicle_type_id)
+        if existing is not None and existing != mapping_vehicle_type_id:
+            raise ValueError(
+                f"{frame_name} hash collision detected for "
+                f"{mapping_vehicle_type_id} and {existing} using prefix={prefix} length={hash_hex_length}"
+            )
+        seen_short_to_long[hashed_vehicle_type_id] = mapping_vehicle_type_id
+        hashed_ids.append(hashed_vehicle_type_id)
+
+    if len(set(hashed_ids)) != len(hashed_ids):
+        raise ValueError(f"{frame_name} generated duplicate hashed {source_column} values")
+
+    prepared[source_column] = hashed_ids
     return prepared
 
 

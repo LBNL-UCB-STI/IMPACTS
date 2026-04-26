@@ -18,6 +18,8 @@ from impacts.emfac.fleet.step4_map_emfac_frism import _load_configured_port_clas
 from impacts.emfac.fleet.step4_map_emfac_frism import _load_vehicle_type_assignment_table
 from impacts.emfac.fleet.step4_map_emfac_frism import _load_port_zone_mapping
 from impacts.emfac.fleet.step4_map_emfac_frism import _port_category_weight
+from impacts.emfac.fleet.step4_map_emfac_frism import _read_step4_carriers
+from impacts.emfac.fleet.step4_map_emfac_frism import _read_step4_freight_vehicle_types
 from impacts.emfac.fleet.step4_map_emfac_frism import _normalize_zone_id
 
 
@@ -192,6 +194,32 @@ def test_load_vehicle_type_assignment_table_expands_naics_code_lists(tmp_path: P
         {"naics_code_2": "31", "vehicleCategory": "T7 Tractor Class 8"},
         {"naics_code_2": "32", "vehicleCategory": "T7 Tractor Class 8"},
     ]
+
+
+def test_read_step4_carriers_preserves_full_schema(tmp_path: Path) -> None:
+    carriers_file = tmp_path / "carriers.parquet"
+    source = pd.DataFrame(
+        [
+            {
+                "carrierId": "c1",
+                "tourId": "t1",
+                "vehicleId": "v1",
+                "vehicleTypeId": "HdtDsl",
+                "depotZone": "123",
+                "depotX": 1.25,
+                "depotY": 2.5,
+            }
+        ]
+    )
+    source.to_parquet(carriers_file, index=False)
+
+    loaded = _read_step4_carriers(str(carriers_file))
+
+    assert list(loaded.columns) == list(source.columns)
+    assert loaded.loc[0, "carrierId"] == "c1"
+    assert loaded.loc[0, "vehicleId"] == "v1"
+    assert loaded.loc[0, "tourId"] == "t1"
+    assert loaded.loc[0, "vehicleTypeId"] == "HdtDsl"
 
 
 def test_build_tour_port_weight_lookup_is_tour_specific() -> None:
@@ -474,7 +502,7 @@ def test_attach_freight_fuel_consumption_templates_keeps_baseline_values_when_ma
     monkeypatch.setattr(
         "impacts.emfac.fleet.step4_map_emfac_frism.build_fuel_consumption_emfac_assignment_catalog",
         lambda model_file, breakdown_path: pd.DataFrame(
-            [{"emfac_vehicle_category": "T7 Tractor Class 8", "emfac_fuel": "Dsl", "fastsim_relative_path": "foo.csv"}]
+            [{"fastsim_id": "unused-template", "emfac_vehicle_category": "T7 Tractor Class 8", "emfac_fuel": "Dsl", "fastsim_relative_path": "foo.csv"}]
         ),
     )
     mapped = pd.DataFrame(
@@ -497,15 +525,6 @@ def test_attach_freight_fuel_consumption_templates_keeps_baseline_values_when_ma
             }
         ]
     )
-    source = pd.DataFrame(
-        [
-            {
-                "vehicleTypeId": "Ld1Dsl",
-                "primaryVehicleEnergyFile": "",
-                "secondaryVehicleEnergyFile": "",
-            }
-        ]
-    )
     config = {
         "vehicle_type_assignment": {"model_file": "fleet_assignment.yaml"},
         "beam": {"fuel_consumption_catalog": "fuel_catalog.csv"},
@@ -513,11 +532,12 @@ def test_attach_freight_fuel_consumption_templates_keeps_baseline_values_when_ma
 
     result = _attach_freight_fuel_consumption_templates(
         mapped_freight_vehicle_types=mapped,
-        source_vehicle_types=source,
         config=config,
+        seed=123,
     )
 
-    assert result.loc[0, "vehicleTypeId"] == "unmapped--2004to2014LDADsl--Ld1Dsl"
+    assert result.loc[0, "mappingVehicleTypeId"] == "unmapped--2004to2014LDADsl--Ld1Dsl"
+    assert str(result.loc[0, "vehicleTypeId"]).startswith("frt-")
     assert result.loc[0, "fuelConsumptionId"] == ""
     assert result.loc[0, "primaryFuelType"] == "diesel"
     assert result.loc[0, "primaryFuelConsumptionInJoulePerMeter"] == 6007.565107
@@ -542,15 +562,6 @@ def test_attach_freight_fuel_consumption_templates_rebuilds_vehicle_type_id_with
             }
         ]
     )
-    source = pd.DataFrame(
-        [
-            {
-                "vehicleTypeId": "2015_gasoline_Chrysler_200",
-                "primaryVehicleEnergyFile": "test.csv",
-                "secondaryVehicleEnergyFile": "",
-            }
-        ]
-    )
     config = {
         "vehicle_type_assignment": {"model_file": "fleet_assignment.yaml"},
         "beam": {"fuel_consumption_catalog": "fuel_catalog.csv"},
@@ -562,6 +573,7 @@ def test_attach_freight_fuel_consumption_templates_rebuilds_vehicle_type_id_with
             lambda model_file, breakdown_path: pd.DataFrame(
                 [
                     {
+                        "fastsim_id": "2015_gasoline_Chrysler_200",
                         "emfac_vehicle_category": "LDA",
                         "emfac_fuel": "Dsl",
                         "fastsim_relative_path": "test.csv",
@@ -571,14 +583,16 @@ def test_attach_freight_fuel_consumption_templates_rebuilds_vehicle_type_id_with
         )
         result = _attach_freight_fuel_consumption_templates(
             mapped_freight_vehicle_types=mapped,
-            source_vehicle_types=source,
             config=config,
+            seed=123,
         )
     finally:
         _attach_freight_fuel_consumption_templates.__globals__["build_fuel_consumption_emfac_assignment_catalog"] = original_catalog
 
     assert result.loc[0, "fuelConsumptionId"] == "2015_gasoline_Chrysler_200"
-    assert result.loc[0, "vehicleTypeId"] == "2015gasolineChrysler200--2004to2014LDADsl--Ld1Dsl"
+    assert result.loc[0, "primaryVehicleEnergyFile"] == "test.csv"
+    assert result.loc[0, "mappingVehicleTypeId"] == "2015gasolineChrysler200--2004to2014LDADsl--Ld1Dsl"
+    assert str(result.loc[0, "vehicleTypeId"]).startswith("frt-")
 
 
 def test_attach_freight_fuel_consumption_templates_still_errors_without_baseline_values(
@@ -586,7 +600,7 @@ def test_attach_freight_fuel_consumption_templates_still_errors_without_baseline
 ) -> None:
     monkeypatch.setattr(
         "impacts.emfac.fleet.step4_map_emfac_frism.build_fuel_consumption_emfac_assignment_catalog",
-        lambda model_file, breakdown_path: pd.DataFrame(columns=["emfac_vehicle_category", "emfac_fuel", "fastsim_relative_path"]),
+        lambda model_file, breakdown_path: pd.DataFrame(columns=["fastsim_id", "emfac_vehicle_category", "emfac_fuel", "fastsim_relative_path"]),
     )
     mapped = pd.DataFrame(
         [
@@ -608,7 +622,6 @@ def test_attach_freight_fuel_consumption_templates_still_errors_without_baseline
             }
         ]
     )
-    source = pd.DataFrame([{"vehicleTypeId": "Ld1Dsl"}])
     config = {
         "vehicle_type_assignment": {"model_file": "fleet_assignment.yaml"},
         "beam": {"fuel_consumption_catalog": "fuel_catalog.csv"},
@@ -617,8 +630,8 @@ def test_attach_freight_fuel_consumption_templates_still_errors_without_baseline
     try:
         _attach_freight_fuel_consumption_templates(
             mapped_freight_vehicle_types=mapped,
-            source_vehicle_types=source,
             config=config,
+            seed=123,
         )
     except ValueError as error:
         assert "No fuel-consumption freight assignment matched EMFAC-assigned class/fuel" in str(error)
@@ -671,3 +684,33 @@ def test_finalize_freight_vehicle_type_probabilities_normalizes_within_vehicle_c
     assert probs["vt-a1"] == "0.666667"
     assert probs["vt-a2"] == "0.333333"
     assert probs["vt-b1"] == "1.000000"
+
+
+def test_read_step4_freight_vehicle_types_preserves_full_vehicle_type_columns(tmp_path: Path) -> None:
+    path = tmp_path / "freight_vehicle_types.csv"
+    pd.DataFrame(
+        [
+            {
+                "vehicleTypeId": "ld1-dsl",
+                "vehicleCategory": "Class12aVocational",
+                "adopt_fuel": "diesel",
+                "sampleProbabilityWithinCategory": "1.0",
+                "sampleProbabilityString": "income | 0-999999:1.000000",
+                "primaryFuelType": "diesel",
+                "primaryFuelConsumptionInJoulePerMeter": 12.5,
+                "primaryFuelCapacityInJoule": 100.0,
+                "primaryVehicleEnergyFile": "",
+                "secondaryVehicleEnergyFile": "",
+                "secondaryFuelType": "",
+                "automationLevel": 2,
+                "rechargeLevel2RateLimitInWatts": 0.0,
+            }
+        ]
+    ).to_csv(path, index=False)
+
+    result = _read_step4_freight_vehicle_types(str(path))
+
+    assert result.loc[0, "primaryFuelType"] == "diesel"
+    assert result.loc[0, "primaryFuelConsumptionInJoulePerMeter"] == 12.5
+    assert result.loc[0, "automationLevel"] == 2.0
+    assert result.loc[0, "rechargeLevel2RateLimitInWatts"] == 0.0

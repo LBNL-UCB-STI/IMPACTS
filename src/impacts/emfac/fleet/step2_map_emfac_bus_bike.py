@@ -31,8 +31,34 @@ _STEP2_REQUIRED_VEHICLE_TYPES_SCHEMA = {
     "adopt_fuel": "string",
 }
 _STEP2_OPTIONAL_VEHICLE_TYPES_SCHEMA = {
+    "vehicleCategory": "string",
+    "bodytype": "string",
+    "modelyear": "Int64",
     "sampleProbabilityWithinCategory": "string",
     "sampleProbabilityString": "string",
+    "curbWeightInKg": "Float64",
+    "seatingCapacity": "Int64",
+    "standingRoomCapacity": "Int64",
+    "lengthInMeter": "Float64",
+    "primaryFuelType": "string",
+    "primaryFuelConsumptionInJoulePerMeter": "Float64",
+    "primaryFuelCapacityInJoule": "Float64",
+    "primaryVehicleEnergyFile": "string",
+    "secondaryFuelType": "string",
+    "secondaryFuelConsumptionInJoulePerMeter": "Float64",
+    "secondaryVehicleEnergyFile": "string",
+    "secondaryFuelCapacityInJoule": "Float64",
+    "automationLevel": "Float64",
+    "maxVelocity": "Float64",
+    "passengerCarUnit": "string",
+    "rechargeLevel2RateLimitInWatts": "Float64",
+    "rechargeLevel3RateLimitInWatts": "Float64",
+    "emfacId": "string",
+    "emfacVehicleCategory": "string",
+    "emfacFuel": "string",
+    "emfacResolvedModelYear": "string",
+    "emissionsRatesFile": "string",
+    "idleTimeFraction": "Float64",
 }
 
 
@@ -281,10 +307,23 @@ def _read_step2_vehicle_types(path_like: str) -> pd.DataFrame:
         available_columns = list(pd.read_parquet(resolved).columns)
     else:
         available_columns = pd.read_csv(resolved, nrows=0).columns.tolist()
-    schema = dict(_STEP2_REQUIRED_VEHICLE_TYPES_SCHEMA)
-    for column_name, dtype_name in _STEP2_OPTIONAL_VEHICLE_TYPES_SCHEMA.items():
-        if column_name in available_columns:
-            schema[column_name] = dtype_name
+    missing_required = [
+        column_name for column_name in _STEP2_REQUIRED_VEHICLE_TYPES_SCHEMA if column_name not in available_columns
+    ]
+    if missing_required:
+        raise ValueError(
+            "Passenger non-car vehicle types file is missing required columns: "
+            + ", ".join(sorted(missing_required))
+        )
+    schema = {
+        column_name: dtype_name
+        for column_name, dtype_name in _STEP2_REQUIRED_VEHICLE_TYPES_SCHEMA.items()
+        if column_name in available_columns
+    }
+    for column_name in available_columns:
+        if column_name in schema:
+            continue
+        schema[column_name] = _STEP2_OPTIONAL_VEHICLE_TYPES_SCHEMA.get(column_name, "string")
     return read_table(str(path_like), schema=schema)
 
 

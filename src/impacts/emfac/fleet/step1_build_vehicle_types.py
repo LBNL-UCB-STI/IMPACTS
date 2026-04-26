@@ -138,6 +138,28 @@ def _write_new_vehicle_types_file(frame: pd.DataFrame, output_dir: str) -> str:
     return str(target)
 
 
+def _build_year_scenario_token(*, year: object, scenario: object) -> str:
+    year_token = re.sub(r"[^A-Za-z0-9._-]+", "-", _normalize_text(year)).strip("-")
+    scenario_token = re.sub(r"[^A-Za-z0-9._-]+", "-", _normalize_text(scenario)).strip("-")
+    if year_token and scenario_token:
+        return f"{year_token}-{scenario_token}"
+    return year_token or scenario_token
+
+
+def _passenger_vehicle_types_output_file(output_dir: str, *, year: object, scenario: object) -> str:
+    return str(
+        Path(resolve_workflow_path(output_dir))
+        / f"vehicleTypes--atlas--{_build_year_scenario_token(year=year, scenario=scenario)}--EM.csv"
+    )
+
+
+def _freight_vehicle_types_output_file(output_dir: str, *, year: object, scenario: object) -> str:
+    return str(
+        Path(resolve_workflow_path(output_dir))
+        / f"vehicleTypes--frism--{_build_year_scenario_token(year=year, scenario=scenario)}--EM.csv"
+    )
+
+
 def _write_vehicle_type_crosswalk_file(frame: pd.DataFrame, output_dir: str) -> str:
     target = _step1_tmp_dir(output_dir) / "vehicleTypeCrosswalk--atlas.csv"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -177,6 +199,7 @@ def _remove_stale_step1_output_files(output_dir: str) -> None:
         "vehicleTypes--passenger-bike.csv",
         "vehicleTypes--passenger-other.csv",
         "vehicleTypes--passenger-car.csv",
+        "vehicleTypes--passenger.csv",
         "vehicleTypeCrosswalk--atlas.csv",
         "vehicleTypes--freight.csv",
     ]:
@@ -867,7 +890,7 @@ def _build_passenger_car_vehicle_types(
         "source_atlas_households": atlas_households,
         "source_atlas_persons": atlas_persons,
         "built_vehicle_types": built_vehicle_types,
-        "built_vehicle_types_file": built_vehicle_types_file,
+        "built_passenger_car_vehicle_types_file": built_vehicle_types_file,
         "atlas_vehicle_type_targets": atlas_vehicle_type_targets,
         "atlas_income_bin_targets": atlas_income_bin_targets,
         "vehicle_type_atlas_crosswalk": vehicle_type_atlas_crosswalk,

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from impacts.emfac.config import _ingest_fleet_sources
+from impacts.emfac.config import _normalize_activities_inputs
 from impacts.emfac.config import _normalize_alias_mapping
 from impacts.emfac.config import _normalize_model_spec_path
 
@@ -70,6 +71,37 @@ def test_normalize_model_spec_path_requires_expected_model_file(tmp_path: Path) 
 
     with pytest.raises(FileNotFoundError, match="fleet_assignment.yaml"):
         _normalize_model_spec_path(str(model_file), path_label="vehicle_type_assignment.model_file")
+
+
+def test_normalize_activities_inputs_preserves_residential_link_road_category_map(tmp_path: Path) -> None:
+    dust_dir = tmp_path / "dust"
+    emissions_dir = tmp_path / "emissions"
+    dust_dir.mkdir()
+    emissions_dir.mkdir()
+    for name in ("rainy_days.csv", "silt_loading.csv"):
+        (dust_dir / name).write_text("stub\n", encoding="utf-8")
+    for name in ("emission.csv",):
+        (emissions_dir / name).write_text("stub\n", encoding="utf-8")
+
+    normalized = _normalize_activities_inputs(
+        {
+            "project_analysis": {
+                "paved_road_dust": {
+                    "folder": str(dust_dir),
+                    "road_category_map": {
+                        "residential": "Local Urban",
+                        "residential_link": "Local Urban",
+                    },
+                }
+            },
+            "emissions_inventory": {
+                "inventory_folder": str(emissions_dir),
+            },
+        }
+    )
+
+    assert normalized["road_category_map"]["residential"] == "Local Urban"
+    assert normalized["road_category_map"]["residential_link"] == "Local Urban"
 
 
 def test_normalize_model_spec_path_requires_expected_evidence_sources(tmp_path: Path) -> None:

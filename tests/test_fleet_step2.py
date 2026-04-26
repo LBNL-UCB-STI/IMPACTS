@@ -5,6 +5,7 @@ import pandas as pd
 
 from impacts.emfac.common import attach_idle_time_fraction
 from impacts.emfac.fleet.step2_map_emfac_bus_bike import _matched_emfac_fuels
+from impacts.emfac.fleet.step2_map_emfac_bus_bike import _read_step2_vehicle_types
 from impacts.emfac.fleet.step2_map_emfac_bus_bike import run_step2
 
 
@@ -145,6 +146,8 @@ def test_run_step2_assigns_bus_and_bike_and_leaves_other_empty(tmp_path) -> None
                 "vehicleTypeId": "bus-type-1",
                 "vehicleCategory": "MediumDutyPassenger",
                 "adopt_fuel": "gasoline",
+                "primaryFuelType": "diesel",
+                "seatingCapacity": 30,
             }
         ]
     ).to_csv(bus_file, index=False)
@@ -154,6 +157,7 @@ def test_run_step2_assigns_bus_and_bike_and_leaves_other_empty(tmp_path) -> None
                 "vehicleTypeId": "bike-type-1",
                 "vehicleCategory": "Bike",
                 "adopt_fuel": "gasoline",
+                "primaryFuelType": "human",
             }
         ]
     ).to_csv(bike_file, index=False)
@@ -163,6 +167,7 @@ def test_run_step2_assigns_bus_and_bike_and_leaves_other_empty(tmp_path) -> None
                 "vehicleTypeId": "other-type-1",
                 "vehicleCategory": "Other",
                 "adopt_fuel": "gasoline",
+                "primaryFuelType": "other",
             }
         ]
     ).to_csv(other_file, index=False)
@@ -190,6 +195,8 @@ def test_run_step2_assigns_bus_and_bike_and_leaves_other_empty(tmp_path) -> None
 
     assert result["built_passenger_bus_vehicle_types"].loc[0, "emfacId"] == "2019UBUSGas"
     assert result["built_passenger_bus_vehicle_types"].loc[0, "emfacVehicleCategory"] == "UBUS"
+    assert result["built_passenger_bus_vehicle_types"].loc[0, "primaryFuelType"] == "diesel"
+    assert result["built_passenger_bus_vehicle_types"].loc[0, "seatingCapacity"] == 30
     assert result["built_passenger_bus_vehicle_types"].loc[0, "idleTimeFraction"] == 0.25
     assert result["built_passenger_bus_vehicle_types"].loc[0, "emissionsRatesFile"] == os.path.relpath(
         rates_store_root / "emfacId=2019UBUSGas" / "2019UBUSGas.parquet",
@@ -211,6 +218,8 @@ def test_run_step2_assigns_bus_and_bike_and_leaves_other_empty(tmp_path) -> None
     written_other = pd.read_csv(result["built_passenger_other_vehicle_types_file"], dtype=str).fillna("")
 
     assert written_bus.loc[0, "emfacId"] == "2019UBUSGas"
+    assert written_bus.loc[0, "primaryFuelType"] == "diesel"
+    assert written_bus.loc[0, "seatingCapacity"] == "30"
     assert written_bus.loc[0, "idleTimeFraction"] == "0.25"
     assert written_bus.loc[0, "emissionsRatesFile"] == os.path.relpath(
         rates_store_root / "emfacId=2019UBUSGas" / "2019UBUSGas.parquet",
@@ -225,6 +234,31 @@ def test_run_step2_assigns_bus_and_bike_and_leaves_other_empty(tmp_path) -> None
     assert written_other.loc[0, "emfacId"] == ""
     assert written_other.loc[0, "idleTimeFraction"] == ""
     assert written_other.loc[0, "emissionsRatesFile"] == ""
+
+
+def test_read_step2_vehicle_types_preserves_full_vehicle_type_columns(tmp_path) -> None:
+    path = tmp_path / "vehicle_types.csv"
+    pd.DataFrame(
+        [
+            {
+                "vehicleTypeId": "bus-type-1",
+                "vehicleCategory": "MediumDutyPassenger",
+                "adopt_fuel": "gasoline",
+                "primaryFuelType": "diesel",
+                "primaryFuelConsumptionInJoulePerMeter": 12.5,
+                "seatingCapacity": 30,
+                "automationLevel": 3,
+            }
+        ]
+    ).to_csv(path, index=False)
+
+    result = _read_step2_vehicle_types(str(path))
+
+    assert result.loc[0, "vehicleCategory"] == "MediumDutyPassenger"
+    assert result.loc[0, "primaryFuelType"] == "diesel"
+    assert result.loc[0, "primaryFuelConsumptionInJoulePerMeter"] == 12.5
+    assert result.loc[0, "seatingCapacity"] == 30
+    assert result.loc[0, "automationLevel"] == 3.0
 
 
 def test_attach_idle_time_fraction_can_fallback_to_emfac_id_for_mcy_and_ubus() -> None:

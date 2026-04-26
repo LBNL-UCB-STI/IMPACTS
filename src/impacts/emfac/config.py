@@ -701,20 +701,6 @@ def build_model_category_fuel_mapping(model_spec_path: str | Path) -> pd.DataFra
     return frame.drop_duplicates().reset_index(drop=True)
 
 
-def _normalize_fastsim_catalog_id(value: object) -> str:
-    token = str(value or "").strip()
-    if token.endswith("_lookup_table"):
-        token = token[: -len("_lookup_table")]
-    return token
-
-
-def _normalize_fuel_consumption_relative_path(value: object) -> str:
-    token = str(value or "").strip()
-    if token.startswith("fuel/"):
-        token = token[len("fuel/") :]
-    return token
-
-
 def build_fuel_consumption_emfac_assignment_catalog(
     model_spec_path: str | Path,
     breakdown_path: str | Path,
@@ -733,17 +719,17 @@ def build_fuel_consumption_emfac_assignment_catalog(
         str(breakdown_path),
         schema=FUEL_CONSUMPTION_CATALOG_SCHEMA,
     ).copy()
-    breakdown["fastsim_id"] = breakdown["fastsim_id"].map(_normalize_fastsim_catalog_id)
+    breakdown["fastsim_id"] = breakdown["fastsim_id"].map(lambda value: str(value or "").strip())
     breakdown["fuel"] = breakdown["fuel"].fillna("").str.strip().str.lower()
     breakdown["charge_behavior"] = breakdown["charge_behavior"].fillna("").str.strip().str.lower()
     breakdown["model_trim"] = breakdown["model_trim"].fillna("").str.strip()
-    breakdown["fastsim_relative_path"] = breakdown["fastsim_relative_path"].map(_normalize_fuel_consumption_relative_path)
+    breakdown["fastsim_relative_path"] = breakdown["fastsim_relative_path"].map(lambda value: str(value or "").strip())
 
     rows: list[dict[str, object]] = []
     for item in assignments:
         if not isinstance(item, dict):
             continue
-        fastsim_id = _normalize_fastsim_catalog_id(item.get("fastsim_id"))
+        fastsim_id = str(item.get("fastsim_id", "") or "").strip()
         emfac_vehicle_categories = _normalized_string_list(item.get("vehicle_categories"))
         emfac_fuels = _normalized_string_list(item.get("fuel_types"))
         if not fastsim_id or not emfac_vehicle_categories or not emfac_fuels:

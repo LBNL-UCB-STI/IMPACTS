@@ -9,8 +9,10 @@ from impacts.emfac.fleet.step1_build_vehicle_types import _build_atlas_vehicle_t
 from impacts.emfac.fleet.step1_build_vehicle_types import _build_passenger_vehicle_types_from_atlas_targets
 from impacts.emfac.fleet.step3_map_emfac_atlas import _assign_passenger_fuel_consumption_fields
 from impacts.emfac.fleet.step3_map_emfac_atlas import _build_passenger_emfac_candidates
+from impacts.emfac.fleet.step3_map_emfac_atlas import _combine_passenger_vehicle_types_for_output
 from impacts.emfac.fleet.step3_map_emfac_atlas import _finalize_passenger_vehicle_type_probabilities
 from impacts.emfac.fleet.step3_map_emfac_atlas import _prepare_mapped_passenger_vehicles_output
+from impacts.emfac.fleet.step3_map_emfac_atlas import _read_step3_passenger_vehicle_types
 from impacts.emfac.fleet.step3_map_emfac_atlas import _sample_passenger_vehicle_type_ids_for_vehicles
 
 
@@ -296,6 +298,124 @@ def test_build_passenger_emfac_candidates_maps_hybrid_to_gasoline_emfac_candidat
     assert result["modelYear"].tolist() == ["2004-2014"]
 
 
+def test_combine_passenger_vehicle_types_for_output_keeps_all_sections_and_blanks_other_emfac_fields() -> None:
+    passenger_car = pd.DataFrame(
+        [
+            {
+                "vehicleTypeId": "car-1",
+                "vehicleCategory": "Car",
+                "sampleProbabilityWithinCategory": "0.9",
+                "sampleProbabilityString": "income | 0-999999:0.900000",
+                "adopt_fuel": "gasoline",
+                "bodytype": "car",
+                "modelyear": 2019,
+                "emfacId": "post2014LDAGas",
+                "emissionsRatesFile": "emfacId=post2014LDAGas/post2014LDAGas.parquet",
+                "idleTimeFraction": 0.12,
+            }
+        ]
+    )
+    passenger_bus = pd.DataFrame(
+        [
+            {
+                "vehicleTypeId": "bus-1",
+                "vehicleCategory": "Bus",
+                "sampleProbabilityWithinCategory": "1.0",
+                "sampleProbabilityString": "income | 0-999999:1.000000",
+                "adopt_fuel": "diesel",
+                "emfacId": "post2014MDBusDsl",
+                "emissionsRatesFile": "emfacId=post2014MDBusDsl/post2014MDBusDsl.parquet",
+                "idleTimeFraction": 0.25,
+            }
+        ]
+    )
+    passenger_bike = pd.DataFrame(
+        [
+            {
+                "vehicleTypeId": "bike-1",
+                "vehicleCategory": "Bike",
+                "sampleProbabilityWithinCategory": "1.0",
+                "sampleProbabilityString": "income | 0-999999:1.000000",
+                "adopt_fuel": "human",
+                "emfacId": "bikeHuman",
+                "emissionsRatesFile": "emfacId=bikeHuman/bikeHuman.parquet",
+                "idleTimeFraction": 0.05,
+            }
+        ]
+    )
+    passenger_other = pd.DataFrame(
+        [
+            {
+                "vehicleTypeId": "other-1",
+                "vehicleCategory": "Body",
+                "sampleProbabilityWithinCategory": "1.0",
+                "sampleProbabilityString": "income | 0-999999:1.000000",
+                "adopt_fuel": "other",
+                "emfacId": "should-be-cleared",
+                "emissionsRatesFile": "should-be-cleared.parquet",
+                "idleTimeFraction": 0.77,
+            }
+        ]
+    )
+
+    result = _combine_passenger_vehicle_types_for_output(
+        passenger_car_with_emfac=passenger_car,
+        passenger_bus_with_emfac=passenger_bus,
+        passenger_bike_with_emfac=passenger_bike,
+        passenger_other_with_emfac=passenger_other,
+    )
+
+    assert result["vehicleTypeId"].tolist() == ["car-1", "bus-1", "bike-1", "other-1"]
+
+    car_row = result.loc[result["vehicleTypeId"] == "car-1"].iloc[0]
+    assert car_row["emfacId"] == "post2014LDAGas"
+    assert car_row["emissionsRatesFile"] == "emfacId=post2014LDAGas/post2014LDAGas.parquet"
+    assert car_row["idleTimeFraction"] == 0.12
+
+    bus_row = result.loc[result["vehicleTypeId"] == "bus-1"].iloc[0]
+    assert bus_row["emfacId"] == "post2014MDBusDsl"
+    assert bus_row["emissionsRatesFile"] == "emfacId=post2014MDBusDsl/post2014MDBusDsl.parquet"
+    assert bus_row["idleTimeFraction"] == 0.25
+
+    bike_row = result.loc[result["vehicleTypeId"] == "bike-1"].iloc[0]
+    assert bike_row["emfacId"] == "bikeHuman"
+    assert bike_row["emissionsRatesFile"] == "emfacId=bikeHuman/bikeHuman.parquet"
+    assert bike_row["idleTimeFraction"] == 0.05
+
+    other_row = result.loc[result["vehicleTypeId"] == "other-1"].iloc[0]
+    assert other_row["emfacId"] == ""
+    assert other_row["emissionsRatesFile"] == ""
+    assert other_row["idleTimeFraction"] == ""
+
+
+def test_read_step3_passenger_vehicle_types_preserves_full_vehicle_type_columns(tmp_path: Path) -> None:
+    path = tmp_path / "passenger_vehicle_types.csv"
+    pd.DataFrame(
+        [
+            {
+                "vehicleTypeId": "car-1",
+                "vehicleCategory": "Car",
+                "bodytype": "car",
+                "adopt_fuel": "gasoline",
+                "modelyear": 2019,
+                "sampleProbabilityWithinCategory": "1.0",
+                "sampleProbabilityString": "income | 0-999999:1.000000",
+                "primaryFuelType": "gasoline",
+                "primaryFuelConsumptionInJoulePerMeter": 10.5,
+                "seatingCapacity": 5,
+                "mappingVehicleTypeId": "source-car-1",
+            }
+        ]
+    ).to_csv(path, index=False)
+
+    result = _read_step3_passenger_vehicle_types(str(path))
+
+    assert result.loc[0, "primaryFuelType"] == "gasoline"
+    assert result.loc[0, "primaryFuelConsumptionInJoulePerMeter"] == 10.5
+    assert result.loc[0, "seatingCapacity"] == 5
+    assert result.loc[0, "mappingVehicleTypeId"] == "source-car-1"
+
+
 def test_build_passenger_emfac_candidates_splits_by_fleet_share() -> None:
     candidates = pd.DataFrame(
         [
@@ -556,7 +676,7 @@ def _write_step3_test_source_vehicle_types(source_file: Path) -> None:
         [
             {
                 "vehicleTypeId": "2015_gasoline_Chrysler_200",
-                "primaryVehicleEnergyFile": "test.csv",
+                "primaryVehicleEnergyFile": "legacy/2015_gasoline_Chrysler_200_lookup_table.csv.gz",
                 "secondaryVehicleEnergyFile": "",
                 "primaryFuelType": "gasoline",
                 "secondaryFuelType": "",
@@ -611,7 +731,7 @@ def test_assign_passenger_fuel_consumption_fields_attach_fastsim_id_and_rewrite_
     assert result.loc[0, "primaryVehicleEnergyFile"] == "test.csv"
     assert result.loc[0, "secondaryVehicleEnergyFile"] == ""
     expected_mapping_id = "2015gasolineChrysler200--2004to2014LDAGas--CarConv2008"
-    expected_vehicle_type_id = f"paxcar-{hashlib.sha256(expected_mapping_id.encode('utf-8')).hexdigest()[:12]}"
+    expected_vehicle_type_id = f"paxcar-{hashlib.sha256(expected_mapping_id.encode('utf-8')).hexdigest()[:6]}"
     assert result.loc[0, "mappingVehicleTypeId"] == expected_mapping_id
     assert result.loc[0, "vehicleTypeId"] == expected_vehicle_type_id
 
@@ -713,7 +833,7 @@ def test_assign_passenger_fuel_consumption_fields_keep_baseline_values_when_mapp
     assert result.loc[0, "primaryVehicleEnergyFile"] == ""
     assert result.loc[0, "secondaryVehicleEnergyFile"] == ""
     expected_mapping_id = "unmapped--2004to2014LDAPhe--CarPhev2008"
-    expected_vehicle_type_id = f"paxcar-{hashlib.sha256(expected_mapping_id.encode('utf-8')).hexdigest()[:12]}"
+    expected_vehicle_type_id = f"paxcar-{hashlib.sha256(expected_mapping_id.encode('utf-8')).hexdigest()[:6]}"
     assert result.loc[0, "mappingVehicleTypeId"] == expected_mapping_id
     assert result.loc[0, "vehicleTypeId"] == expected_vehicle_type_id
     assert "WARNING: Passenger Step 3.3 leaving fuel-consumption template fields empty" in capsys.readouterr().out

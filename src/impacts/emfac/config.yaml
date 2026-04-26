@@ -51,6 +51,7 @@ emfac:
               tertiary_link: Collector
               unclassified: Collector
               residential: Local Urban
+              residential_link: Local Urban
     emissions_inventory:
       - inventory_folder: ~/Workspace/Models/emfac/raw/sfbay-emfac-emissions-inventory
       - fallback_folder: ~/Workspace/Models/emfac/raw/statewide-emfac-emissions-inventory

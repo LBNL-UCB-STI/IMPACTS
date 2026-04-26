@@ -17,13 +17,13 @@ from impacts.emfac.config import read_table
 from impacts.emfac.config import resolve_workflow_path
 from impacts.emfac.common import attach_emissions_rates_filepaths_from_config
 from impacts.emfac.common import attach_idle_time_fraction_from_config
-from impacts.emfac.common import model_year_interval_distance
+from impacts.emfac.common import build_hashed_vehicle_type_ids
 from impacts.emfac.common import model_year_group_id_component
 from impacts.emfac.common import normalize_probabilities_to_fixed_precision
-from impacts.emfac.common import parse_model_year_group_interval
-from impacts.emfac.fleet.step1_build_vehicle_types import _extract_model_year_from_vehicle_type_id
+from impacts.emfac.fleet.step1_build_vehicle_types import _freight_vehicle_types_output_file
 from impacts.emfac.fleet.step1_build_vehicle_types import _normalize_energy_file_columns
 from impacts.emfac.fleet.step1_build_vehicle_types import _normalize_energy_file_path
+from impacts.emfac.fleet.step3_map_emfac_atlas import _coerce_random_generator
 
 
 _EMFAC_KEY_COLUMNS = ["vehicleCategory", "fuel", "modelYear"]
@@ -59,6 +59,26 @@ _FREIGHT_VEHICLE_TYPES_SCHEMA = {
     "primaryFuelCapacityInJoule": "Float64",
     "primaryVehicleEnergyFile": "string",
     "secondaryVehicleEnergyFile": "string",
+}
+_FREIGHT_OPTIONAL_VEHICLE_TYPES_SCHEMA = {
+    "secondaryFuelType": "string",
+    "secondaryFuelConsumptionInJoulePerMeter": "Float64",
+    "secondaryFuelCapacityInJoule": "Float64",
+    "automationLevel": "Float64",
+    "maxVelocity": "Float64",
+    "passengerCarUnit": "string",
+    "rechargeLevel2RateLimitInWatts": "Float64",
+    "rechargeLevel3RateLimitInWatts": "Float64",
+    "frismVehicleTypeId": "string",
+    "emfacId": "string",
+    "emfacVehicleCategory": "string",
+    "emfacFuel": "string",
+    "emfacResolvedModelYear": "string",
+    "fleetVmtPrior": "Float64",
+    "fleetPopulationPrior": "Float64",
+    "fuelConsumptionId": "string",
+    "emissionsRatesFile": "string",
+    "idleTimeFraction": "Float64",
 }
 _FREIGHT_FUEL_CONSUMPTION_TEMPLATE_SCHEMA = {
     "vehicleTypeId": "string",
@@ -1082,8 +1102,8 @@ def _score_freight_sampling_candidates(
 def _attach_freight_fuel_consumption_templates(
     *,
     mapped_freight_vehicle_types: pd.DataFrame,
-    source_vehicle_types: pd.DataFrame,
     config: dict[str, Any],
+    seed: int | np.random.Generator,
 ) -> pd.DataFrame:
     model_file = str(config.get("vehicle_type_assignment", {}).get("model_file", "")).strip()
     breakdown_path = str(config.get("beam", {}).get("fuel_consumption_catalog", "")).strip()
@@ -1093,14 +1113,11 @@ def _attach_freight_fuel_consumption_templates(
             "vehicle_type_assignment.model_file and beam.fuel_consumption_catalog"
         )
     assignment_catalog = build_fuel_consumption_emfac_assignment_catalog(model_file, breakdown_path)
-
-    templates = _normalize_energy_file_columns(source_vehicle_types.copy())
-    templates["fuelConsumptionId"] = templates["vehicleTypeId"].astype(str)
-    templates["template_modelyear"] = _extract_model_year_from_vehicle_type_id(templates["vehicleTypeId"])
+    random = _coerce_random_generator(seed)
+    prepared = _normalize_energy_file_columns(mapped_freight_vehicle_types.copy())
 
     rewritten_rows: list[pd.Series] = []
     fallback_warnings: dict[str, list[tuple[str, str, str]]] = {}
-    template_columns = [column for column in source_vehicle_types.columns if column != "vehicleTypeId"]
 
     def _has_baseline_fuel_consumption_values(row: Any) -> bool:
         primary_fuel_type = _normalize_text(getattr(row, "primaryFuelType", ""))
@@ -1151,7 +1168,7 @@ def _attach_freight_fuel_consumption_templates(
         candidates = assignment_catalog[
             assignment_catalog["emfac_vehicle_category"].astype(str).eq(emfac_vehicle_category)
             & assignment_catalog["emfac_fuel"].astype(str).eq(emfac_fuel)
-        ][["fastsim_relative_path"]].drop_duplicates().copy()
+        ][["fastsim_id", "fastsim_relative_path"]].drop_duplicates().copy()
         if candidates.empty:
             if _has_baseline_fuel_consumption_values(row):
                 rewritten_rows.append(
@@ -1168,60 +1185,13 @@ def _attach_freight_fuel_consumption_templates(
                 f"emfacFuel={emfac_fuel}"
             )
         candidates["fastsim_relative_path"] = candidates["fastsim_relative_path"].map(_normalize_energy_file_path)
-        candidates = templates.merge(
-            candidates,
-            left_on="primaryVehicleEnergyFile",
-            right_on="fastsim_relative_path",
-            how="inner",
-        )
-        if emfac_fuel == "Phe":
-            candidates = candidates[
-                candidates["secondaryVehicleEnergyFile"].astype(str).str.strip().ne("")
-            ].copy()
-            if candidates.empty:
-                raise ValueError(
-                    "Freight PHEV fuel-consumption assignment requires a secondaryVehicleEnergyFile in the "
-                    f"source freight vehicle types for vehicleTypeId={getattr(row, 'vehicleTypeId', '')}"
-                )
-        if candidates.empty:
-            if _has_baseline_fuel_consumption_values(row):
-                rewritten_rows.append(
-                    _build_unassigned_template_row(
-                        row,
-                        reason="the configured fuel-consumption mapping matched, but no source freight template row "
-                        "matched the assigned class/fuel; keeping baseline fuel consumption and capacity values only",
-                    )
-                )
-                continue
-            raise ValueError(
-                "No freight fuel-consumption template row matched the configured assignment for "
-                f"vehicleTypeId={getattr(row, 'vehicleTypeId', '')}, emfacVehicleCategory={emfac_vehicle_category}, "
-                f"emfacFuel={emfac_fuel}"
-            )
-        try:
-            requested_interval = parse_model_year_group_interval(getattr(row, "emfacResolvedModelYear", ""))
-        except ValueError as error:
-            raise ValueError(
-                "Freight fuel-consumption template attachment could not parse EMFAC model year label "
-                f"{getattr(row, 'emfacResolvedModelYear', '')} for vehicleTypeId={getattr(row, 'vehicleTypeId', '')}"
-            ) from error
-        candidates["yearDistance"] = candidates["template_modelyear"].map(
-            lambda value: float("inf")
-            if pd.isna(value)
-            else model_year_interval_distance((float(value), float(value)), requested_interval)
-        )
-        selected = candidates.sort_values(
-            ["yearDistance", "template_modelyear", "fuelConsumptionId"],
-            ascending=[True, True, True],
-            kind="mergesort",
-        ).iloc[0]
-
         updated = pd.Series(row._asdict()).copy()
-        for column in template_columns:
-            updated[column] = selected[column]
-        updated["fuelConsumptionId"] = str(selected["fuelConsumptionId"])
+        selected = candidates.sample(n=1, random_state=int(random.integers(0, 2**32 - 1))).iloc[0]
+        updated["fuelConsumptionId"] = str(selected["fastsim_id"])
+        updated["primaryVehicleEnergyFile"] = str(selected["fastsim_relative_path"]).strip()
+        updated["secondaryVehicleEnergyFile"] = ""
         updated["vehicleTypeId"] = (
-            _sanitize_vehicle_type_component(selected["fuelConsumptionId"])
+            _sanitize_vehicle_type_component(updated["fuelConsumptionId"])
             + "--"
             + str(getattr(row, "emfacId"))
             + "--"
@@ -1262,7 +1232,11 @@ def _attach_freight_fuel_consumption_templates(
                 + "\n".join(detail_blocks)
             )
 
-    return pd.DataFrame(rewritten_rows).reset_index(drop=True)
+    return build_hashed_vehicle_type_ids(
+        pd.DataFrame(rewritten_rows).reset_index(drop=True),
+        frame_name="Freight Step 4 vehicle types",
+        prefix="frt",
+    )
 
 
 def _map_freight_carriers_and_tours(
@@ -1356,10 +1330,53 @@ def _write_mapped_freight_carriers(frame: pd.DataFrame, path_like: str) -> str:
     return str(output_path)
 
 
+def _read_step4_freight_vehicle_types(path_like: str) -> pd.DataFrame:
+    resolved = Path(resolve_workflow_path(path_like))
+    if resolved.suffix.lower() == ".parquet":
+        available_columns = list(pd.read_parquet(resolved).columns)
+    else:
+        available_columns = pd.read_csv(resolved, nrows=0).columns.tolist()
+    missing_required = [
+        column_name for column_name in _FREIGHT_VEHICLE_TYPES_SCHEMA if column_name not in available_columns
+    ]
+    if missing_required:
+        raise ValueError(
+            "Freight vehicle types file is missing required columns: "
+            + ", ".join(sorted(missing_required))
+        )
+    schema = {
+        column_name: dtype_name
+        for column_name, dtype_name in _FREIGHT_VEHICLE_TYPES_SCHEMA.items()
+        if column_name in available_columns
+    }
+    for column_name in available_columns:
+        if column_name in schema:
+            continue
+        schema[column_name] = _FREIGHT_OPTIONAL_VEHICLE_TYPES_SCHEMA.get(column_name, "string")
+    return read_table(str(path_like), schema=schema)
+
+
+def _read_step4_carriers(path_like: str) -> pd.DataFrame:
+    resolved = Path(resolve_workflow_path(path_like))
+    if resolved.suffix.lower() == ".parquet":
+        carriers = pd.read_parquet(resolved)
+    else:
+        carriers = pd.read_csv(resolved, low_memory=False)
+
+    for column_name in _FRISM_CARRIERS_SCHEMA:
+        if column_name not in carriers.columns:
+            raise ValueError(f"FRISM carriers file is missing required column '{column_name}'")
+
+    prepared = carriers.copy()
+    for column_name in _FRISM_CARRIERS_SCHEMA:
+        prepared[column_name] = prepared[column_name].astype("string")
+    return prepared
+
+
 def _build_freight_emfac_mapping_context(
     workflow: dict[str, Any],
 ) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame]:
-    carriers = read_table(workflow["config"]["frism"]["carriers_file"], schema=_FRISM_CARRIERS_SCHEMA)
+    carriers = _read_step4_carriers(workflow["config"]["frism"]["carriers_file"])
     payloads = workflow.get("source_frism_payloads")
     if payloads is None:
         payloads = read_table(workflow["config"]["frism"]["payloads_file"], schema=_FRISM_PAYLOADS_SCHEMA)
@@ -1377,7 +1394,7 @@ def _map_freight_vehicle_types_to_emfac(
     freight_vehicle_types_file = workflow.get("built_freight_vehicle_types_file")
     if not freight_vehicle_types_file:
         raise ValueError("Step 4 requires freight vehicle types from Step 1")
-    freight_vehicle_types = read_table(str(freight_vehicle_types_file), schema=_FREIGHT_VEHICLE_TYPES_SCHEMA)
+    freight_vehicle_types = _read_step4_freight_vehicle_types(str(freight_vehicle_types_file))
     return _build_freight_vehicle_types_with_emfac(
         freight_vehicle_types=freight_vehicle_types,
         mapping_context=mapping_context,
@@ -1391,8 +1408,8 @@ def _assign_freight_fuel_consumption_templates(
 ) -> pd.DataFrame:
     return _attach_freight_fuel_consumption_templates(
         mapped_freight_vehicle_types=mapped_freight_vehicle_types,
-        source_vehicle_types=workflow["source_freight_vehicle_types"],
         config=workflow["config"],
+        seed=int(workflow["config"]["seed"]),
     )
 
 
@@ -1460,9 +1477,6 @@ def _write_mapped_freight_outputs(
     mapped_freight_vehicle_types: pd.DataFrame,
     mapped_carriers: pd.DataFrame,
 ) -> tuple[str, str]:
-    freight_vehicle_types_file = workflow.get("built_freight_vehicle_types_file")
-    if not freight_vehicle_types_file:
-        raise ValueError("Step 4 requires freight vehicle types from Step 1")
     mapped_freight_vehicle_types = attach_emissions_rates_filepaths_from_config(
         mapped_freight_vehicle_types,
         config=workflow["config"],
@@ -1474,6 +1488,11 @@ def _write_mapped_freight_outputs(
         mapped_freight_vehicle_types,
         config=workflow["config"],
         step_label="Fleet Step 4",
+    )
+    freight_vehicle_types_file = _freight_vehicle_types_output_file(
+        str(workflow["config"]["output"]),
+        year=workflow["config"]["frism"]["year"],
+        scenario=workflow["scenario"],
     )
     mapped_freight_vehicle_types_file = _write_mapped_freight_vehicle_types(
         mapped_freight_vehicle_types,
