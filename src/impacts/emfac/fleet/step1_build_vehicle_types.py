@@ -889,7 +889,7 @@ def _build_passenger_car_vehicle_types(
         "source_atlas_vehicles": atlas_vehicles,
         "source_atlas_households": atlas_households,
         "source_atlas_persons": atlas_persons,
-        "built_vehicle_types": built_vehicle_types,
+        "built_passenger_car_vehicle_types": built_vehicle_types,
         "built_passenger_car_vehicle_types_file": built_vehicle_types_file,
         "atlas_vehicle_type_targets": atlas_vehicle_type_targets,
         "atlas_income_bin_targets": atlas_income_bin_targets,

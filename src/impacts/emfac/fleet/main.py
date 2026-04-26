@@ -102,7 +102,7 @@ def run_workflow(workflow: dict[str, object]) -> dict[str, object]:
     write_trace(workflow, "workflow_success", {"status": "completed"})
     vehicles_output_file = workflow.get("mapped_passenger_vehicles_file", "")
     carriers_output_file = workflow.get("mapped_freight_carriers_file", "")
-    passenger_vehicle_types_output = workflow.get("built_vehicle_types_file", "")
+    passenger_vehicle_types_output = workflow.get("mapped_passenger_vehicle_types_file", "")
     freight_vehicle_types_output = workflow.get("built_freight_vehicle_types_file", "")
     if vehicles_output_file:
         print(f"  Passenger vehicles file: {vehicles_output_file}")

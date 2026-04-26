@@ -846,16 +846,13 @@ def _prepare_mapped_passenger_vehicles_output(vehicles: pd.DataFrame) -> pd.Data
     if vehicle_id_alias.str.strip().eq("").any():
         raise ValueError(f"{frame_name} produced blank values in required alias component 'vehicle_id'")
 
-    result = pd.DataFrame(
-        {
-            "household_id": household_id,
-            "vehicle_id": vehicle_id,
-            "householdId": household_id_alias,
-            "vehicleId": household_id_alias + "-" + vehicle_id_alias,
-            "vehicleTypeId": vehicle_type_id,
-            "initialSoc": pd.Series(pd.NA, index=prepared.index, dtype="Float64"),
-        }
-    )
+    result = prepared.copy()
+    result["household_id"] = household_id
+    result["vehicle_id"] = vehicle_id
+    result["householdId"] = household_id_alias
+    result["vehicleId"] = household_id_alias + "-" + vehicle_id_alias
+    result["vehicleTypeId"] = vehicle_type_id
+    result["initialSoc"] = pd.Series(pd.NA, index=prepared.index, dtype="Float64")
     if result["vehicleId"].duplicated().any():
         raise ValueError(f"{frame_name} produced duplicate BEAM vehicleId values")
     return result
@@ -1084,6 +1081,27 @@ def _read_step3_passenger_vehicle_types(path_like: str) -> pd.DataFrame:
     return read_table(str(path_like), schema=schema)
 
 
+def _read_step3_atlas_vehicles(path_like: str) -> pd.DataFrame:
+    resolved = Path(resolve_workflow_path(path_like))
+    if resolved.suffix.lower() == ".parquet":
+        vehicles = pd.read_parquet(resolved)
+    else:
+        vehicles = pd.read_csv(resolved, low_memory=False)
+
+    for column_name, dtype_name in ATLAS_VEHICLES_SCHEMA.items():
+        if column_name not in vehicles.columns:
+            raise ValueError(f"ATLAS vehicles file is missing required column '{column_name}'")
+        if dtype_name == "string":
+            vehicles[column_name] = vehicles[column_name].astype("string")
+        elif dtype_name == "Float64":
+            vehicles[column_name] = pd.to_numeric(vehicles[column_name], errors="raise").astype("Float64")
+        elif dtype_name == "Int64":
+            vehicles[column_name] = pd.to_numeric(vehicles[column_name], errors="raise").astype("Int64")
+        else:
+            raise ValueError(f"Unsupported ATLAS vehicles dtype '{dtype_name}' for column '{column_name}'")
+    return vehicles
+
+
 def _combine_passenger_vehicle_types_for_output(
     *,
     passenger_car_with_emfac: pd.DataFrame,
@@ -1155,7 +1173,7 @@ def _sample_mapped_passenger_vehicles(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     config = workflow["config"]
     atlas_config = config["atlas"]
-    atlas_vehicles = read_table(atlas_config["vehicles_file"], schema=ATLAS_VEHICLES_SCHEMA)
+    atlas_vehicles = _read_step3_atlas_vehicles(atlas_config["vehicles_file"])
     atlas_vehicles = _apply_atlas_fuel_aliases(atlas_vehicles, config)
     atlas_households = read_table(
         atlas_config["households_file"],
@@ -1205,7 +1223,7 @@ def _write_mapped_passenger_vehicle_types(
         passenger_bike_with_emfac=passenger_bike_with_emfac,
         passenger_other_with_emfac=passenger_other_with_emfac,
     )
-    workflow["built_vehicle_types"] = passenger_vehicle_types
+    workflow["mapped_passenger_vehicle_types"] = passenger_vehicle_types
     passenger_vehicle_types_file = _write_vehicle_types(
         passenger_vehicle_types,
         _passenger_vehicle_types_output_file(
@@ -1249,7 +1267,7 @@ def run_step3(workflow: dict[str, Any]) -> dict[str, Any]:
         config=workflow["config"],
         seed=random,
     )
-    workflow["built_vehicle_types"] = passenger_car_with_emfac
+    workflow["mapped_passenger_car_vehicle_types"] = passenger_car_with_emfac
 
     print("=== Step 3.4: sample mapped passenger vehicleTypeId values for ATLAS vehicles ===")
     vehicles_with_em, passenger_car_with_emfac = _sample_mapped_passenger_vehicles(
@@ -1257,10 +1275,10 @@ def run_step3(workflow: dict[str, Any]) -> dict[str, Any]:
         passenger_car_with_emfac=passenger_car_with_emfac,
         seed=random,
     )
-    workflow["built_vehicle_types"] = passenger_car_with_emfac
+    workflow["mapped_passenger_car_vehicle_types"] = passenger_car_with_emfac
 
     print("=== Step 3.5: write mapped passenger vehicle types and ATLAS vehicles ===")
-    built_vehicle_types_file = _write_mapped_passenger_vehicle_types(
+    mapped_passenger_vehicle_types_file = _write_mapped_passenger_vehicle_types(
         workflow=workflow,
         passenger_car_with_emfac=passenger_car_with_emfac,
     )
@@ -1268,7 +1286,7 @@ def run_step3(workflow: dict[str, Any]) -> dict[str, Any]:
         workflow=workflow,
         vehicles_with_em=vehicles_with_em,
     )
-    workflow["built_vehicle_types_file"] = built_vehicle_types_file
+    workflow["mapped_passenger_vehicle_types_file"] = mapped_passenger_vehicle_types_file
     workflow["mapped_passenger_vehicles"] = vehicles_with_em
     workflow["mapped_passenger_vehicles_file"] = vehicles_output_file
     return workflow

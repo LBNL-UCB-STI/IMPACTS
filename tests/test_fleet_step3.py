@@ -12,6 +12,7 @@ from impacts.emfac.fleet.step3_map_emfac_atlas import _build_passenger_emfac_can
 from impacts.emfac.fleet.step3_map_emfac_atlas import _combine_passenger_vehicle_types_for_output
 from impacts.emfac.fleet.step3_map_emfac_atlas import _finalize_passenger_vehicle_type_probabilities
 from impacts.emfac.fleet.step3_map_emfac_atlas import _prepare_mapped_passenger_vehicles_output
+from impacts.emfac.fleet.step3_map_emfac_atlas import _read_step3_atlas_vehicles
 from impacts.emfac.fleet.step3_map_emfac_atlas import _read_step3_passenger_vehicle_types
 from impacts.emfac.fleet.step3_map_emfac_atlas import _sample_passenger_vehicle_type_ids_for_vehicles
 
@@ -548,7 +549,7 @@ def test_build_passenger_emfac_candidates_errors_when_exact_year_match_is_missin
         raise AssertionError("Expected ValueError when no exact passenger EMFAC modelYear match exists")
 
 
-def test_prepare_mapped_passenger_vehicles_output_writes_required_columns() -> None:
+def test_prepare_mapped_passenger_vehicles_output_preserves_existing_columns() -> None:
     vehicles = pd.DataFrame(
         [
             {
@@ -566,13 +567,17 @@ def test_prepare_mapped_passenger_vehicles_output_writes_required_columns() -> N
     assert list(result.columns) == [
         "household_id",
         "vehicle_id",
+        "vehicleTypeId",
+        "stateOfCharge",
+        "bodytype",
         "householdId",
         "vehicleId",
-        "vehicleTypeId",
         "initialSoc",
     ]
     assert result.loc[0, "household_id"] == "353"
     assert result.loc[0, "vehicle_id"] == "2"
+    assert result.loc[0, "stateOfCharge"] == "0.75"
+    assert result.loc[0, "bodytype"] == "Sedan"
     assert result.loc[0, "householdId"] == "353"
     assert result.loc[0, "vehicleId"] == "353-2"
     assert result.loc[0, "vehicleTypeId"] == "type-1"
@@ -603,6 +608,29 @@ def test_prepare_mapped_passenger_vehicles_output_normalizes_beam_alias_ids() ->
     assert result.loc[0, "vehicleId"] == "4227970-2"
     assert result.loc[1, "householdId"] == "100000"
     assert result.loc[1, "vehicleId"] == "100000-3"
+
+
+def test_read_step3_atlas_vehicles_preserves_full_schema(tmp_path: Path) -> None:
+    vehicles_file = tmp_path / "vehicles.csv"
+    pd.DataFrame(
+        [
+            {
+                "vehicle_id": 2,
+                "household_id": 353,
+                "bodytype": "Car",
+                "modelyear": 2019,
+                "adopt_fuel": "gasoline",
+                "extraFlag": "keep-me",
+                "weight": 12.5,
+            }
+        ]
+    ).to_csv(vehicles_file, index=False)
+
+    loaded = _read_step3_atlas_vehicles(str(vehicles_file))
+
+    assert list(loaded.columns) == ["vehicle_id", "household_id", "bodytype", "modelyear", "adopt_fuel", "extraFlag", "weight"]
+    assert loaded.loc[0, "extraFlag"] == "keep-me"
+    assert loaded.loc[0, "weight"] == 12.5
 
 
 def _write_step3_test_model_file(model_file: Path) -> None:
