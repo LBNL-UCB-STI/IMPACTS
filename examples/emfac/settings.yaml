@@ -71,7 +71,7 @@ emfac:
 
     atlas:
       year: 2019
-      vehicles_file: ~/Workspace/Simulation/sfbay/urbansim/vehicles.csv.gz
+      vehicles_file: ~/Workspace/Simulation/sfbay/urbansim/vehicles.parquet
       households_file: ~/Workspace/Simulation/sfbay/urbansim/households.parquet
       persons_file: ~/Workspace/Simulation/sfbay/urbansim/persons.parquet
       income_bins: [0, 30, 60, 100, 200, 9999]
