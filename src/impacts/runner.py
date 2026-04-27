@@ -217,12 +217,9 @@ def _resolve_analysis_inventory_emfacid_activity_path(
         derived = source.with_name(f"{source.stem}-by-emfacid{source.suffix}")
     if derived.exists():
         return derived
-    emfac_output_fallback = (_REPO_ROOT / "examples" / "emfac" / "output" / "activities" / derived.name).resolve()
-    if emfac_output_fallback.exists():
-        return emfac_output_fallback
     raise FileNotFoundError(
         "Analysis Step 1 requires an EMFAC activity-by-emfacId file, but it was not found. "
-        f"Expected one of: {derived} or {emfac_output_fallback}"
+        f"Expected {derived}."
     )
 
 

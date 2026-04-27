@@ -6,7 +6,7 @@ from impacts.runner import _resolve_analysis_inventory_emfacid_activity_path
 from impacts.runner import _resolve_analysis_vehicle_category_metadata_path
 
 
-def test_resolve_analysis_inventory_emfacid_activity_path_falls_back_to_emfac_output(
+def test_resolve_analysis_inventory_emfacid_activity_path_uses_colocated_emfacid_file_only(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -18,21 +18,21 @@ def test_resolve_analysis_inventory_emfacid_activity_path_falls_back_to_emfac_ou
     source = production_dir / "sf-emfac-2018-inventory-final-passenger-activity.parquet"
     source.write_text("")
 
-    fallback_dir = repo_root / "examples" / "emfac" / "output" / "activities"
-    fallback_dir.mkdir(parents=True, exist_ok=True)
-    fallback = fallback_dir / "sf-emfac-2018-inventory-final-passenger-activity-by-emfacid.parquet"
-    fallback.write_text("")
-
     monkeypatch.setattr("impacts.runner._REPO_ROOT", repo_root)
     monkeypatch.setattr("impacts.runner._load_analysis_context", lambda _: (None, None, None, {}))
 
-    resolved = _resolve_analysis_inventory_emfacid_activity_path(
-        settings_path,
-        source=source,
-        manifest_key="passenger_inventory_emfacid_file",
-    )
-
-    assert resolved == fallback.resolve()
+    try:
+        _resolve_analysis_inventory_emfacid_activity_path(
+            settings_path,
+            source=source,
+            manifest_key="passenger_inventory_emfacid_file",
+        )
+    except FileNotFoundError as error:
+        assert str(source.with_name("sf-emfac-2018-inventory-final-passenger-activity-by-emfacid.parquet").resolve()) in str(
+            error
+        )
+    else:
+        raise AssertionError("Expected FileNotFoundError when colocated EMFAC activity-by-emfacId file is missing")
 
 
 def test_resolve_analysis_vehicle_category_metadata_path_prefers_manifest_input(

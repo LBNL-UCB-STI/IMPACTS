@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import yaml
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -107,7 +108,10 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.beam.passenger_vehicle_types_file == "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
     assert config.impacts.beam.freight_vehicle_types_file == "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
     assert len(config.impacts.analysis.sector_targets) == 6
-    assert config.impacts.emissions.vehicle_category_metadata_file == "vehicle-tech/_emissions_vehicle_catalog.csv"
+    assert (
+        config.impacts.emissions.vehicle_category_metadata_file
+        == "~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/_emissions_vehicle_catalog.csv"
+    )
     assert config.impacts.emissions.defaults.annualization_days.light_duty == 327.0
     assert config.impacts.emissions.defaults.annualization_days.medium_heavy_duty == 312.0
     assert config.impacts.analysis.sector_targets[0].source == "mobile_onroad"
@@ -118,6 +122,16 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.analysis.sector_targets[-1].annual_pm25_short_tons == 1499.25
     assert config.impacts.analysis.sector_targets[-1].annual_nox_short_tons is None
     assert config.impacts.analysis.inventory_targets == []
+
+
+def test_pipeline_example_is_source_of_truth_for_builtin_pipeline_impacts_settings() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    example_payload = yaml.safe_load((repo_root / "examples" / "pipeline" / "pilates" / "settings.yaml").read_text())
+    default_payload = yaml.safe_load((repo_root / "src" / "impacts" / "config" / "settings.yaml").read_text())
+    overlay_payload = yaml.safe_load((repo_root / "src" / "impacts" / "pipeline" / "adapters" / "pilates_overlay.yaml").read_text())
+
+    assert default_payload["impacts"] == example_payload["impacts"]
+    assert overlay_payload["impacts"] == example_payload["impacts"]
 
 
 def test_top_level_emfac_command_defaults_to_all(monkeypatch, tmp_path: Path) -> None:
@@ -252,13 +266,16 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
     assert config.impacts.dispersions.aermod.grid_size_meters == 100.0
     assert config.impacts.dispersions.aermod.default_site == "LIVERMORE_2015"
     assert config.impacts.dispersions.aermod.default_temporal == "CITYSTREET"
-    assert config.impacts.exposure.population_folder == "urbansim/2018"
+    assert config.impacts.exposure.population_folder == "urbansim/atlas-2019"
     assert config.impacts.beam.include_passenger is True
     assert config.impacts.beam.include_freight is True
     assert config.impacts.beam.passenger_vehicle_types_file == "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
     assert config.impacts.beam.freight_vehicle_types_file == "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
     assert len(config.impacts.analysis.sector_targets) == 6
-    assert config.impacts.emissions.vehicle_category_metadata_file == "vehicle-tech/emissions/emfac_vehicle_category_attributes.csv"
+    assert (
+        config.impacts.emissions.vehicle_category_metadata_file
+        == "~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/_emissions_vehicle_catalog.csv"
+    )
     assert config.impacts.analysis.inventory_targets == []
 
 
