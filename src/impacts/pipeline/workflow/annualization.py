@@ -12,6 +12,7 @@ import pandas as pd
 
 from ...common import _configure_duckdb_progress_bar
 from ...common import _should_show_duckdb_progress_bar
+from ...common import configure_duckdb_connection
 from ...common import read_table
 from ...config.defaults import annualization_days_by_vehicle_group as default_annualization_days_by_vehicle_group
 from ...config.defaults import grams_per_short_ton
@@ -160,6 +161,7 @@ def _annualize_prepared_skims_with_duckdb(
     output_columns.extend(["totTrips", "totVMT"])
     output_columns.extend([f"tons_per_year_{pollutant}" for pollutant in required_pollutants])
     try:
+        configure_duckdb_connection(con, working_dir=output_path, show_progress=False)
         con.execute("PRAGMA threads = 4")
         con.register("link_lengths", link_lengths)
         con.register("annualization_lookup", lookup_df)

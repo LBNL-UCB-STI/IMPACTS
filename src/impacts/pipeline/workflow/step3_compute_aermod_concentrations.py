@@ -18,6 +18,7 @@ from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import _configure_duckdb_progress_bar
 from ...common import _should_show_duckdb_progress_bar
+from ...common import configure_duckdb_connection
 from ...common import read_table
 from ...common import read_vector
 from ...config.defaults import aermod_active_days_per_year as default_aermod_active_days_per_year
@@ -143,6 +144,7 @@ def _prepare_source_emissions(
     grid_size_meters: float,
     origin_x: float,
     origin_y: float,
+    outputs_dir: Path,
 ) -> pd.DataFrame:
     defaults = _pattern_defaults(pipeline)
     source = emissions_gdf.copy()
@@ -171,7 +173,7 @@ def _prepare_source_emissions(
     con = duckdb.connect(database=":memory:")
     show_progress = _should_show_duckdb_progress_bar()
     try:
-        _configure_duckdb_progress_bar(con, enabled=show_progress)
+        configure_duckdb_connection(con, working_dir=outputs_dir, show_progress=show_progress)
         con.register("source_frame", source_frame)
         source = con.execute(
             f"""
@@ -867,6 +869,7 @@ def run(
         grid_size_meters=grid_size_meters,
         origin_x=origin_x,
         origin_y=origin_y,
+        outputs_dir=raw_dir,
     )
     logger.info(
         "%s prepared %d source cells over %d target cells at %.2fm grid spacing",

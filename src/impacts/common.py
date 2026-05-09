@@ -793,6 +793,16 @@ def is_valid_parquet(path: str | Path) -> bool:
     return True
 
 
+def resolve_duckdb_temp_directory(path: str | Path) -> Path:
+    target = Path(path).resolve()
+    base = target if target.is_dir() else target.parent
+    tmp_ancestor = next((parent for parent in (base, *base.parents) if parent.name == "tmp"), None)
+    temp_root = tmp_ancestor.parent if tmp_ancestor is not None and tmp_ancestor.parent != tmp_ancestor else base
+    destination = temp_root / "duckdb_spill"
+    destination.mkdir(parents=True, exist_ok=True)
+    return destination
+
+
 def _duckdb_scan_expression(path: str | Path) -> str:
     target = Path(path)
     if target.suffix.lower() != ".parquet":
@@ -809,6 +819,22 @@ def _configure_duckdb_progress_bar(con: duckdb.DuckDBPyConnection, *, enabled: b
     con.execute(f"SET enable_progress_bar = {'true' if enabled else 'false'}")
     if enabled:
         con.execute("SET progress_bar_time = 0")
+
+
+def configure_duckdb_connection(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    working_dir: str | Path,
+    show_progress: Optional[bool] = None,
+) -> Path:
+    temp_dir = resolve_duckdb_temp_directory(working_dir)
+    temp_dir_sql = str(temp_dir).replace("'", "''")
+    con.execute(f"SET temp_directory = '{temp_dir_sql}'")
+    _configure_duckdb_progress_bar(
+        con,
+        enabled=_should_show_duckdb_progress_bar() if show_progress is None else bool(show_progress),
+    )
+    return temp_dir
 
 
 def _emissions_value_expression(*, source_pollutant: str) -> str:
@@ -865,6 +891,7 @@ def _prepare_skims_for_grid_allocation_duckdb(
     con = duckdb.connect(database=":memory:")
     show_progress = _should_show_duckdb_progress_bar()
     try:
+        configure_duckdb_connection(con, working_dir=out, show_progress=False)
         if known_vehicle_type_ids is not None:
             observed_ids = {
                 row[0]

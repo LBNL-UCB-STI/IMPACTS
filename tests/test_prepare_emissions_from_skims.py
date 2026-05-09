@@ -34,6 +34,16 @@ def test_configure_duckdb_progress_bar_toggles_settings() -> None:
     ]
 
 
+def test_resolve_duckdb_temp_directory_avoids_system_and_pipeline_tmp_roots(tmp_path: Path) -> None:
+    output_path = tmp_path / "impacts_output" / "tmp" / "skims" / "prepared_skims.parquet"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    resolved = common.resolve_duckdb_temp_directory(output_path)
+
+    assert resolved == tmp_path / "impacts_output" / "duckdb_spill"
+    assert resolved.exists()
+
+
 def test_build_skims_scale_factors_uses_transit_sample_for_non_bus_transit() -> None:
     prepared = pd.DataFrame(
         [
