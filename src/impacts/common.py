@@ -790,11 +790,13 @@ def parse_emissions_string(emissions: str) -> Dict[str, float]:
     return out
 
 
-def read_skims_emissions(
+def _iter_skims_emissions_batches(
     path: str,
+    *,
     pollutants: Optional[list[str]] = None,
     pollutants_map: Optional[Dict[str, str]] = None,
-) -> pd.DataFrame:
+    batch_size: int = default_chunk_size,
+):
     dim_cols = ["hour", "linkId", "vehicleTypeId", "process", "travelTimeInSecond", "parkingDurationInSecond"]
     compact_cols = dim_cols + ["emissions", "observations", "iterations"]
     source_pollutants = [pollutants_map.get(p, p) for p in (pollutants or [])] if pollutants_map else (pollutants or [])
@@ -807,20 +809,94 @@ def read_skims_emissions(
         if cols is not None:
             available = set(pq.read_schema(path).names)
             cols = [c for c in cols if c in available] or None
-        df = pd.read_parquet(target, columns=cols)
+        parquet_file = pq.ParquetFile(target)
+        total_rows = parquet_file.metadata.num_rows if parquet_file.metadata is not None else None
+        progress = tqdm(
+            total=total_rows,
+            desc=f"Streaming skims {target.name}",
+            unit="row",
+            dynamic_ncols=True,
+            leave=True,
+        )
+        try:
+            for batch in parquet_file.iter_batches(batch_size=int(batch_size), columns=cols):
+                progress.update(batch.num_rows)
+                yield _normalize_skims_emissions_batch(
+                    batch.to_pandas(),
+                    pollutants=pollutants,
+                    pollutants_map=pollutants_map,
+                    dim_cols=dim_cols,
+                )
+        finally:
+            progress.close()
+        return
     elif lower.endswith(".csv.gz"):
         if cols is not None:
             header_cols = pd.read_csv(target, compression="gzip", nrows=0).columns.tolist()
             cols = [c for c in cols if c in header_cols] or None
-        df = pd.read_csv(target, compression="gzip", usecols=cols if pollutants else None)
+        reader = pd.read_csv(
+            target,
+            compression="gzip",
+            usecols=cols,
+            chunksize=int(batch_size),
+        )
+        progress = tqdm(
+            total=None,
+            desc=f"Streaming skims {target.name}",
+            unit="row",
+            dynamic_ncols=True,
+            leave=True,
+        )
+        try:
+            for chunk in reader:
+                progress.update(len(chunk))
+                yield _normalize_skims_emissions_batch(
+                    chunk,
+                    pollutants=pollutants,
+                    pollutants_map=pollutants_map,
+                    dim_cols=dim_cols,
+                )
+        finally:
+            progress.close()
+        return
     elif lower.endswith(".csv"):
         if cols is not None:
             header_cols = pd.read_csv(target, nrows=0).columns.tolist()
             cols = [c for c in cols if c in header_cols] or None
-        df = pd.read_csv(target, usecols=cols if pollutants else None)
+        reader = pd.read_csv(
+            target,
+            usecols=cols,
+            chunksize=int(batch_size),
+        )
+        progress = tqdm(
+            total=None,
+            desc=f"Streaming skims {target.name}",
+            unit="row",
+            dynamic_ncols=True,
+            leave=True,
+        )
+        try:
+            for chunk in reader:
+                progress.update(len(chunk))
+                yield _normalize_skims_emissions_batch(
+                    chunk,
+                    pollutants=pollutants,
+                    pollutants_map=pollutants_map,
+                    dim_cols=dim_cols,
+                )
+        finally:
+            progress.close()
+        return
     else:
         raise ValueError(f"Unsupported skims format: {target}. Use .csv, .csv.gz, or .parquet")
 
+def _normalize_skims_emissions_batch(
+    df: pd.DataFrame,
+    *,
+    pollutants: Optional[list[str]],
+    pollutants_map: Optional[Dict[str, str]],
+    dim_cols: list[str],
+) -> pd.DataFrame:
     if "emissions" not in df.columns:
         return df
 
@@ -882,33 +958,51 @@ def prepare_skims_for_grid_allocation(
     required_pollutants: Optional[list[str]] = None,
     pollutants_map: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
-    df = read_skims_emissions(
-        skims_path,
-        pollutants=required_pollutants,
-        pollutants_map=pollutants_map,
-    )
     prepared_group_cols = group_cols or ["linkId", "vehicleTypeId", "process"]
-    missing_group_cols = [col for col in prepared_group_cols if col not in df.columns]
-    if missing_group_cols:
-        raise ValueError(f"Prepared skims missing required grouping columns: {missing_group_cols}")
-
     required = required_pollutants or default_prepared_pollutants
-    totals_cols = _totals_pollutant_columns(df, required)
-    prepared = df[prepared_group_cols + list(totals_cols.values())].copy()
-    rename_map = {source: pollutant for pollutant, source in totals_cols.items()}
-    prepared = prepared.rename(columns=rename_map)
-    for pollutant in required:
-        if pollutant not in prepared.columns:
-            prepared[pollutant] = 0.0
-    if "observations" in df.columns:
-        prepared["observations"] = pd.to_numeric(df["observations"], errors="coerce").fillna(0.0)
-    else:
-        prepared["observations"] = 0.0
-    aggregated = _group_and_sum_numeric(
-        prepared,
-        group_cols=prepared_group_cols,
-        sum_cols=["observations"] + list(required),
-    )
+    aggregated = pd.DataFrame(columns=prepared_group_cols + ["observations"] + list(required))
+    for chunk_index, df in enumerate(
+        _iter_skims_emissions_batches(
+            skims_path,
+            pollutants=required,
+            pollutants_map=pollutants_map,
+        ),
+        start=1,
+    ):
+        missing_group_cols = [col for col in prepared_group_cols if col not in df.columns]
+        if missing_group_cols:
+            raise ValueError(f"Prepared skims missing required grouping columns: {missing_group_cols}")
+        totals_cols = _totals_pollutant_columns(df, required)
+        prepared = df[prepared_group_cols + list(totals_cols.values())].copy()
+        rename_map = {source: pollutant for pollutant, source in totals_cols.items()}
+        prepared = prepared.rename(columns=rename_map)
+        for pollutant in required:
+            if pollutant not in prepared.columns:
+                prepared[pollutant] = 0.0
+        if "observations" in df.columns:
+            prepared["observations"] = pd.to_numeric(df["observations"], errors="coerce").fillna(0.0)
+        else:
+            prepared["observations"] = 0.0
+        chunk_aggregated = _group_and_sum_numeric(
+            prepared,
+            group_cols=prepared_group_cols,
+            sum_cols=["observations"] + list(required),
+        )
+        if aggregated.empty:
+            aggregated = chunk_aggregated
+        else:
+            aggregated = _group_and_sum_numeric(
+                pd.concat([aggregated, chunk_aggregated], ignore_index=True, sort=False),
+                group_cols=prepared_group_cols,
+                sum_cols=["observations"] + list(required),
+            )
+        logger.info(
+            "Prepared skims chunk %d processed from %s: %d raw rows -> %d grouped rows",
+            chunk_index,
+            skims_path,
+            len(df),
+            len(chunk_aggregated),
+        )
 
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
