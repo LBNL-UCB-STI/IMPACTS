@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def _derive_impacts_tmp_root(output_root: Path) -> Path:
-    return output_root / "tmp"
+    return output_root / "inputs"
 
 
 def _validate_configured_local_path(

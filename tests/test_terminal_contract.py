@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import yaml
 from pathlib import Path
 from types import SimpleNamespace
@@ -146,6 +148,67 @@ def test_top_level_emfac_command_defaults_to_all(monkeypatch, tmp_path: Path) ->
 
     assert main(["emfac", "--config", str(config_path)]) == 0
     assert captured["argv"] == ["--config", str(config_path)]
+
+
+def test_pipeline_profile_memray_relaunches_under_impacts_output(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text("impacts:\n  local_output_folder: impacts_output\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "impacts.__main__.load_settings_from_yaml",
+        lambda _: SimpleNamespace(impacts=SimpleNamespace(local_output_folder="impacts_output")),
+    )
+    monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
+
+    def _fake_run(command, env=None, check=False):
+        captured["command"] = command
+        captured["env"] = env
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("impacts.__main__.subprocess.run", _fake_run)
+
+    assert main(["pipeline", "--config", str(config_path), "--profile", "memray"]) == 0
+    assert captured["command"] == [
+        sys.executable,
+        "-m",
+        "memray",
+        "run",
+        "-o",
+        str((tmp_path / "impacts_output" / "profiles" / "pipeline.memray").resolve()),
+        "-m",
+        "impacts",
+        "pipeline",
+        "--config",
+        str(config_path),
+        "--profile",
+        "none",
+    ]
+    assert captured["env"]["IMPACTS_PROFILE_ACTIVE"] == "1"
+
+
+def test_pipeline_profile_output_must_stay_under_impacts_output(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text("impacts:\n  local_output_folder: impacts_output\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "impacts.__main__.load_settings_from_yaml",
+        lambda _: SimpleNamespace(impacts=SimpleNamespace(local_output_folder="impacts_output")),
+    )
+    monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
+
+    with pytest.raises(ValueError, match="Profile output must live under impacts.local_output_folder"):
+        main(
+            [
+                "pipeline",
+                "--config",
+                str(config_path),
+                "--profile",
+                "memray",
+                "--profile-output",
+                str(tmp_path / "outside.memray"),
+            ]
+        )
 
 
 def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_defaults(tmp_path: Path):
@@ -413,8 +476,8 @@ def test_run_from_settings_delegates_through_preprocess(monkeypatch, tmp_path: P
         }
         return {
             "inputs_manifest_path": str(tmp_path / "impacts" / "inputs_manifest.yaml"),
-            "staging_dir": str(tmp_path / "impacts" / "tmp"),
-            "input_dir": str(tmp_path / "impacts" / "tmp"),
+            "staging_dir": str(tmp_path / "impacts" / "inputs"),
+            "input_dir": str(tmp_path / "impacts" / "inputs"),
         }
 
     def _fake_run(input_manifest_path, output_dir, run_manifest_path=None, run_dispersion=False):
@@ -437,7 +500,7 @@ def test_run_from_settings_delegates_through_preprocess(monkeypatch, tmp_path: P
     assert result["run_manifest_path"].endswith("run_manifest.yaml")
     assert calls["preprocess"]["settings_path"].endswith("settings.yaml")
     assert calls["run"]["input_manifest_path"].endswith("inputs_manifest.yaml")
-    assert calls["run"]["output_dir"].endswith("tmp")
+    assert calls["run"]["output_dir"].endswith("inputs")
     assert calls["run"]["run_dispersion"] is False
 
 

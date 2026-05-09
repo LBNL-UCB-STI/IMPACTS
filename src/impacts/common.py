@@ -806,9 +806,9 @@ def parquet_row_count(path: str | Path) -> int:
 def resolve_duckdb_temp_directory(path: str | Path) -> Path:
     target = Path(path).resolve()
     base = target if target.is_dir() else target.parent
-    tmp_ancestor = next((parent for parent in (base, *base.parents) if parent.name == "tmp"), None)
-    temp_root = tmp_ancestor.parent if tmp_ancestor is not None and tmp_ancestor.parent != tmp_ancestor else base
-    destination = temp_root / "duckdb_spill"
+    output_ancestor = next((parent for parent in (base, *base.parents) if parent.name == "impacts_output"), None)
+    temp_root = output_ancestor if output_ancestor is not None else base
+    destination = temp_root / "runtime" / "duckdb"
     destination.mkdir(parents=True, exist_ok=True)
     return destination
 

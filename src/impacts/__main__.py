@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 from impacts.config.settings_builder import load_settings_from_yaml
 from impacts.manifest.file_ops import resolve_path
@@ -15,6 +18,65 @@ def _print_pipeline_banner() -> None:
         "computes air-quality concentrations, and publishes the final exposure artifact."
     )
     print()
+
+
+def _resolve_pipeline_output_root(settings_path: str) -> Path:
+    settings = load_settings_from_yaml(settings_path)
+    return Path(
+        resolve_path(settings.impacts.local_output_folder, settings_path) or settings.impacts.local_output_folder
+    ).resolve()
+
+
+def _validate_profile_output_path(*, output_path: Path, output_root: Path) -> Path:
+    resolved_root = output_root.resolve()
+    resolved_output = output_path.resolve()
+    try:
+        resolved_output.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"Profile output must live under impacts.local_output_folder ({resolved_root}), got {resolved_output}"
+        ) from exc
+    resolved_output.parent.mkdir(parents=True, exist_ok=True)
+    return resolved_output
+
+
+def _resolve_pipeline_profile_output(*, settings_path: str, explicit_output: str | None) -> Path:
+    output_root = _resolve_pipeline_output_root(settings_path)
+    candidate = Path(explicit_output).expanduser() if explicit_output else output_root / "profiles" / "pipeline.memray"
+    if not candidate.is_absolute():
+        candidate = (Path.cwd() / candidate).resolve()
+    return _validate_profile_output_path(output_path=candidate, output_root=output_root)
+
+
+def _maybe_relaunch_pipeline_with_profiler(args: argparse.Namespace) -> int | None:
+    if args.command != "pipeline" or args.profile != "memray":
+        return None
+    if os.environ.get("IMPACTS_PROFILE_ACTIVE") == "1":
+        return None
+
+    profile_output = _resolve_pipeline_profile_output(
+        settings_path=args.config,
+        explicit_output=args.profile_output,
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "memray",
+        "run",
+        "-o",
+        str(profile_output),
+        "-m",
+        "impacts",
+        "pipeline",
+        "--config",
+        args.config,
+        "--profile",
+        "none",
+    ]
+    env = os.environ.copy()
+    env["IMPACTS_PROFILE_ACTIVE"] = "1"
+    completed = subprocess.run(command, env=env, check=False)
+    return int(completed.returncode)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,6 +119,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     pipeline = subparsers.add_parser("pipeline", help="Run preprocess, run, and postprocess end-to-end")
     pipeline.add_argument("--config", required=True)
+    pipeline.add_argument("--profile", choices=("none", "memray"), default="none")
+    pipeline.add_argument("--profile-output")
     derive_settings = subparsers.add_parser(
         "derive_settings_from_pilates",
         help="Generate an impacts settings file from main PILATES settings and a thin impacts overlay.",
@@ -136,6 +200,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    profiling_exit_code = _maybe_relaunch_pipeline_with_profiler(args)
+    if profiling_exit_code is not None:
+        return profiling_exit_code
 
     if args.command == "preprocess":
         from impacts.preprocessor import preprocess_workflow
@@ -190,10 +257,7 @@ def main(argv: list[str] | None = None) -> int:
         from impacts.runner import run_from_input_manifest
 
         _print_pipeline_banner()
-        settings = load_settings_from_yaml(args.config)
-        downstream_output_root = Path(
-            resolve_path(settings.impacts.local_output_folder, args.config) or settings.impacts.local_output_folder
-        ).resolve()
+        downstream_output_root = _resolve_pipeline_output_root(args.config)
         preprocess_manifest = preprocess_workflow(
             settings_path=args.config,
         )
