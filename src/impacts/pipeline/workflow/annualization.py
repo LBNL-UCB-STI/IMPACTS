@@ -160,7 +160,6 @@ def _annualize_prepared_skims_with_duckdb(
     output_columns.extend(["totTrips", "totVMT"])
     output_columns.extend([f"tons_per_year_{pollutant}" for pollutant in required_pollutants])
     try:
-        _configure_duckdb_progress_bar(con, enabled=show_progress)
         con.execute("PRAGMA threads = 4")
         con.register("link_lengths", link_lengths)
         con.register("annualization_lookup", lookup_df)
@@ -224,6 +223,8 @@ def _annualize_prepared_skims_with_duckdb(
               ON {vehicle_type_expr} = lookup.vehicleTypeId
         """
         output_sql = str(output_path).replace("'", "''")
+        if show_progress:
+            _configure_duckdb_progress_bar(con, enabled=True)
         con.execute(f"COPY ({query}) TO '{output_sql}' (FORMAT PARQUET)")
         if show_progress:
             _configure_duckdb_progress_bar(con, enabled=False)

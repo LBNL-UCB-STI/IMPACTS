@@ -318,6 +318,57 @@ def test_prepare_staged_skims_for_processing_reuses_grouped_intermediate(tmp_pat
     ]
 
 
+def test_prepare_staged_skims_for_processing_rebuilds_invalid_grouped_intermediate(tmp_path: Path, monkeypatch) -> None:
+    input_root = tmp_path / "inputs"
+    grouped_path = input_root / "skims" / "prepared_skims_grouped_for_grid_allocation.parquet"
+    grouped_path.parent.mkdir(parents=True, exist_ok=True)
+    grouped_path.write_bytes(b"")
+    called = {"prepare": 0}
+
+    def _stub_prepare(*args, **kwargs):
+        called["prepare"] += 1
+        pd.DataFrame(
+            [
+                {"linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "observations": 5.0, "NOx": 2.0},
+            ]
+        ).to_parquet(grouped_path, index=False)
+        return pd.read_parquet(grouped_path)
+
+    def _stub_annualize(*, prepared_skims_path: str, output_path: str, **kwargs):
+        assert Path(prepared_skims_path) == grouped_path
+        pd.DataFrame(
+            [
+                {"linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "totTrips": 10.0, "totVMT": 3.0, "tons_per_year_NOx": 0.1},
+            ]
+        ).to_parquet(output_path, index=False)
+
+    monkeypatch.setattr(prepare_skims_module, "prepare_skims_for_grid_allocation", _stub_prepare)
+    monkeypatch.setattr(prepare_skims_module, "annualize_prepared_skims_for_grid_allocation", _stub_annualize)
+
+    result = prepare_skims_module.prepare_staged_skims_for_processing(
+        input_root=input_root,
+        skims_input_source=str(tmp_path / "raw.skims.parquet"),
+        network_path=str(tmp_path / "network.parquet"),
+        passenger_vehicle_types_path=None,
+        freight_vehicle_types_path=None,
+        beam_length_col="length",
+        prepared_skims_group_cols=["linkId", "vehicleTypeId", "process"],
+        pollutants=["NOx"],
+        pollutants_map={},
+        vehicle_category_metadata_file=str(tmp_path / "vehicle_categories.csv"),
+        annualization_days={"light_duty": 327.0, "medium_heavy_duty": 312.0},
+        population_sample=1.0,
+        transit_sample=1.0,
+        include_passenger=True,
+        include_freight=True,
+    )
+
+    assert called["prepare"] == 1
+    assert result.to_dict("records") == [
+        {"linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "totTrips": 10.0, "totVMT": 3.0, "tons_per_year_NOx": 0.1},
+    ]
+
+
 def test_annualize_prepared_skims_uses_grouped_input_without_eager_read(tmp_path: Path, monkeypatch) -> None:
     grouped = pd.DataFrame(
         [

@@ -18,6 +18,7 @@ from ...common import prepare_skims_for_grid_allocation
 from ...common import prepared_table_target
 from ...common import read_table
 from ...common import resolve_required_manifest_input
+from ...common import is_valid_parquet
 from . import _step_label
 from .annualization import annualize_prepared_skims_for_grid_allocation
 
@@ -70,6 +71,19 @@ _EMFAC_MODEL_YEAR_GROUP_PATTERN = re.compile(r"^(pre\d+|\d{4}to\d{4}|post\d+)")
 # ---------------------------------------------------------------------------
 def _existing_output(path: Path) -> Optional[str]:
     return str(path) if path.exists() else None
+
+
+def _existing_valid_skims_parquet(path: Path) -> Optional[str]:
+    if not path.exists():
+        return None
+    if is_valid_parquet(path):
+        return str(path)
+    logger.warning("Step 1: ignoring invalid cached skims parquet %s", path)
+    try:
+        path.unlink()
+    except Exception:
+        pass
+    return None
 
 
 def _load_intersection_subset(path: str, columns: List[str]) -> pd.DataFrame:
@@ -428,16 +442,12 @@ def _build_source_activity_totals(skims_df: pd.DataFrame) -> Optional[pd.DataFra
 
 def resolve_prepared_skims_path(input_root: Path) -> Optional[str]:
     candidate = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
-    if candidate.exists():
-        return str(candidate)
-    return None
+    return _existing_valid_skims_parquet(candidate)
 
 
 def resolve_prepared_grouped_skims_path(input_root: Path) -> Optional[str]:
     candidate = prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
-    if candidate.exists():
-        return str(candidate)
-    return None
+    return _existing_valid_skims_parquet(candidate)
 
 
 def _resolve_staged_skims_input_path(manifest_inputs: Optional[Dict[str, Any]] = None) -> Optional[str]:
@@ -469,12 +479,14 @@ def prepare_staged_skims_for_processing(
 ) -> pd.DataFrame:
     started = time.perf_counter()
     prepared_skims_path = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
-    if prepared_skims_path.exists():
+    prepared_skims_existing = _existing_valid_skims_parquet(prepared_skims_path)
+    if prepared_skims_existing:
         logger.info("Step 1: reusing prepared skims %s", prepared_skims_path)
         return read_table(prepared_skims_path)
 
     prepared_grouped_skims_path = prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
-    if prepared_grouped_skims_path.exists():
+    prepared_grouped_existing = _existing_valid_skims_parquet(prepared_grouped_skims_path)
+    if prepared_grouped_existing:
         logger.info("Step 1: reusing grouped prepared skims %s", prepared_grouped_skims_path)
     else:
         group_started = time.perf_counter()

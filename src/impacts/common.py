@@ -780,6 +780,19 @@ def _table_available_columns(path: str | Path) -> list[str]:
     return pq.read_schema(target).names
 
 
+def is_valid_parquet(path: str | Path) -> bool:
+    target = Path(path)
+    if target.suffix.lower() != ".parquet" or not target.exists() or target.stat().st_size <= 0:
+        return False
+    import pyarrow.parquet as pq
+
+    try:
+        pq.read_schema(target)
+    except Exception:
+        return False
+    return True
+
+
 def _duckdb_scan_expression(path: str | Path) -> str:
     target = Path(path)
     if target.suffix.lower() != ".parquet":
@@ -852,7 +865,6 @@ def _prepare_skims_for_grid_allocation_duckdb(
     con = duckdb.connect(database=":memory:")
     show_progress = _should_show_duckdb_progress_bar()
     try:
-        _configure_duckdb_progress_bar(con, enabled=show_progress)
         if known_vehicle_type_ids is not None:
             observed_ids = {
                 row[0]
@@ -905,6 +917,8 @@ def _prepare_skims_for_grid_allocation_duckdb(
             GROUP BY {", ".join(group_by_exprs)}
         """
         output_sql = str(output_path).replace("'", "''")
+        if show_progress:
+            _configure_duckdb_progress_bar(con, enabled=True)
         con.execute(f"COPY ({query}) TO '{output_sql}' (FORMAT PARQUET)")
         if show_progress:
             _configure_duckdb_progress_bar(con, enabled=False)

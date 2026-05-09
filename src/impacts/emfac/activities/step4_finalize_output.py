@@ -455,8 +455,9 @@ def _build_rates_store_duckdb(*, parquet_root: Path, duckdb_path: Path) -> Path:
     con = duckdb.connect(str(duckdb_path))
     show_progress = _should_show_duckdb_progress_bar()
     try:
-        _configure_duckdb_progress_bar(con, enabled=show_progress)
         con.execute("DROP TABLE IF EXISTS emfac_rates")
+        if show_progress:
+            _configure_duckdb_progress_bar(con, enabled=True)
         con.execute(
             """
             CREATE TABLE emfac_rates AS
@@ -465,6 +466,8 @@ def _build_rates_store_duckdb(*, parquet_root: Path, duckdb_path: Path) -> Path:
             """,
             [parquet_glob],
         )
+        if show_progress:
+            _configure_duckdb_progress_bar(con, enabled=False)
         con.execute("CREATE INDEX IF NOT EXISTS emfac_rates_emfac_id_idx ON emfac_rates (emfacId)")
         if _column_exists(con, "emfac_rates", "county"):
             con.execute("CREATE INDEX IF NOT EXISTS emfac_rates_county_idx ON emfac_rates (county)")
