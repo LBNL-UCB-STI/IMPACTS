@@ -33,7 +33,7 @@ def test_build_skims_scale_factors_uses_transit_sample_for_non_bus_transit() -> 
     assert factors.tolist() == [10.0, 4.0, 4.0, 4.0]
 
 
-def test_prepare_skims_for_grid_allocation_streams_parquet_and_aggregates_across_chunks(
+def test_prepare_skims_for_grid_allocation_aggregates_parquet_without_eager_raw_read(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -52,11 +52,10 @@ def test_prepare_skims_for_grid_allocation_streams_parquet_and_aggregates_across
 
     def _guarded_read_parquet(path_like, *args, **kwargs):
         if Path(path_like) == raw_path:
-            raise AssertionError("prepare_skims_for_grid_allocation should stream parquet batches, not eager-read the raw skims file")
+            raise AssertionError("prepare_skims_for_grid_allocation should not eager-read the raw skims file")
         return original_read_parquet(path_like, *args, **kwargs)
 
     monkeypatch.setattr(pd, "read_parquet", _guarded_read_parquet)
-    monkeypatch.setattr(common, "default_chunk_size", 1)
 
     aggregated = common.prepare_skims_for_grid_allocation(
         str(raw_path),
@@ -88,7 +87,7 @@ def test_prepare_skims_for_grid_allocation_streams_parquet_and_aggregates_across
     pd.testing.assert_frame_equal(aggregated, written)
 
 
-def test_prepare_skims_for_grid_allocation_filters_vehicle_types_during_streaming(tmp_path: Path) -> None:
+def test_prepare_skims_for_grid_allocation_filters_vehicle_types_during_aggregation(tmp_path: Path) -> None:
     raw_skims = pd.DataFrame(
         [
             {"hour": 7, "linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "NOx": 1.25, "observations": 2.0},
@@ -115,6 +114,103 @@ def test_prepare_skims_for_grid_allocation_filters_vehicle_types_during_streamin
             "process": "RUNEX",
             "observations": 2.0,
             "NOx": 1.25,
+        }
+    ]
+
+
+def test_prepare_skims_for_grid_allocation_parses_compact_emissions_schema(tmp_path: Path) -> None:
+    raw_skims = pd.DataFrame(
+        [
+            {
+                "hour": 7,
+                "linkId": 101,
+                "vehicleTypeId": "pax-car",
+                "process": "RUNEX",
+                "emissions": "NOx:1.25;PM2_5:0.10;SOx:0.01",
+                "observations": 2.0,
+            },
+            {
+                "hour": 8,
+                "linkId": 101,
+                "vehicleTypeId": "pax-car",
+                "process": "RUNEX",
+                "emissions": "NOx:0.75;PM2_5:0.20",
+                "observations": 3.0,
+            },
+            {
+                "hour": 9,
+                "linkId": 202,
+                "vehicleTypeId": "ft-md",
+                "process": "PMBW",
+                "emissions": "NOx:4.00;PM2_5:0.50",
+                "observations": 1.0,
+            },
+        ]
+    )
+    raw_path = tmp_path / "skimsEmissions.parquet"
+    pq.write_table(pa.Table.from_pandas(raw_skims, preserve_index=False), raw_path, row_group_size=1)
+    output_path = tmp_path / "prepared_skims.parquet"
+
+    aggregated = common.prepare_skims_for_grid_allocation(
+        str(raw_path),
+        str(output_path),
+        group_cols=["linkId", "vehicleTypeId", "process"],
+        required_pollutants=["NOx", "PM2_5"],
+    ).sort_values(["linkId", "vehicleTypeId", "process"]).reset_index(drop=True)
+
+    assert aggregated.to_dict("records") == [
+        {
+            "linkId": 101,
+            "vehicleTypeId": "pax-car",
+            "process": "RUNEX",
+            "observations": 5.0,
+            "NOx": 4.75,
+            "PM2_5": 0.8,
+        },
+        {
+            "linkId": 202,
+            "vehicleTypeId": "ft-md",
+            "process": "PMBW",
+            "observations": 1.0,
+            "NOx": 4.0,
+            "PM2_5": 0.5,
+        },
+    ]
+
+
+def test_prepare_skims_for_grid_allocation_parses_compact_emissions_with_pollutant_mapping(tmp_path: Path) -> None:
+    raw_skims = pd.DataFrame(
+        [
+            {
+                "hour": 7,
+                "linkId": 101,
+                "vehicleTypeId": "pax-car",
+                "process": "RUNEX",
+                "emissions": "PM25:0.50;ROG:0.25",
+                "observations": 4.0,
+            }
+        ]
+    )
+    raw_path = tmp_path / "skimsEmissions.parquet"
+    pq.write_table(pa.Table.from_pandas(raw_skims, preserve_index=False), raw_path, row_group_size=1)
+    output_path = tmp_path / "prepared_skims.parquet"
+
+    aggregated = common.prepare_skims_for_grid_allocation(
+        str(raw_path),
+        str(output_path),
+        group_cols=["linkId", "vehicleTypeId", "process"],
+        required_pollutants=["PM2_5", "ROG"],
+        pollutants_map={"PM2_5": "PM25", "ROG": "ROG"},
+    ).reset_index(drop=True)
+
+    assert aggregated.to_dict("records") == [
+        {
+            "linkId": 101,
+            "vehicleTypeId": "pax-car",
+            "process": "RUNEX",
+            "observations": 4.0,
+            "PM2_5": 2.0,
+            "ROG": 1.0,
         }
     ]
 
@@ -166,7 +262,7 @@ def test_prepare_staged_skims_for_processing_reuses_grouped_intermediate(tmp_pat
     ]
 
 
-def test_annualize_prepared_skims_streams_grouped_input(tmp_path: Path, monkeypatch) -> None:
+def test_annualize_prepared_skims_uses_grouped_input_without_eager_read(tmp_path: Path, monkeypatch) -> None:
     grouped = pd.DataFrame(
         [
             {"linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "observations": 2.0, "NOx": 10.0},
@@ -210,7 +306,7 @@ def test_annualize_prepared_skims_streams_grouped_input(tmp_path: Path, monkeypa
 
     def _guarded_read_parquet(path_like, *args, **kwargs):
         if Path(path_like) == grouped_path:
-            raise AssertionError("annualize_prepared_skims_for_grid_allocation should stream the grouped skims input")
+            raise AssertionError("annualize_prepared_skims_for_grid_allocation should not eager-read the grouped skims input")
         return original_read_parquet(path_like, *args, **kwargs)
 
     monkeypatch.setattr(pd, "read_parquet", _guarded_read_parquet)

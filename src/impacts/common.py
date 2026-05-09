@@ -787,6 +787,31 @@ def _duckdb_scan_expression(path: str | Path) -> str:
     return f"read_parquet('{path_sql}')"
 
 
+def _emissions_value_expression(*, source_pollutant: str) -> str:
+    escaped = re.escape(source_pollutant).replace("'", "''")
+    return (
+        "COALESCE("
+        f"TRY_CAST(regexp_extract(COALESCE(CAST(emissions AS VARCHAR), ''), '(^|;){escaped}:([^;]+)', 2) AS DOUBLE), "
+        "0.0)"
+    )
+
+
+def _resolve_skims_pollutant_mode(
+    *,
+    available_columns: list[str],
+    source_pollutants: list[str],
+) -> str:
+    if all(col in available_columns for col in source_pollutants):
+        return "explicit"
+    if "emissions" in available_columns:
+        return "compact"
+    missing_pollutants = [col for col in source_pollutants if col not in available_columns]
+    raise ValueError(
+        "Skims parquet must include either explicit pollutant columns or an emissions column for DuckDB aggregation: "
+        f"missing={missing_pollutants}"
+    )
+
+
 def _prepare_skims_for_grid_allocation_duckdb(
     *,
     skims_path: str,
@@ -800,11 +825,13 @@ def _prepare_skims_for_grid_allocation_duckdb(
     started = time.perf_counter()
     available_columns = _table_available_columns(skims_path)
     source_pollutants = [pollutants_map.get(p, p) for p in required_pollutants] if pollutants_map else list(required_pollutants)
+    pollutant_mode = _resolve_skims_pollutant_mode(
+        available_columns=available_columns,
+        source_pollutants=source_pollutants,
+    )
     if not all(col in available_columns for col in prepared_group_cols):
         missing = [col for col in prepared_group_cols if col not in available_columns]
         raise ValueError(f"Prepared skims missing required grouping columns: {missing}")
-    if not all(col in available_columns for col in source_pollutants):
-        raise ValueError("DuckDB skims aggregation requires explicit pollutant columns in the source file.")
 
     scan = _duckdb_scan_expression(skims_path)
     con = duckdb.connect(database=":memory:")
@@ -828,11 +855,14 @@ def _prepare_skims_for_grid_allocation_duckdb(
                     f"the configured passenger/freight vehicle types files: sample={unknown_ids[:10]}"
                 )
 
-        value_select = ['SUM(COALESCE(TRY_CAST(observations AS DOUBLE), 0.0)) AS observations']
+        observations_expr = "COALESCE(TRY_CAST(observations AS DOUBLE), 0.0)"
+        value_select = [f"SUM({observations_expr}) AS observations"]
         for pollutant, source_col in zip(required_pollutants, source_pollutants):
-            value_select.append(
-                f'SUM(COALESCE(TRY_CAST("{source_col}" AS DOUBLE), 0.0)) AS "{pollutant}"'
-            )
+            if pollutant_mode == "explicit":
+                value_expr = f'COALESCE(TRY_CAST("{source_col}" AS DOUBLE), 0.0)'
+            else:
+                value_expr = f"{_emissions_value_expression(source_pollutant=source_col)} * {observations_expr}"
+            value_select.append(f'SUM({value_expr}) AS "{pollutant}"')
         select_cols: list[str] = []
         group_by_exprs: list[str] = []
         for idx, col in enumerate(prepared_group_cols, start=1):
@@ -893,12 +923,10 @@ def prepare_skims_for_grid_allocation(
     required = required_pollutants or default_prepared_pollutants
     available_columns = _table_available_columns(skims_path)
     source_pollutants = [pollutants_map.get(p, p) for p in required] if pollutants_map else list(required)
-    missing_pollutants = [col for col in source_pollutants if col not in available_columns]
-    if missing_pollutants:
-        raise ValueError(
-            "Skims parquet must include explicit pollutant columns for fast aggregation: "
-            f"missing={missing_pollutants}"
-        )
+    _resolve_skims_pollutant_mode(
+        available_columns=available_columns,
+        source_pollutants=source_pollutants,
+    )
     return _prepare_skims_for_grid_allocation_duckdb(
         skims_path=skims_path,
         output_path=output_path,
