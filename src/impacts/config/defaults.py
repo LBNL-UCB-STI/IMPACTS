@@ -41,6 +41,9 @@ tons_per_year_to_ug_per_s: float = grams_per_short_ton * 1_000_000.0 / (365.0 * 
 chunk_size: int = 50_000
 """Default batch size used to chunk large workflow tables for processing and parallelization."""
 
+skims_chunk_size: int = 250_000
+"""Default batch size used when streaming large skims tables during preprocessing."""
+
 meters_per_mile: float = 1609.344
 """Meters in one mile — used for distance unit conversion."""
 

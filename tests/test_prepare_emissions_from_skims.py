@@ -5,97 +5,13 @@ from pathlib import Path
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 import impacts.common as common
+import impacts.pipeline.workflow.annualization as annualization_module
+import impacts.pipeline.workflow.prepare_emissions_from_skims as prepare_skims_module
 from impacts.pipeline.workflow.annualization import _build_skims_scale_factors
-from impacts.pipeline.workflow.prepare_emissions_from_skims import _filter_prepared_skims_by_assignment
-
-
-def test_filter_prepared_skims_by_assignment_uses_vehicle_types_contract(tmp_path: Path) -> None:
-    passenger_vehicle_types = pd.DataFrame(
-        [
-            {"vehicleTypeId": "pax-car", "vehicleCategory": "Car"},
-            {"vehicleTypeId": "pax-bus", "vehicleCategory": "Bus"},
-        ]
-    )
-    freight_vehicle_types = pd.DataFrame(
-        [
-            {
-                "vehicleTypeId": "ft-md",
-                "vehicleCategory": "Class456Vocational",
-                "vehicleClass": "truck",
-                "vehicleUse": "freight",
-            },
-        ]
-    )
-    passenger_vehicle_types_path = tmp_path / "vehicleTypes--atlas.csv"
-    freight_vehicle_types_path = tmp_path / "vehicleTypes--frism.csv"
-    passenger_vehicle_types.to_csv(passenger_vehicle_types_path, index=False)
-    freight_vehicle_types.to_csv(freight_vehicle_types_path, index=False)
-
-    prepared = pd.DataFrame(
-        [
-            {"linkId": 1, "vehicleTypeId": "pax-car", "process": "RUNEX", "NOx": 1.0, "observations": 2.0},
-            {"linkId": 1, "vehicleTypeId": "pax-bus", "process": "RUNEX", "NOx": 1.0, "observations": 2.0},
-            {"linkId": 1, "vehicleTypeId": "ft-md", "process": "RUNEX", "NOx": 1.0, "observations": 2.0},
-        ]
-    )
-
-    passenger_only = _filter_prepared_skims_by_assignment(
-        prepared,
-        passenger_vehicle_types_path=str(passenger_vehicle_types_path),
-        freight_vehicle_types_path=str(freight_vehicle_types_path),
-        include_passenger=True,
-        include_freight=False,
-    )
-    assert passenger_only["vehicleTypeId"].tolist() == ["pax-car", "pax-bus"]
-
-    freight_only = _filter_prepared_skims_by_assignment(
-        prepared,
-        passenger_vehicle_types_path=str(passenger_vehicle_types_path),
-        freight_vehicle_types_path=str(freight_vehicle_types_path),
-        include_passenger=False,
-        include_freight=True,
-    )
-    assert freight_only["vehicleTypeId"].tolist() == ["ft-md"]
-
-
-def test_filter_prepared_skims_by_assignment_keeps_transit_with_passenger(tmp_path: Path) -> None:
-    passenger_vehicle_types = pd.DataFrame(
-        [
-            {"vehicleTypeId": "pax-car", "vehicleCategory": "Car"},
-            {"vehicleTypeId": "BUS-DEFAULT", "vehicleCategory": "MediumDutyPassenger", "emfacVehicleCategory": "UBUS"},
-            {"vehicleTypeId": "RAIL-DEFAULT", "vehicleCategory": "Rail-Default"},
-        ]
-    )
-    freight_vehicle_types = pd.DataFrame(
-        [
-            {"vehicleTypeId": "ft-md", "vehicleCategory": "Class456Vocational", "vehicleClass": "truck", "vehicleUse": "freight"},
-        ]
-    )
-    passenger_vehicle_types_path = tmp_path / "vehicleTypes--atlas.csv"
-    freight_vehicle_types_path = tmp_path / "vehicleTypes--frism.csv"
-    passenger_vehicle_types.to_csv(passenger_vehicle_types_path, index=False)
-    freight_vehicle_types.to_csv(freight_vehicle_types_path, index=False)
-
-    prepared = pd.DataFrame(
-        [
-            {"linkId": 1, "vehicleTypeId": "pax-car", "process": "RUNEX", "NOx": 1.0, "observations": 2.0},
-            {"linkId": 1, "vehicleTypeId": "BUS-DEFAULT", "process": "RUNEX", "NOx": 1.0, "observations": 2.0},
-            {"linkId": 1, "vehicleTypeId": "RAIL-DEFAULT", "process": "RUNEX", "NOx": 1.0, "observations": 2.0},
-            {"linkId": 1, "vehicleTypeId": "ft-md", "process": "RUNEX", "NOx": 1.0, "observations": 2.0},
-        ]
-    )
-
-    passenger_only = _filter_prepared_skims_by_assignment(
-        prepared,
-        passenger_vehicle_types_path=str(passenger_vehicle_types_path),
-        freight_vehicle_types_path=str(freight_vehicle_types_path),
-        include_passenger=True,
-        include_freight=False,
-    )
-
-    assert passenger_only["vehicleTypeId"].tolist() == ["pax-car", "BUS-DEFAULT", "RAIL-DEFAULT"]
+from impacts.pipeline.workflow.annualization import annualize_prepared_skims_for_grid_allocation
 
 
 def test_build_skims_scale_factors_uses_transit_sample_for_non_bus_transit() -> None:
@@ -170,3 +86,158 @@ def test_prepare_skims_for_grid_allocation_streams_parquet_and_aggregates_across
 
     written = original_read_parquet(output_path).sort_values(["linkId", "vehicleTypeId", "process"]).reset_index(drop=True)
     pd.testing.assert_frame_equal(aggregated, written)
+
+
+def test_prepare_skims_for_grid_allocation_filters_vehicle_types_during_streaming(tmp_path: Path) -> None:
+    raw_skims = pd.DataFrame(
+        [
+            {"hour": 7, "linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "NOx": 1.25, "observations": 2.0},
+            {"hour": 8, "linkId": 202, "vehicleTypeId": "ft-md", "process": "RUNEX", "NOx": 9.99, "observations": 4.0},
+        ]
+    )
+    raw_path = tmp_path / "skimsEmissions.parquet"
+    pq.write_table(pa.Table.from_pandas(raw_skims, preserve_index=False), raw_path, row_group_size=1)
+    output_path = tmp_path / "prepared_skims.parquet"
+
+    aggregated = common.prepare_skims_for_grid_allocation(
+        str(raw_path),
+        str(output_path),
+        group_cols=["linkId", "vehicleTypeId", "process"],
+        required_pollutants=["NOx"],
+        allowed_vehicle_type_ids={"pax-car"},
+        known_vehicle_type_ids={"pax-car", "ft-md"},
+    ).reset_index(drop=True)
+
+    assert aggregated.to_dict("records") == [
+        {
+            "linkId": 101,
+            "vehicleTypeId": "pax-car",
+            "process": "RUNEX",
+            "observations": 2.0,
+            "NOx": 1.25,
+        }
+    ]
+
+
+def test_prepare_staged_skims_for_processing_reuses_grouped_intermediate(tmp_path: Path, monkeypatch) -> None:
+    input_root = tmp_path / "inputs"
+    grouped_path = input_root / "skims" / "prepared_skims_grouped_for_grid_allocation.parquet"
+    grouped_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {"linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "observations": 5.0, "NOx": 2.0},
+        ]
+    ).to_parquet(grouped_path, index=False)
+
+    def _fail_prepare(*args, **kwargs):
+        raise AssertionError("prepare_skims_for_grid_allocation should not rerun when grouped prepared skims already exist")
+
+    def _stub_annualize(*, prepared_skims_path: str, output_path: str, **kwargs):
+        assert Path(prepared_skims_path) == grouped_path
+        pd.DataFrame(
+            [
+                {"linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "totTrips": 10.0, "totVMT": 3.0, "tons_per_year_NOx": 0.1},
+            ]
+        ).to_parquet(output_path, index=False)
+
+    monkeypatch.setattr(prepare_skims_module, "prepare_skims_for_grid_allocation", _fail_prepare)
+    monkeypatch.setattr(prepare_skims_module, "annualize_prepared_skims_for_grid_allocation", _stub_annualize)
+
+    result = prepare_skims_module.prepare_staged_skims_for_processing(
+        input_root=input_root,
+        skims_input_source=str(tmp_path / "raw.skims.parquet"),
+        network_path=str(tmp_path / "network.parquet"),
+        passenger_vehicle_types_path=None,
+        freight_vehicle_types_path=None,
+        beam_length_col="length",
+        prepared_skims_group_cols=["linkId", "vehicleTypeId", "process"],
+        pollutants=["NOx"],
+        pollutants_map={},
+        vehicle_category_metadata_file=str(tmp_path / "vehicle_categories.csv"),
+        annualization_days={"light_duty": 327.0, "medium_heavy_duty": 312.0},
+        population_sample=1.0,
+        transit_sample=1.0,
+        include_passenger=True,
+        include_freight=True,
+    )
+
+    assert result.to_dict("records") == [
+        {"linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "totTrips": 10.0, "totVMT": 3.0, "tons_per_year_NOx": 0.1},
+    ]
+
+
+def test_annualize_prepared_skims_streams_grouped_input(tmp_path: Path, monkeypatch) -> None:
+    grouped = pd.DataFrame(
+        [
+            {"linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "observations": 2.0, "NOx": 10.0},
+            {"linkId": 102, "vehicleTypeId": "ft-md", "process": "RUNEX", "observations": 3.0, "NOx": 30.0},
+        ]
+    )
+    grouped_path = tmp_path / "prepared_grouped.parquet"
+    pq.write_table(pa.Table.from_pandas(grouped, preserve_index=False), grouped_path, row_group_size=1)
+
+    network = pd.DataFrame(
+        [
+            {"linkId": 101, "length": 1609.344, "attributeOrigType": "local"},
+            {"linkId": 102, "length": 3218.688, "attributeOrigType": "arterial"},
+        ]
+    )
+    network_path = tmp_path / "network.parquet"
+    network.to_parquet(network_path, index=False)
+
+    passenger_vehicle_types = pd.DataFrame(
+        [{"vehicleTypeId": "pax-car", "vehicleCategory": "Car", "emfacVehicleCategory": "LDA"}]
+    )
+    freight_vehicle_types = pd.DataFrame(
+        [{"vehicleTypeId": "ft-md", "vehicleCategory": "Class456Vocational", "vehicleClass": "truck", "vehicleUse": "freight", "emfacVehicleCategory": "Class 4-6 Vocational"}]
+    )
+    passenger_path = tmp_path / "vehicleTypes--atlas.csv"
+    freight_path = tmp_path / "vehicleTypes--frism.csv"
+    passenger_vehicle_types.to_csv(passenger_path, index=False)
+    freight_vehicle_types.to_csv(freight_path, index=False)
+
+    metadata = pd.DataFrame(
+        [
+            {"vehicleCategory": "LDA", "operation_days_per_year": 327.0},
+            {"vehicleCategory": "Class 4-6 Vocational", "operation_days_per_year": 312.0},
+        ]
+    )
+    metadata_path = tmp_path / "vehicle_categories.csv"
+    metadata.to_csv(metadata_path, index=False)
+    output_path = tmp_path / "annualized.parquet"
+
+    original_read_parquet = pd.read_parquet
+
+    def _guarded_read_parquet(path_like, *args, **kwargs):
+        if Path(path_like) == grouped_path:
+            raise AssertionError("annualize_prepared_skims_for_grid_allocation should stream the grouped skims input")
+        return original_read_parquet(path_like, *args, **kwargs)
+
+    monkeypatch.setattr(pd, "read_parquet", _guarded_read_parquet)
+    result = annualize_prepared_skims_for_grid_allocation(
+        prepared_skims_path=str(grouped_path),
+        output_path=str(output_path),
+        network_path=str(network_path),
+        beam_length_col="length",
+        group_cols=["linkId", "vehicleTypeId", "process"],
+        required_pollutants=["NOx"],
+        vehicle_category_metadata_file=str(metadata_path),
+        annualization_days={"light_duty": 327.0, "medium_heavy_duty": 312.0},
+        passenger_vehicle_types_path=str(passenger_path),
+        freight_vehicle_types_path=str(freight_path),
+        population_sample=1.0,
+        transit_sample=1.0,
+    )
+
+    assert list(result.columns) == ["linkId", "vehicleTypeId", "process", "roadCategory", "totTrips", "totVMT", "tons_per_year_NOx"]
+
+    written = original_read_parquet(output_path).sort_values(["linkId"]).reset_index(drop=True)
+    assert written["linkId"].tolist() == [101, 102]
+    assert written["vehicleTypeId"].tolist() == ["pax-car", "ft-md"]
+    assert written["process"].tolist() == ["RUNEX", "RUNEX"]
+    assert written["roadCategory"].tolist() == ["local", "arterial"]
+    assert written["totTrips"].tolist() == [654.0, 936.0]
+    assert written["totVMT"].tolist() == pytest.approx([654.0, 1872.0])
+    assert written["tons_per_year_NOx"].tolist() == pytest.approx(
+        [10.0 * 327.0 / 907184.74, 30.0 * 312.0 / 907184.74]
+    )

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 import re
+import time
 from typing import Optional
 
+import duckdb
 import numpy as np
 import pandas as pd
 
@@ -12,6 +15,8 @@ from ...config.defaults import annualization_days_by_vehicle_group as default_an
 from ...config.defaults import grams_per_short_ton
 from ...config.defaults import meters_per_mile as _METERS_PER_MILE
 from ...config.defaults import pollutants as default_prepared_pollutants
+
+logger = logging.getLogger(__name__)
 
 
 _SKIMS_DIMENSION_COLS = {
@@ -74,13 +79,10 @@ def annualize_prepared_skims_for_grid_allocation(
     population_sample: float = 1.0,
     transit_sample: float = 1.0,
 ) -> pd.DataFrame:
-    prepared = read_table(prepared_skims_path)
+    started = time.perf_counter()
     link_lengths = read_table(network_path)
     prepared_group_cols = group_cols or ["linkId", "vehicleTypeId", "process"]
     required = required_pollutants or default_prepared_pollutants
-    missing_group_cols = [col for col in prepared_group_cols if col not in prepared.columns]
-    if missing_group_cols:
-        raise ValueError(f"Annualized skims missing required grouping columns: {missing_group_cols}")
 
     if "linkId" not in link_lengths.columns or beam_length_col not in link_lengths.columns:
         raise ValueError(
@@ -91,46 +93,197 @@ def annualize_prepared_skims_for_grid_allocation(
         network_cols.append("attributeOrigType")
     link_lengths = link_lengths[network_cols].copy()
     link_lengths[beam_length_col] = pd.to_numeric(link_lengths[beam_length_col], errors="coerce").fillna(0.0)
-    prepared = prepared.merge(link_lengths, how="left", on="linkId")
-    prepared[beam_length_col] = pd.to_numeric(prepared[beam_length_col], errors="coerce").fillna(0.0)
-    if "attributeOrigType" in prepared.columns:
-        prepared = prepared.rename(columns={"attributeOrigType": "roadCategory"})
-    scale_factors = _build_skims_scale_factors(
-        prepared,
-        population_sample=population_sample,
-        transit_sample=transit_sample,
-    )
-    annualization_factors = resolve_skims_annualization_factors(
-        prepared,
+
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.exists():
+        output.unlink()
+    if Path(prepared_skims_path).suffix.lower() != ".parquet":
+        raise ValueError("Annualized skims input must be .parquet")
+    if output.suffix.lower() != ".parquet":
+        raise ValueError("Annualized skims output must be .parquet")
+    annualization_days_lookup = _resolve_vehicle_type_annualization_days_lookup(
         vehicle_category_metadata_file=vehicle_category_metadata_file,
         annualization_days=annualization_days,
         passenger_vehicle_types_path=passenger_vehicle_types_path,
         freight_vehicle_types_path=freight_vehicle_types_path,
     )
+    return _annualize_prepared_skims_with_duckdb(
+        prepared_skims_path=prepared_skims_path,
+        output_path=output,
+        prepared_group_cols=prepared_group_cols,
+        required_pollutants=required,
+        link_lengths=link_lengths,
+        beam_length_col=beam_length_col,
+        annualization_days_lookup=annualization_days_lookup,
+        population_sample=population_sample,
+        transit_sample=transit_sample,
+        started=started,
+    )
 
-    retained_dim_cols = [col for col in prepared.columns if col in _SKIMS_DIMENSION_COLS and col not in prepared_group_cols]
-    out = prepared[prepared_group_cols + retained_dim_cols].copy()
-    prepared_observations = pd.to_numeric(prepared.get("observations", 0.0), errors="coerce").fillna(0.0)
-    out["totTrips"] = prepared_observations * scale_factors * annualization_factors
-    out["totVMT"] = out["totTrips"] * prepared[beam_length_col] / _METERS_PER_MILE
-    out = out.drop(columns=[col for col in [beam_length_col] if col in out.columns], errors="ignore")
-    for pollutant in required:
-        values = (
-            pd.to_numeric(prepared[pollutant], errors="coerce").fillna(0.0)
-            if pollutant in prepared.columns
-            else pd.Series(np.zeros(len(prepared), dtype=float), index=prepared.index)
+
+def _duckdb_scan_expression(path: str | Path) -> str:
+    target = Path(path)
+    if target.suffix.lower() != ".parquet":
+        raise ValueError("Annualized skims input must be .parquet")
+    path_sql = str(target).replace("'", "''")
+    return f"read_parquet('{path_sql}')"
+
+
+def _annualize_prepared_skims_with_duckdb(
+    *,
+    prepared_skims_path: str,
+    output_path: Path,
+    prepared_group_cols: list[str],
+    required_pollutants: list[str],
+    link_lengths: pd.DataFrame,
+    beam_length_col: str,
+    annualization_days_lookup: dict[str, float],
+    population_sample: float,
+    transit_sample: float,
+    started: float,
+) -> pd.DataFrame:
+    scan = _duckdb_scan_expression(prepared_skims_path)
+    con = duckdb.connect(database=":memory:")
+    lookup_df = pd.DataFrame(
+        {
+            "vehicleTypeId": list(annualization_days_lookup.keys()),
+            "annualization_days": list(annualization_days_lookup.values()),
+        }
+    )
+    output_columns = list(prepared_group_cols)
+    if "attributeOrigType" in link_lengths.columns:
+        output_columns.append("roadCategory")
+    output_columns.extend(["totTrips", "totVMT"])
+    output_columns.extend([f"tons_per_year_{pollutant}" for pollutant in required_pollutants])
+    try:
+        con.execute("PRAGMA threads = 4")
+        con.register("link_lengths", link_lengths)
+        con.register("annualization_lookup", lookup_df)
+        missing_vehicle_types = [
+            row[0]
+            for row in con.execute(
+                f"""
+                SELECT DISTINCT trim(CAST(source.vehicleTypeId AS VARCHAR)) AS vehicleTypeId
+                FROM {scan} AS source
+                LEFT JOIN annualization_lookup AS lookup
+                  ON trim(CAST(source.vehicleTypeId AS VARCHAR)) = lookup.vehicleTypeId
+                WHERE lookup.annualization_days IS NULL
+                LIMIT 10
+                """
+            ).fetchall()
+            if row[0]
+        ]
+        if missing_vehicle_types:
+            raise ValueError(
+                "Could not resolve annualization days for some skim vehicleTypeId values using "
+                "the configured passenger/freight vehicle types files: "
+                f"sample={missing_vehicle_types[:10]}"
+            )
+
+        vehicle_type_expr = "trim(CAST(source.vehicleTypeId AS VARCHAR))"
+        scale_expr = (
+            f"CASE WHEN regexp_matches(upper({vehicle_type_expr}), '(^|[-_])(BUS|RAIL|FERRY|SUBWAY|TRAM|TRAIN|COACH)($|[-_])') "
+            f"THEN {1.0 / transit_sample} ELSE {1.0 / population_sample} END"
         )
-        out[f"tons_per_year_{pollutant}"] = values * scale_factors * annualization_factors / grams_per_short_ton
+        obs_expr = "COALESCE(TRY_CAST(source.observations AS DOUBLE), 0.0)"
+        annualization_expr = "lookup.annualization_days"
+        tot_trips_expr = f"({obs_expr} * {scale_expr} * {annualization_expr})"
+        select_parts = []
+        for col in prepared_group_cols:
+            if col == "vehicleTypeId":
+                select_parts.append(f'{vehicle_type_expr} AS "{col}"')
+            else:
+                select_parts.append(f'source."{col}" AS "{col}"')
+        if "attributeOrigType" in link_lengths.columns:
+            select_parts.append('link_lengths.attributeOrigType AS "roadCategory"')
+        select_parts.append(f"{tot_trips_expr} AS totTrips")
+        select_parts.append(
+            f"({tot_trips_expr} * COALESCE(TRY_CAST(link_lengths.\"{beam_length_col}\" AS DOUBLE), 0.0) / {_METERS_PER_MILE}) AS totVMT"
+        )
+        for pollutant in required_pollutants:
+            select_parts.append(
+                f"""(
+                    COALESCE(TRY_CAST(source."{pollutant}" AS DOUBLE), 0.0)
+                    * {scale_expr}
+                    * {annualization_expr}
+                    / {grams_per_short_ton}
+                ) AS "tons_per_year_{pollutant}" """
+            )
+        query = f"""
+            SELECT
+                {", ".join(select_parts)}
+            FROM {scan} AS source
+            LEFT JOIN link_lengths
+              ON source.linkId = link_lengths.linkId
+            LEFT JOIN annualization_lookup AS lookup
+              ON {vehicle_type_expr} = lookup.vehicleTypeId
+        """
+        output_sql = str(output_path).replace("'", "''")
+        con.execute(f"COPY ({query}) TO '{output_sql}' (FORMAT PARQUET)")
+        output_rows = con.execute(f"SELECT COUNT(*) FROM ({query})").fetchone()[0]
+    finally:
+        con.close()
+    logger.info(
+        "Annualized prepared skims via DuckDB in %.2fs: input=%s output_rows=%d output=%s",
+        time.perf_counter() - started,
+        prepared_skims_path,
+        output_rows,
+        output_path,
+    )
+    return pd.DataFrame(columns=output_columns)
+def _resolve_vehicle_type_annualization_days_lookup(
+    *,
+    vehicle_category_metadata_file: Optional[str],
+    annualization_days: Optional[dict[str, float]] = None,
+    passenger_vehicle_types_path: Optional[str] = None,
+    freight_vehicle_types_path: Optional[str] = None,
+) -> dict[str, float]:
+    defaults = _default_annualization_days(annualization_days)
+    if not vehicle_category_metadata_file:
+        raise ValueError("vehicle_category_metadata_file is required to resolve annualization factors.")
+    if not passenger_vehicle_types_path or not freight_vehicle_types_path:
+        raise ValueError("Passenger and freight vehicle types inputs are required to resolve annualization factors.")
+    csv_path = str(vehicle_category_metadata_file).strip()
+    if not csv_path:
+        raise ValueError("vehicle_category_metadata_file must be non-empty.")
+    category_lookup, sanitized_categories = _load_vehicle_operation_days_lookup(csv_path)
+    vehicle_type_category_lookup = _load_vehicle_type_category_lookup(
+        passenger_vehicle_types_path,
+        freight_vehicle_types_path,
+        category_lookup=category_lookup,
+        sanitized_categories=sanitized_categories,
+    )
+    resolved: dict[str, float] = {}
+    for vehicle_type_id, category in vehicle_type_category_lookup.items():
+        if category in category_lookup:
+            resolved[vehicle_type_id] = float(category_lookup[category])
+        else:
+            resolved[vehicle_type_id] = float(defaults[_vehicle_group_for_emfac_category(category)])
+    return resolved
 
-    output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    if output.suffix.lower() == ".parquet":
-        out.to_parquet(output, index=False)
-    elif output.name.lower().endswith(".csv.gz"):
-        out.to_csv(output, index=False, compression="gzip")
-    else:
-        raise ValueError("Annualized skims output must be .parquet or .csv.gz")
-    return out
+
+def _resolve_skims_annualization_factors_from_lookup(
+    prepared: pd.DataFrame,
+    *,
+    vehicle_type_annualization_days_lookup: dict[str, float],
+) -> pd.Series:
+    if "vehicleTypeId" not in prepared.columns:
+        raise ValueError("Prepared skims must include vehicleTypeId to resolve annualization factors.")
+    resolved = prepared["vehicleTypeId"].astype(str).map(vehicle_type_annualization_days_lookup)
+    missing_vehicle_types = (
+        prepared.loc[resolved.isna(), "vehicleTypeId"]
+        .astype(str)
+        .drop_duplicates()
+        .tolist()
+    )
+    if missing_vehicle_types:
+        raise ValueError(
+            "Could not resolve annualization days for some skim vehicleTypeId values using "
+            "the configured passenger/freight vehicle types files: "
+            f"sample={missing_vehicle_types[:10]}"
+        )
+    return resolved.astype(float)
 
 
 def _sanitize_emfac_token(value: object) -> str:
@@ -275,40 +428,13 @@ def resolve_skims_annualization_factors(
     passenger_vehicle_types_path: Optional[str] = None,
     freight_vehicle_types_path: Optional[str] = None,
 ) -> pd.Series:
-    defaults = _default_annualization_days(annualization_days)
-    if not vehicle_category_metadata_file:
-        raise ValueError("vehicle_category_metadata_file is required to resolve annualization factors.")
-    if "vehicleTypeId" not in prepared.columns:
-        raise ValueError("Prepared skims must include vehicleTypeId to resolve annualization factors.")
-    if not passenger_vehicle_types_path or not freight_vehicle_types_path:
-        raise ValueError("Passenger and freight vehicle types inputs are required to resolve annualization factors.")
-    csv_path = str(vehicle_category_metadata_file).strip()
-    if not csv_path:
-        raise ValueError("vehicle_category_metadata_file must be non-empty.")
-    category_lookup, sanitized_categories = _load_vehicle_operation_days_lookup(csv_path)
-    vehicle_type_category_lookup = _load_vehicle_type_category_lookup(
-        passenger_vehicle_types_path,
-        freight_vehicle_types_path,
-        category_lookup=category_lookup,
-        sanitized_categories=sanitized_categories,
+    vehicle_type_annualization_days_lookup = _resolve_vehicle_type_annualization_days_lookup(
+        vehicle_category_metadata_file=vehicle_category_metadata_file,
+        annualization_days=annualization_days,
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
     )
-    categories = prepared["vehicleTypeId"].astype(str).map(vehicle_type_category_lookup)
-    missing_vehicle_types = (
-        prepared.loc[categories.isna(), "vehicleTypeId"]
-        .astype(str)
-        .drop_duplicates()
-        .tolist()
+    return _resolve_skims_annualization_factors_from_lookup(
+        prepared,
+        vehicle_type_annualization_days_lookup=vehicle_type_annualization_days_lookup,
     )
-    if missing_vehicle_types:
-        raise ValueError(
-            "Could not resolve EMFAC vehicle category for some skim vehicleTypeId values using "
-            "the configured passenger/freight vehicle types files: "
-            f"sample={missing_vehicle_types[:10]}"
-        )
-    resolved = categories.map(category_lookup)
-    fallback_mask = resolved.isna()
-    if fallback_mask.any():
-        resolved.loc[fallback_mask] = categories.loc[fallback_mask].map(
-            lambda category: defaults[_vehicle_group_for_emfac_category(category)]
-        )
-    return resolved.astype(float)

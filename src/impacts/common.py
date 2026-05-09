@@ -21,6 +21,7 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
+import duckdb
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -173,8 +174,6 @@ def find_latest_iteration_events(iters_dir: Path) -> Optional[Path]:
 
 def find_latest_iteration_skims(iters_dir: Path) -> Optional[Path]:
     patterns = [
-        ("*.skimsEmissionsTotals.csv.gz", r"/it\.(\d+)/(\d+)\.skimsEmissionsTotals\.csv\.gz$"),
-        ("*.skimsEmissions.csv.gz", r"/it\.(\d+)/(\d+)\.skimsEmissions\.csv\.gz$"),
         ("*.skimsEmissions.parquet", r"/it\.(\d+)/(\d+)\.skimsEmissions\.parquet$"),
     ]
     latest_iter = -1
@@ -215,7 +214,7 @@ def resolve_emissions_skims_local_path(root: str) -> str:
         latest_skims = find_latest_iteration_skims(latest_iters_dir)
         if latest_skims:
             return str(latest_skims)
-    for pattern in ("*.skimsEmissionsTotals*.csv.gz", "*.skimsEmissions*.csv.gz", "*.skimsEmissions*.parquet"):
+    for pattern in ("*.skimsEmissions*.parquet",):
         match = find_first_matching(resolved, pattern)
         if match:
             return match
@@ -771,179 +770,109 @@ def resolve_column_config(
     return resolved
 
 
-def parse_emissions_string(emissions: str) -> Dict[str, float]:
-    if emissions is None or (isinstance(emissions, float) and pd.isna(emissions)):
-        return {}
-    txt = str(emissions).strip()
-    if not txt:
-        return {}
-    out: Dict[str, float] = {}
-    for part in txt.split(";"):
-        part = part.strip()
-        if not part or ":" not in part:
-            continue
-        key, value = part.split(":", 1)
-        try:
-            out[key.strip()] = float(value)
-        except ValueError:
-            continue
-    return out
-
-
-def _iter_skims_emissions_batches(
-    path: str,
-    *,
-    pollutants: Optional[list[str]] = None,
-    pollutants_map: Optional[Dict[str, str]] = None,
-    batch_size: int = default_chunk_size,
-):
-    dim_cols = ["hour", "linkId", "vehicleTypeId", "process", "travelTimeInSecond", "parkingDurationInSecond"]
-    compact_cols = dim_cols + ["emissions", "observations", "iterations"]
-    source_pollutants = [pollutants_map.get(p, p) for p in (pollutants or [])] if pollutants_map else (pollutants or [])
-    cols = None if pollutants is None else compact_cols + [c for c in source_pollutants if c not in compact_cols]
+def _table_available_columns(path: str | Path) -> list[str]:
     target = Path(path)
-    lower = target.name.lower()
-    if lower.endswith(".parquet"):
-        import pyarrow.parquet as pq
+    if target.suffix.lower() != ".parquet":
+        raise ValueError(f"Skims input must be parquet: {target}")
+    import pyarrow.parquet as pq
 
-        if cols is not None:
-            available = set(pq.read_schema(path).names)
-            cols = [c for c in cols if c in available] or None
-        parquet_file = pq.ParquetFile(target)
-        total_rows = parquet_file.metadata.num_rows if parquet_file.metadata is not None else None
-        progress = tqdm(
-            total=total_rows,
-            desc=f"Streaming skims {target.name}",
-            unit="row",
-            dynamic_ncols=True,
-            leave=True,
-        )
-        try:
-            for batch in parquet_file.iter_batches(batch_size=int(batch_size), columns=cols):
-                progress.update(batch.num_rows)
-                yield _normalize_skims_emissions_batch(
-                    batch.to_pandas(),
-                    pollutants=pollutants,
-                    pollutants_map=pollutants_map,
-                    dim_cols=dim_cols,
-                )
-        finally:
-            progress.close()
-        return
-    elif lower.endswith(".csv.gz"):
-        if cols is not None:
-            header_cols = pd.read_csv(target, compression="gzip", nrows=0).columns.tolist()
-            cols = [c for c in cols if c in header_cols] or None
-        reader = pd.read_csv(
-            target,
-            compression="gzip",
-            usecols=cols,
-            chunksize=int(batch_size),
-        )
-        progress = tqdm(
-            total=None,
-            desc=f"Streaming skims {target.name}",
-            unit="row",
-            dynamic_ncols=True,
-            leave=True,
-        )
-        try:
-            for chunk in reader:
-                progress.update(len(chunk))
-                yield _normalize_skims_emissions_batch(
-                    chunk,
-                    pollutants=pollutants,
-                    pollutants_map=pollutants_map,
-                    dim_cols=dim_cols,
-                )
-        finally:
-            progress.close()
-        return
-    elif lower.endswith(".csv"):
-        if cols is not None:
-            header_cols = pd.read_csv(target, nrows=0).columns.tolist()
-            cols = [c for c in cols if c in header_cols] or None
-        reader = pd.read_csv(
-            target,
-            usecols=cols,
-            chunksize=int(batch_size),
-        )
-        progress = tqdm(
-            total=None,
-            desc=f"Streaming skims {target.name}",
-            unit="row",
-            dynamic_ncols=True,
-            leave=True,
-        )
-        try:
-            for chunk in reader:
-                progress.update(len(chunk))
-                yield _normalize_skims_emissions_batch(
-                    chunk,
-                    pollutants=pollutants,
-                    pollutants_map=pollutants_map,
-                    dim_cols=dim_cols,
-                )
-        finally:
-            progress.close()
-        return
-    else:
-        raise ValueError(f"Unsupported skims format: {target}. Use .csv, .csv.gz, or .parquet")
+    return pq.read_schema(target).names
 
-def _normalize_skims_emissions_batch(
-    df: pd.DataFrame,
+
+def _duckdb_scan_expression(path: str | Path) -> str:
+    target = Path(path)
+    if target.suffix.lower() != ".parquet":
+        raise ValueError(f"Skims input must be parquet for DuckDB aggregation: {target}")
+    path_sql = str(target).replace("'", "''")
+    return f"read_parquet('{path_sql}')"
+
+
+def _prepare_skims_for_grid_allocation_duckdb(
     *,
-    pollutants: Optional[list[str]],
-    pollutants_map: Optional[Dict[str, str]],
-    dim_cols: list[str],
-) -> pd.DataFrame:
-    if "emissions" not in df.columns:
-        return df
-
-    requested_pollutants = list(dict.fromkeys(pollutants or default_prepared_pollutants))
-    parsed = df["emissions"].apply(parse_emissions_string)
-    observations = pd.to_numeric(df.get("observations", 1.0), errors="coerce").fillna(0.0)
-    normalized = df[[c for c in dim_cols if c in df.columns]].copy()
-    normalized["observations"] = observations
-    for pollutant in requested_pollutants:
-        source_pollutant = pollutants_map.get(pollutant, pollutant) if pollutants_map else pollutant
-        normalized[pollutant] = (
-            parsed.apply(lambda values, p=source_pollutant: float(values.get(p, 0.0))) * observations
-        )
-    return normalized
-
-
-def _totals_pollutant_columns(
-    df: pd.DataFrame,
+    skims_path: str,
+    output_path: str,
+    prepared_group_cols: list[str],
     required_pollutants: list[str],
-) -> Dict[str, str]:
-    resolved: Dict[str, str] = {}
-    for pollutant in required_pollutants:
-        if pollutant in df.columns:
-            resolved[pollutant] = pollutant
-    return resolved
-
-
-def _group_and_sum_numeric(
-    df: pd.DataFrame,
-    *,
-    group_cols: list[str],
-    sum_cols: list[str],
-    count_nonzero_cols: Optional[Dict[str, str]] = None,
+    pollutants_map: Optional[Dict[str, str]],
+    allowed_vehicle_type_ids: Optional[set[str]],
+    known_vehicle_type_ids: Optional[set[str]],
 ) -> pd.DataFrame:
-    prepared = df[group_cols + sum_cols].copy()
-    for col in sum_cols:
-        prepared[col] = pd.to_numeric(prepared[col], errors="coerce").fillna(0.0)
-    grouped = prepared.groupby(group_cols, dropna=False)[sum_cols].sum().reset_index()
-    if count_nonzero_cols:
-        count_frame = df[group_cols].copy()
-        for source_col, output_col in count_nonzero_cols.items():
-            values = pd.to_numeric(df.get(source_col, 0.0), errors="coerce").fillna(0.0)
-            count_frame[output_col] = values.ne(0).astype(int)
-        count_outputs = list(count_nonzero_cols.values())
-        counts = count_frame.groupby(group_cols, dropna=False)[count_outputs].sum().reset_index()
-        grouped = grouped.merge(counts, on=group_cols, how="left")
-    return grouped
+    started = time.perf_counter()
+    available_columns = _table_available_columns(skims_path)
+    source_pollutants = [pollutants_map.get(p, p) for p in required_pollutants] if pollutants_map else list(required_pollutants)
+    if not all(col in available_columns for col in prepared_group_cols):
+        missing = [col for col in prepared_group_cols if col not in available_columns]
+        raise ValueError(f"Prepared skims missing required grouping columns: {missing}")
+    if not all(col in available_columns for col in source_pollutants):
+        raise ValueError("DuckDB skims aggregation requires explicit pollutant columns in the source file.")
+
+    scan = _duckdb_scan_expression(skims_path)
+    con = duckdb.connect(database=":memory:")
+    try:
+        if known_vehicle_type_ids is not None:
+            observed_ids = {
+                row[0]
+                for row in con.execute(
+                    f"""
+                    SELECT DISTINCT trim(CAST(vehicleTypeId AS VARCHAR)) AS vehicleTypeId
+                    FROM {scan}
+                    WHERE vehicleTypeId IS NOT NULL
+                    """
+                ).fetchall()
+                if row[0]
+            }
+            unknown_ids = sorted(observed_ids - known_vehicle_type_ids)
+            if unknown_ids:
+                raise ValueError(
+                    "Could not assign some skim vehicleTypeId values to passenger or freight using "
+                    f"the configured passenger/freight vehicle types files: sample={unknown_ids[:10]}"
+                )
+
+        value_select = ['SUM(COALESCE(TRY_CAST(observations AS DOUBLE), 0.0)) AS observations']
+        for pollutant, source_col in zip(required_pollutants, source_pollutants):
+            value_select.append(
+                f'SUM(COALESCE(TRY_CAST("{source_col}" AS DOUBLE), 0.0)) AS "{pollutant}"'
+            )
+        select_cols: list[str] = []
+        group_by_exprs: list[str] = []
+        for idx, col in enumerate(prepared_group_cols, start=1):
+            if col == "vehicleTypeId":
+                expr = "trim(CAST(vehicleTypeId AS VARCHAR))"
+            else:
+                expr = f'"{col}"'
+            select_cols.append(f"{expr} AS \"{col}\"")
+            group_by_exprs.append(str(idx))
+        where_clauses: list[str] = []
+        if allowed_vehicle_type_ids is not None:
+            allowed_literals = ", ".join(
+                "'" + value.replace("'", "''") + "'"
+                for value in sorted(allowed_vehicle_type_ids)
+            )
+            where_clauses.append(f"trim(CAST(vehicleTypeId AS VARCHAR)) IN ({allowed_literals})")
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        query = f"""
+            SELECT
+                {", ".join(select_cols + value_select)}
+            FROM {scan}
+            {where_sql}
+            GROUP BY {", ".join(group_by_exprs)}
+        """
+        output_sql = str(output_path).replace("'", "''")
+        con.execute(f"COPY ({query}) TO '{output_sql}' (FORMAT PARQUET)")
+        grouped_rows = con.execute(f"SELECT COUNT(*) FROM ({query})").fetchone()[0]
+    finally:
+        con.close()
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.suffix.lower() != ".parquet":
+        raise ValueError("Prepared skims output must be .parquet")
+    logger.info(
+        "Prepared skims via DuckDB in %.2fs: source=%s grouped_rows=%d",
+        time.perf_counter() - started,
+        skims_path,
+        grouped_rows,
+    )
+    return read_table(output_path)
 
 
 # ---------------------------------------------------------------------------
@@ -957,62 +886,28 @@ def prepare_skims_for_grid_allocation(
     group_cols: Optional[list[str]] = None,
     required_pollutants: Optional[list[str]] = None,
     pollutants_map: Optional[Dict[str, str]] = None,
+    allowed_vehicle_type_ids: Optional[set[str]] = None,
+    known_vehicle_type_ids: Optional[set[str]] = None,
 ) -> pd.DataFrame:
     prepared_group_cols = group_cols or ["linkId", "vehicleTypeId", "process"]
     required = required_pollutants or default_prepared_pollutants
-    aggregated = pd.DataFrame(columns=prepared_group_cols + ["observations"] + list(required))
-    for chunk_index, df in enumerate(
-        _iter_skims_emissions_batches(
-            skims_path,
-            pollutants=required,
-            pollutants_map=pollutants_map,
-        ),
-        start=1,
-    ):
-        missing_group_cols = [col for col in prepared_group_cols if col not in df.columns]
-        if missing_group_cols:
-            raise ValueError(f"Prepared skims missing required grouping columns: {missing_group_cols}")
-        totals_cols = _totals_pollutant_columns(df, required)
-        prepared = df[prepared_group_cols + list(totals_cols.values())].copy()
-        rename_map = {source: pollutant for pollutant, source in totals_cols.items()}
-        prepared = prepared.rename(columns=rename_map)
-        for pollutant in required:
-            if pollutant not in prepared.columns:
-                prepared[pollutant] = 0.0
-        if "observations" in df.columns:
-            prepared["observations"] = pd.to_numeric(df["observations"], errors="coerce").fillna(0.0)
-        else:
-            prepared["observations"] = 0.0
-        chunk_aggregated = _group_and_sum_numeric(
-            prepared,
-            group_cols=prepared_group_cols,
-            sum_cols=["observations"] + list(required),
+    available_columns = _table_available_columns(skims_path)
+    source_pollutants = [pollutants_map.get(p, p) for p in required] if pollutants_map else list(required)
+    missing_pollutants = [col for col in source_pollutants if col not in available_columns]
+    if missing_pollutants:
+        raise ValueError(
+            "Skims parquet must include explicit pollutant columns for fast aggregation: "
+            f"missing={missing_pollutants}"
         )
-        if aggregated.empty:
-            aggregated = chunk_aggregated
-        else:
-            aggregated = _group_and_sum_numeric(
-                pd.concat([aggregated, chunk_aggregated], ignore_index=True, sort=False),
-                group_cols=prepared_group_cols,
-                sum_cols=["observations"] + list(required),
-            )
-        logger.info(
-            "Prepared skims chunk %d processed from %s: %d raw rows -> %d grouped rows",
-            chunk_index,
-            skims_path,
-            len(df),
-            len(chunk_aggregated),
-        )
-
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    if out.suffix.lower() == ".parquet":
-        aggregated.to_parquet(out, index=False)
-    elif out.name.lower().endswith(".csv.gz"):
-        aggregated.to_csv(out, index=False, compression="gzip")
-    else:
-        raise ValueError("Prepared skims output must be .parquet or .csv.gz")
-    return aggregated
+    return _prepare_skims_for_grid_allocation_duckdb(
+        skims_path=skims_path,
+        output_path=output_path,
+        prepared_group_cols=prepared_group_cols,
+        required_pollutants=required,
+        pollutants_map=pollutants_map,
+        allowed_vehicle_type_ids=allowed_vehicle_type_ids,
+        known_vehicle_type_ids=known_vehicle_type_ids,
+    )
 
 
 def stage_county_boundaries(

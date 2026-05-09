@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import re
+import time
 from typing import Any
 from typing import Dict
 from typing import List
@@ -255,35 +256,21 @@ def _load_vehicle_type_activity_lookup(
     )
 
 
-def _write_frame(frame: pd.DataFrame, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.suffix.lower() == ".parquet":
-        frame.to_parquet(path, index=False)
-        return
-    if path.name.lower().endswith(".csv.gz"):
-        frame.to_csv(path, index=False, compression="gzip")
-        return
-    raise ValueError(f"Unsupported table output format: {path}")
-
-
-def _filter_prepared_skims_by_assignment(
-    prepared: pd.DataFrame,
+def _resolve_assignment_filter_ids(
     *,
     passenger_vehicle_types_path: Optional[str],
     freight_vehicle_types_path: Optional[str],
     include_passenger: bool,
     include_freight: bool,
-) -> pd.DataFrame:
+) -> tuple[Optional[set[str]], Optional[set[str]]]:
     if include_passenger and include_freight:
-        return prepared
+        return None, None
     if not include_passenger and not include_freight:
         raise ValueError("At least one of include_passenger or include_freight must be true.")
     if not passenger_vehicle_types_path or not freight_vehicle_types_path:
         raise ValueError(
             "Vehicle types input is required to filter prepared skims by passenger/freight assignment."
         )
-    if "vehicleTypeId" not in prepared.columns:
-        raise ValueError("Prepared skims must include vehicleTypeId for passenger/freight filtering.")
 
     assignments = _load_vehicle_type_assignments(
         passenger_vehicle_types_path,
@@ -296,31 +283,12 @@ def _filter_prepared_skims_by_assignment(
     if include_freight:
         allowed_groups.add("freight")
     allowed_ids = set(assignments.loc[assignments["assignment_group"].isin(allowed_groups), "vehicleTypeId"].tolist())
+    known_ids = set(assignments["vehicleTypeId"].tolist())
     if not allowed_ids:
         raise ValueError(
             "No vehicleTypeId values in the vehicle types input match the requested passenger/freight filter."
         )
-
-    result = prepared.copy()
-    result["vehicleTypeId"] = result["vehicleTypeId"].map(_normalize_vehicle_type_token)
-    observed_ids = set(result["vehicleTypeId"].dropna().tolist())
-    missing_ids = sorted(observed_ids - set(assignments["vehicleTypeId"].tolist()))
-    if missing_ids:
-        raise ValueError(
-            "Could not assign some skim vehicleTypeId values to passenger or freight using "
-            f"the configured passenger/freight vehicle types files: sample={missing_ids[:10]}"
-        )
-
-    filtered = result.loc[result["vehicleTypeId"].isin(allowed_ids)].copy()
-    logger.info(
-        "%s filtered prepared skims by assignment (include_passenger=%s, include_freight=%s): %d -> %d rows",
-        _step_label("1.0"),
-        include_passenger,
-        include_freight,
-        len(result),
-        len(filtered),
-    )
-    return filtered
+    return allowed_ids, known_ids
 
 
 # ---------------------------------------------------------------------------
@@ -465,6 +433,13 @@ def resolve_prepared_skims_path(input_root: Path) -> Optional[str]:
     return None
 
 
+def resolve_prepared_grouped_skims_path(input_root: Path) -> Optional[str]:
+    candidate = prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
+    if candidate.exists():
+        return str(candidate)
+    return None
+
+
 def _resolve_staged_skims_input_path(manifest_inputs: Optional[Dict[str, Any]] = None) -> Optional[str]:
     if not manifest_inputs:
         return None
@@ -492,23 +467,39 @@ def prepare_staged_skims_for_processing(
     include_passenger: bool,
     include_freight: bool,
 ) -> pd.DataFrame:
-    prepared_grouped_skims_path = prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
-    prepared_grouped = prepare_skims_for_grid_allocation(
-        skims_path=skims_input_source,
-        output_path=str(prepared_grouped_skims_path),
-        group_cols=list(prepared_skims_group_cols),
-        required_pollutants=list(pollutants),
-        pollutants_map=dict(pollutants_map),
-    )
-    prepared_grouped = _filter_prepared_skims_by_assignment(
-        prepared_grouped,
-        passenger_vehicle_types_path=passenger_vehicle_types_path,
-        freight_vehicle_types_path=freight_vehicle_types_path,
-        include_passenger=include_passenger,
-        include_freight=include_freight,
-    )
-    _write_frame(prepared_grouped, prepared_grouped_skims_path)
+    started = time.perf_counter()
     prepared_skims_path = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
+    if prepared_skims_path.exists():
+        logger.info("Step 1: reusing prepared skims %s", prepared_skims_path)
+        return read_table(prepared_skims_path)
+
+    prepared_grouped_skims_path = prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
+    if prepared_grouped_skims_path.exists():
+        logger.info("Step 1: reusing grouped prepared skims %s", prepared_grouped_skims_path)
+    else:
+        group_started = time.perf_counter()
+        allowed_vehicle_type_ids, known_vehicle_type_ids = _resolve_assignment_filter_ids(
+            passenger_vehicle_types_path=passenger_vehicle_types_path,
+            freight_vehicle_types_path=freight_vehicle_types_path,
+            include_passenger=include_passenger,
+            include_freight=include_freight,
+        )
+        prepare_skims_for_grid_allocation(
+            skims_path=skims_input_source,
+            output_path=str(prepared_grouped_skims_path),
+            group_cols=list(prepared_skims_group_cols),
+            required_pollutants=list(pollutants),
+            pollutants_map=dict(pollutants_map),
+            allowed_vehicle_type_ids=allowed_vehicle_type_ids,
+            known_vehicle_type_ids=known_vehicle_type_ids,
+        )
+        logger.info(
+            "Step 1: prepared grouped skims in %.2fs -> %s",
+            time.perf_counter() - group_started,
+            prepared_grouped_skims_path,
+        )
+
+    annualize_started = time.perf_counter()
     annualize_prepared_skims_for_grid_allocation(
         prepared_skims_path=str(prepared_grouped_skims_path),
         output_path=str(prepared_skims_path),
@@ -523,6 +514,12 @@ def prepare_staged_skims_for_processing(
         population_sample=float(population_sample),
         transit_sample=float(transit_sample),
     )
+    logger.info(
+        "Step 1: annualized prepared skims in %.2fs -> %s",
+        time.perf_counter() - annualize_started,
+        prepared_skims_path,
+    )
+    logger.info("Step 1: total skims preparation time %.2fs", time.perf_counter() - started)
     return read_table(prepared_skims_path)
 
 
