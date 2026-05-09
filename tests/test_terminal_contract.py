@@ -399,6 +399,8 @@ def test_run_from_input_manifest_uses_current_step_name(monkeypatch, tmp_path: P
 
     assert result["execution"]["dispersion_completed"] is False
     assert result["execution"]["stopped_after"] == "step1_process_emissions"
+    assert "preprocess_step3_integrate_grids" in result["execution"]["stage_timings_seconds"]
+    assert "step1_process_emissions" in result["execution"]["stage_timings_seconds"]
 
 
 def test_run_from_settings_delegates_through_preprocess(monkeypatch, tmp_path: Path):

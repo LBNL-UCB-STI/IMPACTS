@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 
 from impacts.pipeline.workflow.step1_process_emissions import _derive_county_correction_factors
 from impacts.pipeline.workflow.step1_process_emissions import _derive_inventory_activity_targets_for_assignment
+from impacts.pipeline.workflow.step1_process_emissions import _build_county_corrected_table
 from impacts.pipeline.workflow.step1_process_emissions import apply_county_corrections
 
 
@@ -204,3 +206,51 @@ def test_apply_county_corrections_leaves_transit_rows_neutral(tmp_path: Path) ->
     )
 
     assert corrected["tons_per_year_NOx_county_allocated"].tolist() == [20.0, 20.0, 30.0]
+
+
+def test_build_county_corrected_table_skips_when_inventory_corrections_disabled(monkeypatch) -> None:
+    county_allocated = pd.DataFrame(
+        [
+            {"linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "countyfp": "001", "tons_per_year_NOx_county_allocated": 10.0},
+        ]
+    )
+    county_grouped = pd.DataFrame(
+        [
+            {"linkId": 101, "countyfp": "001", "county_zone_edge_proportion": 1.0},
+        ]
+    )
+    skims = pd.DataFrame(
+        [
+            {"linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "totVMT": 1.0, "totTrips": 1.0},
+        ]
+    )
+    pipeline = SimpleNamespace(
+        enable_passenger_inventory_activity_correction=False,
+        enable_freight_inventory_activity_correction=False,
+        passenger_inventory_file="passenger.parquet",
+        freight_inventory_file="freight.parquet",
+    )
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("inventory correction helpers should not run when both correction flags are false")
+
+    monkeypatch.setattr(
+        "impacts.pipeline.workflow.step1_process_emissions.resolve_required_manifest_input",
+        _fail,
+    )
+    monkeypatch.setattr(
+        "impacts.pipeline.workflow.step1_process_emissions._build_beam_activity_details",
+        _fail,
+    )
+
+    corrected, beam_activity_totals, county_correction_factors = _build_county_corrected_table(
+        county_allocated_df=county_allocated,
+        county_grouped_df=county_grouped,
+        skims_df=skims,
+        pipeline=pipeline,
+        manifest_inputs={},
+    )
+
+    assert beam_activity_totals is None
+    assert county_correction_factors is None
+    pd.testing.assert_frame_equal(corrected, county_allocated)

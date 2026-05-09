@@ -12,6 +12,7 @@ import impacts.pipeline.workflow.annualization as annualization_module
 import impacts.pipeline.workflow.prepare_emissions_from_skims as prepare_skims_module
 from impacts.pipeline.workflow.annualization import _build_skims_scale_factors
 from impacts.pipeline.workflow.annualization import annualize_prepared_skims_for_grid_allocation
+from impacts.pipeline.workflow.prepare_emissions_from_skims import _build_zone_allocated_table
 
 
 def test_configure_duckdb_progress_bar_toggles_settings() -> None:
@@ -31,6 +32,27 @@ def test_configure_duckdb_progress_bar_toggles_settings() -> None:
         "SET enable_progress_bar = true",
         "SET progress_bar_time = 0",
         "SET enable_progress_bar = false",
+    ]
+
+
+def test_configure_duckdb_execution_settings_uses_bounded_threads(monkeypatch) -> None:
+    class _FakeConnection:
+        def __init__(self) -> None:
+            self.commands: list[str] = []
+
+        def execute(self, sql: str):
+            self.commands.append(sql)
+            return self
+
+    monkeypatch.setattr(common.os, "cpu_count", lambda: 12)
+    monkeypatch.delenv("IMPACTS_DUCKDB_MEMORY_LIMIT", raising=False)
+
+    con = _FakeConnection()
+    common._configure_duckdb_execution_settings(con)
+
+    assert con.commands == [
+        "SET preserve_insertion_order = false",
+        "SET threads = 4",
     ]
 
 
@@ -278,6 +300,76 @@ def test_prepare_skims_for_grid_allocation_creates_output_parent_directory(tmp_p
             "observations": 2.0,
             "NOx": 2.5,
         }
+    ]
+
+
+def test_build_zone_allocated_table_uses_duckdb_and_preserves_allocated_values() -> None:
+    grouped = pd.DataFrame(
+        [
+            {
+                "linkId": 101,
+                "countyfp": "001",
+                "county_zone_edge_proportion": 0.25,
+                "county_edge_link_length_m": 100.0,
+                "county_zone_link_length_m": 25.0,
+            },
+            {
+                "linkId": 101,
+                "countyfp": "013",
+                "county_zone_edge_proportion": 0.75,
+                "county_edge_link_length_m": 100.0,
+                "county_zone_link_length_m": 75.0,
+            },
+        ]
+    )
+    skims = pd.DataFrame(
+        [
+            {
+                "linkId": 101,
+                "vehicleTypeId": " pax-car ",
+                "process": " RUNEX ",
+                "totVMT": 20.0,
+                "totTrips": 4.0,
+                "tons_per_year_NOx": 8.0,
+            }
+        ]
+    )
+
+    allocated = (
+        _build_zone_allocated_table(
+            grouped_df=grouped,
+            skims_df=skims,
+            zone_label="county",
+        )
+        .sort_values("countyfp")
+        .reset_index(drop=True)
+    )
+
+    assert allocated.to_dict("records") == [
+        {
+            "linkId": 101,
+            "vehicleTypeId": "pax-car",
+            "process": "RUNEX",
+            "countyfp": "001",
+            "county_zone_edge_proportion": 0.25,
+            "county_edge_link_length_m": 100.0,
+            "county_zone_link_length_m": 25.0,
+            "totVMT_county_allocated": 5.0,
+            "totTrips_county_allocated": 1.0,
+            "tons_per_year_NOx_county_allocated": 2.0,
+        },
+        {
+            "linkId": 101,
+            "vehicleTypeId": "pax-car",
+            "process": "RUNEX",
+            "countyfp": "013",
+            "county_zone_edge_proportion": 0.75,
+            "county_edge_link_length_m": 100.0,
+            "county_zone_link_length_m": 75.0,
+            "totVMT_county_allocated": 15.0,
+            "totTrips_county_allocated": 3.0,
+            "tons_per_year_NOx_county_allocated": 6.0,
+        },
     ]
 
 

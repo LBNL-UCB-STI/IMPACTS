@@ -13,6 +13,7 @@ import pandas as pd
 from ...common import _configure_duckdb_progress_bar
 from ...common import _should_show_duckdb_progress_bar
 from ...common import configure_duckdb_connection
+from ...common import parquet_row_count
 from ...common import read_table
 from ...config.defaults import annualization_days_by_vehicle_group as default_annualization_days_by_vehicle_group
 from ...config.defaults import grams_per_short_ton
@@ -161,8 +162,7 @@ def _annualize_prepared_skims_with_duckdb(
     output_columns.extend(["totTrips", "totVMT"])
     output_columns.extend([f"tons_per_year_{pollutant}" for pollutant in required_pollutants])
     try:
-        configure_duckdb_connection(con, working_dir=output_path, show_progress=False)
-        con.execute("PRAGMA threads = 4")
+        configure_duckdb_connection(con, working_dir=output_path, show_progress=False, profile="balanced")
         con.register("link_lengths", link_lengths)
         con.register("annualization_lookup", lookup_df)
         missing_vehicle_types = [
@@ -230,9 +230,9 @@ def _annualize_prepared_skims_with_duckdb(
         con.execute(f"COPY ({query}) TO '{output_sql}' (FORMAT PARQUET)")
         if show_progress:
             _configure_duckdb_progress_bar(con, enabled=False)
-        output_rows = con.execute(f"SELECT COUNT(*) FROM ({query})").fetchone()[0]
     finally:
         con.close()
+    output_rows = parquet_row_count(output_path)
     logger.info(
         "Annualized prepared skims via DuckDB in %.2fs: input=%s output_rows=%d output=%s",
         time.perf_counter() - started,

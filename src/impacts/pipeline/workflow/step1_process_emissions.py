@@ -8,10 +8,13 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
+import duckdb
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
+from ...common import configure_duckdb_connection
 from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import normalize_county_fips
@@ -64,6 +67,13 @@ def _build_county_name_lookup(county_boundaries_path: str) -> dict[str, str]:
     lookup["NAME"] = lookup["NAME"].astype(str).str.strip()
     lookup = lookup.loc[lookup["countyfp"].notna() & lookup["NAME"].ne("")].copy()
     return dict(zip(lookup["NAME"], lookup["countyfp"]))
+
+
+def _should_apply_inventory_activity_corrections(pipeline: PipelineConfig) -> bool:
+    return bool(
+        pipeline.enable_passenger_inventory_activity_correction
+        or pipeline.enable_freight_inventory_activity_correction
+    )
 
 
 def _build_beam_activity_details(
@@ -216,72 +226,114 @@ def apply_county_corrections(
     passenger_vehicle_types_path: str,
     freight_vehicle_types_path: str,
 ) -> pd.DataFrame:
-    result = allocated_df.copy()
     vehicle_lookup = _load_vehicle_type_activity_lookup(
         passenger_vehicle_types_path,
         freight_vehicle_types_path,
     )[["vehicleTypeId", "assignment_group", "modelYear"]].copy()
-    result["vehicleTypeId"] = result["vehicleTypeId"].astype(str).str.strip()
-    result = result.merge(vehicle_lookup, how="left", on="vehicleTypeId")
-    correction_eligible = result["assignment_group"].isin(_CORRECTION_ASSIGNMENT_GROUPS)
-    missing_vehicle_types = result.loc[
-        correction_eligible & result["modelYear"].isna(),
-        "vehicleTypeId",
-    ].drop_duplicates().tolist()
-    unresolved_vehicle_types = result.loc[
-        result["assignment_group"].isna(),
-        "vehicleTypeId",
-    ].drop_duplicates().tolist()
-    if missing_vehicle_types:
-        raise ValueError(
-            "Could not resolve modelYear for correction-eligible allocated rows with vehicleTypeId values: "
-            f"{missing_vehicle_types[:10]}"
-        )
-    if unresolved_vehicle_types:
-        raise ValueError(
-            "Could not resolve vehicle type assignment for allocated rows with vehicleTypeId values: "
-            f"{unresolved_vehicle_types[:10]}"
-        )
-    result["_fips_norm"] = normalize_county_fips(result[county_col])
-    result["_process_norm"] = result.get("process", pd.Series("", index=result.index)).astype(str).str.upper().str.strip()
-    result = result.merge(
-        county_correction_factors[
-            ["countyfp", "assignment_group", "modelYear", "process", "factor_totVMT", "factor_totTrips"]
-        ].rename(columns={"countyfp": "_fips_norm", "process": "_process_norm"}),
-        how="left",
-        on=["_fips_norm", "assignment_group", "modelYear", "_process_norm"],
-    )
-    result["factor_totVMT"] = pd.to_numeric(result["factor_totVMT"], errors="coerce").fillna(1.0)
-    result["factor_totTrips"] = pd.to_numeric(result["factor_totTrips"], errors="coerce").fillna(1.0)
-
-    process_upper = result["_process_norm"]
-    unique_processes = sorted(process_upper.dropna().unique().tolist())
+    process_upper = allocated_df.get("process", pd.Series("", index=allocated_df.index)).astype(str).str.upper().str.strip()
+    unique_processes = sorted(process_upper[process_upper.ne("")].dropna().unique().tolist())
     vmt_used = sorted([proc for proc in unique_processes if proc in _VMT_PROCESSES])
     trip_used = sorted([proc for proc in unique_processes if proc in _TRIP_PROCESSES])
     neutral_used = sorted([proc for proc in unique_processes if proc not in _VMT_PROCESSES and proc not in _TRIP_PROCESSES])
     if vmt_used:
-        logger.info("%s using factor_totVMT for processes: %s", _step_label("1.4"), ", ".join(vmt_used))
+        logger.info("%s using factor_totVMT for processes: %s", _step_label("1.3"), ", ".join(vmt_used))
     if trip_used:
-        logger.info("%s using factor_totTrips for processes: %s", _step_label("1.4"), ", ".join(trip_used))
+        logger.info("%s using factor_totTrips for processes: %s", _step_label("1.3"), ", ".join(trip_used))
     if neutral_used:
         logger.warning(
             "%s no county correction factor mapping for processes; using neutral factor 1.0: %s",
-            _step_label("1.4"),
+            _step_label("1.3"),
             ", ".join(neutral_used),
         )
-
-    factor_arr = np.ones(len(result), dtype=np.float32)
-    factor_arr = np.where(process_upper.isin(_VMT_PROCESSES), result["factor_totVMT"].to_numpy(dtype=np.float32), factor_arr)
-    factor_arr = np.where(process_upper.isin(_TRIP_PROCESSES), result["factor_totTrips"].to_numpy(dtype=np.float32), factor_arr)
-
     emission_allocated_cols = [
-        c for c in result.columns
+        c for c in allocated_df.columns
         if c.startswith("tons_per_year_") and c.endswith("_allocated")
     ]
-    for col in emission_allocated_cols:
-        result[col] = pd.to_numeric(result[col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32) * factor_arr
+    original_cols = list(allocated_df.columns)
+    passthrough_cols = [col for col in original_cols if col not in emission_allocated_cols]
+    normalized_county_expr = (
+        f"CASE WHEN regexp_extract(CAST(a.\"{county_col}\" AS VARCHAR), '(\\d+)', 1) = '' "
+        f"THEN NULL ELSE lpad(regexp_extract(CAST(a.\"{county_col}\" AS VARCHAR), '(\\d+)', 1), 3, '0') END"
+    )
 
-    return result.drop(columns=["_fips_norm", "_process_norm", "assignment_group", "modelYear", "factor_totVMT", "factor_totTrips"])
+    con = duckdb.connect(database=":memory:")
+    try:
+        configure_duckdb_connection(con, working_dir=Path.cwd(), show_progress=True, profile="memory_heavy")
+        con.register("allocated_df", allocated_df)
+        con.register("vehicle_lookup", vehicle_lookup)
+        con.register("county_correction_factors", county_correction_factors)
+
+        missing_vehicle_types = [
+            row[0]
+            for row in con.execute(
+                """
+                SELECT DISTINCT trim(CAST(a."vehicleTypeId" AS VARCHAR)) AS vehicleTypeId
+                FROM allocated_df AS a
+                LEFT JOIN vehicle_lookup AS v
+                    ON trim(CAST(a."vehicleTypeId" AS VARCHAR)) = trim(CAST(v."vehicleTypeId" AS VARCHAR))
+                WHERE COALESCE(trim(CAST(a."vehicleTypeId" AS VARCHAR)), '') <> ''
+                  AND v.assignment_group IN ('passenger', 'freight')
+                  AND COALESCE(trim(CAST(v.modelYear AS VARCHAR)), '') = ''
+                """
+            ).fetchall()
+            if row[0]
+        ]
+        unresolved_vehicle_types = [
+            row[0]
+            for row in con.execute(
+                """
+                SELECT DISTINCT trim(CAST(a."vehicleTypeId" AS VARCHAR)) AS vehicleTypeId
+                FROM allocated_df AS a
+                LEFT JOIN vehicle_lookup AS v
+                    ON trim(CAST(a."vehicleTypeId" AS VARCHAR)) = trim(CAST(v."vehicleTypeId" AS VARCHAR))
+                WHERE COALESCE(trim(CAST(a."vehicleTypeId" AS VARCHAR)), '') <> ''
+                  AND v.assignment_group IS NULL
+                """
+            ).fetchall()
+            if row[0]
+        ]
+        if missing_vehicle_types:
+            raise ValueError(
+                "Could not resolve modelYear for correction-eligible allocated rows with vehicleTypeId values: "
+                f"{missing_vehicle_types[:10]}"
+            )
+        if unresolved_vehicle_types:
+            raise ValueError(
+                "Could not resolve vehicle type assignment for allocated rows with vehicleTypeId values: "
+                f"{unresolved_vehicle_types[:10]}"
+            )
+
+        select_parts = [f'a."{col}" AS "{col}"' for col in passthrough_cols]
+        for col in emission_allocated_cols:
+            select_parts.append(
+                f"""
+                COALESCE(TRY_CAST(a."{col}" AS DOUBLE), 0.0) *
+                CASE
+                    WHEN upper(trim(CAST(a."process" AS VARCHAR))) IN ({", ".join(f"'{proc}'" for proc in sorted(_VMT_PROCESSES))})
+                        THEN COALESCE(TRY_CAST(f.factor_totVMT AS DOUBLE), 1.0)
+                    WHEN upper(trim(CAST(a."process" AS VARCHAR))) IN ({", ".join(f"'{proc}'" for proc in sorted(_TRIP_PROCESSES))})
+                        THEN COALESCE(TRY_CAST(f.factor_totTrips AS DOUBLE), 1.0)
+                    ELSE 1.0
+                END AS "{col}"
+                """.strip()
+            )
+        query = f"""
+            SELECT
+                {", ".join(select_parts)}
+            FROM allocated_df AS a
+            LEFT JOIN vehicle_lookup AS v
+                ON trim(CAST(a."vehicleTypeId" AS VARCHAR)) = trim(CAST(v."vehicleTypeId" AS VARCHAR))
+            LEFT JOIN county_correction_factors AS f
+                ON {normalized_county_expr} = CAST(f.countyfp AS VARCHAR)
+               AND v.assignment_group = f.assignment_group
+               AND COALESCE(trim(CAST(v.modelYear AS VARCHAR)), '') = COALESCE(trim(CAST(f.modelYear AS VARCHAR)), '')
+               AND upper(trim(CAST(a."process" AS VARCHAR))) = upper(trim(CAST(f.process AS VARCHAR)))
+        """
+        result = con.execute(query).fetchdf()
+    finally:
+        con.close()
+
+    return result
 
 
 def _build_corrected_source_totals(county_corrected_df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
@@ -292,9 +344,26 @@ def _build_corrected_source_totals(county_corrected_df: Optional[pd.DataFrame]) 
     missing = sorted(required - set(county_corrected_df.columns))
     if missing:
         raise ValueError(f"County-corrected emissions are missing source grouping columns: {missing}")
-    source = county_corrected_df.copy()
-    value_cols = [col for col in source.columns if col.endswith("_county_allocated")]
-    aggregated = source.groupby(group_cols, dropna=False)[value_cols].sum().reset_index()
+    value_cols = [col for col in county_corrected_df.columns if col.endswith("_county_allocated")]
+    con = duckdb.connect(database=":memory:")
+    try:
+        configure_duckdb_connection(con, working_dir=Path.cwd(), show_progress=True, profile="memory_heavy")
+        con.register("county_corrected_df", county_corrected_df)
+        select_parts = [f'"{col}"' for col in group_cols]
+        select_parts.extend(
+            f'SUM(COALESCE(TRY_CAST("{col}" AS DOUBLE), 0.0)) AS "{col}"'
+            for col in value_cols
+        )
+        aggregated = con.execute(
+            f"""
+            SELECT
+                {", ".join(select_parts)}
+            FROM county_corrected_df
+            GROUP BY 1, 2, 3
+            """
+        ).fetchdf()
+    finally:
+        con.close()
     rename_map = {
         "totVMT_county_allocated": "totVMT",
         "totTrips_county_allocated": "totTrips",
@@ -314,7 +383,7 @@ def _save_grid_emissions(
     output_epsg: int,
     output_stem: Path,
 ) -> gpd.GeoDataFrame:
-    grid_gdf = read_vector(grid_path)
+    grid_gdf = read_vector(grid_path, columns=[right_col, "geometry"])
     if right_col not in grid_gdf.columns:
         raise ValueError(
             f"Step 1 grid export expected grid column '{right_col}' in {grid_path}. "
@@ -323,7 +392,24 @@ def _save_grid_emissions(
     if grid_gdf.crs is not None:
         grid_gdf = grid_gdf.to_crs(epsg=output_epsg)
     expected_grid_ids = set(pd.to_numeric(df[left_col], errors="coerce").dropna().astype(int).unique().tolist())
-    joined = df.merge(
+    tabular = df.copy()
+    con = duckdb.connect(database=":memory:")
+    try:
+        configure_duckdb_connection(con, working_dir=output_stem.parent, show_progress=False, profile="export")
+        con.register("emissions_df", tabular)
+        con.register("grid_ids", pd.DataFrame({right_col: grid_gdf[right_col]}))
+        joined = con.execute(
+            f"""
+            SELECT emissions_df.*
+            FROM emissions_df
+            LEFT JOIN grid_ids
+              ON emissions_df."{left_col}" = grid_ids."{right_col}"
+            WHERE grid_ids."{right_col}" IS NOT NULL
+            """
+        ).fetchdf()
+    finally:
+        con.close()
+    joined = joined.merge(
         grid_gdf[[right_col, "geometry"]],
         how="left",
         left_on=left_col,
@@ -365,66 +451,79 @@ def _build_county_corrected_table(
 ) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     if county_allocated_df is None or county_allocated_df.empty:
         return None, None, None
+    if not _should_apply_inventory_activity_corrections(pipeline):
+        logger.info("%s inventory activity corrections disabled; skipping county correction stage", _step_label("1.3"))
+        return county_allocated_df.copy(), None, None
+
+    progress = tqdm(
+        total=4,
+        desc="Step 1.3 activity corrections",
+        leave=True,
+        dynamic_ncols=True,
+        disable=not logger.isEnabledFor(logging.INFO),
+    )
     passenger_inventory_path = pipeline.passenger_inventory_file
     freight_inventory_path = pipeline.freight_inventory_file
     passenger_vehicle_types_path = resolve_required_manifest_input(manifest_inputs, key="passenger_vehicle_types_input")
     freight_vehicle_types_path = resolve_required_manifest_input(manifest_inputs, key="freight_vehicle_types_input")
     county_boundaries_path = resolve_required_manifest_input(manifest_inputs, key="county_boundaries")
-    _, beam_activity_totals = _build_beam_activity_details(
-        skims_df=skims_df,
-        grouped_df=county_grouped_df,
-        passenger_vehicle_types_path=passenger_vehicle_types_path,
-        freight_vehicle_types_path=freight_vehicle_types_path,
-    )
-    county_name_lookup = _build_county_name_lookup(county_boundaries_path)
-    inventory_targets_frames: list[pd.DataFrame] = []
-    if pipeline.enable_passenger_inventory_activity_correction:
-        logger.info(
-            "%s deriving passenger county activity correction factors from inventory %s",
-            _step_label("1.3"),
-            passenger_inventory_path,
+    try:
+        _, beam_activity_totals = _build_beam_activity_details(
+            skims_df=skims_df,
+            grouped_df=county_grouped_df,
+            passenger_vehicle_types_path=passenger_vehicle_types_path,
+            freight_vehicle_types_path=freight_vehicle_types_path,
         )
-        inventory_targets_frames.append(
-            _derive_inventory_activity_targets_for_assignment(
-                inventory_path=passenger_inventory_path,
-                county_name_lookup=county_name_lookup,
-                assignment_group="passenger",
+        progress.update(1)
+        county_name_lookup = _build_county_name_lookup(county_boundaries_path)
+        inventory_targets_frames: list[pd.DataFrame] = []
+        if pipeline.enable_passenger_inventory_activity_correction:
+            logger.info(
+                "%s deriving passenger county activity correction factors from inventory %s",
+                _step_label("1.3"),
+                passenger_inventory_path,
             )
-        )
-    if pipeline.enable_freight_inventory_activity_correction:
-        logger.info(
-            "%s deriving freight county activity correction factors from inventory %s",
-            _step_label("1.3"),
-            freight_inventory_path,
-        )
-        inventory_targets_frames.append(
-            _derive_inventory_activity_targets_for_assignment(
-                inventory_path=freight_inventory_path,
-                county_name_lookup=county_name_lookup,
-                assignment_group="freight",
+            inventory_targets_frames.append(
+                _derive_inventory_activity_targets_for_assignment(
+                    inventory_path=passenger_inventory_path,
+                    county_name_lookup=county_name_lookup,
+                    assignment_group="passenger",
+                )
             )
-        )
-    if inventory_targets_frames:
+        if pipeline.enable_freight_inventory_activity_correction:
+            logger.info(
+                "%s deriving freight county activity correction factors from inventory %s",
+                _step_label("1.3"),
+                freight_inventory_path,
+            )
+            inventory_targets_frames.append(
+                _derive_inventory_activity_targets_for_assignment(
+                    inventory_path=freight_inventory_path,
+                    county_name_lookup=county_name_lookup,
+                    assignment_group="freight",
+                )
+            )
         inventory_targets = pd.concat(inventory_targets_frames, ignore_index=True)
-    else:
-        inventory_targets = beam_activity_totals.copy()
-        inventory_targets["totVMT"] = pd.to_numeric(inventory_targets["totVMT"], errors="coerce").fillna(0.0)
-        inventory_targets["totTrips"] = pd.to_numeric(inventory_targets["totTrips"], errors="coerce").fillna(0.0)
-    county_correction_factors = _derive_county_correction_factors(
-        beam_activity_totals,
-        inventory_targets,
-    )
-    logger.info(
-        "%s correcting allocated emissions by county/modelYear/process/assignment factors",
-        _step_label("1.4"),
-    )
-    corrected = apply_county_corrections(
-        county_allocated_df,
-        county_correction_factors,
-        county_col="countyfp",
-        passenger_vehicle_types_path=passenger_vehicle_types_path,
-        freight_vehicle_types_path=freight_vehicle_types_path,
-    )
+        progress.update(1)
+        county_correction_factors = _derive_county_correction_factors(
+            beam_activity_totals,
+            inventory_targets,
+        )
+        progress.update(1)
+        logger.info(
+            "%s correcting allocated emissions by county/modelYear/process/assignment factors",
+            _step_label("1.3"),
+        )
+        corrected = apply_county_corrections(
+            county_allocated_df,
+            county_correction_factors,
+            county_col="countyfp",
+            passenger_vehicle_types_path=passenger_vehicle_types_path,
+            freight_vehicle_types_path=freight_vehicle_types_path,
+        )
+        progress.update(1)
+    finally:
+        progress.close()
     return corrected, beam_activity_totals, county_correction_factors
 
 

@@ -139,15 +139,15 @@ def _build_synthetic_beam_links(
     if candidates.empty:
         return mapped_network
 
-    candidates["geometry"] = candidates.apply(
-        lambda row: LineString(
-            [
-                (float(row["fromLocationX"]), float(row["fromLocationY"])),
-                (float(row["toLocationX"]), float(row["toLocationY"])),
-            ]
-        ),
-        axis=1,
-    )
+    candidates["geometry"] = [
+        LineString([(float(from_x), float(from_y)), (float(to_x), float(to_y))])
+        for from_x, from_y, to_x, to_y in zip(
+            candidates["fromLocationX"].to_numpy(),
+            candidates["fromLocationY"].to_numpy(),
+            candidates["toLocationX"].to_numpy(),
+            candidates["toLocationY"].to_numpy(),
+        )
+    ]
     candidates = gpd.GeoDataFrame(candidates, geometry="geometry", crs=f"EPSG:{output_epsg}")
     candidates["osm_id"] = pd.NA
     candidates["name"] = pd.NA

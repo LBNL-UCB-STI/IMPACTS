@@ -14,6 +14,7 @@ multiple maintained modules. It is organized by concern:
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 import re
 import sys
@@ -297,11 +298,11 @@ def infer_vector_epsg(path: Optional[str]) -> Optional[int]:
 # Table and vector IO
 # ---------------------------------------------------------------------------
 
-def read_vector(path: str) -> gpd.GeoDataFrame:
+def read_vector(path: str, *, columns: Optional[list[str]] = None) -> gpd.GeoDataFrame:
     target = Path(path)
     if target.suffix.lower() == ".parquet":
-        return gpd.read_parquet(target)
-    return gpd.read_file(target)
+        return gpd.read_parquet(target, columns=columns)
+    return gpd.read_file(target, columns=columns)
 
 
 def write_vector(gdf: gpd.GeoDataFrame, path: str) -> None:
@@ -793,6 +794,15 @@ def is_valid_parquet(path: str | Path) -> bool:
     return True
 
 
+def parquet_row_count(path: str | Path) -> int:
+    target = Path(path)
+    if target.suffix.lower() != ".parquet" or not target.exists():
+        raise ValueError(f"Expected parquet path for row count: {target}")
+    import pyarrow.parquet as pq
+
+    return int(pq.ParquetFile(target).metadata.num_rows)
+
+
 def resolve_duckdb_temp_directory(path: str | Path) -> Path:
     target = Path(path).resolve()
     base = target if target.is_dir() else target.parent
@@ -821,15 +831,39 @@ def _configure_duckdb_progress_bar(con: duckdb.DuckDBPyConnection, *, enabled: b
         con.execute("SET progress_bar_time = 0")
 
 
+def _duckdb_threads_for_profile(profile: str) -> int:
+    cpu_count = os.cpu_count() or 4
+    if profile == "memory_heavy":
+        return max(1, min(cpu_count, 2))
+    if profile == "export":
+        return max(1, min(cpu_count, 3))
+    return max(1, min(cpu_count, 4))
+
+
+def _configure_duckdb_execution_settings(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    profile: str = "balanced",
+) -> None:
+    con.execute("SET preserve_insertion_order = false")
+    con.execute(f"SET threads = {_duckdb_threads_for_profile(profile)}")
+    memory_limit = os.environ.get("IMPACTS_DUCKDB_MEMORY_LIMIT", "").strip()
+    if memory_limit:
+        escaped = memory_limit.replace("'", "''")
+        con.execute(f"SET memory_limit = '{escaped}'")
+
+
 def configure_duckdb_connection(
     con: duckdb.DuckDBPyConnection,
     *,
     working_dir: str | Path,
     show_progress: Optional[bool] = None,
+    profile: str = "balanced",
 ) -> Path:
     temp_dir = resolve_duckdb_temp_directory(working_dir)
     temp_dir_sql = str(temp_dir).replace("'", "''")
     con.execute(f"SET temp_directory = '{temp_dir_sql}'")
+    _configure_duckdb_execution_settings(con, profile=profile)
     _configure_duckdb_progress_bar(
         con,
         enabled=_should_show_duckdb_progress_bar() if show_progress is None else bool(show_progress),
@@ -837,11 +871,11 @@ def configure_duckdb_connection(
     return temp_dir
 
 
-def _emissions_value_expression(*, source_pollutant: str) -> str:
+def _emissions_value_expression(*, source_pollutant: str, emissions_column: str = "emissions") -> str:
     escaped = re.escape(source_pollutant).replace("'", "''")
     return (
         "COALESCE("
-        f"TRY_CAST(regexp_extract(COALESCE(CAST(emissions AS VARCHAR), ''), '(^|;){escaped}:([^;]+)', 2) AS DOUBLE), "
+        f"TRY_CAST(regexp_extract(COALESCE(CAST({emissions_column} AS VARCHAR), ''), '(^|;){escaped}:([^;]+)', 2) AS DOUBLE), "
         "0.0)"
     )
 
@@ -891,7 +925,7 @@ def _prepare_skims_for_grid_allocation_duckdb(
     con = duckdb.connect(database=":memory:")
     show_progress = _should_show_duckdb_progress_bar()
     try:
-        configure_duckdb_connection(con, working_dir=out, show_progress=False)
+        configure_duckdb_connection(con, working_dir=out, show_progress=False, profile="memory_heavy")
         if known_vehicle_type_ids is not None:
             observed_ids = {
                 row[0]
@@ -912,13 +946,6 @@ def _prepare_skims_for_grid_allocation_duckdb(
                 )
 
         observations_expr = "COALESCE(TRY_CAST(observations AS DOUBLE), 0.0)"
-        value_select = [f"SUM({observations_expr}) AS observations"]
-        for pollutant, source_col in zip(required_pollutants, source_pollutants):
-            if pollutant_mode == "explicit":
-                value_expr = f'COALESCE(TRY_CAST("{source_col}" AS DOUBLE), 0.0)'
-            else:
-                value_expr = f"{_emissions_value_expression(source_pollutant=source_col)} * {observations_expr}"
-            value_select.append(f'SUM({value_expr}) AS "{pollutant}"')
         select_cols: list[str] = []
         group_by_exprs: list[str] = []
         for idx, col in enumerate(prepared_group_cols, start=1):
@@ -936,22 +963,57 @@ def _prepare_skims_for_grid_allocation_duckdb(
             )
             where_clauses.append(f"trim(CAST(vehicleTypeId AS VARCHAR)) IN ({allowed_literals})")
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        query = f"""
-            SELECT
-                {", ".join(select_cols + value_select)}
-            FROM {scan}
-            {where_sql}
-            GROUP BY {", ".join(group_by_exprs)}
-        """
+        if pollutant_mode == "explicit":
+            value_select = [f"SUM({observations_expr}) AS observations"]
+            for pollutant, source_col in zip(required_pollutants, source_pollutants):
+                value_select.append(f'SUM(COALESCE(TRY_CAST("{source_col}" AS DOUBLE), 0.0)) AS "{pollutant}"')
+            query = f"""
+                SELECT
+                    {", ".join(select_cols + value_select)}
+                FROM {scan}
+                {where_sql}
+                GROUP BY {", ".join(group_by_exprs)}
+            """
+        else:
+            compact_group_exprs = list(group_by_exprs) + [str(len(group_by_exprs) + 1)]
+            compact_base_select = list(select_cols)
+            compact_base_select.append("COALESCE(CAST(emissions AS VARCHAR), '') AS emissions_text")
+            value_select = ["SUM(observations) AS observations"]
+            for pollutant, source_col in zip(required_pollutants, source_pollutants):
+                value_select.append(
+                    f'SUM({_emissions_value_expression(source_pollutant=source_col, emissions_column="emissions_text")} * observations) AS "{pollutant}"'
+                )
+            query = f"""
+                WITH compact_base AS (
+                    SELECT
+                        {", ".join(compact_base_select)},
+                        {observations_expr} AS observations
+                    FROM {scan}
+                    {where_sql}
+                ),
+                compact_collapsed AS (
+                    SELECT
+                        {", ".join(f'"{col}"' for col in prepared_group_cols)},
+                        emissions_text,
+                        SUM(observations) AS observations
+                    FROM compact_base
+                    GROUP BY {", ".join(compact_group_exprs)}
+                )
+                SELECT
+                    {", ".join(f'"{col}" AS "{col}"' for col in prepared_group_cols)},
+                    {", ".join(value_select)}
+                FROM compact_collapsed
+                GROUP BY {", ".join(str(index) for index in range(1, len(prepared_group_cols) + 1))}
+            """
         output_sql = str(output_path).replace("'", "''")
         if show_progress:
             _configure_duckdb_progress_bar(con, enabled=True)
         con.execute(f"COPY ({query}) TO '{output_sql}' (FORMAT PARQUET)")
         if show_progress:
             _configure_duckdb_progress_bar(con, enabled=False)
-        grouped_rows = con.execute(f"SELECT COUNT(*) FROM ({query})").fetchone()[0]
     finally:
         con.close()
+    grouped_rows = parquet_row_count(output_path)
     logger.info(
         "Prepared skims via DuckDB in %.2fs: source=%s grouped_rows=%d",
         time.perf_counter() - started,

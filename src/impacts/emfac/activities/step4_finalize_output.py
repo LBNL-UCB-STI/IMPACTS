@@ -456,7 +456,7 @@ def _build_rates_store_duckdb(*, parquet_root: Path, duckdb_path: Path) -> Path:
     con = duckdb.connect(str(duckdb_path))
     show_progress = _should_show_duckdb_progress_bar()
     try:
-        configure_duckdb_connection(con, working_dir=duckdb_path.parent, show_progress=False)
+        configure_duckdb_connection(con, working_dir=duckdb_path.parent, show_progress=False, profile="balanced")
         con.execute("DROP TABLE IF EXISTS emfac_rates")
         if show_progress:
             _configure_duckdb_progress_bar(con, enabled=True)

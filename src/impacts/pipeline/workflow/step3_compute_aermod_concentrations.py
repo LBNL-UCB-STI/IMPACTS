@@ -173,7 +173,7 @@ def _prepare_source_emissions(
     con = duckdb.connect(database=":memory:")
     show_progress = _should_show_duckdb_progress_bar()
     try:
-        configure_duckdb_connection(con, working_dir=outputs_dir, show_progress=show_progress)
+        configure_duckdb_connection(con, working_dir=outputs_dir, show_progress=show_progress, profile="balanced")
         con.register("source_frame", source_frame)
         source = con.execute(
             f"""

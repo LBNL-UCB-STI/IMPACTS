@@ -11,8 +11,10 @@ from typing import Dict
 from typing import List
 from typing import Optional
 
+import duckdb
 import pandas as pd
 
+from ...common import configure_duckdb_connection
 from ...common import normalize_county_fips
 from ...common import prepare_skims_for_grid_allocation
 from ...common import prepared_table_target
@@ -88,6 +90,13 @@ def _existing_valid_skims_parquet(path: Path) -> Optional[str]:
 
 def _load_intersection_subset(path: str, columns: List[str]) -> pd.DataFrame:
     target = Path(path)
+    lower = target.name.lower()
+    if lower.endswith(".parquet"):
+        return pd.read_parquet(target, columns=columns)
+    if lower.endswith(".csv.gz"):
+        return pd.read_csv(target, compression="gzip", usecols=columns)
+    if lower.endswith(".csv"):
+        return pd.read_csv(target, usecols=columns)
     frame = read_table(target)
     return frame[columns].copy()
 
@@ -101,6 +110,29 @@ def _load_intersection_subset_or_df(
     if intersection_df is not None:
         return intersection_df[columns].copy()
     return _load_intersection_subset(path, columns)
+
+
+def _register_frame_or_scan(
+    *,
+    con: duckdb.DuckDBPyConnection,
+    relation_name: str,
+    path: Optional[str],
+    columns: list[str],
+    frame: Optional[pd.DataFrame],
+) -> str:
+    if frame is not None:
+        con.register(relation_name, frame[columns].copy())
+        return relation_name
+    if not path:
+        raise ValueError(f"Expected path or frame for DuckDB relation '{relation_name}'.")
+    target = Path(path)
+    if target.suffix.lower() != ".parquet":
+        subset = read_table(target)[columns].copy()
+        con.register(relation_name, subset)
+        return relation_name
+    quoted_path = str(target).replace("'", "''")
+    projected = ", ".join(f'"{column}"' for column in columns)
+    return f"(SELECT {projected} FROM read_parquet('{quoted_path}'))"
 
 
 def _normalize_vehicle_type_token(value: object) -> str:
@@ -347,21 +379,49 @@ def _build_zone_grouped_table(
     edge_length_col = f"{zone_label}_edge_link_length_m"
     zone_length_col = f"{zone_label}_zone_link_length_m"
     required_cols = {"linkId", zone_id_col, proportion_col, edge_length_col, zone_length_col}
-    intersection = _load_intersection_subset_or_df(
-        path=str(intersection_path),
-        columns=list(required_cols),
-        intersection_df=intersection_df,
-    )
-    missing = [col for col in required_cols if col not in intersection.columns]
+    if intersection_df is not None:
+        missing = [col for col in required_cols if col not in intersection_df.columns]
+    else:
+        probe = _load_intersection_subset_or_df(
+            path=str(intersection_path),
+            columns=list(required_cols),
+            intersection_df=intersection_df,
+        )
+        missing = [col for col in required_cols if col not in probe.columns]
     if missing:
         raise ValueError(
             f"{_step_label('1.1')} requires canonical {zone_label} intersection columns. Missing: {missing}"
         )
-    grouped = intersection.copy()
-    for col in [proportion_col, edge_length_col, zone_length_col]:
-        grouped[col] = pd.to_numeric(grouped[col], errors="coerce").fillna(0.0)
-    group_cols = ["linkId", zone_id_col]
-    grouped = grouped.groupby(group_cols, dropna=False)[[proportion_col, edge_length_col, zone_length_col]].sum().reset_index()
+
+    con = duckdb.connect(database=":memory:")
+    try:
+        configure_duckdb_connection(
+            con,
+            working_dir=Path(intersection_path) if intersection_path else Path.cwd(),
+            show_progress=False,
+            profile="memory_heavy",
+        )
+        source = _register_frame_or_scan(
+            con=con,
+            relation_name=f"{zone_label}_intersection",
+            path=intersection_path,
+            columns=list(required_cols),
+            frame=intersection_df,
+        )
+        grouped = con.execute(
+            f"""
+            SELECT
+                "linkId" AS "linkId",
+                "{zone_id_col}" AS "{zone_id_col}",
+                SUM(COALESCE(TRY_CAST("{proportion_col}" AS DOUBLE), 0.0)) AS "{proportion_col}",
+                SUM(COALESCE(TRY_CAST("{edge_length_col}" AS DOUBLE), 0.0)) AS "{edge_length_col}",
+                SUM(COALESCE(TRY_CAST("{zone_length_col}" AS DOUBLE), 0.0)) AS "{zone_length_col}"
+            FROM {source}
+            GROUP BY 1, 2
+            """
+        ).fetchdf()
+    finally:
+        con.close()
     if grouped.empty:
         return None
     logger.info("%s BEAM %s mapping rows=%d", _step_label("1.1"), zone_label, len(grouped))
@@ -395,22 +455,45 @@ def _build_zone_allocated_table(
     zone_length_col = f"{zone_label}_zone_link_length_m"
 
     merge_cols = ["linkId", "vehicleTypeId", "process"] + activity_cols + emission_cols
-    allocated = grouped_df.merge(skims_df[merge_cols].copy(), how="left", on="linkId")
-    allocated["vehicleTypeId"] = allocated["vehicleTypeId"].map(_normalize_vehicle_type_token)
-    allocated["process"] = allocated["process"].map(_normalize_vehicle_type_token)
-    allocated = allocated.loc[allocated["vehicleTypeId"].ne("") & allocated["process"].ne("")].copy()
+    con = duckdb.connect(database=":memory:")
+    try:
+        configure_duckdb_connection(
+            con,
+            working_dir=Path.cwd(),
+            show_progress=True,
+            profile="memory_heavy",
+        )
+        con.register("grouped_df", grouped_df)
+        con.register("skims_df", skims_df[merge_cols].copy())
+        value_selects = [
+            f"""
+            COALESCE(TRY_CAST(s."{col}" AS DOUBLE), 0.0) * COALESCE(TRY_CAST(g."{proportion_col}" AS DOUBLE), 0.0)
+            AS "{col}_{zone_label}_allocated"
+            """.strip()
+            for col in activity_cols + emission_cols
+        ]
+        allocated = con.execute(
+            f"""
+            SELECT
+                g."linkId" AS "linkId",
+                trim(CAST(s."vehicleTypeId" AS VARCHAR)) AS "vehicleTypeId",
+                trim(CAST(s."process" AS VARCHAR)) AS "process",
+                g."{zone_id_col}" AS "{zone_id_col}",
+                COALESCE(TRY_CAST(g."{proportion_col}" AS DOUBLE), 0.0) AS "{proportion_col}",
+                COALESCE(TRY_CAST(g."{edge_length_col}" AS DOUBLE), 0.0) AS "{edge_length_col}",
+                COALESCE(TRY_CAST(g."{zone_length_col}" AS DOUBLE), 0.0) AS "{zone_length_col}",
+                {", ".join(value_selects)}
+            FROM grouped_df AS g
+            LEFT JOIN skims_df AS s
+                ON g."linkId" = s."linkId"
+            WHERE trim(CAST(s."vehicleTypeId" AS VARCHAR)) <> ''
+              AND trim(CAST(s."process" AS VARCHAR)) <> ''
+            """
+        ).fetchdf()
+    finally:
+        con.close()
     if allocated.empty:
         return None
-
-    proportion = pd.to_numeric(allocated[proportion_col], errors="coerce").fillna(0.0)
-    for col in activity_cols:
-        allocated[f"{col}_{zone_label}_allocated"] = pd.to_numeric(allocated[col], errors="coerce").fillna(0.0) * proportion
-    for col in emission_cols:
-        allocated[f"{col}_{zone_label}_allocated"] = pd.to_numeric(allocated[col], errors="coerce").fillna(0.0) * proportion
-
-    keep_cols = ["linkId", "vehicleTypeId", "process", zone_id_col, proportion_col, edge_length_col, zone_length_col]
-    keep_cols.extend([f"{col}_{zone_label}_allocated" for col in activity_cols + emission_cols])
-    allocated = allocated[keep_cols].copy()
     logger.info("%s BEAM emissions allocated across %s rows=%d", _step_label("1.2"), zone_label, len(allocated))
     return allocated
 

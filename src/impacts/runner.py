@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from pathlib import Path
 from typing import Any
 from typing import Dict
@@ -36,6 +37,17 @@ def _log_step_banner(label: str, name: str) -> None:
     sys.stdout.write("\n")
     sys.stdout.flush()
     logger.info("%s", banner)
+
+
+def _record_stage_timing(stage_timings: dict[str, float], key: str, started_at: float) -> None:
+    stage_timings[key] = round(time.perf_counter() - started_at, 2)
+
+
+def _log_stage_timing_summary(stage_timings: dict[str, float]) -> None:
+    if not stage_timings:
+        return
+    summary = ", ".join(f"{stage}={seconds:.2f}s" for stage, seconds in stage_timings.items())
+    logger.info("Stage timing summary: %s", summary)
 
 
 def _resolve_runtime_output_root(
@@ -382,17 +394,21 @@ def run_from_input_manifest(
     from .pipeline.preprocessing.step3_integrate_grids import run as run_grid_intersection
     from .pipeline.workflow.step1_process_emissions import run as run_emissions_processing
     from .common import prepared_table_target
+    stage_timings: dict[str, float] = {}
 
     _log_step_banner("PREPROCESS STEP 3", "network mapping and grid intersection")
+    stage_started = time.perf_counter()
     grid_intersection_paths, intersection_dfs = run_grid_intersection(
         pipeline,
         output_root,
         input_root,
         manifest_inputs=manifest_inputs,
     )
+    _record_stage_timing(stage_timings, "preprocess_step3_integrate_grids", stage_started)
 
     _log_step_banner("STEP 1", "emissions processing")
     logger.info("Using Step 1 implementation: emissions_processing")
+    stage_started = time.perf_counter()
     emissions_outputs = run_emissions_processing(
         pipeline,
         output_root,
@@ -401,6 +417,7 @@ def run_from_input_manifest(
         intersection_dfs=intersection_dfs,
         manifest_inputs=manifest_inputs,
     )
+    _record_stage_timing(stage_timings, "step1_process_emissions", stage_started)
     prepared_skims_candidate = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
     prepared_skims_path = str(prepared_skims_candidate) if prepared_skims_candidate.exists() else None
 
@@ -416,12 +433,14 @@ def run_from_input_manifest(
         if pipeline.inmap_enabled and emissions_outputs.get("beam_emissions_for_inmap"):
             _log_step_banner("STEP 2", "inmap concentrations")
             logger.info("Using Step 2 implementation: inmap_concentrations_and_export")
+            stage_started = time.perf_counter()
             _, _, concentration_path = run_inmap_dispersion(
                 pipeline=pipeline,
                 raw_dir=output_root,
                 emissions_input_path=emissions_outputs["beam_emissions_for_inmap"],
                 inmap_study_area_grid_path=emissions_outputs.get("beam_inmap_study_area_grid"),
             )
+            _record_stage_timing(stage_timings, "step2_compute_inmap_concentrations", stage_started)
             logger.info("InMAP concentrations complete: wrote %s", concentration_path)
         else:
             logger.info(
@@ -432,11 +451,13 @@ def run_from_input_manifest(
         if pipeline.aermod_enabled and pipeline.asrv_patterns_file and emissions_outputs.get("beam_emissions_for_aermod"):
             _log_step_banner("STEP 3", "aermod concentrations")
             logger.info("Using Step 3 implementation: aermod_concentrations_and_export")
+            stage_started = time.perf_counter()
             _, _, aermod_concentration_path = run_aermod_dispersion(
                 pipeline=pipeline,
                 raw_dir=output_root,
                 emissions_input_path=emissions_outputs["beam_emissions_for_aermod"],
             )
+            _record_stage_timing(stage_timings, "step3_compute_aermod_concentrations", stage_started)
             logger.info("AERMOD concentrations complete: wrote %s", aermod_concentration_path)
         else:
             logger.info(
@@ -448,6 +469,7 @@ def run_from_input_manifest(
         if concentration_path is not None:
             _log_step_banner("STEP 4", "prepare exposure")
             logger.info("Using Step 4 implementation: prepare_exposure")
+            stage_started = time.perf_counter()
             _, exposure_grid_path, population_distribution_path, population_counts_path = run_prepare_exposure(
                 pipeline=pipeline,
                 raw_dir=output_root,
@@ -455,6 +477,7 @@ def run_from_input_manifest(
                 aermod_concentrations_path=str(aermod_concentration_path) if aermod_concentration_path else None,
                 population_inputs=population_inputs,
             )
+            _record_stage_timing(stage_timings, "step4_prepare_exposure", stage_started)
             logger.info("Concentration distribution complete: wrote %s", exposure_grid_path)
             if population_distribution_path is not None:
                 logger.info("Population distribution complete: wrote %s", population_distribution_path)
@@ -465,6 +488,7 @@ def run_from_input_manifest(
     else:
         logger.info("Dispersion skipped")
 
+    _log_stage_timing_summary(stage_timings)
     run_manifest = {
         "contract_version": manifest.get("contract_version", "1"),
         "model": "impacts",
@@ -510,6 +534,7 @@ def run_from_input_manifest(
         },
         "execution": {
             "dispersion_completed": run_dispersion,
+            "stage_timings_seconds": stage_timings,
             "stopped_after": (
                 "step4_prepare_exposure"
                 if exposure_grid_path is not None or population_distribution_path is not None
