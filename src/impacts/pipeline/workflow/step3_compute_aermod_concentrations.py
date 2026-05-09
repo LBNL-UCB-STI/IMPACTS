@@ -16,6 +16,8 @@ from scipy.signal import fftconvolve
 
 from ...common import log_step_banner
 from ...common import log_substep_banner
+from ...common import _configure_duckdb_progress_bar
+from ...common import _should_show_duckdb_progress_bar
 from ...common import read_table
 from ...common import read_vector
 from ...config.defaults import aermod_active_days_per_year as default_aermod_active_days_per_year
@@ -167,7 +169,9 @@ def _prepare_source_emissions(
         + [f"SUM({col}) AS {col}" for col in emissions_cols]
     )
     con = duckdb.connect(database=":memory:")
+    show_progress = _should_show_duckdb_progress_bar()
     try:
+        _configure_duckdb_progress_bar(con, enabled=show_progress)
         con.register("source_frame", source_frame)
         source = con.execute(
             f"""

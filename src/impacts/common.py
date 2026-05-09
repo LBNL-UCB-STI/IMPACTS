@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import re
+import sys
 import time
 from typing import Any
 from typing import Dict
@@ -787,6 +788,16 @@ def _duckdb_scan_expression(path: str | Path) -> str:
     return f"read_parquet('{path_sql}')"
 
 
+def _should_show_duckdb_progress_bar() -> bool:
+    return sys.stderr.isatty()
+
+
+def _configure_duckdb_progress_bar(con: duckdb.DuckDBPyConnection, *, enabled: bool) -> None:
+    con.execute(f"SET enable_progress_bar = {'true' if enabled else 'false'}")
+    if enabled:
+        con.execute("SET progress_bar_time = 0")
+
+
 def _emissions_value_expression(*, source_pollutant: str) -> str:
     escaped = re.escape(source_pollutant).replace("'", "''")
     return (
@@ -839,7 +850,9 @@ def _prepare_skims_for_grid_allocation_duckdb(
 
     scan = _duckdb_scan_expression(skims_path)
     con = duckdb.connect(database=":memory:")
+    show_progress = _should_show_duckdb_progress_bar()
     try:
+        _configure_duckdb_progress_bar(con, enabled=show_progress)
         if known_vehicle_type_ids is not None:
             observed_ids = {
                 row[0]
@@ -893,6 +906,8 @@ def _prepare_skims_for_grid_allocation_duckdb(
         """
         output_sql = str(output_path).replace("'", "''")
         con.execute(f"COPY ({query}) TO '{output_sql}' (FORMAT PARQUET)")
+        if show_progress:
+            _configure_duckdb_progress_bar(con, enabled=False)
         grouped_rows = con.execute(f"SELECT COUNT(*) FROM ({query})").fetchone()[0]
     finally:
         con.close()

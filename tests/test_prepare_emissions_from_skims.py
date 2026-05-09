@@ -14,6 +14,26 @@ from impacts.pipeline.workflow.annualization import _build_skims_scale_factors
 from impacts.pipeline.workflow.annualization import annualize_prepared_skims_for_grid_allocation
 
 
+def test_configure_duckdb_progress_bar_toggles_settings() -> None:
+    class _FakeConnection:
+        def __init__(self) -> None:
+            self.commands: list[str] = []
+
+        def execute(self, sql: str):
+            self.commands.append(sql)
+            return self
+
+    con = _FakeConnection()
+    common._configure_duckdb_progress_bar(con, enabled=True)
+    common._configure_duckdb_progress_bar(con, enabled=False)
+
+    assert con.commands == [
+        "SET enable_progress_bar = true",
+        "SET progress_bar_time = 0",
+        "SET enable_progress_bar = false",
+    ]
+
+
 def test_build_skims_scale_factors_uses_transit_sample_for_non_bus_transit() -> None:
     prepared = pd.DataFrame(
         [

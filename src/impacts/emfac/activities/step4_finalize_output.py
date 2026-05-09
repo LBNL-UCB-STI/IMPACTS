@@ -9,6 +9,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from impacts.emfac.config import _apply_table_schema
+from impacts.common import _configure_duckdb_progress_bar
+from impacts.common import _should_show_duckdb_progress_bar
 from impacts.emfac.activities.step3_fill_project_analysis_rates import ACTIVITY_COLUMN
 from impacts.emfac.activities.step3_fill_project_analysis_rates import POLLUTANT_COLUMNS
 from impacts.emfac.common import frame_summary
@@ -451,7 +453,9 @@ def _build_rates_store_duckdb(*, parquet_root: Path, duckdb_path: Path) -> Path:
     duckdb_path.parent.mkdir(parents=True, exist_ok=True)
     parquet_glob = (parquet_root / "**" / "*.parquet").as_posix()
     con = duckdb.connect(str(duckdb_path))
+    show_progress = _should_show_duckdb_progress_bar()
     try:
+        _configure_duckdb_progress_bar(con, enabled=show_progress)
         con.execute("DROP TABLE IF EXISTS emfac_rates")
         con.execute(
             """
