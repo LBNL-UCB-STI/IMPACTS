@@ -823,6 +823,10 @@ def _prepare_skims_for_grid_allocation_duckdb(
     known_vehicle_type_ids: Optional[set[str]],
 ) -> pd.DataFrame:
     started = time.perf_counter()
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.suffix.lower() != ".parquet":
+        raise ValueError("Prepared skims output must be .parquet")
     available_columns = _table_available_columns(skims_path)
     source_pollutants = [pollutants_map.get(p, p) for p in required_pollutants] if pollutants_map else list(required_pollutants)
     pollutant_mode = _resolve_skims_pollutant_mode(
@@ -892,10 +896,6 @@ def _prepare_skims_for_grid_allocation_duckdb(
         grouped_rows = con.execute(f"SELECT COUNT(*) FROM ({query})").fetchone()[0]
     finally:
         con.close()
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    if out.suffix.lower() != ".parquet":
-        raise ValueError("Prepared skims output must be .parquet")
     logger.info(
         "Prepared skims via DuckDB in %.2fs: source=%s grouped_rows=%d",
         time.perf_counter() - started,

@@ -215,6 +215,42 @@ def test_prepare_skims_for_grid_allocation_parses_compact_emissions_with_polluta
     ]
 
 
+def test_prepare_skims_for_grid_allocation_creates_output_parent_directory(tmp_path: Path) -> None:
+    raw_skims = pd.DataFrame(
+        [
+            {
+                "hour": 7,
+                "linkId": 101,
+                "vehicleTypeId": "pax-car",
+                "process": "RUNEX",
+                "emissions": "NOx:1.25",
+                "observations": 2.0,
+            }
+        ]
+    )
+    raw_path = tmp_path / "skimsEmissions.parquet"
+    pq.write_table(pa.Table.from_pandas(raw_skims, preserve_index=False), raw_path, row_group_size=1)
+    output_path = tmp_path / "nested" / "skims" / "prepared_skims.parquet"
+
+    aggregated = common.prepare_skims_for_grid_allocation(
+        str(raw_path),
+        str(output_path),
+        group_cols=["linkId", "vehicleTypeId", "process"],
+        required_pollutants=["NOx"],
+    ).reset_index(drop=True)
+
+    assert output_path.exists()
+    assert aggregated.to_dict("records") == [
+        {
+            "linkId": 101,
+            "vehicleTypeId": "pax-car",
+            "process": "RUNEX",
+            "observations": 2.0,
+            "NOx": 2.5,
+        }
+    ]
+
+
 def test_prepare_staged_skims_for_processing_reuses_grouped_intermediate(tmp_path: Path, monkeypatch) -> None:
     input_root = tmp_path / "inputs"
     grouped_path = input_root / "skims" / "prepared_skims_grouped_for_grid_allocation.parquet"
