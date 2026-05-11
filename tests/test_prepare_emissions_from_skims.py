@@ -56,13 +56,13 @@ def test_configure_duckdb_execution_settings_uses_bounded_threads(monkeypatch) -
     ]
 
 
-def test_resolve_duckdb_temp_directory_stays_under_impacts_output_inputs_root(tmp_path: Path) -> None:
+def test_resolve_duckdb_temp_directory_stays_under_impacts_output_tmp_root(tmp_path: Path) -> None:
     output_path = tmp_path / "impacts_output" / "inputs" / "skims" / "prepared_skims.parquet"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     resolved = common.resolve_duckdb_temp_directory(output_path)
 
-    assert resolved == tmp_path / "impacts_output" / "inputs" / "duckdb"
+    assert resolved == tmp_path / "impacts_output" / "tmp" / "duckdb"
     assert resolved.exists()
 
 
@@ -303,7 +303,7 @@ def test_prepare_skims_for_grid_allocation_creates_output_parent_directory(tmp_p
     ]
 
 
-def test_build_zone_allocated_table_uses_duckdb_and_preserves_allocated_values() -> None:
+def test_build_zone_allocated_table_uses_duckdb_and_preserves_allocated_values(tmp_path: Path) -> None:
     grouped = pd.DataFrame(
         [
             {
@@ -340,6 +340,7 @@ def test_build_zone_allocated_table_uses_duckdb_and_preserves_allocated_values()
             grouped_df=grouped,
             skims_df=skims,
             zone_label="county",
+            scratch_dir=tmp_path,
         )
         .sort_values("countyfp")
         .reset_index(drop=True)
@@ -373,7 +374,7 @@ def test_build_zone_allocated_table_uses_duckdb_and_preserves_allocated_values()
     ]
 
 
-def test_build_zone_allocated_table_uses_supplied_step_label(caplog) -> None:
+def test_build_zone_allocated_table_uses_supplied_step_label(caplog, tmp_path: Path) -> None:
     grouped = pd.DataFrame(
         [
             {
@@ -403,6 +404,7 @@ def test_build_zone_allocated_table_uses_supplied_step_label(caplog) -> None:
             grouped_df=grouped,
             skims_df=skims,
             zone_label="inmap",
+            scratch_dir=tmp_path,
             step_id="1.4",
         )
 

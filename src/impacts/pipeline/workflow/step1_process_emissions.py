@@ -36,6 +36,10 @@ _TRIP_PROCESSES = {"HOTSOAK", "DIURN", "STREX"}
 _CORRECTION_ASSIGNMENT_GROUPS = {"passenger", "freight"}
 
 
+def _step1_scratch_dir(raw_dir: Path) -> Path:
+    return raw_dir / "tmp" / "step1_process_emissions"
+
+
 def _safe_ratio(
     numerator: pd.Series,
     denominator: pd.Series,
@@ -223,6 +227,7 @@ def apply_county_corrections(
     county_correction_factors: pd.DataFrame,
     *,
     county_col: str,
+    scratch_dir: Path,
     passenger_vehicle_types_path: str,
     freight_vehicle_types_path: str,
 ) -> pd.DataFrame:
@@ -258,7 +263,7 @@ def apply_county_corrections(
 
     con = duckdb.connect(database=":memory:")
     try:
-        configure_duckdb_connection(con, working_dir=Path.cwd(), show_progress=True, profile="memory_heavy")
+        configure_duckdb_connection(con, working_dir=scratch_dir, show_progress=True, profile="memory_heavy")
         con.register("allocated_df", allocated_df)
         con.register("vehicle_lookup", vehicle_lookup)
         con.register("county_correction_factors", county_correction_factors)
@@ -336,7 +341,11 @@ def apply_county_corrections(
     return result
 
 
-def _build_corrected_source_totals(county_corrected_df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+def _build_corrected_source_totals(
+    county_corrected_df: Optional[pd.DataFrame],
+    *,
+    scratch_dir: Path,
+) -> Optional[pd.DataFrame]:
     if county_corrected_df is None or county_corrected_df.empty:
         return None
     group_cols = ["linkId", "vehicleTypeId", "process"]
@@ -347,7 +356,7 @@ def _build_corrected_source_totals(county_corrected_df: Optional[pd.DataFrame]) 
     value_cols = [col for col in county_corrected_df.columns if col.endswith("_county_allocated")]
     con = duckdb.connect(database=":memory:")
     try:
-        configure_duckdb_connection(con, working_dir=Path.cwd(), show_progress=True, profile="memory_heavy")
+        configure_duckdb_connection(con, working_dir=scratch_dir, show_progress=True, profile="memory_heavy")
         con.register("county_corrected_df", county_corrected_df)
         select_parts = [f'"{col}"' for col in group_cols]
         select_parts.extend(
@@ -448,6 +457,7 @@ def _build_county_corrected_table(
     skims_df: pd.DataFrame,
     pipeline: PipelineConfig,
     manifest_inputs: Dict[str, Any],
+    scratch_dir: Path,
 ) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     if county_allocated_df is None or county_allocated_df.empty:
         return None, None, None
@@ -518,6 +528,7 @@ def _build_county_corrected_table(
             county_allocated_df,
             county_correction_factors,
             county_col="countyfp",
+            scratch_dir=scratch_dir,
             passenger_vehicle_types_path=passenger_vehicle_types_path,
             freight_vehicle_types_path=freight_vehicle_types_path,
         )
@@ -538,6 +549,7 @@ def run(
     reused = _reuse_existing_outputs(raw_dir)
     if reused is not None:
         return reused
+    scratch_dir = _step1_scratch_dir(raw_dir)
 
     log_substep_banner("1.0", "prepare skims inputs", logger=logger)
     skims_df = load_or_prepare_skims_df(
@@ -561,16 +573,19 @@ def run(
         intersection_path=intersection_paths.get("county"),
         intersection_df=None,
         zone_label="county",
+        scratch_dir=scratch_dir,
     )
     inmap_grouped_df = _build_zone_grouped_table(
         intersection_path=intersection_paths.get("inmap"),
         intersection_df=None,
         zone_label="inmap",
+        scratch_dir=scratch_dir,
     )
     aermod_grouped_df = _build_zone_grouped_table(
         intersection_path=intersection_paths.get("aermod"),
         intersection_df=None,
         zone_label="aermod",
+        scratch_dir=scratch_dir,
     )
 
     log_substep_banner("1.2[county]", "allocate emissions to county surface", logger=logger)
@@ -578,6 +593,7 @@ def run(
         grouped_df=county_grouped_df,
         skims_df=skims_df,
         zone_label="county",
+        scratch_dir=scratch_dir,
         step_id="1.2",
     )
     log_substep_banner("1.3", "apply activity corrections", logger=logger)
@@ -587,20 +603,26 @@ def run(
         skims_df=skims_df,
         pipeline=pipeline,
         manifest_inputs=manifest_inputs or {},
+        scratch_dir=scratch_dir,
     )
-    corrected_source_df = _build_corrected_source_totals(county_corrected_df)
+    corrected_source_df = _build_corrected_source_totals(
+        county_corrected_df,
+        scratch_dir=scratch_dir,
+    )
 
     log_substep_banner("1.4[inmap/aermod]", "allocate corrected totals independently to inmap and aermod surfaces", logger=logger)
     inmap_allocated_df = _build_zone_allocated_table(
         grouped_df=inmap_grouped_df,
         skims_df=corrected_source_df if corrected_source_df is not None else skims_df,
         zone_label="inmap",
+        scratch_dir=scratch_dir,
         step_id="1.4",
     )
     aermod_allocated_df = _build_zone_allocated_table(
         grouped_df=aermod_grouped_df,
         skims_df=corrected_source_df if corrected_source_df is not None else skims_df,
         zone_label="aermod",
+        scratch_dir=scratch_dir,
         step_id="1.4",
     )
 

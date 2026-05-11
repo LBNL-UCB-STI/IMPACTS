@@ -52,9 +52,9 @@ def _resolve_run_output_root(*, input_manifest_path: str | None) -> Path:
 
 
 def _resolve_profile_output(*, output_root: Path, explicit_output: str | None, stem: str) -> Path:
-    candidate = Path(explicit_output).expanduser() if explicit_output else output_root / "profiles" / stem
+    candidate = Path(explicit_output).expanduser() if explicit_output else output_root / "profiling" / stem
     if not candidate.is_absolute():
-        candidate = (Path.cwd() / candidate).resolve()
+        candidate = (output_root / candidate).resolve()
     return _validate_profile_output_path(output_path=candidate, output_root=output_root)
 
 

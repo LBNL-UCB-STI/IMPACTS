@@ -5,10 +5,10 @@
 ## Main commands
 
 ```bash
-python -m impacts preprocess --config /path/settings.yaml --staging-dir /path/workspace
+python -m impacts preprocess --config /path/settings.yaml
 python -m impacts run --input-manifest /path/workspace/inputs_manifest.yaml
 python -m impacts postprocess --run-manifest /path/workspace/run_manifest.yaml --output-dir /path/impacts
-python -m impacts pipeline --config /path/settings.yaml --workspace /path/workspace
+python -m impacts pipeline --config /path/settings.yaml
 ```
 
 ## Outputs

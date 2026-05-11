@@ -371,6 +371,7 @@ def _build_zone_grouped_table(
     intersection_path: Optional[str],
     intersection_df: Optional[pd.DataFrame],
     zone_label: str,
+    scratch_dir: Path,
 ) -> Optional[pd.DataFrame]:
     if not intersection_path and intersection_df is None:
         return None
@@ -397,7 +398,7 @@ def _build_zone_grouped_table(
     try:
         configure_duckdb_connection(
             con,
-            working_dir=Path(intersection_path) if intersection_path else Path.cwd(),
+            working_dir=scratch_dir,
             show_progress=False,
             profile="memory_heavy",
         )
@@ -437,6 +438,7 @@ def _build_zone_allocated_table(
     grouped_df: Optional[pd.DataFrame],
     skims_df: pd.DataFrame,
     zone_label: str,
+    scratch_dir: Path,
     step_id: str = "1.2",
 ) -> Optional[pd.DataFrame]:
     if grouped_df is None or grouped_df.empty:
@@ -460,7 +462,7 @@ def _build_zone_allocated_table(
     try:
         configure_duckdb_connection(
             con,
-            working_dir=Path.cwd(),
+            working_dir=scratch_dir,
             show_progress=True,
             profile="memory_heavy",
         )
