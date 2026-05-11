@@ -56,13 +56,13 @@ def test_configure_duckdb_execution_settings_uses_bounded_threads(monkeypatch) -
     ]
 
 
-def test_resolve_duckdb_temp_directory_stays_under_impacts_output_runtime_root(tmp_path: Path) -> None:
+def test_resolve_duckdb_temp_directory_stays_under_impacts_output_inputs_root(tmp_path: Path) -> None:
     output_path = tmp_path / "impacts_output" / "inputs" / "skims" / "prepared_skims.parquet"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     resolved = common.resolve_duckdb_temp_directory(output_path)
 
-    assert resolved == tmp_path / "impacts_output" / "runtime" / "duckdb"
+    assert resolved == tmp_path / "impacts_output" / "inputs" / "duckdb"
     assert resolved.exists()
 
 
