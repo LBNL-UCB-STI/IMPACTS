@@ -373,6 +373,44 @@ def test_build_zone_allocated_table_uses_duckdb_and_preserves_allocated_values()
     ]
 
 
+def test_build_zone_allocated_table_uses_supplied_step_label(caplog) -> None:
+    grouped = pd.DataFrame(
+        [
+            {
+                "linkId": 101,
+                "inmap_cell_id": 9,
+                "inmap_zone_edge_proportion": 0.5,
+                "inmap_edge_link_length_m": 100.0,
+                "inmap_zone_link_length_m": 50.0,
+            }
+        ]
+    )
+    skims = pd.DataFrame(
+        [
+            {
+                "linkId": 101,
+                "vehicleTypeId": "pax-car",
+                "process": "RUNEX",
+                "totVMT": 20.0,
+                "totTrips": 4.0,
+                "tons_per_year_NOx": 8.0,
+            }
+        ]
+    )
+
+    with caplog.at_level("INFO", logger="impacts.pipeline.workflow.prepare_emissions_from_skims"):
+        allocated = _build_zone_allocated_table(
+            grouped_df=grouped,
+            skims_df=skims,
+            zone_label="inmap",
+            step_id="1.4",
+        )
+
+    assert allocated is not None
+    assert "Step 1.4" in caplog.text
+    assert "allocated across inmap rows=1" in caplog.text
+
+
 def test_prepare_staged_skims_for_processing_reuses_grouped_intermediate(tmp_path: Path, monkeypatch) -> None:
     input_root = tmp_path / "inputs"
     grouped_path = input_root / "skims" / "prepared_skims_grouped_for_grid_allocation.parquet"

@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 from impacts.config.settings_builder import load_settings_from_yaml
+from impacts.manifest.file_ops import load_structured_file
 from impacts.manifest.file_ops import resolve_path
 
 
@@ -40,39 +41,86 @@ def _validate_profile_output_path(*, output_path: Path, output_root: Path) -> Pa
     return resolved_output
 
 
-def _resolve_pipeline_profile_output(*, settings_path: str, explicit_output: str | None) -> Path:
-    output_root = _resolve_pipeline_output_root(settings_path)
-    candidate = Path(explicit_output).expanduser() if explicit_output else output_root / "profiles" / "pipeline.memray"
+def _resolve_run_output_root(*, input_manifest_path: str | None) -> Path:
+    if not input_manifest_path:
+        raise ValueError("run profiling requires input_manifest_path")
+    manifest = load_structured_file(input_manifest_path)
+    settings_source = manifest.get("settings_source")
+    if not settings_source:
+        raise ValueError("Input manifest is missing settings_source; cannot resolve impacts.local_output_folder.")
+    return _resolve_pipeline_output_root(str(settings_source))
+
+
+def _resolve_profile_output(*, output_root: Path, explicit_output: str | None, stem: str) -> Path:
+    candidate = Path(explicit_output).expanduser() if explicit_output else output_root / "profiles" / stem
     if not candidate.is_absolute():
         candidate = (Path.cwd() / candidate).resolve()
     return _validate_profile_output_path(output_path=candidate, output_root=output_root)
 
 
-def _maybe_relaunch_pipeline_with_profiler(args: argparse.Namespace) -> int | None:
-    if args.command != "pipeline" or args.profile != "memray":
+def _resolve_profile_target(args: argparse.Namespace) -> tuple[Path, list[str], str] | None:
+    if args.profile == "none":
+        return None
+    if args.command == "pipeline":
+        output_root = _resolve_pipeline_output_root(args.config)
+        forwarded_args = ["pipeline", "--config", args.config, "--profile", "none"]
+        default_name = "pipeline"
+        return output_root, forwarded_args, default_name
+    if args.command == "run":
+        output_root = _resolve_run_output_root(
+            input_manifest_path=args.input_manifest,
+        )
+        forwarded_args = [
+            "run",
+            "--input-manifest",
+            args.input_manifest,
+            *(["--run-manifest", args.run_manifest] if args.run_manifest else []),
+            "--profile",
+            "none",
+        ]
+        default_name = "run"
+        return output_root, forwarded_args, default_name
+    return None
+
+
+def _maybe_relaunch_with_profiler(args: argparse.Namespace) -> int | None:
+    if args.profile == "none":
         return None
     if os.environ.get("IMPACTS_PROFILE_ACTIVE") == "1":
         return None
-
-    profile_output = _resolve_pipeline_profile_output(
-        settings_path=args.config,
+    resolved = _resolve_profile_target(args)
+    if resolved is None:
+        return None
+    output_root, forwarded_args, default_name = resolved
+    default_stem = f"{default_name}.memray" if args.profile == "memray" else f"{default_name}.time.txt"
+    profile_output = _resolve_profile_output(
+        output_root=output_root,
         explicit_output=args.profile_output,
+        stem=default_stem,
     )
-    command = [
-        sys.executable,
-        "-m",
-        "memray",
-        "run",
-        "-o",
-        str(profile_output),
-        "-m",
-        "impacts",
-        "pipeline",
-        "--config",
-        args.config,
-        "--profile",
-        "none",
-    ]
+    if args.profile == "memray":
+        command = [
+            sys.executable,
+            "-m",
+            "memray",
+            "run",
+            "-o",
+            str(profile_output),
+            "-m",
+            "impacts",
+            *forwarded_args,
+        ]
+    else:
+        command = [
+            "/usr/bin/time",
+            "-l",
+            "-o",
+            str(profile_output),
+            sys.executable,
+            "-m",
+            "impacts",
+            *forwarded_args,
+        ]
     env = os.environ.copy()
     env["IMPACTS_PROFILE_ACTIVE"] = "1"
     completed = subprocess.run(command, env=env, check=False)
@@ -91,11 +139,15 @@ def build_parser() -> argparse.ArgumentParser:
     preprocess.add_argument("--manifest-path")
 
     run = subparsers.add_parser("run", help="Run the maintained impacts pipeline from staged inputs only")
-    run_group = run.add_mutually_exclusive_group(required=True)
-    run_group.add_argument("--input-manifest")
-    run_group.add_argument("--config")
-    run.add_argument("--output-dir")
+    run.add_argument("--input-manifest", required=True)
     run.add_argument("--run-manifest")
+    run.add_argument("--profile", choices=("none", "memray", "time"), default="none")
+    run.add_argument("--profile-output")
+    run.add_argument(
+        "--allow-heavy-profile",
+        action="store_true",
+        help="Explicitly opt in to memray profiling for full run executions.",
+    )
 
     postprocess = subparsers.add_parser("postprocess", help="Publish the canonical impacts exposure table artifact")
     postprocess_group = postprocess.add_mutually_exclusive_group(required=True)
@@ -119,7 +171,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     pipeline = subparsers.add_parser("pipeline", help="Run preprocess, run, and postprocess end-to-end")
     pipeline.add_argument("--config", required=True)
-    pipeline.add_argument("--profile", choices=("none", "memray"), default="none")
+    pipeline.add_argument("--profile", choices=("none", "memray", "time"), default="none")
     pipeline.add_argument("--profile-output")
     derive_settings = subparsers.add_parser(
         "derive_settings_from_pilates",
@@ -200,7 +252,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    profiling_exit_code = _maybe_relaunch_pipeline_with_profiler(args)
+    if args.command == "pipeline" and args.profile == "memray":
+        parser.error("--profile memray is only supported on 'run'; full pipeline profiling is too expensive.")
+    if args.command == "run" and args.profile == "memray" and not args.allow_heavy_profile:
+        parser.error(
+            "--profile memray for 'run' requires --allow-heavy-profile; use /usr/bin/time -l for full real runs."
+        )
+    profiling_exit_code = _maybe_relaunch_with_profiler(args)
     if profiling_exit_code is not None:
         return profiling_exit_code
 
@@ -215,21 +273,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run":
         from impacts.runner import run_from_input_manifest
-        from impacts.runner import run_from_settings
 
-        if args.input_manifest:
-            if not args.output_dir:
-                parser.error("--output-dir is required with --input-manifest")
-            run_from_input_manifest(
-                input_manifest_path=args.input_manifest,
-                output_dir=args.output_dir,
-                run_manifest_path=args.run_manifest,
-            )
-        else:
-            run_from_settings(
-                settings_path=args.config,
-                run_manifest_path=args.run_manifest,
-            )
+        run_from_input_manifest(
+            input_manifest_path=args.input_manifest,
+            run_manifest_path=args.run_manifest,
+        )
         return 0
 
     if args.command == "postprocess":
@@ -263,7 +311,6 @@ def main(argv: list[str] | None = None) -> int:
         )
         run_manifest = run_from_input_manifest(
             input_manifest_path=preprocess_manifest["inputs_manifest_path"],
-            output_dir=preprocess_manifest["input_dir"],
             run_dispersion=True,
         )
         postprocess_from_run_manifest(

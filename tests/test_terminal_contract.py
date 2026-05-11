@@ -18,7 +18,6 @@ from impacts.manifest.schema import PostprocessManifest
 from impacts.manifest.schema import RunManifest
 from impacts.postprocessor import postprocess_from_settings
 from impacts.runner import run_from_input_manifest
-from impacts.runner import run_from_settings
 
 
 def _pipeline_payload(tmp_path: Path) -> dict:
@@ -74,12 +73,16 @@ def _inputs_manifest_payload(tmp_path: Path) -> dict:
         "input_dir": str(tmp_path / "workspace" / "staged"),
         "inputs_manifest_path": str(tmp_path / "workspace" / "inputs_manifest.yaml"),
         "maintained_execution_path": [
-            "impacts.pipeline.preprocessing.step3_integrate_grids",
             "impacts.pipeline.workflow.step1_process_emissions",
             "impacts.pipeline.workflow.step2_compute_inmap_concentrations",
             "impacts.pipeline.workflow.step3_compute_aermod_concentrations",
         ],
-        "inputs": {"settings": {"path": str(tmp_path / "settings.yaml")}},
+        "inputs": {
+            "settings": {"source_path": str(tmp_path / "settings.yaml")},
+            "county_intersection": {"source_path": str(tmp_path / "beam_osm_county_intersection.parquet")},
+            "inmap_intersection": {"source_path": str(tmp_path / "beam_osm_inmap_intersection.parquet")},
+            "aermod_intersection": {"source_path": str(tmp_path / "beam_osm_aermod_intersection.parquet")},
+        },
         "pipeline": _pipeline_payload(tmp_path),
         "pilates_contract": {"stage": "terminal_postprocessing"},
         "population_inputs": {},
@@ -150,7 +153,124 @@ def test_top_level_emfac_command_defaults_to_all(monkeypatch, tmp_path: Path) ->
     assert captured["argv"] == ["--config", str(config_path)]
 
 
-def test_pipeline_profile_memray_relaunches_under_impacts_output(monkeypatch, tmp_path: Path) -> None:
+def test_run_profile_memray_relaunches_under_impacts_output(monkeypatch, tmp_path: Path) -> None:
+    input_manifest_path = tmp_path / "inputs_manifest.yaml"
+    input_manifest_path.write_text("model: impacts\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("impacts.__main__.load_structured_file", lambda _: {"settings_source": str(tmp_path / "settings.yaml")})
+    monkeypatch.setattr(
+        "impacts.__main__.load_settings_from_yaml",
+        lambda _: SimpleNamespace(impacts=SimpleNamespace(local_output_folder="impacts_output")),
+    )
+    monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
+
+    def _fake_run(command, env=None, check=False):
+        captured["command"] = command
+        captured["env"] = env
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("impacts.__main__.subprocess.run", _fake_run)
+
+    assert main(["run", "--input-manifest", str(input_manifest_path), "--profile", "memray", "--allow-heavy-profile"]) == 0
+    assert captured["command"] == [
+        sys.executable,
+        "-m",
+        "memray",
+        "run",
+        "-o",
+        str((tmp_path / "impacts_output" / "profiles" / "run.memray").resolve()),
+        "-m",
+        "impacts",
+        "run",
+        "--input-manifest",
+        str(input_manifest_path),
+        "--profile",
+        "none",
+    ]
+    assert captured["env"]["IMPACTS_PROFILE_ACTIVE"] == "1"
+
+
+def test_run_profile_memray_requires_allow_heavy_profile(tmp_path: Path) -> None:
+    input_manifest_path = tmp_path / "inputs_manifest.yaml"
+    input_manifest_path.write_text("model: impacts\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        main(["run", "--input-manifest", str(input_manifest_path), "--profile", "memray"])
+
+
+def test_run_profile_time_relaunches_under_impacts_output(monkeypatch, tmp_path: Path) -> None:
+    input_manifest_path = tmp_path / "inputs_manifest.yaml"
+    input_manifest_path.write_text("model: impacts\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("impacts.__main__.load_structured_file", lambda _: {"settings_source": str(tmp_path / "settings.yaml")})
+    monkeypatch.setattr(
+        "impacts.__main__.load_settings_from_yaml",
+        lambda _: SimpleNamespace(impacts=SimpleNamespace(local_output_folder="impacts_output")),
+    )
+    monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
+
+    def _fake_run(command, env=None, check=False):
+        captured["command"] = command
+        captured["env"] = env
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("impacts.__main__.subprocess.run", _fake_run)
+
+    assert main(["run", "--input-manifest", str(input_manifest_path), "--profile", "time"]) == 0
+    assert captured["command"] == [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        str((tmp_path / "impacts_output" / "profiles" / "run.time.txt").resolve()),
+        sys.executable,
+        "-m",
+        "impacts",
+        "run",
+        "--input-manifest",
+        str(input_manifest_path),
+        "--profile",
+        "none",
+    ]
+    assert captured["env"]["IMPACTS_PROFILE_ACTIVE"] == "1"
+
+
+def test_run_profile_output_must_stay_under_impacts_output(monkeypatch, tmp_path: Path) -> None:
+    input_manifest_path = tmp_path / "inputs_manifest.yaml"
+    input_manifest_path.write_text("model: impacts\n", encoding="utf-8")
+
+    monkeypatch.setattr("impacts.__main__.load_structured_file", lambda _: {"settings_source": str(tmp_path / "settings.yaml")})
+    monkeypatch.setattr(
+        "impacts.__main__.load_settings_from_yaml",
+        lambda _: SimpleNamespace(impacts=SimpleNamespace(local_output_folder="impacts_output")),
+    )
+    monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
+
+    with pytest.raises(ValueError, match="Profile output must live under impacts.local_output_folder"):
+        main(
+            [
+                "run",
+                "--input-manifest",
+                str(input_manifest_path),
+                "--profile",
+                "memray",
+                "--allow-heavy-profile",
+                "--profile-output",
+                str(tmp_path / "outside.memray"),
+            ]
+        )
+
+
+def test_pipeline_profile_memray_is_rejected(tmp_path: Path) -> None:
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text("impacts:\n  local_output_folder: impacts_output\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        main(["pipeline", "--config", str(config_path), "--profile", "memray"])
+
+
+def test_pipeline_profile_time_relaunches_under_impacts_output(monkeypatch, tmp_path: Path) -> None:
     config_path = tmp_path / "settings.yaml"
     config_path.write_text("impacts:\n  local_output_folder: impacts_output\n", encoding="utf-8")
     captured: dict[str, object] = {}
@@ -168,14 +288,13 @@ def test_pipeline_profile_memray_relaunches_under_impacts_output(monkeypatch, tm
 
     monkeypatch.setattr("impacts.__main__.subprocess.run", _fake_run)
 
-    assert main(["pipeline", "--config", str(config_path), "--profile", "memray"]) == 0
+    assert main(["pipeline", "--config", str(config_path), "--profile", "time"]) == 0
     assert captured["command"] == [
-        sys.executable,
-        "-m",
-        "memray",
-        "run",
+        "/usr/bin/time",
+        "-l",
         "-o",
-        str((tmp_path / "impacts_output" / "profiles" / "pipeline.memray").resolve()),
+        str((tmp_path / "impacts_output" / "profiles" / "pipeline.time.txt").resolve()),
+        sys.executable,
         "-m",
         "impacts",
         "pipeline",
@@ -185,30 +304,6 @@ def test_pipeline_profile_memray_relaunches_under_impacts_output(monkeypatch, tm
         "none",
     ]
     assert captured["env"]["IMPACTS_PROFILE_ACTIVE"] == "1"
-
-
-def test_pipeline_profile_output_must_stay_under_impacts_output(monkeypatch, tmp_path: Path) -> None:
-    config_path = tmp_path / "settings.yaml"
-    config_path.write_text("impacts:\n  local_output_folder: impacts_output\n", encoding="utf-8")
-
-    monkeypatch.setattr(
-        "impacts.__main__.load_settings_from_yaml",
-        lambda _: SimpleNamespace(impacts=SimpleNamespace(local_output_folder="impacts_output")),
-    )
-    monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
-
-    with pytest.raises(ValueError, match="Profile output must live under impacts.local_output_folder"):
-        main(
-            [
-                "pipeline",
-                "--config",
-                str(config_path),
-                "--profile",
-                "memray",
-                "--profile-output",
-                str(tmp_path / "outside.memray"),
-            ]
-        )
 
 
 def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_defaults(tmp_path: Path):
@@ -414,11 +509,17 @@ def test_pipeline_manifest_allows_disabled_aermod_without_aermod_inputs(tmp_path
     assert config.asrv_patterns_file is None
 
 
-def test_run_from_input_manifest_uses_current_step_name(monkeypatch, tmp_path: Path):
-    import impacts.pipeline.preprocessing.step3_integrate_grids as step3_integrate_grids
+def test_run_from_input_manifest_uses_staged_intersections_from_preprocess(monkeypatch, tmp_path: Path):
     import impacts.pipeline.workflow.prepare_emissions_from_skims as prepare_emissions_from_skims
     import impacts.pipeline.workflow.step1_process_emissions as step1_process_emissions
     import impacts.runner as runner_module
+
+    for name in (
+        "beam_osm_county_intersection.parquet",
+        "beam_osm_inmap_intersection.parquet",
+        "beam_osm_aermod_intersection.parquet",
+    ):
+        (tmp_path / name).write_text("", encoding="utf-8")
 
     monkeypatch.setattr(runner_module, "load_structured_file", lambda _: _inputs_manifest_payload(tmp_path))
     monkeypatch.setattr(
@@ -428,22 +529,15 @@ def test_run_from_input_manifest_uses_current_step_name(monkeypatch, tmp_path: P
             impacts=SimpleNamespace(local_output_folder=str(tmp_path / "impacts_output"))
         ),
     )
-    monkeypatch.setattr(
-        step3_integrate_grids,
-        "run",
-        lambda pipeline, raw_dir, input_root, manifest_inputs=None: (
-            {
-                "county": str(tmp_path / "beam_osm_county_intersection.parquet"),
-                "inmap": str(tmp_path / "beam_osm_inmap_intersection.parquet"),
-                "aermod": str(tmp_path / "beam_osm_aermod_intersection.parquet"),
-            },
-            {"county": None, "inmap": None, "aermod": None},
-        ),
-    )
+    captured = {}
     monkeypatch.setattr(
         step1_process_emissions,
         "run",
-        lambda pipeline, raw_dir, input_root, grid_intersection_paths, intersection_dfs=None, manifest_inputs=None: {
+        lambda pipeline, raw_dir, input_root, grid_intersection_paths, manifest_inputs=None: captured.update(
+            {
+                "grid_intersection_paths": grid_intersection_paths,
+            }
+        ) or {
             "beam_emissions_by_county_process": str(tmp_path / "beam_emissions_by_county_process.parquet"),
             "beam_emissions_for_inmap": str(tmp_path / "beam_emissions_for_inmap.parquet"),
         },
@@ -456,78 +550,149 @@ def test_run_from_input_manifest_uses_current_step_name(monkeypatch, tmp_path: P
 
     result = run_from_input_manifest(
         input_manifest_path=tmp_path / "workspace" / "inputs_manifest.yaml",
-        output_dir=tmp_path / "workspace",
         run_dispersion=False,
     )
 
     assert result["execution"]["dispersion_completed"] is False
     assert result["execution"]["stopped_after"] == "step1_process_emissions"
-    assert "preprocess_step3_integrate_grids" in result["execution"]["stage_timings_seconds"]
     assert "step1_process_emissions" in result["execution"]["stage_timings_seconds"]
+    assert captured["grid_intersection_paths"]["county"].endswith("beam_osm_county_intersection.parquet")
+    assert captured["grid_intersection_paths"]["inmap"].endswith("beam_osm_inmap_intersection.parquet")
+    assert captured["grid_intersection_paths"]["aermod"].endswith("beam_osm_aermod_intersection.parquet")
 
 
-def test_run_from_settings_delegates_through_preprocess(monkeypatch, tmp_path: Path):
+def test_build_inputs_manifest_runs_step3_and_registers_intersections(monkeypatch, tmp_path: Path):
+    import impacts.pipeline.preprocessing.step1_collect_inputs as step1_collect_inputs
+    import impacts.pipeline.preprocessing.step2_prepare_grids as step2_prepare_grids
+    import impacts.pipeline.preprocessing.step3_integrate_grids as step3_integrate_grids
+    import impacts.preprocessor as preprocessor_module
+
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text("impacts: {}\n", encoding="utf-8")
+    output_root = tmp_path / "impacts_output"
+    input_root = output_root / "inputs"
     calls = {}
 
-    def _fake_preprocess(settings_path, manifest_path=None):
-        calls["preprocess"] = {
-            "settings_path": str(settings_path),
-            "manifest_path": manifest_path,
-        }
+    settings = SimpleNamespace(
+        run=SimpleNamespace(region="sfbay", start_year=2018),
+        shared=SimpleNamespace(
+            geography=SimpleNamespace(
+                local_crs="EPSG:26910",
+                fips=SimpleNamespace(state="06", counties=["001", "013"]),
+            )
+        ),
+        impacts=SimpleNamespace(
+            local_output_folder="impacts_output",
+            beam=SimpleNamespace(
+                population_sample=0.1,
+                transit_sample=0.25,
+                include_non_osm_car_links=True,
+                include_passenger=True,
+                include_freight=True,
+            ),
+            emissions=SimpleNamespace(
+                mapping_columns={"link_id": "linkId"},
+                beam_osm_id_col="attributeOrigId",
+                beam_length_col="linkLength",
+                prepared_skims_group_cols=["linkId", "vehicleTypeId", "process"],
+                pollutants=["NOx"],
+                source_pollutants=["NOx"],
+                vehicle_category_metadata_file=str(tmp_path / "vehicle_category_metadata.csv"),
+                inventory=SimpleNamespace(
+                    enable_passenger_activity_correction=True,
+                    enable_freight_activity_correction=True,
+                ),
+                defaults=SimpleNamespace(
+                    annualization_days=SimpleNamespace(light_duty=327.0, medium_heavy_duty=312.0)
+                ),
+            ),
+            dispersions=SimpleNamespace(
+                inmap=SimpleNamespace(enabled=True, grid_epsg=26910),
+                aermod=SimpleNamespace(
+                    enabled=True,
+                    asrv_patterns_epsg=4326,
+                    asrv_nox_to_no2_ratios_file=str(tmp_path / "asrv_nox_to_no2.csv"),
+                    default_site="LIVERMORE_2015",
+                    default_urban_class=0,
+                    default_temporal="CITYSTREET",
+                    default_release_height=1.0,
+                    grid_size_meters=100.0,
+                ),
+            ),
+        ),
+    )
+
+    monkeypatch.setattr(preprocessor_module, "load_settings_from_yaml", lambda _: settings)
+    monkeypatch.setattr(preprocessor_module, "resolve_path", lambda path, _: str(tmp_path / path))
+    monkeypatch.setattr(preprocessor_module, "parse_epsg", lambda _: 26910)
+    monkeypatch.setattr(preprocessor_module, "infer_vector_epsg", lambda _: 26910)
+
+    def _fake_step1(*, manifest_inputs, **kwargs):
+        for key, filename in (
+            ("passenger_vehicle_types_input", "passenger_vehicle_types.csv"),
+            ("freight_vehicle_types_input", "freight_vehicle_types.csv"),
+            ("vehicle_category_metadata_file_input", "vehicle_category_metadata.csv"),
+            ("county_boundaries", "county_boundaries.parquet"),
+            ("network", "network.csv.gz"),
+            ("osm_network", "osm_network.parquet"),
+        ):
+            manifest_inputs[key] = {"source_path": str(tmp_path / filename)}
         return {
-            "inputs_manifest_path": str(tmp_path / "impacts" / "inputs_manifest.yaml"),
-            "staging_dir": str(tmp_path / "impacts" / "inputs"),
-            "input_dir": str(tmp_path / "impacts" / "inputs"),
+            "staged_passenger_inventory_file": str(tmp_path / "passenger_inventory.parquet"),
+            "staged_freight_inventory_file": str(tmp_path / "freight_inventory.parquet"),
+            "staged_isrm": str(tmp_path / "isrm.zarr"),
+            "staged_isrm_nox_to_no2_ratios_file": str(tmp_path / "matrix.npz"),
+            "staged_asrv_patterns_file": str(tmp_path / "asrv_patterns.parquet"),
+            "staged_inmap_grid": str(tmp_path / "inmap_grid.parquet"),
+            "population_inputs": {},
         }
 
-    def _fake_run(input_manifest_path, output_dir, run_manifest_path=None, run_dispersion=False):
-        calls["run"] = {
-            "input_manifest_path": str(input_manifest_path),
-            "output_dir": str(output_dir),
-            "run_manifest_path": run_manifest_path,
-            "run_dispersion": run_dispersion,
+    def _fake_step2(**kwargs):
+        return {
+            "staged_inmap_grid": str(tmp_path / "inmap_grid.parquet"),
+            "staged_aermod_grid": str(tmp_path / "aermod_grid.parquet"),
+            "staged_aermod_full_grid": str(tmp_path / "aermod_full_grid.parquet"),
+            "resolved_inmap_grid_id": "isrm",
+            "resolved_aermod_grid_id": "aermod_id",
         }
-        return {"run_manifest_path": str(tmp_path / "workspace" / "run_manifest.yaml")}
 
-    monkeypatch.setattr("impacts.preprocessor.preprocess_workflow", _fake_preprocess)
-    monkeypatch.setattr("impacts.runner.run_from_input_manifest", _fake_run)
-
-    result = run_from_settings(
-        settings_path=tmp_path / "settings.yaml",
-        run_dispersion=False,
-    )
-
-    assert result["run_manifest_path"].endswith("run_manifest.yaml")
-    assert calls["preprocess"]["settings_path"].endswith("settings.yaml")
-    assert calls["run"]["input_manifest_path"].endswith("inputs_manifest.yaml")
-    assert calls["run"]["output_dir"].endswith("inputs")
-    assert calls["run"]["run_dispersion"] is False
-
-
-def test_cli_run_accepts_settings_only(monkeypatch, tmp_path: Path):
-    calls = {}
-
-    def _fake_run_from_settings(settings_path, run_manifest_path=None, run_dispersion=False):
-        calls["settings_run"] = {
-            "settings_path": str(settings_path),
-            "run_manifest_path": run_manifest_path,
-            "run_dispersion": run_dispersion,
+    def _fake_step3(pipeline, raw_dir, staged_input_root, manifest_inputs=None):
+        calls["step3"] = {
+            "raw_dir": raw_dir,
+            "input_root": staged_input_root,
+            "manifest_inputs": manifest_inputs,
+            "pipeline": pipeline,
         }
-        return {"run_manifest_path": str(tmp_path / "workspace" / "run_manifest.yaml")}
+        return (
+            {
+                "county": str(output_root / "beam_osm_county_intersection.parquet"),
+                "inmap": str(output_root / "beam_osm_inmap_intersection.parquet"),
+                "aermod": str(output_root / "beam_osm_aermod_intersection.parquet"),
+            },
+            {"county": None, "inmap": None, "aermod": None},
+        )
 
-    monkeypatch.setattr("impacts.runner.run_from_settings", _fake_run_from_settings)
+    monkeypatch.setattr(step1_collect_inputs, "run", _fake_step1)
+    monkeypatch.setattr(step2_prepare_grids, "run", _fake_step2)
+    monkeypatch.setattr(step3_integrate_grids, "run", _fake_step3)
 
-    exit_code = main(
-        [
-            "run",
-            "--config",
-            str(tmp_path / "settings.yaml"),
-        ]
-    )
+    manifest = preprocessor_module.build_inputs_manifest(config_path)
 
-    assert exit_code == 0
-    assert calls["settings_run"]["settings_path"].endswith("settings.yaml")
-    assert calls["settings_run"]["run_dispersion"] is False
+    assert calls["step3"]["raw_dir"] == output_root
+    assert calls["step3"]["input_root"] == input_root
+    assert manifest["maintained_execution_path"] == [
+        "impacts.pipeline.workflow.step1_process_emissions",
+        "impacts.pipeline.workflow.step2_compute_inmap_concentrations",
+        "impacts.pipeline.workflow.step3_compute_aermod_concentrations",
+    ]
+    assert manifest["inputs"]["county_intersection"]["source_path"].endswith("beam_osm_county_intersection.parquet")
+    assert manifest["inputs"]["inmap_intersection"]["source_path"].endswith("beam_osm_inmap_intersection.parquet")
+    assert manifest["inputs"]["aermod_intersection"]["source_path"].endswith("beam_osm_aermod_intersection.parquet")
+
+
+def test_cli_run_requires_input_manifest(tmp_path: Path):
+    with pytest.raises(SystemExit):
+        main(["run"])
 
 
 def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_path: Path):
@@ -537,9 +702,15 @@ def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_pat
         class impacts:
             local_output_folder = "impacts"
 
-    def _fake_settings_run(settings_path, run_dispersion=True):
-        calls["settings_run"] = {
+    def _fake_preprocess(settings_path):
+        calls["preprocess"] = {
             "settings_path": str(settings_path),
+        }
+        return {"inputs_manifest_path": str(tmp_path / "workspace" / "inputs_manifest.yaml")}
+
+    def _fake_manifest_run(input_manifest_path, run_dispersion=True):
+        calls["manifest_run"] = {
+            "input_manifest_path": str(input_manifest_path),
             "run_dispersion": run_dispersion,
         }
         return {"run_manifest_path": str(tmp_path / "workspace" / "run_manifest.yaml")}
@@ -554,7 +725,8 @@ def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_pat
 
     monkeypatch.setattr("impacts.postprocessor.load_settings_from_yaml", lambda _: _Settings())
     monkeypatch.setattr("impacts.postprocessor.resolve_path", lambda path, _: path)
-    monkeypatch.setattr("impacts.runner.run_from_settings", _fake_settings_run)
+    monkeypatch.setattr("impacts.preprocessor.preprocess_workflow", _fake_preprocess)
+    monkeypatch.setattr("impacts.runner.run_from_input_manifest", _fake_manifest_run)
     monkeypatch.setattr("impacts.postprocessor.postprocess_from_run_manifest", _fake_postprocess)
 
     result = postprocess_from_settings(
@@ -562,8 +734,9 @@ def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_pat
     )
 
     assert result["postprocess_manifest_path"].endswith("postprocess_manifest.yaml")
-    assert calls["settings_run"]["settings_path"].endswith("settings.yaml")
-    assert calls["settings_run"]["run_dispersion"] is True
+    assert calls["preprocess"]["settings_path"].endswith("settings.yaml")
+    assert calls["manifest_run"]["input_manifest_path"].endswith("inputs_manifest.yaml")
+    assert calls["manifest_run"]["run_dispersion"] is True
     assert calls["postprocess"]["run_manifest_path"].endswith("run_manifest.yaml")
     assert calls["postprocess"]["output_dir"].endswith("impacts")
 

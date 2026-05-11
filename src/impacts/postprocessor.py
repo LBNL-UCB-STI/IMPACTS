@@ -66,14 +66,18 @@ def postprocess_from_settings(
     settings_path: str | Path,
     manifest_path: str | Path | None = None,
 ) -> Dict[str, Any]:
-    from impacts.runner import run_from_settings
+    from impacts.preprocessor import preprocess_workflow
+    from impacts.runner import run_from_input_manifest
 
     settings = load_settings_from_yaml(settings_path)
     output_root = Path(
         resolve_path(settings.impacts.local_output_folder, settings_path) or settings.impacts.local_output_folder
     ).resolve()
-    run_manifest = run_from_settings(
+    preprocess_manifest = preprocess_workflow(
         settings_path=settings_path,
+    )
+    run_manifest = run_from_input_manifest(
+        input_manifest_path=preprocess_manifest["inputs_manifest_path"],
         run_dispersion=True,
     )
     return postprocess_from_run_manifest(

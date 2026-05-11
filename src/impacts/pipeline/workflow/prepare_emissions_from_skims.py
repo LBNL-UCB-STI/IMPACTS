@@ -437,6 +437,7 @@ def _build_zone_allocated_table(
     grouped_df: Optional[pd.DataFrame],
     skims_df: pd.DataFrame,
     zone_label: str,
+    step_id: str = "1.2",
 ) -> Optional[pd.DataFrame]:
     if grouped_df is None or grouped_df.empty:
         return None
@@ -494,7 +495,7 @@ def _build_zone_allocated_table(
         con.close()
     if allocated.empty:
         return None
-    logger.info("%s BEAM emissions allocated across %s rows=%d", _step_label("1.2"), zone_label, len(allocated))
+    logger.info("%s BEAM emissions allocated across %s rows=%d", _step_label(step_id), zone_label, len(allocated))
     return allocated
 
 

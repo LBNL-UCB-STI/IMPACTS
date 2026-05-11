@@ -64,6 +64,34 @@ def _resolve_runtime_output_root(
     return Path(resolved).resolve()
 
 
+def _resolve_staged_intersection_paths(
+    *,
+    manifest_inputs: Dict[str, Any],
+    pipeline: PipelineConfig,
+) -> Dict[str, Optional[str]]:
+    paths = {
+        "county": resolve_required_manifest_input(manifest_inputs, key="county_intersection"),
+        "inmap": (
+            resolve_required_manifest_input(manifest_inputs, key="inmap_intersection")
+            if pipeline.inmap_enabled
+            else None
+        ),
+        "aermod": (
+            resolve_required_manifest_input(manifest_inputs, key="aermod_intersection")
+            if pipeline.aermod_enabled
+            else None
+        ),
+    }
+    for zone_label, path in paths.items():
+        if not path:
+            continue
+        if not Path(path).exists():
+            raise FileNotFoundError(
+                f"Run requires staged {zone_label} intersection output from preprocess, but it was not found: {path}"
+            )
+    return paths
+
+
 def _humanize_target_name(name: str) -> str:
     return str(name).strip().replace("_", " ").replace("-", " ").title()
 
@@ -369,7 +397,6 @@ def run_analysis_from_run_manifest(
 
 def run_from_input_manifest(
     input_manifest_path: str | Path,
-    output_dir: str | Path,
     run_manifest_path: str | Path | None = None,
     run_dispersion: bool = False,
 ) -> Dict[str, Any]:
@@ -391,20 +418,13 @@ def run_from_input_manifest(
     logger.info("Loaded input manifest: %s", Path(input_manifest_path).resolve())
     logger.info("Output directory: %s", output_root)
 
-    from .pipeline.preprocessing.step3_integrate_grids import run as run_grid_intersection
     from .pipeline.workflow.step1_process_emissions import run as run_emissions_processing
     from .common import prepared_table_target
     stage_timings: dict[str, float] = {}
-
-    _log_step_banner("PREPROCESS STEP 3", "network mapping and grid intersection")
-    stage_started = time.perf_counter()
-    grid_intersection_paths, intersection_dfs = run_grid_intersection(
-        pipeline,
-        output_root,
-        input_root,
+    grid_intersection_paths = _resolve_staged_intersection_paths(
         manifest_inputs=manifest_inputs,
+        pipeline=pipeline,
     )
-    _record_stage_timing(stage_timings, "preprocess_step3_integrate_grids", stage_started)
 
     _log_step_banner("STEP 1", "emissions processing")
     logger.info("Using Step 1 implementation: emissions_processing")
@@ -414,7 +434,6 @@ def run_from_input_manifest(
         output_root,
         input_root,
         grid_intersection_paths,
-        intersection_dfs=intersection_dfs,
         manifest_inputs=manifest_inputs,
     )
     _record_stage_timing(stage_timings, "step1_process_emissions", stage_started)
@@ -556,21 +575,3 @@ def run_from_input_manifest(
     write_structured_file(output_manifest, typed_manifest.to_dict())
     logger.info("Run manifest written: %s", output_manifest)
     return typed_manifest.to_dict()
-
-
-def run_from_settings(
-    settings_path: str | Path,
-    run_manifest_path: str | Path | None = None,
-    run_dispersion: bool = False,
-) -> Dict[str, Any]:
-    from impacts.preprocessor import preprocess_workflow
-
-    preprocess_manifest = preprocess_workflow(
-        settings_path=settings_path,
-    )
-    return run_from_input_manifest(
-        input_manifest_path=preprocess_manifest["inputs_manifest_path"],
-        output_dir=preprocess_manifest["input_dir"],
-        run_manifest_path=run_manifest_path,
-        run_dispersion=run_dispersion,
-    )

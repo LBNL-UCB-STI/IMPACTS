@@ -532,7 +532,6 @@ def run(
     raw_dir: Path,
     input_root: Path,
     intersection_paths: Dict[str, Optional[str]],
-    intersection_dfs: Optional[Dict[str, Optional[pd.DataFrame]]] = None,
     manifest_inputs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Optional[str]]:
     log_step_banner("Step 1", "Process Emissions", logger=logger)
@@ -557,21 +556,20 @@ def run(
         manifest_inputs=manifest_inputs,
     )
 
-    intersection_dfs = intersection_dfs or {}
     log_substep_banner("1.1", "group county, inmap, and aermod intersections separately", logger=logger)
     county_grouped_df = _build_zone_grouped_table(
         intersection_path=intersection_paths.get("county"),
-        intersection_df=intersection_dfs.get("county"),
+        intersection_df=None,
         zone_label="county",
     )
     inmap_grouped_df = _build_zone_grouped_table(
         intersection_path=intersection_paths.get("inmap"),
-        intersection_df=intersection_dfs.get("inmap"),
+        intersection_df=None,
         zone_label="inmap",
     )
     aermod_grouped_df = _build_zone_grouped_table(
         intersection_path=intersection_paths.get("aermod"),
-        intersection_df=intersection_dfs.get("aermod"),
+        intersection_df=None,
         zone_label="aermod",
     )
 
@@ -580,6 +578,7 @@ def run(
         grouped_df=county_grouped_df,
         skims_df=skims_df,
         zone_label="county",
+        step_id="1.2",
     )
     log_substep_banner("1.3", "apply activity corrections", logger=logger)
     county_corrected_df, beam_activity_totals, county_correction_factors = _build_county_corrected_table(
@@ -596,11 +595,13 @@ def run(
         grouped_df=inmap_grouped_df,
         skims_df=corrected_source_df if corrected_source_df is not None else skims_df,
         zone_label="inmap",
+        step_id="1.4",
     )
     aermod_allocated_df = _build_zone_allocated_table(
         grouped_df=aermod_grouped_df,
         skims_df=corrected_source_df if corrected_source_df is not None else skims_df,
         zone_label="aermod",
+        step_id="1.4",
     )
 
     beam_activity_totals_path = None

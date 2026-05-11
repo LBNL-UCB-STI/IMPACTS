@@ -8,6 +8,7 @@ from .config.settings_builder import load_settings_from_yaml
 from .manifest.file_ops import resolve_path
 from .manifest.file_ops import write_structured_file
 from .manifest.schema import InputsManifest
+from .manifest.schema import PipelineConfig
 from .common import infer_vector_epsg
 from .common import parse_epsg
 from .common import register_local_input
@@ -112,10 +113,80 @@ def build_inputs_manifest(
             "Set impacts.dispersions.aermod.asrv_patterns_epsg explicitly or provide CRS metadata in the file."
         )
 
-    maintained_execution_path = [
-        "impacts.pipeline.preprocessing.step3_integrate_grids",
-        "impacts.pipeline.workflow.step1_process_emissions",
-    ]
+    pipeline_payload = {
+        "inmap_enabled": bool(inmap.enabled),
+        "aermod_enabled": bool(aermod.enabled),
+        "inmap_grid_path": staged_inmap_grid,
+        "aermod_full_grid_path": staged_aermod_full_grid,
+        "aermod_grid_path": staged_aermod_grid,
+        "isrm_url": staged_isrm,
+        "isrm_nox_to_no2_ratios_file": staged_isrm_nox_to_no2_ratios_file,
+        "asrv_nox_to_no2_ratios_file": aermod.asrv_nox_to_no2_ratios_file,
+        "asrv_patterns_file": staged_asrv_patterns_file,
+        "asrv_patterns_epsg": int(asrv_patterns_epsg) if asrv_patterns_epsg is not None else None,
+        "aermod_default_site": aermod.default_site,
+        "aermod_default_urban_class": int(aermod.default_urban_class),
+        "aermod_default_temporal": aermod.default_temporal,
+        "aermod_default_release_height": float(aermod.default_release_height),
+        "grid_size_meters": float(aermod.grid_size_meters) if aermod.grid_size_meters is not None else None,
+        "beam_osm_id_col": emissions.beam_osm_id_col,
+        "beam_length_col": emissions.beam_length_col,
+        "inmap_grid_epsg": int(inmap_grid_epsg) if inmap_grid_epsg is not None else None,
+        "aermod_grid_epsg": int(local_output_epsg) if staged_aermod_grid else None,
+        "aermod_grid_id": resolved_aermod_grid_id,
+        "output_epsg": int(local_output_epsg),
+        "region": settings.run.region,
+        "start_year": settings.run.start_year,
+        "county_state_fips": geography.fips.state,
+        "county_fips_codes": list(geography.fips.counties),
+        "mapping_columns": mapping_columns,
+        "prepared_skims_group_cols": list(emissions.prepared_skims_group_cols),
+        "pollutants": list(emissions.pollutants),
+        "source_pollutants": list(emissions.source_pollutants),
+        "passenger_inventory_file": staged_passenger_inventory_file,
+        "freight_inventory_file": staged_freight_inventory_file,
+        "enable_passenger_inventory_activity_correction": bool(emissions.inventory.enable_passenger_activity_correction),
+        "enable_freight_inventory_activity_correction": bool(emissions.inventory.enable_freight_activity_correction),
+        "passenger_vehicle_types_file": resolve_required_manifest_input(manifest_inputs, key="passenger_vehicle_types_input"),
+        "freight_vehicle_types_file": resolve_required_manifest_input(manifest_inputs, key="freight_vehicle_types_input"),
+        "vehicle_category_metadata_file": (
+            resolve_required_manifest_input(manifest_inputs, key="vehicle_category_metadata_file_input")
+            if emissions.vehicle_category_metadata_file
+            else None
+        ),
+        "annualization_days": {
+            "light_duty": float(emissions.defaults.annualization_days.light_duty),
+            "medium_heavy_duty": float(emissions.defaults.annualization_days.medium_heavy_duty),
+        },
+        "population_sample": float(beam_processing.population_sample),
+        "transit_sample": float(beam_processing.transit_sample),
+        "include_non_osm_car_links": bool(beam_processing.include_non_osm_car_links),
+        "include_passenger": bool(beam_processing.include_passenger),
+        "include_freight": bool(beam_processing.include_freight),
+    }
+    pipeline_config = PipelineConfig.from_dict(pipeline_payload)
+
+    from .pipeline.preprocessing.step3_integrate_grids import run as preprocess_step3
+    intersection_paths, _ = preprocess_step3(
+        pipeline_config,
+        output_root,
+        input_root,
+        manifest_inputs=manifest_inputs,
+    )
+    for manifest_key, path in (
+        ("county_intersection", intersection_paths.get("county")),
+        ("inmap_intersection", intersection_paths.get("inmap")),
+        ("aermod_intersection", intersection_paths.get("aermod")),
+    ):
+        if path:
+            register_local_input(
+                manifest_inputs=manifest_inputs,
+                input_root=input_root,
+                key=manifest_key,
+                source_path=path,
+            )
+
+    maintained_execution_path = ["impacts.pipeline.workflow.step1_process_emissions"]
     if inmap.enabled:
         maintained_execution_path.append("impacts.pipeline.workflow.step2_compute_inmap_concentrations")
     if aermod.enabled:
@@ -130,57 +201,7 @@ def build_inputs_manifest(
         "inputs_manifest_path": str(output_root / "inputs_manifest.yaml"),
         "maintained_execution_path": maintained_execution_path,
         "inputs": manifest_inputs,
-        "pipeline": {
-            "inmap_enabled": bool(inmap.enabled),
-            "aermod_enabled": bool(aermod.enabled),
-            "inmap_grid_path": staged_inmap_grid,
-            "aermod_full_grid_path": staged_aermod_full_grid,
-            "aermod_grid_path": staged_aermod_grid,
-            "isrm_url": staged_isrm,
-            "isrm_nox_to_no2_ratios_file": staged_isrm_nox_to_no2_ratios_file,
-            "asrv_nox_to_no2_ratios_file": aermod.asrv_nox_to_no2_ratios_file,
-            "asrv_patterns_file": staged_asrv_patterns_file,
-            "asrv_patterns_epsg": int(asrv_patterns_epsg) if asrv_patterns_epsg is not None else None,
-            "aermod_default_site": aermod.default_site,
-            "aermod_default_urban_class": int(aermod.default_urban_class),
-            "aermod_default_temporal": aermod.default_temporal,
-            "aermod_default_release_height": float(aermod.default_release_height),
-            "grid_size_meters": float(aermod.grid_size_meters) if aermod.grid_size_meters is not None else None,
-            "beam_osm_id_col": emissions.beam_osm_id_col,
-            "beam_length_col": emissions.beam_length_col,
-            "inmap_grid_epsg": int(inmap_grid_epsg) if inmap_grid_epsg is not None else None,
-            "aermod_grid_epsg": int(local_output_epsg) if staged_aermod_grid else None,
-            "aermod_grid_id": resolved_aermod_grid_id,
-            "output_epsg": int(local_output_epsg),
-            "region": settings.run.region,
-            "start_year": settings.run.start_year,
-            "county_state_fips": geography.fips.state,
-            "county_fips_codes": list(geography.fips.counties),
-            "mapping_columns": mapping_columns,
-            "prepared_skims_group_cols": list(emissions.prepared_skims_group_cols),
-            "pollutants": list(emissions.pollutants),
-            "source_pollutants": list(emissions.source_pollutants),
-            "passenger_inventory_file": staged_passenger_inventory_file,
-            "freight_inventory_file": staged_freight_inventory_file,
-            "enable_passenger_inventory_activity_correction": bool(emissions.inventory.enable_passenger_activity_correction),
-            "enable_freight_inventory_activity_correction": bool(emissions.inventory.enable_freight_activity_correction),
-            "passenger_vehicle_types_file": resolve_required_manifest_input(manifest_inputs, key="passenger_vehicle_types_input"),
-            "freight_vehicle_types_file": resolve_required_manifest_input(manifest_inputs, key="freight_vehicle_types_input"),
-            "vehicle_category_metadata_file": (
-                resolve_required_manifest_input(manifest_inputs, key="vehicle_category_metadata_file_input")
-                if emissions.vehicle_category_metadata_file
-                else None
-            ),
-            "annualization_days": {
-                "light_duty": float(emissions.defaults.annualization_days.light_duty),
-                "medium_heavy_duty": float(emissions.defaults.annualization_days.medium_heavy_duty),
-            },
-            "population_sample": float(beam_processing.population_sample),
-            "transit_sample": float(beam_processing.transit_sample),
-            "include_non_osm_car_links": bool(beam_processing.include_non_osm_car_links),
-            "include_passenger": bool(beam_processing.include_passenger),
-            "include_freight": bool(beam_processing.include_freight),
-        },
+        "pipeline": pipeline_config.to_dict(),
         "pilates_contract": {
             "stage": "terminal_postprocessing",
             "runs_after": ["beam", "supply_demand_loop"],
@@ -191,7 +212,7 @@ def build_inputs_manifest(
             "container_input_dir": "/input",
             "container_output_dir": "/output",
             "entrypoint": "python -m impacts run",
-            "command_template": "python -m impacts run --input-manifest {input_manifest} --output-dir {output_dir}",
+            "command_template": "python -m impacts run --input-manifest {input_manifest}",
             "canonical_output_filenames": ["impacts_exposure_table.parquet"],
             "manifest_filenames": ["inputs_manifest.yaml", "run_manifest.yaml", "postprocess_manifest.yaml"],
         },
@@ -219,4 +240,5 @@ def preprocess_workflow(
     manifest["inputs_manifest_path"] = str(output_manifest)
     typed_manifest = InputsManifest.from_dict(manifest)
     write_structured_file(output_manifest, typed_manifest.to_dict())
+    logger.info("Preprocess complete: wrote inputs manifest %s", output_manifest)
     return typed_manifest.to_dict()
