@@ -42,7 +42,7 @@ impacts:
       freight_file: vehicle-tech/emissions/sf-emfac-2018-inventory-final-freight-activity.parquet
       enable_passenger_activity_correction: false
       enable_freight_activity_correction: false
-    vehicle_category_metadata_file: ~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/_emissions_vehicle_catalog.csv
+    vehicle_category_metadata_file: vehicle-tech/_emissions_vehicle_catalog.csv
     defaults:
       annualization_days:
         light_duty: 327.0
@@ -51,7 +51,7 @@ impacts:
   dispersions:
     inmap:
       enabled: true
-      isrm_zarr: ~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr
+      isrm_zarr: /global/home/users/hmlaarabi/scratch/isrm_v1.2.1.zarr # ~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr
       isrm_nox_to_no2_ratios_file: vehicle-tech/dispersions/inmap/nox_to_no2_full_isrm_matrix.npz
       grid_path: vehicle-tech/dispersions/inmap/isrm_polygon_wgs84.gpkg
       grid_id: isrm
