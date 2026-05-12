@@ -54,8 +54,8 @@ while [ $# -gt 0 ]; do
         echo "Usage: $0 -c <config> -a <account> [-p partition] [--high-mem|-H] [-t hours]"
         echo "  -c             Path to impacts settings.yaml (required)"
         echo "  -a, --account  Slurm account name (required)"
-        echo "  -p             Partition: lr7 (default) or lr8"
-        echo "  --high-mem     For lr7: request 480G instead of 240G"
+        echo "  -p             Partition: lr4, lr5, lr6, lr7 (default), lr8, lr_bigmem, cm1, cm2"
+        echo "  --high-mem     Request high-memory config (lr6: 180G, lr7: 480G)"
         echo "  -t, --hours    Job time limit in hours (default: 24)"
         exit 0
         ;;
@@ -95,8 +95,49 @@ case "$partition_arg" in
             MEMORY_LIMIT_GB="${MEMORY_LIMIT_GB:-240}"
         fi
         ;;
+    lr6)
+        PARTITION="lr6"
+        QOS="lr_normal"
+        NUM_CPUS=32
+        if [ "$high_mem" = true ]; then
+            MEMORY_LIMIT_GB="${MEMORY_LIMIT_GB:-180}"
+        else
+            MEMORY_LIMIT_GB="${MEMORY_LIMIT_GB:-90}"
+        fi
+        ;;
+    lr5)
+        PARTITION="lr5"
+        QOS="lr_normal"
+        NUM_CPUS=28
+        MEMORY_LIMIT_GB="${MEMORY_LIMIT_GB:-60}"
+        ;;
+    lr4)
+        PARTITION="lr4"
+        QOS="lr_normal"
+        NUM_CPUS=24
+        MEMORY_LIMIT_GB="${MEMORY_LIMIT_GB:-60}"
+        ;;
+    lr_bigmem)
+        PARTITION="lr_bigmem"
+        QOS="lr_bigmem"
+        NUM_CPUS=32
+        MEMORY_LIMIT_GB="${MEMORY_LIMIT_GB:-1400}"
+        ;;
+    cm1)
+        PARTITION="cm1"
+        QOS="cm_normal"
+        NUM_CPUS=48
+        MEMORY_LIMIT_GB="${MEMORY_LIMIT_GB:-240}"
+        ;;
+    cm2)
+        PARTITION="cm2"
+        QOS="cm_normal"
+        NUM_CPUS=64
+        MEMORY_LIMIT_GB="${MEMORY_LIMIT_GB:-240}"
+        ;;
     *)
-        echo "ERROR: unsupported partition '$partition_arg' (expected lr7 or lr8)"
+        echo "ERROR: unsupported partition '$partition_arg'"
+        echo "Available: lr4, lr5, lr6, lr7 (default), lr8, lr_bigmem, cm1, cm2"
         exit 2
         ;;
 esac
