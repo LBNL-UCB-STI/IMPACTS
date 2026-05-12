@@ -1,0 +1,13 @@
+numpy<2.0
+geopandas>=0.11.1
+pyproj>=3.6.1
+shapely>=1.8.5
+duckdb>=1.1.0
+pyarrow>=14
+scipy>=1.10
+zarr==3.1.5
+PyYAML
+tqdm
+pyogrio
+s3fs
+osm-chordify>=0.2.2
