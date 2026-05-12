@@ -183,7 +183,7 @@ def build_inputs_manifest(
             )
 
     from .pipeline.preprocessing.step4_aggregate_population import run as preprocess_step4
-    aermod_cell_population_path = preprocess_step4(
+    aermod_cell_population_path, staged_population_path = preprocess_step4(
         pipeline_config,
         output_root,
         population_inputs=step1_outputs.get("population_inputs"),
@@ -194,6 +194,13 @@ def build_inputs_manifest(
             input_root=input_root,
             key="aermod_cell_population",
             source_path=aermod_cell_population_path,
+        )
+    if staged_population_path:
+        register_local_input(
+            manifest_inputs=manifest_inputs,
+            input_root=input_root,
+            key="staged_population",
+            source_path=staged_population_path,
         )
 
     maintained_execution_path = ["impacts.pipeline.workflow.step1_process_emissions"]

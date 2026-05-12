@@ -29,6 +29,7 @@ _AERMOD_CELL_ID = "aermod_cell_id"
 _PERSON_REQUIRED = ["person_id", "household_id", "home_x", "home_y"]
 _HOUSEHOLD_REQUIRED = ["household_id"]
 _OUTPUT_FILENAME = "aermod_cell_population.parquet"
+_STAGED_POPULATION_FILENAME = "staged_population.parquet"
 
 
 def _classify_urban(person_count: pd.Series) -> pd.Series:
@@ -110,16 +111,16 @@ def run(
     output_root: Path,
     *,
     population_inputs: Optional[Dict[str, Any]] = None,
-) -> Optional[str]:
+) -> tuple[Optional[str], Optional[str]]:
     log_step_banner("Preprocess Step 4", "Aggregate Population to AERMOD Grid", logger=logger)
 
     if not population_inputs or not population_inputs.get("persons") or not population_inputs.get("households"):
         logger.info("Preprocess step 4: no population inputs available — skipping.")
-        return None
+        return None, None
 
     if not pipeline.aermod_grid_path:
         logger.info("Preprocess step 4: no AERMOD grid configured — skipping.")
-        return None
+        return None, None
 
     log_substep_banner("4.1", "load and merge persons + households", logger=logger)
     population_gdf = _load_and_merge_population(
@@ -152,10 +153,14 @@ def run(
         (counts["source_urban_class"] == 0).sum(),
     )
 
-    log_substep_banner("4.3", "write population per AERMOD cell", logger=logger)
+    log_substep_banner("4.3", "write staged population and per-cell counts", logger=logger)
     output_root.mkdir(parents=True, exist_ok=True)
-    output_path = output_root / _OUTPUT_FILENAME
-    counts.to_parquet(output_path, index=False)
-    logger.info("Preprocess step 4.3: aermod cell population → %s", output_path)
+    staged_population_path = output_root / _STAGED_POPULATION_FILENAME
+    population_gdf.to_parquet(staged_population_path, index=False)
+    logger.info("Preprocess step 4.3: staged population → %s", staged_population_path)
 
-    return str(output_path)
+    cell_population_path = output_root / _OUTPUT_FILENAME
+    counts.to_parquet(cell_population_path, index=False)
+    logger.info("Preprocess step 4.3: aermod cell population → %s", cell_population_path)
+
+    return str(cell_population_path), str(staged_population_path)

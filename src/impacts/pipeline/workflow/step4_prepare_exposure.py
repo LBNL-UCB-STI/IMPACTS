@@ -284,6 +284,7 @@ def run(
     inmap_concentrations_path: Optional[str] = None,
     aermod_concentrations_path: Optional[str] = None,
     population_inputs: Optional[dict[str, Any]] = None,
+    manifest_inputs: Optional[dict[str, Any]] = None,
 ) -> tuple[Optional[gpd.GeoDataFrame], Path, Optional[Path], Optional[Path]]:
     """Step 4: prepare the merged exposure artifact from dispersion outputs."""
 
@@ -316,16 +317,29 @@ def run(
 
     population_distribution_output_path: Optional[Path] = None
     population_counts_output_path: Optional[Path] = None
-    if population_inputs and population_inputs.get("persons") and population_inputs.get("households"):
-        log_substep_banner("4.3", "create population table", logger=logger)
-        persons_df = _load_population_table(population_inputs["persons"], "persons")
-        households_df = _load_population_table(population_inputs["households"], "households")
-        population_gdf = _prepare_population_table(
-            persons_df=persons_df,
-            households_df=households_df,
-            target_epsg=int(pipeline.output_epsg),
-        )
-        _trace_frame("3", "population_with_households", pd.DataFrame(population_gdf.drop(columns="geometry", errors="ignore")))
+
+    staged_population_path = (manifest_inputs or {}).get("staged_population")
+    aermod_cell_population_path = (manifest_inputs or {}).get("aermod_cell_population")
+    has_staged = bool(staged_population_path)
+    has_raw = bool(population_inputs and population_inputs.get("persons") and population_inputs.get("households"))
+
+    if has_staged or has_raw:
+        log_substep_banner("4.3", "create population distribution", logger=logger)
+        if has_staged:
+            staged_path = resolve_required_manifest_input(manifest_inputs, key="staged_population")
+            population_gdf = gpd.read_parquet(staged_path)
+            if population_gdf.crs is None or population_gdf.crs.to_epsg() != int(pipeline.output_epsg):
+                population_gdf = population_gdf.to_crs(epsg=int(pipeline.output_epsg))
+            logger.info("%s loaded staged population (%d persons) from preprocess", _step_label("4.3"), len(population_gdf))
+        else:
+            persons_df = _load_population_table(population_inputs["persons"], "persons")
+            households_df = _load_population_table(population_inputs["households"], "households")
+            population_gdf = _prepare_population_table(
+                persons_df=persons_df,
+                households_df=households_df,
+                target_epsg=int(pipeline.output_epsg),
+            )
+        _trace_frame("3", "population_gdf", pd.DataFrame(population_gdf.drop(columns="geometry", errors="ignore")))
         population_table = _assign_population_to_exposure_grid(
             population_gdf=population_gdf,
             exposure_grid=full_exposure_grid,
@@ -337,21 +351,29 @@ def run(
         logger.info("%s population distribution → %s", _step_label("4.3"), population_distribution_output_path)
 
         log_substep_banner("4.4", "build population counts", logger=logger)
-        population_counts = _build_population_exposure_distribution(
-            population_table=population_table,
-            exposure_grid=full_exposure_grid,
-        )
-        _trace_frame(
-            "4",
-            "population_counts",
-            pd.DataFrame(population_counts.drop(columns="geometry", errors="ignore")),
-        )
+        if aermod_cell_population_path:
+            cell_pop_path = resolve_required_manifest_input(manifest_inputs, key="aermod_cell_population")
+            cell_counts = read_table(cell_pop_path)[[_AERMOD_SOURCE_ID_COLUMN, "person_count"]]
+            cell_counts[_AERMOD_SOURCE_ID_COLUMN] = pd.to_numeric(cell_counts[_AERMOD_SOURCE_ID_COLUMN], errors="coerce").astype(int)
+            grid_lookup = full_exposure_grid[[_AERMOD_SOURCE_ID_COLUMN, "geometry"]].drop_duplicates(subset=[_AERMOD_SOURCE_ID_COLUMN]).copy()
+            population_counts = gpd.GeoDataFrame(
+                grid_lookup.merge(cell_counts, how="inner", on=_AERMOD_SOURCE_ID_COLUMN),
+                geometry="geometry",
+                crs=full_exposure_grid.crs,
+            )
+            logger.info("%s reused cell counts from preprocess (%d cells)", _step_label("4.4"), len(population_counts))
+        else:
+            population_counts = _build_population_exposure_distribution(
+                population_table=population_table,
+                exposure_grid=full_exposure_grid,
+            )
+        _trace_frame("4", "population_counts", pd.DataFrame(population_counts.drop(columns="geometry", errors="ignore")))
         population_counts_output_path = raw_dir / "beam_population_counts.parquet"
         population_counts_output_path.parent.mkdir(parents=True, exist_ok=True)
         population_counts.to_parquet(population_counts_output_path, index=False)
         population_counts.to_file(population_counts_output_path.with_suffix(".gpkg"), driver="GPKG")
         logger.info("%s population counts → %s", _step_label("4.4"), population_counts_output_path)
     else:
-        logger.info("%s population table skipped: persons/households not both available", _step_label("4.3"))
+        logger.info("%s population table skipped: no staged population or persons/households available", _step_label("4.3"))
 
     return full_exposure_grid, output_path, population_distribution_output_path, population_counts_output_path

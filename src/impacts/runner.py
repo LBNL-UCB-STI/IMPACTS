@@ -495,6 +495,7 @@ def run_from_input_manifest(
                 inmap_concentrations_path=str(concentration_path),
                 aermod_concentrations_path=str(aermod_concentration_path) if aermod_concentration_path else None,
                 population_inputs=population_inputs,
+                manifest_inputs=manifest_inputs,
             )
             _record_stage_timing(stage_timings, "step4_prepare_exposure", stage_started)
             logger.info("Concentration distribution complete: wrote %s", exposure_grid_path)
