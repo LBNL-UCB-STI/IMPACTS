@@ -21,8 +21,6 @@ from . import _step_label
 logger = logging.getLogger(__name__)
 _INMAP_SOURCE_ID_COLUMN = "inmap_cell_id"
 _AERMOD_SOURCE_ID_COLUMN = "aermod_cell_id"
-_PERSON_REQUIRED_COLUMNS = ["person_id", "household_id", "home_x", "home_y"]
-_HOUSEHOLD_REQUIRED_COLUMNS = ["household_id"]
 
 
 def _trace_frame(step: str, label: str, df: pd.DataFrame) -> None:
@@ -177,104 +175,6 @@ def _write_exposure_grid(
     exposure_grid.to_file(output_path.with_suffix(".gpkg"), driver="GPKG")
 
 
-def _load_population_table(entry: dict[str, Any], label: str) -> pd.DataFrame:
-    return read_table(resolve_required_manifest_input({label: entry}, key=label))
-
-
-def _normalize_identity_field(df: pd.DataFrame, *, field: str, label: str) -> pd.DataFrame:
-    result = df.copy()
-    if field not in result.columns and result.index.name == field:
-        result = result.reset_index()
-    if field not in result.columns:
-        raise ValueError(f"{label} table is missing required identity field: {field}")
-    return result
-
-
-def _prepare_population_table(
-    *,
-    persons_df: pd.DataFrame,
-    households_df: pd.DataFrame,
-    target_epsg: int,
-) -> gpd.GeoDataFrame:
-    persons = _normalize_identity_field(persons_df, field="person_id", label="Persons")
-    persons = _normalize_identity_field(persons, field="household_id", label="Persons")
-    households = _normalize_identity_field(households_df, field="household_id", label="Households")
-
-    missing_person_cols = [col for col in _PERSON_REQUIRED_COLUMNS if col not in persons.columns]
-    if missing_person_cols:
-        raise ValueError(f"Persons table is missing required columns: {missing_person_cols}")
-    missing_household_cols = [col for col in _HOUSEHOLD_REQUIRED_COLUMNS if col not in households.columns]
-    if missing_household_cols:
-        raise ValueError(f"Households table is missing required columns: {missing_household_cols}")
-    if "Unnamed: 0" in persons.columns:
-        persons = persons.drop(columns=["Unnamed: 0"])
-    if "Unnamed: 0" in households.columns:
-        households = households.drop(columns=["Unnamed: 0"])
-
-    household_renames = {}
-    for column in households.columns:
-        if column == "household_id":
-            continue
-        if column in persons.columns:
-            household_renames[column] = f"household_{column}"
-    if household_renames:
-        households = households.rename(columns=household_renames)
-
-    merged = persons.merge(households, how="left", on="household_id")
-    merged["home_x"] = pd.to_numeric(merged["home_x"], errors="coerce")
-    merged["home_y"] = pd.to_numeric(merged["home_y"], errors="coerce")
-    merged = merged.loc[merged["home_x"].notna() & merged["home_y"].notna()].copy()
-    population = gpd.GeoDataFrame(
-        merged,
-        geometry=gpd.points_from_xy(merged["home_x"], merged["home_y"]),
-        crs="EPSG:4326",
-    )
-    return population.to_crs(epsg=target_epsg)
-
-
-def _assign_population_to_exposure_grid(
-    *,
-    population_gdf: gpd.GeoDataFrame,
-    exposure_grid: gpd.GeoDataFrame,
-) -> pd.DataFrame:
-    joined = gpd.sjoin(
-        population_gdf,
-        exposure_grid[[_AERMOD_SOURCE_ID_COLUMN, "geometry"]],
-        how="inner",
-        predicate="within",
-    )
-    joined = joined.drop(columns=["index_right", "geometry"], errors="ignore")
-    if _AERMOD_SOURCE_ID_COLUMN not in joined.columns:
-        raise ValueError("Population overlay did not produce aermod_cell_id.")
-    return pd.DataFrame(joined)
-
-
-def _aggregate_population_by_aermod_cell(population_table: pd.DataFrame) -> pd.DataFrame:
-    if _AERMOD_SOURCE_ID_COLUMN not in population_table.columns:
-        raise ValueError("Population exposure table must include aermod_cell_id before aggregation.")
-    counts = (
-        population_table.groupby(_AERMOD_SOURCE_ID_COLUMN, dropna=False)
-        .size()
-        .rename("person_count")
-        .reset_index()
-    )
-    counts[_AERMOD_SOURCE_ID_COLUMN] = pd.to_numeric(counts[_AERMOD_SOURCE_ID_COLUMN], errors="raise").astype(int)
-    counts["person_count"] = pd.to_numeric(counts["person_count"], errors="raise").astype(int)
-    return counts
-
-
-def _build_population_exposure_distribution(
-    *,
-    population_table: pd.DataFrame,
-    exposure_grid: gpd.GeoDataFrame,
-) -> gpd.GeoDataFrame:
-    counts = _aggregate_population_by_aermod_cell(population_table)
-    grid_lookup = exposure_grid[[_AERMOD_SOURCE_ID_COLUMN, "geometry"]].drop_duplicates(
-        subset=[_AERMOD_SOURCE_ID_COLUMN]
-    ).copy()
-    distribution = grid_lookup.merge(counts, how="inner", on=_AERMOD_SOURCE_ID_COLUMN)
-    ordered = [_AERMOD_SOURCE_ID_COLUMN, "person_count", "geometry"]
-    return gpd.GeoDataFrame(distribution[ordered], geometry="geometry", crs=exposure_grid.crs)
 
 
 def run(
@@ -283,7 +183,6 @@ def run(
     raw_dir: Path,
     inmap_concentrations_path: Optional[str] = None,
     aermod_concentrations_path: Optional[str] = None,
-    population_inputs: Optional[dict[str, Any]] = None,
     manifest_inputs: Optional[dict[str, Any]] = None,
 ) -> tuple[Optional[gpd.GeoDataFrame], Path, Optional[Path], Optional[Path]]:
     """Step 4: prepare the merged exposure artifact from dispersion outputs."""
@@ -318,61 +217,39 @@ def run(
     population_distribution_output_path: Optional[Path] = None
     population_counts_output_path: Optional[Path] = None
 
-    staged_population_path = (manifest_inputs or {}).get("staged_population")
-    aermod_cell_population_path = (manifest_inputs or {}).get("aermod_cell_population")
-    has_staged = bool(staged_population_path)
-    has_raw = bool(population_inputs and population_inputs.get("persons") and population_inputs.get("households"))
+    manifest = manifest_inputs or {}
+    if "staged_population" not in manifest or "aermod_cell_population" not in manifest:
+        raise ValueError(
+            "Step 4 requires staged_population and aermod_cell_population from preprocessing. "
+            "Ensure preprocessing step 4 ran successfully before running the workflow."
+        )
 
-    if has_staged or has_raw:
-        log_substep_banner("4.3", "create population distribution", logger=logger)
-        if has_staged:
-            staged_path = resolve_required_manifest_input(manifest_inputs, key="staged_population")
-            population_table = read_table(staged_path)
-            if _AERMOD_SOURCE_ID_COLUMN not in population_table.columns:
-                raise ValueError("staged_population is missing aermod_cell_id — rerun preprocessing step 4.")
-            logger.info("%s loaded staged population (%d persons) from preprocess", _step_label("4.3"), len(population_table))
-        else:
-            persons_df = _load_population_table(population_inputs["persons"], "persons")
-            households_df = _load_population_table(population_inputs["households"], "households")
-            population_gdf = _prepare_population_table(
-                persons_df=persons_df,
-                households_df=households_df,
-                target_epsg=int(pipeline.output_epsg),
-            )
-            population_table = _assign_population_to_exposure_grid(
-                population_gdf=population_gdf,
-                exposure_grid=full_exposure_grid,
-            )
-        _trace_frame("3", "population_distribution", population_table)
-        population_distribution_output_path = raw_dir / "beam_population_distribution.parquet"
-        population_distribution_output_path.parent.mkdir(parents=True, exist_ok=True)
-        population_table.to_parquet(population_distribution_output_path, index=False)
-        logger.info("%s population distribution → %s", _step_label("4.3"), population_distribution_output_path)
+    log_substep_banner("4.3", "write population distribution", logger=logger)
+    staged_path = resolve_required_manifest_input(manifest, key="staged_population")
+    population_table = read_table(staged_path)
+    if _AERMOD_SOURCE_ID_COLUMN not in population_table.columns:
+        raise ValueError("staged_population is missing aermod_cell_id — rerun preprocessing step 4.")
+    _trace_frame("3", "population_distribution", population_table)
+    population_distribution_output_path = raw_dir / "beam_population_distribution.parquet"
+    population_distribution_output_path.parent.mkdir(parents=True, exist_ok=True)
+    population_table.to_parquet(population_distribution_output_path, index=False)
+    logger.info("%s population distribution → %s", _step_label("4.3"), population_distribution_output_path)
 
-        log_substep_banner("4.4", "build population counts", logger=logger)
-        if aermod_cell_population_path:
-            cell_pop_path = resolve_required_manifest_input(manifest_inputs, key="aermod_cell_population")
-            cell_counts = read_table(cell_pop_path)[[_AERMOD_SOURCE_ID_COLUMN, "person_count"]]
-            cell_counts[_AERMOD_SOURCE_ID_COLUMN] = pd.to_numeric(cell_counts[_AERMOD_SOURCE_ID_COLUMN], errors="coerce").astype(int)
-            grid_lookup = full_exposure_grid[[_AERMOD_SOURCE_ID_COLUMN, "geometry"]].drop_duplicates(subset=[_AERMOD_SOURCE_ID_COLUMN]).copy()
-            population_counts = gpd.GeoDataFrame(
-                grid_lookup.merge(cell_counts, how="inner", on=_AERMOD_SOURCE_ID_COLUMN),
-                geometry="geometry",
-                crs=full_exposure_grid.crs,
-            )
-            logger.info("%s reused cell counts from preprocess (%d cells)", _step_label("4.4"), len(population_counts))
-        else:
-            population_counts = _build_population_exposure_distribution(
-                population_table=population_table,
-                exposure_grid=full_exposure_grid,
-            )
-        _trace_frame("4", "population_counts", pd.DataFrame(population_counts.drop(columns="geometry", errors="ignore")))
-        population_counts_output_path = raw_dir / "beam_population_counts.parquet"
-        population_counts_output_path.parent.mkdir(parents=True, exist_ok=True)
-        population_counts.to_parquet(population_counts_output_path, index=False)
-        population_counts.to_file(population_counts_output_path.with_suffix(".gpkg"), driver="GPKG")
-        logger.info("%s population counts → %s", _step_label("4.4"), population_counts_output_path)
-    else:
-        logger.info("%s population table skipped: no staged population or persons/households available", _step_label("4.3"))
+    log_substep_banner("4.4", "build population counts with geometry", logger=logger)
+    cell_pop_path = resolve_required_manifest_input(manifest, key="aermod_cell_population")
+    cell_counts = read_table(cell_pop_path)[[_AERMOD_SOURCE_ID_COLUMN, "person_count"]]
+    cell_counts[_AERMOD_SOURCE_ID_COLUMN] = pd.to_numeric(cell_counts[_AERMOD_SOURCE_ID_COLUMN], errors="coerce").astype(int)
+    grid_lookup = full_exposure_grid[[_AERMOD_SOURCE_ID_COLUMN, "geometry"]].drop_duplicates(subset=[_AERMOD_SOURCE_ID_COLUMN]).copy()
+    population_counts = gpd.GeoDataFrame(
+        grid_lookup.merge(cell_counts, how="inner", on=_AERMOD_SOURCE_ID_COLUMN),
+        geometry="geometry",
+        crs=full_exposure_grid.crs,
+    )
+    _trace_frame("4", "population_counts", pd.DataFrame(population_counts.drop(columns="geometry", errors="ignore")))
+    population_counts_output_path = raw_dir / "beam_population_counts.parquet"
+    population_counts_output_path.parent.mkdir(parents=True, exist_ok=True)
+    population_counts.to_parquet(population_counts_output_path, index=False)
+    population_counts.to_file(population_counts_output_path.with_suffix(".gpkg"), driver="GPKG")
+    logger.info("%s population counts → %s", _step_label("4.4"), population_counts_output_path)
 
     return full_exposure_grid, output_path, population_distribution_output_path, population_counts_output_path
