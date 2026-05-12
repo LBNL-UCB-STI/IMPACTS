@@ -28,18 +28,6 @@ def _resolve_pipeline_output_root(settings_path: str) -> Path:
     ).resolve()
 
 
-def _validate_profile_output_path(*, output_path: Path, output_root: Path) -> Path:
-    resolved_root = output_root.resolve()
-    resolved_output = output_path.resolve()
-    try:
-        resolved_output.relative_to(resolved_root)
-    except ValueError as exc:
-        raise ValueError(
-            f"Profile output must live under impacts.local_output_folder ({resolved_root}), got {resolved_output}"
-        ) from exc
-    resolved_output.parent.mkdir(parents=True, exist_ok=True)
-    return resolved_output
-
 
 def _resolve_run_output_root(*, input_manifest_path: str | None) -> Path:
     if not input_manifest_path:
@@ -51,11 +39,10 @@ def _resolve_run_output_root(*, input_manifest_path: str | None) -> Path:
     return _resolve_pipeline_output_root(str(settings_source))
 
 
-def _resolve_profile_output(*, output_root: Path, explicit_output: str | None, stem: str) -> Path:
-    candidate = Path(explicit_output).expanduser() if explicit_output else output_root / "profiling" / stem
-    if not candidate.is_absolute():
-        candidate = (output_root / candidate).resolve()
-    return _validate_profile_output_path(output_path=candidate, output_root=output_root)
+def _resolve_profile_output(*, output_root: Path, stem: str) -> Path:
+    candidate = output_root / "profiling" / stem
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    return candidate
 
 
 def _resolve_profile_target(args: argparse.Namespace) -> tuple[Path, list[str], str] | None:
@@ -93,11 +80,7 @@ def _maybe_relaunch_with_profiler(args: argparse.Namespace) -> int | None:
         return None
     output_root, forwarded_args, default_name = resolved
     default_stem = f"{default_name}.memray" if args.profile == "memray" else f"{default_name}.time.txt"
-    profile_output = _resolve_profile_output(
-        output_root=output_root,
-        explicit_output=args.profile_output,
-        stem=default_stem,
-    )
+    profile_output = _resolve_profile_output(output_root=output_root, stem=default_stem)
     if args.profile == "memray":
         command = [
             sys.executable,
@@ -142,7 +125,6 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--input-manifest", required=True)
     run.add_argument("--run-manifest")
     run.add_argument("--profile", choices=("none", "memray", "time"), default="none")
-    run.add_argument("--profile-output")
     run.add_argument(
         "--allow-heavy-profile",
         action="store_true",
@@ -172,7 +154,6 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline = subparsers.add_parser("pipeline", help="Run preprocess, run, and postprocess end-to-end")
     pipeline.add_argument("--config", required=True)
     pipeline.add_argument("--profile", choices=("none", "memray", "time"), default="none")
-    pipeline.add_argument("--profile-output")
     derive_settings = subparsers.add_parser(
         "derive_settings_from_pilates",
         help="Generate an impacts settings file from main PILATES settings and a thin impacts overlay.",

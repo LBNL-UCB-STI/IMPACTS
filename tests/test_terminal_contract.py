@@ -230,31 +230,6 @@ def test_run_profile_time_relaunches_under_impacts_output(monkeypatch, tmp_path:
     assert captured["env"]["IMPACTS_PROFILE_ACTIVE"] == "1"
 
 
-def test_run_profile_output_must_stay_under_impacts_output(monkeypatch, tmp_path: Path) -> None:
-    input_manifest_path = tmp_path / "inputs_manifest.yaml"
-    input_manifest_path.write_text("model: impacts\n", encoding="utf-8")
-
-    monkeypatch.setattr("impacts.__main__.load_structured_file", lambda _: {"settings_source": str(tmp_path / "settings.yaml")})
-    monkeypatch.setattr(
-        "impacts.__main__.load_settings_from_yaml",
-        lambda _: SimpleNamespace(impacts=SimpleNamespace(local_output_folder="impacts_output")),
-    )
-    monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
-
-    with pytest.raises(ValueError, match="Profile output must live under impacts.local_output_folder"):
-        main(
-            [
-                "run",
-                "--input-manifest",
-                str(input_manifest_path),
-                "--profile",
-                "memray",
-                "--allow-heavy-profile",
-                "--profile-output",
-                str(tmp_path / "outside.memray"),
-            ]
-        )
-
 
 def test_pipeline_profile_memray_is_rejected(tmp_path: Path) -> None:
     config_path = tmp_path / "settings.yaml"
