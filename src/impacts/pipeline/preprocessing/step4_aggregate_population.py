@@ -81,19 +81,21 @@ def _load_and_merge_population(
     return gdf.to_crs(epsg=target_epsg)
 
 
-def _aggregate_to_aermod_grid(
+def _join_population_to_aermod_grid(
     *,
     population_gdf: gpd.GeoDataFrame,
     aermod_grid: gpd.GeoDataFrame,
 ) -> pd.DataFrame:
     joined = gpd.sjoin(
-        population_gdf[[_AERMOD_CELL_ID if _AERMOD_CELL_ID in population_gdf.columns else "geometry", "geometry"]],
+        population_gdf,
         aermod_grid[[_AERMOD_CELL_ID, "geometry"]],
         how="inner",
         predicate="within",
     )
-    joined = joined.drop(columns=["index_right", "geometry"], errors="ignore")
+    return pd.DataFrame(joined.drop(columns=["index_right", "geometry"], errors="ignore"))
 
+
+def _counts_from_joined(joined: pd.DataFrame) -> pd.DataFrame:
     counts = (
         joined.groupby(_AERMOD_CELL_ID, dropna=False)
         .size()
@@ -130,7 +132,7 @@ def run(
     )
     logger.info("Preprocess step 4.1: loaded %d persons with valid coordinates", len(population_gdf))
 
-    log_substep_banner("4.2", "join population to AERMOD grid and aggregate", logger=logger)
+    log_substep_banner("4.2", "join population to AERMOD grid", logger=logger)
     aermod_grid = read_vector(pipeline.aermod_grid_path)
     if aermod_grid.crs is not None:
         aermod_grid = aermod_grid.to_crs(epsg=int(pipeline.output_epsg))
@@ -143,7 +145,8 @@ def run(
         )
     aermod_grid = aermod_grid.rename(columns={aermod_grid_id: _AERMOD_CELL_ID})
 
-    counts = _aggregate_to_aermod_grid(population_gdf=population_gdf, aermod_grid=aermod_grid)
+    joined = _join_population_to_aermod_grid(population_gdf=population_gdf, aermod_grid=aermod_grid)
+    counts = _counts_from_joined(joined)
     logger.info(
         "Preprocess step 4.2: %d persons assigned across %d AERMOD cells (urban=%d, suburban=%d, rural=%d)",
         counts["person_count"].sum(),
@@ -156,8 +159,8 @@ def run(
     log_substep_banner("4.3", "write staged population and per-cell counts", logger=logger)
     output_root.mkdir(parents=True, exist_ok=True)
     staged_population_path = output_root / _STAGED_POPULATION_FILENAME
-    population_gdf.to_parquet(staged_population_path, index=False)
-    logger.info("Preprocess step 4.3: staged population → %s", staged_population_path)
+    joined.to_parquet(staged_population_path, index=False)
+    logger.info("Preprocess step 4.3: staged population (per-person, with aermod_cell_id) → %s", staged_population_path)
 
     cell_population_path = output_root / _OUTPUT_FILENAME
     counts.to_parquet(cell_population_path, index=False)

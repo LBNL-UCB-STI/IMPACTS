@@ -327,10 +327,10 @@ def run(
         log_substep_banner("4.3", "create population distribution", logger=logger)
         if has_staged:
             staged_path = resolve_required_manifest_input(manifest_inputs, key="staged_population")
-            population_gdf = gpd.read_parquet(staged_path)
-            if population_gdf.crs is None or population_gdf.crs.to_epsg() != int(pipeline.output_epsg):
-                population_gdf = population_gdf.to_crs(epsg=int(pipeline.output_epsg))
-            logger.info("%s loaded staged population (%d persons) from preprocess", _step_label("4.3"), len(population_gdf))
+            population_table = read_table(staged_path)
+            if _AERMOD_SOURCE_ID_COLUMN not in population_table.columns:
+                raise ValueError("staged_population is missing aermod_cell_id — rerun preprocessing step 4.")
+            logger.info("%s loaded staged population (%d persons) from preprocess", _step_label("4.3"), len(population_table))
         else:
             persons_df = _load_population_table(population_inputs["persons"], "persons")
             households_df = _load_population_table(population_inputs["households"], "households")
@@ -339,11 +339,10 @@ def run(
                 households_df=households_df,
                 target_epsg=int(pipeline.output_epsg),
             )
-        _trace_frame("3", "population_gdf", pd.DataFrame(population_gdf.drop(columns="geometry", errors="ignore")))
-        population_table = _assign_population_to_exposure_grid(
-            population_gdf=population_gdf,
-            exposure_grid=full_exposure_grid,
-        )
+            population_table = _assign_population_to_exposure_grid(
+                population_gdf=population_gdf,
+                exposure_grid=full_exposure_grid,
+            )
         _trace_frame("3", "population_distribution", population_table)
         population_distribution_output_path = raw_dir / "beam_population_distribution.parquet"
         population_distribution_output_path.parent.mkdir(parents=True, exist_ok=True)
