@@ -94,9 +94,10 @@ def _maybe_relaunch_with_profiler(args: argparse.Namespace) -> int | None:
             *forwarded_args,
         ]
     else:
+        time_verbose_flag = "-l" if sys.platform == "darwin" else "-v"
         command = [
             "/usr/bin/time",
-            "-l",
+            time_verbose_flag,
             "-o",
             str(profile_output),
             sys.executable,
