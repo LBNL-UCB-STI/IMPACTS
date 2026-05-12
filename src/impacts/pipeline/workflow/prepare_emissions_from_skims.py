@@ -457,7 +457,10 @@ def _build_zone_allocated_table(
     edge_length_col = f"{zone_label}_edge_link_length_m"
     zone_length_col = f"{zone_label}_zone_link_length_m"
 
-    merge_cols = ["linkId", "vehicleTypeId", "process"] + activity_cols + emission_cols
+    has_road_category = "roadCategory" in skims_df.columns
+    has_release_height = "source_release_height" in skims_df.columns
+    extra_cols = (["roadCategory"] if has_road_category else []) + (["source_release_height"] if has_release_height else [])
+    merge_cols = ["linkId"] + extra_cols + ["vehicleTypeId", "process"] + activity_cols + emission_cols
     con = duckdb.connect(database=":memory:")
     try:
         configure_duckdb_connection(
@@ -475,6 +478,11 @@ def _build_zone_allocated_table(
             """.strip()
             for col in activity_cols + emission_cols
         ]
+        extra_selects = ""
+        if has_road_category:
+            extra_selects += ',\n                trim(CAST(s."roadCategory" AS VARCHAR)) AS "roadCategory"'
+        if has_release_height:
+            extra_selects += ',\n                COALESCE(TRY_CAST(s."source_release_height" AS DOUBLE), 1.0) AS "source_release_height"'
         allocated = con.execute(
             f"""
             SELECT
@@ -484,7 +492,7 @@ def _build_zone_allocated_table(
                 g."{zone_id_col}" AS "{zone_id_col}",
                 COALESCE(TRY_CAST(g."{proportion_col}" AS DOUBLE), 0.0) AS "{proportion_col}",
                 COALESCE(TRY_CAST(g."{edge_length_col}" AS DOUBLE), 0.0) AS "{edge_length_col}",
-                COALESCE(TRY_CAST(g."{zone_length_col}" AS DOUBLE), 0.0) AS "{zone_length_col}",
+                COALESCE(TRY_CAST(g."{zone_length_col}" AS DOUBLE), 0.0) AS "{zone_length_col}"{extra_selects},
                 {", ".join(value_selects)}
             FROM grouped_df AS g
             LEFT JOIN skims_df AS s

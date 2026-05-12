@@ -124,10 +124,6 @@ def build_inputs_manifest(
         "asrv_nox_to_no2_ratios_file": aermod.asrv_nox_to_no2_ratios_file,
         "asrv_patterns_file": staged_asrv_patterns_file,
         "asrv_patterns_epsg": int(asrv_patterns_epsg) if asrv_patterns_epsg is not None else None,
-        "aermod_default_site": aermod.default_site,
-        "aermod_default_urban_class": int(aermod.default_urban_class),
-        "aermod_default_temporal": aermod.default_temporal,
-        "aermod_default_release_height": float(aermod.default_release_height),
         "grid_size_meters": float(aermod.grid_size_meters) if aermod.grid_size_meters is not None else None,
         "beam_osm_id_col": emissions.beam_osm_id_col,
         "beam_length_col": emissions.beam_length_col,
@@ -185,6 +181,20 @@ def build_inputs_manifest(
                 key=manifest_key,
                 source_path=path,
             )
+
+    from .pipeline.preprocessing.step4_aggregate_population import run as preprocess_step4
+    aermod_cell_population_path = preprocess_step4(
+        pipeline_config,
+        output_root,
+        population_inputs=step1_outputs.get("population_inputs"),
+    )
+    if aermod_cell_population_path:
+        register_local_input(
+            manifest_inputs=manifest_inputs,
+            input_root=input_root,
+            key="aermod_cell_population",
+            source_path=aermod_cell_population_path,
+        )
 
     maintained_execution_path = ["impacts.pipeline.workflow.step1_process_emissions"]
     if inmap.enabled:

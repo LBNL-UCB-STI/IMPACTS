@@ -35,6 +35,21 @@ _VMT_PROCESSES = {"RUNEX", "PMBW", "PMTW", "PRDUST", "RUNLOSS", "PTOEX"}
 _TRIP_PROCESSES = {"HOTSOAK", "DIURN", "STREX"}
 _CORRECTION_ASSIGNMENT_GROUPS = {"passenger", "freight"}
 
+_OSM_TO_AERMOD_TEMPORAL = {
+    "motorway": "FREEWAY",
+    "motorway_link": "FREEWAY",
+    "trunk": "FREEWAY",
+    "trunk_link": "CITYSTREET",
+    "primary": "CITYSTREET",
+    "primary_link": "CITYSTREET",
+    "secondary": "CITYSTREET",
+    "secondary_link": "CITYSTREET",
+    "tertiary": "CITYSTREET",
+    "tertiary_link": "CITYSTREET",
+    "residential": "CITYSTREET",
+    "residential_link": "CITYSTREET",
+}
+
 
 def _step1_scratch_dir(raw_dir: Path) -> Path:
     return raw_dir / "tmp" / "step1_process_emissions"
@@ -625,6 +640,23 @@ def run(
         scratch_dir=scratch_dir,
         step_id="1.4",
     )
+
+    if aermod_allocated_df is not None and not aermod_allocated_df.empty:
+        aermod_allocated_df = aermod_allocated_df.copy()
+        if "roadCategory" in aermod_allocated_df.columns:
+            aermod_allocated_df["source_temporal_class"] = aermod_allocated_df.groupby("aermod_cell_id")["roadCategory"].transform(
+                lambda cats: "FREEWAY" if cats.map(_OSM_TO_AERMOD_TEMPORAL).fillna("CITYSTREET").eq("FREEWAY").any() else "CITYSTREET"
+            )
+        if "source_release_height" in aermod_allocated_df.columns:
+            aermod_allocated_df["source_release_height"] = aermod_allocated_df.groupby("aermod_cell_id")["source_release_height"].transform("max")
+        cell_population_path = (manifest_inputs or {}).get("aermod_cell_population")
+        if cell_population_path:
+            cell_population_path = resolve_required_manifest_input(manifest_inputs, key="aermod_cell_population")
+            cell_pop = read_table(cell_population_path)[["aermod_cell_id", "source_urban_class"]]
+            cell_pop["aermod_cell_id"] = pd.to_numeric(cell_pop["aermod_cell_id"], errors="coerce")
+            aermod_allocated_df["aermod_cell_id"] = pd.to_numeric(aermod_allocated_df["aermod_cell_id"], errors="coerce")
+            aermod_allocated_df = aermod_allocated_df.merge(cell_pop, on="aermod_cell_id", how="left")
+            aermod_allocated_df["source_urban_class"] = aermod_allocated_df["source_urban_class"].fillna(0).astype(int)
 
     beam_activity_totals_path = None
     beam_activity_correction_factors_path = None

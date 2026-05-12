@@ -202,11 +202,6 @@ class AermodDispersion:
     asrv_patterns_file: Optional[str] = None
     asrv_patterns_epsg: Optional[int] = None
     asrv_nox_to_no2_ratios_file: Optional[str] = None
-    default_site: Optional[str] = None
-    default_urban_class: int = 0
-    default_temporal: Optional[str] = None
-    default_release_height: float = 1.0
-
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "AermodDispersion":
         _reject_unknown_keys(
@@ -217,10 +212,6 @@ class AermodDispersion:
                 "asrv_patterns_file",
                 "asrv_patterns_epsg",
                 "asrv_nox_to_no2_ratios_file",
-                "default_site",
-                "default_urban_class",
-                "default_temporal",
-                "default_release_height",
             },
             "impacts.dispersions.aermod",
         )
@@ -231,28 +222,12 @@ class AermodDispersion:
             asrv_patterns_file=_optional_string(payload.get("asrv_patterns_file")),
             asrv_patterns_epsg=_optional_int(payload.get("asrv_patterns_epsg")),
             asrv_nox_to_no2_ratios_file=_optional_string(payload.get("asrv_nox_to_no2_ratios_file")),
-            default_site=_optional_string(payload.get("default_site")),
-            default_urban_class=(
-                _optional_int(payload.get("default_urban_class"))
-                if payload.get("default_urban_class") is not None
-                else 0
-            ),
-            default_temporal=_optional_string(payload.get("default_temporal")),
-            default_release_height=(
-                _optional_float(payload.get("default_release_height"))
-                if payload.get("default_release_height") is not None
-                else 1.0
-            ),
         )
         if result.enabled:
             if result.grid_size_meters is None:
                 raise ValueError("Missing required value: impacts.dispersions.aermod.grid_size_meters")
             if not result.asrv_patterns_file:
                 raise ValueError("Missing required value: impacts.dispersions.aermod.asrv_patterns_file")
-            if not result.default_site:
-                raise ValueError("Missing required value: impacts.dispersions.aermod.default_site")
-            if not result.default_temporal:
-                raise ValueError("Missing required value: impacts.dispersions.aermod.default_temporal")
         return result
 
 
@@ -798,10 +773,6 @@ class ImpactsSettings:
                         "asrv_patterns_file": self.impacts.dispersions.aermod.asrv_patterns_file,
                         "asrv_patterns_epsg": self.impacts.dispersions.aermod.asrv_patterns_epsg,
                         "asrv_nox_to_no2_ratios_file": self.impacts.dispersions.aermod.asrv_nox_to_no2_ratios_file,
-                        "default_site": self.impacts.dispersions.aermod.default_site,
-                        "default_urban_class": self.impacts.dispersions.aermod.default_urban_class,
-                        "default_temporal": self.impacts.dispersions.aermod.default_temporal,
-                        "default_release_height": self.impacts.dispersions.aermod.default_release_height,
                     },
                 },
                 "exposure": {

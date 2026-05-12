@@ -112,6 +112,11 @@ def annualize_prepared_skims_for_grid_allocation(
         passenger_vehicle_types_path=passenger_vehicle_types_path,
         freight_vehicle_types_path=freight_vehicle_types_path,
     )
+    tailpipe_height_lookup = _resolve_vehicle_type_tailpipe_height_lookup(
+        vehicle_category_metadata_file=vehicle_category_metadata_file,
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
+    )
     return _annualize_prepared_skims_with_duckdb(
         prepared_skims_path=prepared_skims_path,
         output_path=output,
@@ -120,6 +125,7 @@ def annualize_prepared_skims_for_grid_allocation(
         link_lengths=link_lengths,
         beam_length_col=beam_length_col,
         annualization_days_lookup=annualization_days_lookup,
+        tailpipe_height_lookup=tailpipe_height_lookup,
         population_sample=population_sample,
         transit_sample=transit_sample,
         started=started,
@@ -143,6 +149,7 @@ def _annualize_prepared_skims_with_duckdb(
     link_lengths: pd.DataFrame,
     beam_length_col: str,
     annualization_days_lookup: dict[str, float],
+    tailpipe_height_lookup: dict[str, float],
     population_sample: float,
     transit_sample: float,
     started: float,
@@ -156,15 +163,26 @@ def _annualize_prepared_skims_with_duckdb(
             "annualization_days": list(annualization_days_lookup.values()),
         }
     )
+    has_height_lookup = bool(tailpipe_height_lookup)
+    height_lookup_df = pd.DataFrame(
+        {
+            "vehicleTypeId": list(tailpipe_height_lookup.keys()),
+            "tailpipe_height_meters": list(tailpipe_height_lookup.values()),
+        }
+    ) if has_height_lookup else None
     output_columns = list(prepared_group_cols)
     if "attributeOrigType" in link_lengths.columns:
         output_columns.append("roadCategory")
+    if has_height_lookup:
+        output_columns.append("source_release_height")
     output_columns.extend(["totTrips", "totVMT"])
     output_columns.extend([f"tons_per_year_{pollutant}" for pollutant in required_pollutants])
     try:
         configure_duckdb_connection(con, working_dir=output_path, show_progress=False, profile="balanced")
         con.register("link_lengths", link_lengths)
         con.register("annualization_lookup", lookup_df)
+        if has_height_lookup:
+            con.register("height_lookup", height_lookup_df)
         missing_vehicle_types = [
             row[0]
             for row in con.execute(
@@ -202,6 +220,10 @@ def _annualize_prepared_skims_with_duckdb(
                 select_parts.append(f'source."{col}" AS "{col}"')
         if "attributeOrigType" in link_lengths.columns:
             select_parts.append('link_lengths.attributeOrigType AS "roadCategory"')
+        if has_height_lookup:
+            select_parts.append(
+                f'COALESCE(height_lookup.tailpipe_height_meters, {_DEFAULT_TAILPIPE_HEIGHT_METERS}) AS "source_release_height"'
+            )
         select_parts.append(f"{tot_trips_expr} AS totTrips")
         select_parts.append(
             f"({tot_trips_expr} * COALESCE(TRY_CAST(link_lengths.\"{beam_length_col}\" AS DOUBLE), 0.0) / {_METERS_PER_MILE}) AS totVMT"
@@ -215,6 +237,10 @@ def _annualize_prepared_skims_with_duckdb(
                     / {grams_per_short_ton}
                 ) AS "tons_per_year_{pollutant}" """
             )
+        height_join = (
+            f"\n            LEFT JOIN height_lookup ON {vehicle_type_expr} = height_lookup.vehicleTypeId"
+            if has_height_lookup else ""
+        )
         query = f"""
             SELECT
                 {", ".join(select_parts)}
@@ -222,7 +248,7 @@ def _annualize_prepared_skims_with_duckdb(
             LEFT JOIN link_lengths
               ON source.linkId = link_lengths.linkId
             LEFT JOIN annualization_lookup AS lookup
-              ON {vehicle_type_expr} = lookup.vehicleTypeId
+              ON {vehicle_type_expr} = lookup.vehicleTypeId{height_join}
         """
         output_sql = str(output_path).replace("'", "''")
         if show_progress:
@@ -270,6 +296,54 @@ def _resolve_vehicle_type_annualization_days_lookup(
         else:
             resolved[vehicle_type_id] = float(defaults[_vehicle_group_for_emfac_category(category)])
     return resolved
+
+
+_DEFAULT_TAILPIPE_HEIGHT_METERS = 1.0
+
+
+def _load_vehicle_tailpipe_height_lookup(csv_path: str) -> dict[str, float]:
+    frame = read_table(csv_path)
+    category_column = None
+    for candidate in ("emfac_vehicle_category", "vehicleCategory"):
+        if candidate in frame.columns:
+            category_column = candidate
+            break
+    if category_column is None or "tailpipe_height_meters" not in frame.columns:
+        return {}
+    lookup: dict[str, float] = {}
+    for row in frame[[category_column, "tailpipe_height_meters"]].itertuples(index=False):
+        category = str(row[0]).strip()
+        if not category or pd.isna(row[1]) or str(row[1]).strip() == "":
+            continue
+        lookup[category] = float(row[1])
+    return lookup
+
+
+def _resolve_vehicle_type_tailpipe_height_lookup(
+    *,
+    vehicle_category_metadata_file: Optional[str],
+    passenger_vehicle_types_path: Optional[str],
+    freight_vehicle_types_path: Optional[str],
+) -> dict[str, float]:
+    if not vehicle_category_metadata_file or not passenger_vehicle_types_path or not freight_vehicle_types_path:
+        return {}
+    csv_path = str(vehicle_category_metadata_file).strip()
+    if not csv_path:
+        return {}
+    height_by_category = _load_vehicle_tailpipe_height_lookup(csv_path)
+    if not height_by_category:
+        return {}
+    _, sanitized_categories = _load_vehicle_operation_days_lookup(csv_path)
+    vehicle_type_category_lookup = _load_vehicle_type_category_lookup(
+        passenger_vehicle_types_path,
+        freight_vehicle_types_path,
+        category_lookup=height_by_category,
+        sanitized_categories=sanitized_categories,
+    )
+    return {
+        vehicle_type_id: float(height_by_category.get(category, _DEFAULT_TAILPIPE_HEIGHT_METERS))
+        for vehicle_type_id, category in vehicle_type_category_lookup.items()
+    }
 
 
 def _resolve_skims_annualization_factors_from_lookup(

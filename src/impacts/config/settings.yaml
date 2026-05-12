@@ -61,10 +61,7 @@ impacts:
       asrv_patterns_file: vehicle-tech/dispersions/aermod/aermod_patterns_wgs84.parquet
       asrv_patterns_epsg: 4326
       asrv_nox_to_no2_ratios_file:
-      default_site: LIVERMORE_2015
-      default_urban_class: 0
-      default_temporal: CITYSTREET
-      default_release_height: 1.0
+
   exposure:
     enabled: true
     population_folder: urbansim/atlas-2019

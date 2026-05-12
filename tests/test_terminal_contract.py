@@ -35,10 +35,6 @@ def _pipeline_payload(tmp_path: Path) -> dict:
         "grid_size_meters": 100.0,
         "asrv_patterns_file": str(tmp_path / "asrv_patterns.parquet"),
         "asrv_patterns_epsg": 4326,
-        "aermod_default_site": "LIVERMORE_2015",
-        "aermod_default_urban_class": 0,
-        "aermod_default_temporal": "CITYSTREET",
-        "aermod_default_release_height": 1.0,
         "aermod_full_grid_path": str(tmp_path / "aermod_full_grid.parquet"),
         "aermod_grid_path": str(tmp_path / "aermod_grid.parquet"),
         "aermod_grid_epsg": 26910,
@@ -104,8 +100,6 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.dispersions.inmap.enabled is True
     assert config.impacts.dispersions.inmap.grid_path.endswith("isrm_polygon_wgs84.gpkg")
     assert config.impacts.dispersions.aermod.enabled is True
-    assert config.impacts.dispersions.aermod.default_site == "LIVERMORE_2015"
-    assert config.impacts.dispersions.aermod.default_temporal == "CITYSTREET"
     assert config.impacts.exposure.enabled is True
     assert config.impacts.exposure.population_folder == "urbansim/atlas-2019"
     assert config.impacts.beam.include_passenger is True
@@ -422,8 +416,6 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
     assert config.impacts.dispersions.inmap.isrm_zarr == "~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr"
     assert config.impacts.dispersions.aermod.enabled is True
     assert config.impacts.dispersions.aermod.grid_size_meters == 100.0
-    assert config.impacts.dispersions.aermod.default_site == "LIVERMORE_2015"
-    assert config.impacts.dispersions.aermod.default_temporal == "CITYSTREET"
     assert config.impacts.exposure.population_folder == "urbansim/atlas-2019"
     assert config.impacts.beam.include_passenger is True
     assert config.impacts.beam.include_freight is True
@@ -612,10 +604,6 @@ def test_build_inputs_manifest_runs_step3_and_registers_intersections(monkeypatc
                     enabled=True,
                     asrv_patterns_epsg=4326,
                     asrv_nox_to_no2_ratios_file=str(tmp_path / "asrv_nox_to_no2.csv"),
-                    default_site="LIVERMORE_2015",
-                    default_urban_class=0,
-                    default_temporal="CITYSTREET",
-                    default_release_height=1.0,
                     grid_size_meters=100.0,
                 ),
             ),

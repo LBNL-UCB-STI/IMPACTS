@@ -29,9 +29,9 @@ from . import _step_label
 logger = logging.getLogger(__name__)
 
 _AERMOD_SOURCE_ID_COLUMN = "aermod_cell_id"
-_SOURCE_POPULATION_COLUMN = "source_population"
 _SOURCE_TEMPORAL_COLUMN = "source_temporal_class"
 _SOURCE_HEIGHT_COLUMN = "source_release_height"
+_SOURCE_URBAN_COLUMN = "source_urban_class"
 _AERMOD_SUPPORT_COLUMNS = {
     "PrimaryPM25": "has_aermod_primarypm25",
     "BC": "has_aermod_bc",
@@ -61,11 +61,6 @@ class _Kernel(TypedDict):
     response_per_ton: np.ndarray
 
 
-class _AermodPatternDefaults(TypedDict):
-    site: str
-    urban_class: int
-    temporal: str
-    release_height: float
 
 
 def _trace_frame(step: str, label: str, df: pd.DataFrame, *, key_cols: Optional[list[str]] = None) -> None:
@@ -122,23 +117,9 @@ def _geometry_midpoints(geometry: gpd.GeoSeries) -> tuple[np.ndarray, np.ndarray
     return x, y
 
 
-def _pattern_defaults(pipeline: PipelineConfig) -> _AermodPatternDefaults:
-    if not pipeline.aermod_default_site:
-        raise ValueError("pipeline.aermod_default_site must be configured before running AERMOD concentrations.")
-    if not pipeline.aermod_default_temporal:
-        raise ValueError("pipeline.aermod_default_temporal must be configured before running AERMOD concentrations.")
-    return {
-        "site": str(pipeline.aermod_default_site),
-        "urban_class": int(pipeline.aermod_default_urban_class),
-        "temporal": str(pipeline.aermod_default_temporal),
-        "release_height": float(pipeline.aermod_default_release_height),
-    }
-
-
 def _prepare_source_emissions(
     *,
     emissions_gdf: gpd.GeoDataFrame,
-    pipeline: PipelineConfig,
     source_id_col: str,
     emissions_cols: list[str],
     grid_size_meters: float,
@@ -146,28 +127,27 @@ def _prepare_source_emissions(
     origin_y: float,
     outputs_dir: Path,
 ) -> pd.DataFrame:
-    defaults = _pattern_defaults(pipeline)
     source = emissions_gdf.copy()
     if source.geometry.isna().any():
         raise ValueError("AERMOD emissions input contains missing geometry.")
     source_xm, source_ym = _geometry_midpoints(source.geometry)
+    has_temporal = _SOURCE_TEMPORAL_COLUMN in source.columns
+    has_height = _SOURCE_HEIGHT_COLUMN in source.columns
+    has_urban = _SOURCE_URBAN_COLUMN in source.columns
     source_frame = pd.DataFrame({source_id_col: source[source_id_col].to_numpy(), "source_xm": source_xm, "source_ym": source_ym})
-    pop_col = _SOURCE_POPULATION_COLUMN if _SOURCE_POPULATION_COLUMN in source.columns else None
-    temporal_col = _SOURCE_TEMPORAL_COLUMN if _SOURCE_TEMPORAL_COLUMN in source.columns else None
-    height_col = _SOURCE_HEIGHT_COLUMN if _SOURCE_HEIGHT_COLUMN in source.columns else None
-    if pop_col:
-        source_frame["source_population"] = pd.to_numeric(source[pop_col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
-    if temporal_col:
-        source_frame["source_temporal_class"] = source[temporal_col].astype("string").fillna("").to_numpy()
-    if height_col:
-        source_frame["source_release_height"] = pd.to_numeric(source[height_col], errors="coerce").fillna(defaults["release_height"]).to_numpy(dtype=np.float64)
+    if has_temporal:
+        source_frame[_SOURCE_TEMPORAL_COLUMN] = source[_SOURCE_TEMPORAL_COLUMN].astype("string").to_numpy()
+    if has_height:
+        source_frame[_SOURCE_HEIGHT_COLUMN] = pd.to_numeric(source[_SOURCE_HEIGHT_COLUMN], errors="coerce").fillna(1.0).to_numpy(dtype=np.float64)
+    if has_urban:
+        source_frame[_SOURCE_URBAN_COLUMN] = pd.to_numeric(source[_SOURCE_URBAN_COLUMN], errors="coerce").fillna(0).to_numpy(dtype=np.int64)
     for col in emissions_cols:
         source_frame[col] = pd.to_numeric(source[col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
     aggregation_select = ", ".join(
-        [f"AVG(source_xm) AS source_xm", f"AVG(source_ym) AS source_ym"]
-        + (["AVG(source_population) AS source_population"] if pop_col else [])
-        + (["ANY_VALUE(source_temporal_class) AS source_temporal_class"] if temporal_col else [])
-        + (["ANY_VALUE(source_release_height) AS source_release_height"] if height_col else [])
+        ["AVG(source_xm) AS source_xm", "AVG(source_ym) AS source_ym"]
+        + ([f"ANY_VALUE({_SOURCE_TEMPORAL_COLUMN}) AS {_SOURCE_TEMPORAL_COLUMN}"] if has_temporal else [])
+        + ([f"ANY_VALUE({_SOURCE_HEIGHT_COLUMN}) AS {_SOURCE_HEIGHT_COLUMN}"] if has_height else [])
+        + ([f"ANY_VALUE({_SOURCE_URBAN_COLUMN}) AS {_SOURCE_URBAN_COLUMN}"] if has_urban else [])
         + [f"SUM({col}) AS {col}" for col in emissions_cols]
     )
     con = duckdb.connect(database=":memory:")
@@ -188,12 +168,6 @@ def _prepare_source_emissions(
         con.close()
     source["source_ix"] = np.rint((source["source_xm"] - origin_x) / grid_size_meters).astype(int)
     source["source_iy"] = np.rint((source["source_ym"] - origin_y) / grid_size_meters).astype(int)
-    if "source_population" in source.columns:
-        source["source_population"] = pd.to_numeric(source["source_population"], errors="coerce").fillna(0.0)
-    if "source_temporal_class" in source.columns:
-        source["source_temporal_class"] = source["source_temporal_class"].astype("string").str.strip().replace("", pd.NA)
-    if "source_release_height" in source.columns:
-        source["source_release_height"] = pd.to_numeric(source["source_release_height"], errors="coerce").fillna(defaults["release_height"])
     return source
 
 
@@ -283,14 +257,7 @@ def _load_emissions_input(path: str, *, pipeline: PipelineConfig) -> gpd.GeoData
     candidate = Path(path)
     if candidate.suffix.lower() == ".parquet":
         emissions_cols = [f"tons_per_year_{pollutant}_aermod_allocated" for pollutant in list(pipeline.pollutants)]
-        requested = [
-            _AERMOD_SOURCE_ID_COLUMN,
-            *emissions_cols,
-            _SOURCE_POPULATION_COLUMN,
-            _SOURCE_TEMPORAL_COLUMN,
-            _SOURCE_HEIGHT_COLUMN,
-        ]
-        requested = list(dict.fromkeys(requested + ["geometry"]))
+        requested = list(dict.fromkeys([_AERMOD_SOURCE_ID_COLUMN, *emissions_cols, _SOURCE_TEMPORAL_COLUMN, _SOURCE_HEIGHT_COLUMN, _SOURCE_URBAN_COLUMN, "geometry"]))
         try:
             return gpd.read_parquet(candidate, columns=requested)
         except Exception:
@@ -312,8 +279,37 @@ def _load_vector_subset(path: str, *, columns: Optional[list[str]] = None) -> gp
     return gdf[keep].copy()
 
 
-def _build_default_pattern_key(defaults: _AermodPatternDefaults) -> str:
-    return f"{defaults['site']}__{defaults['urban_class']}__{defaults['temporal']}__{defaults['release_height']:g}"
+
+def _parse_available_pattern_keys(available_pattern_keys: set[str]) -> pd.DataFrame:
+    rows = []
+    for key in available_pattern_keys:
+        parts = key.split("__")
+        if len(parts) != 4:
+            continue
+        site, urban_str, temporal, height_str = parts
+        try:
+            rows.append({"pattern_key": key, "site": site, "urban": int(urban_str), "temporal": temporal, "height": float(height_str)})
+        except (ValueError, TypeError):
+            continue
+    return pd.DataFrame(rows, columns=["pattern_key", "site", "urban", "temporal", "height"])
+
+
+def _find_nearest_pattern(
+    site: str,
+    urban: Optional[int],
+    temporal: Optional[str],
+    height: Optional[float],
+    parsed_patterns: pd.DataFrame,
+) -> Optional[str]:
+    site_patterns = parsed_patterns[parsed_patterns["site"] == site]
+    if site_patterns.empty:
+        return None
+    candidates = site_patterns.copy()
+    candidates["temporal_mismatch"] = 0 if temporal is None else (candidates["temporal"] != temporal).astype(int)
+    candidates["height_diff"] = 0.0 if height is None else (candidates["height"] - height).abs()
+    candidates["urban_diff"] = 0 if urban is None else (candidates["urban"] - urban).abs()
+    best = candidates.sort_values(["temporal_mismatch", "height_diff", "urban_diff"]).iloc[0]
+    return str(best["pattern_key"])
 
 
 def _pattern_keys_from_raw_frame(patterns_df: pd.DataFrame) -> pd.Series:
@@ -449,7 +445,6 @@ def _assign_source_pattern_keys(
     site_reference: pd.DataFrame,
     available_pattern_keys: set[str],
 ) -> pd.DataFrame:
-    defaults = _pattern_defaults(pipeline)
     result = source_df.copy()
     site_x = site_reference["site_xm"].to_numpy(dtype=np.float64)
     site_y = site_reference["site_ym"].to_numpy(dtype=np.float64)
@@ -457,47 +452,53 @@ def _assign_source_pattern_keys(
     source_y = result["source_ym"].to_numpy(dtype=np.float64)[:, None]
     nearest_idx = np.argmin((source_x - site_x[None, :]) ** 2 + (source_y - site_y[None, :]) ** 2, axis=1)
     result["nearest_site"] = site_reference["DataSet_ID"].to_numpy()[nearest_idx]
-    if "source_population" in result.columns:
-        result["selected_urban"] = _classify_urban(result["source_population"])
-    else:
-        result["selected_urban"] = defaults["urban_class"]
-    if "source_temporal_class" in result.columns:
-        temporal = result["source_temporal_class"].fillna(defaults["temporal"]).astype(str).str.strip()
-        result["selected_temporal"] = temporal.where(temporal != "", defaults["temporal"])
-    else:
-        result["selected_temporal"] = defaults["temporal"]
-    if "source_release_height" in result.columns:
-        result["selected_height"] = pd.to_numeric(result["source_release_height"], errors="coerce").fillna(defaults["release_height"])
-    else:
-        result["selected_height"] = defaults["release_height"]
-    result["pattern_key_raw"] = (
-        result["nearest_site"].astype(str)
-        + "__"
-        + result["selected_urban"].astype(int).astype(str)
-        + "__"
-        + result["selected_temporal"].astype(str)
-        + "__"
-        + result["selected_height"].map(lambda value: f"{float(value):g}")
-    )
-    result["pattern_key"] = result["pattern_key_raw"]
 
-    same_site_default = (
-        result["nearest_site"].astype(str)
-        + "__"
-        + str(defaults["urban_class"])
-        + "__"
-        + defaults["temporal"]
-        + "__"
-        + f"{defaults['release_height']:g}"
-    )
-    default_pattern = _build_default_pattern_key(defaults)
+    has_urban = _SOURCE_URBAN_COLUMN in result.columns
+    has_temporal = _SOURCE_TEMPORAL_COLUMN in result.columns
+    has_height = _SOURCE_HEIGHT_COLUMN in result.columns
 
-    missing_mask = ~result["pattern_key"].isin(available_pattern_keys)
-    result.loc[missing_mask, "pattern_key"] = same_site_default.loc[missing_mask]
-    missing_mask = ~result["pattern_key"].isin(available_pattern_keys)
-    result.loc[missing_mask, "pattern_key"] = default_pattern
-    if (~result["pattern_key"].isin(available_pattern_keys)).any():
-        raise ValueError("Some source cells still have no matched ASRV pattern after fallback.")
+    if has_urban and has_temporal and has_height:
+        urban_series = pd.to_numeric(result[_SOURCE_URBAN_COLUMN], errors="coerce")
+        temporal_series = result[_SOURCE_TEMPORAL_COLUMN].astype("string").str.strip().replace("", pd.NA)
+        height_series = pd.to_numeric(result[_SOURCE_HEIGHT_COLUMN], errors="coerce")
+        result["pattern_key_raw"] = (
+            result["nearest_site"].astype(str)
+            + "__"
+            + urban_series.astype("Int64").astype(str)
+            + "__"
+            + temporal_series.astype(str)
+            + "__"
+            + height_series.map(lambda v: f"{float(v):g}" if pd.notna(v) else "nan")
+        )
+        result["pattern_key"] = result["pattern_key_raw"]
+    else:
+        result["pattern_key"] = pd.NA
+        urban_series = pd.to_numeric(result[_SOURCE_URBAN_COLUMN], errors="coerce") if has_urban else None
+        temporal_series = result[_SOURCE_TEMPORAL_COLUMN].astype("string").str.strip().replace("", pd.NA) if has_temporal else None
+        height_series = pd.to_numeric(result[_SOURCE_HEIGHT_COLUMN], errors="coerce") if has_height else None
+
+    missing_mask = result["pattern_key"].isna() | ~result["pattern_key"].isin(available_pattern_keys)
+    if missing_mask.any():
+        parsed_patterns = _parse_available_pattern_keys(available_pattern_keys)
+        for idx in result.index[missing_mask]:
+            row = result.loc[idx]
+            urban = int(urban_series.loc[idx]) if urban_series is not None and pd.notna(urban_series.loc[idx]) else None
+            temporal = str(temporal_series.loc[idx]) if temporal_series is not None and pd.notna(temporal_series.loc[idx]) else None
+            height = float(height_series.loc[idx]) if height_series is not None and pd.notna(height_series.loc[idx]) else None
+            nearest = _find_nearest_pattern(
+                site=str(row["nearest_site"]),
+                urban=urban,
+                temporal=temporal,
+                height=height,
+                parsed_patterns=parsed_patterns,
+            )
+            if nearest is None:
+                raise ValueError(
+                    f"No ASRV patterns found for nearest site '{row['nearest_site']}'. "
+                    "Ensure the pattern library covers the study area."
+                )
+            result.at[idx, "pattern_key"] = nearest
+
     return result
 
 
@@ -863,7 +864,6 @@ def run(
     )
     source_df = _prepare_source_emissions(
         emissions_gdf=emissions_gdf,
-        pipeline=pipeline,
         source_id_col=source_id_col,
         emissions_cols=emissions_cols,
         grid_size_meters=grid_size_meters,

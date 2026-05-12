@@ -35,10 +35,6 @@ class PipelineConfig:
     isrm_nox_to_no2_ratios_file: Optional[str] = None
     asrv_patterns_file: Optional[str] = None
     asrv_patterns_epsg: Optional[int] = None
-    aermod_default_site: Optional[str] = None
-    aermod_default_urban_class: int = 0
-    aermod_default_temporal: Optional[str] = None
-    aermod_default_release_height: float = 1.0
     aermod_full_grid_path: Optional[str] = None
     aermod_grid_path: Optional[str] = None
     aermod_grid_epsg: Optional[int] = None
@@ -84,10 +80,6 @@ class PipelineConfig:
                 "isrm_nox_to_no2_ratios_file",
                 "asrv_patterns_file",
                 "asrv_patterns_epsg",
-                "aermod_default_site",
-                "aermod_default_urban_class",
-                "aermod_default_temporal",
-                "aermod_default_release_height",
                 "grid_size_meters",
                 "aermod_full_grid_path",
                 "aermod_grid_path",
@@ -131,18 +123,6 @@ class PipelineConfig:
             isrm_nox_to_no2_ratios_file=_optional_string(payload.get("isrm_nox_to_no2_ratios_file")),
             asrv_patterns_file=_optional_string(payload.get("asrv_patterns_file")),
             asrv_patterns_epsg=_optional_int(payload.get("asrv_patterns_epsg")),
-            aermod_default_site=_optional_string(payload.get("aermod_default_site")),
-            aermod_default_urban_class=(
-                _optional_int(payload.get("aermod_default_urban_class"))
-                if payload.get("aermod_default_urban_class") is not None
-                else 0
-            ),
-            aermod_default_temporal=_optional_string(payload.get("aermod_default_temporal")),
-            aermod_default_release_height=(
-                _optional_float(payload.get("aermod_default_release_height"))
-                if payload.get("aermod_default_release_height") is not None
-                else 1.0
-            ),
             aermod_full_grid_path=_optional_string(payload.get("aermod_full_grid_path")),
             aermod_grid_path=_optional_string(payload.get("aermod_grid_path")),
             aermod_grid_epsg=_optional_int(payload.get("aermod_grid_epsg")),
@@ -235,10 +215,6 @@ class PipelineConfig:
                 raise ValueError("Missing required value: pipeline.aermod_grid_path")
             if not result.asrv_patterns_file:
                 raise ValueError("Missing required value: pipeline.asrv_patterns_file")
-            if not result.aermod_default_site:
-                raise ValueError("Missing required value: pipeline.aermod_default_site")
-            if not result.aermod_default_temporal:
-                raise ValueError("Missing required value: pipeline.aermod_default_temporal")
         return result
 
     def to_dict(self) -> Dict[str, Any]:
