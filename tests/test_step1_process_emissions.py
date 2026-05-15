@@ -201,6 +201,7 @@ def test_apply_county_corrections_leaves_transit_rows_neutral(tmp_path: Path) ->
         allocated,
         factors,
         county_col="countyfp",
+        scratch_dir=tmp_path,
         passenger_vehicle_types_path=str(passenger_vehicle_types_path),
         freight_vehicle_types_path=str(freight_vehicle_types_path),
     )
@@ -208,7 +209,7 @@ def test_apply_county_corrections_leaves_transit_rows_neutral(tmp_path: Path) ->
     assert corrected["tons_per_year_NOx_county_allocated"].tolist() == [20.0, 20.0, 30.0]
 
 
-def test_build_county_corrected_table_skips_when_inventory_corrections_disabled(monkeypatch) -> None:
+def test_build_county_corrected_table_skips_when_inventory_corrections_disabled(monkeypatch, tmp_path: Path) -> None:
     county_allocated = pd.DataFrame(
         [
             {"linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "countyfp": "001", "tons_per_year_NOx_county_allocated": 10.0},
@@ -216,7 +217,7 @@ def test_build_county_corrected_table_skips_when_inventory_corrections_disabled(
     )
     county_grouped = pd.DataFrame(
         [
-            {"linkId": 101, "countyfp": "001", "county_zone_edge_proportion": 1.0},
+            {"linkId": 101, "countyfp": "001", "county_proportion": 1.0},
         ]
     )
     skims = pd.DataFrame(
@@ -249,6 +250,7 @@ def test_build_county_corrected_table_skips_when_inventory_corrections_disabled(
         skims_df=skims,
         pipeline=pipeline,
         manifest_inputs={},
+        scratch_dir=tmp_path,
     )
 
     assert beam_activity_totals is None

@@ -265,27 +265,28 @@ def _normalize_zone_intersection_schema(
     canonical["linkId"] = pd.to_numeric(canonical["linkId"], errors="coerce")
 
     if zone_label == "county":
-        if "county_COUNTYFP" in canonical.columns and "countyfp" not in canonical.columns:
-            canonical["countyfp"] = canonical["county_COUNTYFP"]
+        required_cols = _COUNTY_INTERSECTION_COLUMNS
         canonical["countyfp"] = canonical["countyfp"].astype("string")
-        for col in ("county_proportion", "county_link_length_m"):
-            if col in canonical.columns:
-                canonical[col] = pd.to_numeric(canonical[col], errors="coerce")
-        ordered_cols = [col for col in _COUNTY_INTERSECTION_COLUMNS if col in canonical.columns]
+        canonical["county_proportion"] = pd.to_numeric(canonical["county_proportion"], errors="coerce")
+        canonical["county_link_length_m"] = pd.to_numeric(canonical["county_link_length_m"], errors="coerce")
     elif zone_label == "inmap":
-        canonical["inmap_cell_id"] = pd.to_numeric(canonical.get("inmap_cell_id"), errors="coerce")
-        for col in ("inmap_proportion", "inmap_link_length_m"):
-            if col in canonical.columns:
-                canonical[col] = pd.to_numeric(canonical[col], errors="coerce")
-        ordered_cols = [col for col in _INMAP_INTERSECTION_COLUMNS if col in canonical.columns]
+        required_cols = _INMAP_INTERSECTION_COLUMNS
+        canonical["inmap_cell_id"] = pd.to_numeric(canonical["inmap_cell_id"], errors="coerce")
+        canonical["inmap_proportion"] = pd.to_numeric(canonical["inmap_proportion"], errors="coerce")
+        canonical["inmap_link_length_m"] = pd.to_numeric(canonical["inmap_link_length_m"], errors="coerce")
     elif zone_label == "aermod":
-        canonical["aermod_cell_id"] = pd.to_numeric(canonical.get("aermod_cell_id"), errors="coerce")
-        for col in ("aermod_proportion", "aermod_link_length_m"):
-            if col in canonical.columns:
-                canonical[col] = pd.to_numeric(canonical[col], errors="coerce")
-        ordered_cols = [col for col in _AERMOD_INTERSECTION_COLUMNS if col in canonical.columns]
+        required_cols = _AERMOD_INTERSECTION_COLUMNS
+        canonical["aermod_cell_id"] = pd.to_numeric(canonical["aermod_cell_id"], errors="coerce")
+        canonical["aermod_proportion"] = pd.to_numeric(canonical["aermod_proportion"], errors="coerce")
+        canonical["aermod_link_length_m"] = pd.to_numeric(canonical["aermod_link_length_m"], errors="coerce")
     else:
         raise ValueError(f"Unsupported zone_label {zone_label!r}")
+    missing_cols = [col for col in required_cols if col not in canonical.columns]
+    if missing_cols:
+        raise ValueError(
+            f"{zone_label} intersection must use the canonical schema. Missing columns: {missing_cols}"
+        )
+    ordered_cols = list(required_cols)
 
     if "geometry" in canonical.columns:
         sample = canonical["geometry"].dropna().head(1)
@@ -347,19 +348,19 @@ def _assign_fallback_counties(
     fallback["geometry"] = fallback.geometry.representative_point()
     joined = gpd.sjoin(
         fallback,
-        county_gdf[["COUNTYFP", "geometry"]],
+        county_gdf[["countyfp", "geometry"]],
         how="left",
         predicate="within",
     ).drop(columns=["index_right"], errors="ignore")
-    missing = joined["COUNTYFP"].isna()
+    missing = joined["countyfp"].isna()
     if missing.any():
         nearest = gpd.sjoin_nearest(
             fallback.loc[missing, ["linkId", "geometry"]],
-            county_gdf[["COUNTYFP", "geometry"]],
+            county_gdf[["countyfp", "geometry"]],
             how="left",
         ).drop(columns=["index_right", "distance"], errors="ignore")
-        joined.loc[missing, "COUNTYFP"] = nearest["COUNTYFP"].to_numpy()
-    joined["countyfp"] = joined["COUNTYFP"].astype("string")
+        joined.loc[missing, "countyfp"] = nearest["countyfp"].to_numpy()
+    joined["countyfp"] = joined["countyfp"].astype("string")
     return pd.DataFrame(joined[["linkId", "countyfp"]].copy())
 
 
@@ -545,6 +546,10 @@ def run(
     county_setup_started = time.perf_counter()
     county_path = resolve_required_manifest_input(manifest_inputs, key="county_boundaries")
     county_gdf = read_vector(county_path)
+    if "COUNTYFP" not in county_gdf.columns:
+        raise ValueError("County boundaries must include COUNTYFP.")
+    county_gdf = county_gdf.rename(columns={"COUNTYFP": "countyfp"})
+    county_gdf["countyfp"] = county_gdf["countyfp"].astype("string")
     if county_gdf.crs is not None:
         county_gdf = county_gdf.to_crs(epsg=epsg)
     logger.info(

@@ -12,7 +12,7 @@ from impacts.pipeline.preprocessing.step3_integrate_grids import _ensure_county_
 def _county_frame() -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(
         {
-            "COUNTYFP": ["001", "013"],
+            "countyfp": ["001", "013"],
             "NAME": ["Alpha", "Bravo"],
             "geometry": [
                 Polygon([(0, 0), (10, 0), (10, 10), (0, 10)]),
@@ -37,9 +37,8 @@ def test_ensure_county_mass_conservation_fills_zero_match_links() -> None:
         {
             "linkId": [1],
             "countyfp": [pd.NA],
-            "county_zone_edge_proportion": [0.0],
-            "county_edge_link_length_m": [0.0],
-            "county_zone_link_length_m": [0.0],
+            "county_proportion": [0.0],
+            "county_link_length_m": [0.0],
             "geometry": [LineString([(1, 1), (2, 2)])],
         },
         geometry="geometry",
@@ -55,8 +54,8 @@ def test_ensure_county_mass_conservation_fills_zero_match_links() -> None:
     assert len(result) == 1
     row = result.iloc[0]
     assert row["countyfp"] == "001"
-    assert row["county_zone_edge_proportion"] == 1.0
-    assert row["county_zone_link_length_m"] > 0.0
+    assert row["county_proportion"] == 1.0
+    assert row["county_link_length_m"] > 0.0
 
 
 def test_ensure_county_mass_conservation_adds_partial_remainder_row() -> None:
@@ -73,9 +72,8 @@ def test_ensure_county_mass_conservation_adds_partial_remainder_row() -> None:
         {
             "linkId": [2],
             "countyfp": ["001"],
-            "county_zone_edge_proportion": [0.4],
-            "county_edge_link_length_m": [full_length],
-            "county_zone_link_length_m": [full_length * 0.4],
+            "county_proportion": [0.4],
+            "county_link_length_m": [full_length * 0.4],
             "geometry": [LineString([(1, 1), (5, 1)])],
         },
         geometry="geometry",
@@ -90,13 +88,13 @@ def test_ensure_county_mass_conservation_adds_partial_remainder_row() -> None:
 
     assert len(result) == 2
     assert result["countyfp"].tolist() == ["001", "001"]
-    assert result["county_zone_edge_proportion"].sum() == 1.0
-    remainder = result.loc[result["county_zone_edge_proportion"] < 1.0].sort_values(
-        "county_zone_edge_proportion"
+    assert result["county_proportion"].sum() == 1.0
+    remainder = result.loc[result["county_proportion"] < 1.0].sort_values(
+        "county_proportion"
     ).iloc[0]
-    assert remainder["county_zone_edge_proportion"] == 0.4
-    synthetic = result.loc[result["county_zone_edge_proportion"] > 0.4].iloc[0]
-    assert synthetic["county_zone_edge_proportion"] == 0.6
+    assert remainder["county_proportion"] == 0.4
+    synthetic = result.loc[result["county_proportion"] > 0.4].iloc[0]
+    assert synthetic["county_proportion"] == 0.6
 
 
 def test_build_synthetic_beam_links_appends_null_origin_car_links(tmp_path) -> None:

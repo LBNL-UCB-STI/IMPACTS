@@ -309,16 +309,14 @@ def test_build_zone_allocated_table_uses_duckdb_and_preserves_allocated_values(t
             {
                 "linkId": 101,
                 "countyfp": "001",
-                "county_zone_edge_proportion": 0.25,
-                "county_edge_link_length_m": 100.0,
-                "county_zone_link_length_m": 25.0,
+                "county_proportion": 0.25,
+                "county_link_length_m": 25.0,
             },
             {
                 "linkId": 101,
                 "countyfp": "013",
-                "county_zone_edge_proportion": 0.75,
-                "county_edge_link_length_m": 100.0,
-                "county_zone_link_length_m": 75.0,
+                "county_proportion": 0.75,
+                "county_link_length_m": 75.0,
             },
         ]
     )
@@ -352,9 +350,8 @@ def test_build_zone_allocated_table_uses_duckdb_and_preserves_allocated_values(t
             "vehicleTypeId": "pax-car",
             "process": "RUNEX",
             "countyfp": "001",
-            "county_zone_edge_proportion": 0.25,
-            "county_edge_link_length_m": 100.0,
-            "county_zone_link_length_m": 25.0,
+            "county_proportion": 0.25,
+            "county_link_length_m": 25.0,
             "totVMT_county_allocated": 5.0,
             "totTrips_county_allocated": 1.0,
             "tons_per_year_NOx_county_allocated": 2.0,
@@ -364,9 +361,8 @@ def test_build_zone_allocated_table_uses_duckdb_and_preserves_allocated_values(t
             "vehicleTypeId": "pax-car",
             "process": "RUNEX",
             "countyfp": "013",
-            "county_zone_edge_proportion": 0.75,
-            "county_edge_link_length_m": 100.0,
-            "county_zone_link_length_m": 75.0,
+            "county_proportion": 0.75,
+            "county_link_length_m": 75.0,
             "totVMT_county_allocated": 15.0,
             "totTrips_county_allocated": 3.0,
             "tons_per_year_NOx_county_allocated": 6.0,
@@ -380,9 +376,8 @@ def test_build_zone_allocated_table_uses_supplied_step_label(caplog, tmp_path: P
             {
                 "linkId": 101,
                 "inmap_cell_id": 9,
-                "inmap_zone_edge_proportion": 0.5,
-                "inmap_edge_link_length_m": 100.0,
-                "inmap_zone_link_length_m": 50.0,
+                "inmap_proportion": 0.5,
+                "inmap_link_length_m": 50.0,
             }
         ]
     )
