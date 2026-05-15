@@ -88,3 +88,9 @@ env/
 !.gitignore
 !NOAI
 !setup.cfg
+
+# Markdown — only specific files/locations are tracked
+*.md
+!README.md
+!CHANGELOG.md
+!docs/**/*.md
