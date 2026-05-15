@@ -606,7 +606,8 @@ def assign_grid_cells_to_zones(
         )
         if not overlap_candidates.empty:
             overlap_candidates = overlap_candidates.merge(
-                zone_lookup.reset_index().rename(columns={"index": "zone_index"}),
+                zone_lookup.reset_index()
+                    .rename(columns={"index": "zone_index"})[["zone_index", "_zone_geometry"]],
                 how="left",
                 left_on="index_right",
                 right_on="zone_index",
