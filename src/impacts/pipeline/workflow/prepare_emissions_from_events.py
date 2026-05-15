@@ -176,11 +176,11 @@ def _aggregate(obs_df: pd.DataFrame) -> pd.DataFrame:
 _INTERSECTION_ZONE_COLS = [
     "linkId",
     "countyfp",
-    "county_zone_edge_proportion",
+    "county_proportion",
     "aermod_cell_id",
-    "aermod_zone_edge_proportion",
+    "aermod_proportion",
     "inmap_cell_id",
-    "inmap_zone_edge_proportion",
+    "inmap_proportion",
 ]
 
 
@@ -398,9 +398,9 @@ def _enrich_with_network(skims: pd.DataFrame, network_path: str) -> pd.DataFrame
 
 _ACTIVITY_COLS = ["distanceMiles", "travelTimeInSecond", "parkingDurationInSecond", "tripCount"]
 _PROPORTION_PAIRS = [
-    ("county_zone_edge_proportion", "county"),
-    ("aermod_zone_edge_proportion", "aermod"),
-    ("inmap_zone_edge_proportion", "inmap"),
+    ("county_proportion", "county"),
+    ("aermod_proportion", "aermod"),
+    ("inmap_proportion", "inmap"),
 ]
 
 

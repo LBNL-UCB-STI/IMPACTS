@@ -10,4 +10,4 @@ PyYAML
 tqdm
 pyogrio
 s3fs
-osm-chordify>=0.2.2
+osm-chordify==0.2.4

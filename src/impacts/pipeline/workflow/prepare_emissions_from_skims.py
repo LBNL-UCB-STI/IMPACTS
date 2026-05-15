@@ -376,10 +376,9 @@ def _build_zone_grouped_table(
     if not intersection_path and intersection_df is None:
         return None
     zone_id_col = f"{zone_label}_cell_id" if zone_label != "county" else "countyfp"
-    proportion_col = f"{zone_label}_zone_edge_proportion"
-    edge_length_col = f"{zone_label}_edge_link_length_m"
-    zone_length_col = f"{zone_label}_zone_link_length_m"
-    required_cols = {"linkId", zone_id_col, proportion_col, edge_length_col, zone_length_col}
+    proportion_col = f"{zone_label}_proportion"
+    link_length_col = f"{zone_label}_link_length_m"
+    required_cols = {"linkId", zone_id_col, proportion_col, link_length_col}
     if intersection_df is not None:
         missing = [col for col in required_cols if col not in intersection_df.columns]
     else:
@@ -415,8 +414,7 @@ def _build_zone_grouped_table(
                 "linkId" AS "linkId",
                 "{zone_id_col}" AS "{zone_id_col}",
                 SUM(COALESCE(TRY_CAST("{proportion_col}" AS DOUBLE), 0.0)) AS "{proportion_col}",
-                SUM(COALESCE(TRY_CAST("{edge_length_col}" AS DOUBLE), 0.0)) AS "{edge_length_col}",
-                SUM(COALESCE(TRY_CAST("{zone_length_col}" AS DOUBLE), 0.0)) AS "{zone_length_col}"
+                SUM(COALESCE(TRY_CAST("{link_length_col}" AS DOUBLE), 0.0)) AS "{link_length_col}"
             FROM {source}
             GROUP BY 1, 2
             """
@@ -453,9 +451,8 @@ def _build_zone_allocated_table(
         if c in skims_df.columns and pd.api.types.is_numeric_dtype(skims_df[c])
     ]
     zone_id_col = f"{zone_label}_cell_id" if zone_label != "county" else "countyfp"
-    proportion_col = f"{zone_label}_zone_edge_proportion"
-    edge_length_col = f"{zone_label}_edge_link_length_m"
-    zone_length_col = f"{zone_label}_zone_link_length_m"
+    proportion_col = f"{zone_label}_proportion"
+    link_length_col = f"{zone_label}_link_length_m"
 
     has_road_category = "roadCategory" in skims_df.columns
     has_release_height = "source_release_height" in skims_df.columns
@@ -491,8 +488,7 @@ def _build_zone_allocated_table(
                 trim(CAST(s."process" AS VARCHAR)) AS "process",
                 g."{zone_id_col}" AS "{zone_id_col}",
                 COALESCE(TRY_CAST(g."{proportion_col}" AS DOUBLE), 0.0) AS "{proportion_col}",
-                COALESCE(TRY_CAST(g."{edge_length_col}" AS DOUBLE), 0.0) AS "{edge_length_col}",
-                COALESCE(TRY_CAST(g."{zone_length_col}" AS DOUBLE), 0.0) AS "{zone_length_col}"{extra_selects},
+                COALESCE(TRY_CAST(g."{link_length_col}" AS DOUBLE), 0.0) AS "{link_length_col}"{extra_selects},
                 {", ".join(value_selects)}
             FROM grouped_df AS g
             LEFT JOIN skims_df AS s

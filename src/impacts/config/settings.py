@@ -400,8 +400,8 @@ class Emissions:
     @property
     def mapping_columns(self) -> Dict[str, str]:
         return {
-            "link_id": "edge_linkId",
-            "proportion": "zone_edge_proportion",
+            "link_id": "linkId",
+            "proportion": "proportion",
         }
 
 

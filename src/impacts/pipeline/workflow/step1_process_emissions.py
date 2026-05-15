@@ -106,7 +106,7 @@ def _build_beam_activity_details(
     missing_skims = sorted(required_skims - set(skims_df.columns))
     if missing_skims:
         raise ValueError(f"Prepared skims are missing required activity columns: {missing_skims}")
-    required_grouped = {"linkId", "countyfp", "county_zone_edge_proportion"}
+    required_grouped = {"linkId", "countyfp", "county_proportion"}
     missing_grouped = sorted(required_grouped - set(grouped_df.columns))
     if missing_grouped:
         raise ValueError(f"Grouped intersection is missing required county allocation columns: {missing_grouped}")
@@ -115,13 +115,13 @@ def _build_beam_activity_details(
         passenger_vehicle_types_path,
         freight_vehicle_types_path,
     )
-    county_link = grouped_df[["linkId", "countyfp", "county_zone_edge_proportion"]].copy()
+    county_link = grouped_df[["linkId", "countyfp", "county_proportion"]].copy()
     county_link["countyfp"] = normalize_county_fips(county_link["countyfp"])
-    county_link["county_zone_edge_proportion"] = pd.to_numeric(
-        county_link["county_zone_edge_proportion"], errors="coerce"
+    county_link["county_proportion"] = pd.to_numeric(
+        county_link["county_proportion"], errors="coerce"
     ).fillna(0.0)
     county_link = (
-        county_link.groupby(["linkId", "countyfp"], dropna=False)["county_zone_edge_proportion"]
+        county_link.groupby(["linkId", "countyfp"], dropna=False)["county_proportion"]
         .sum()
         .reset_index()
     )
@@ -137,8 +137,8 @@ def _build_beam_activity_details(
         .reset_index()
     )
     detailed = activity.merge(county_link, how="inner", on="linkId")
-    detailed["totVMT"] = detailed["totVMT"] * detailed["county_zone_edge_proportion"]
-    detailed["totTrips"] = detailed["totTrips"] * detailed["county_zone_edge_proportion"]
+    detailed["totVMT"] = detailed["totVMT"] * detailed["county_proportion"]
+    detailed["totTrips"] = detailed["totTrips"] * detailed["county_proportion"]
     detailed = detailed.merge(vehicle_lookup, how="left", on="vehicleTypeId")
     detailed = detailed.loc[detailed["assignment_group"].isin(_CORRECTION_ASSIGNMENT_GROUPS)].copy()
     missing_vehicle_types = detailed.loc[

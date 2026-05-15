@@ -26,25 +26,22 @@ _SOURCE_ROW_ID = "source_row_id"
 _COUNTY_INTERSECTION_COLUMNS = [
     "linkId",
     "countyfp",
-    "county_zone_edge_proportion",
-    "county_edge_link_length_m",
-    "county_zone_link_length_m",
+    "county_proportion",
+    "county_link_length_m",
     "geometry",
 ]
 _INMAP_INTERSECTION_COLUMNS = [
     "linkId",
     "inmap_cell_id",
-    "inmap_zone_edge_proportion",
-    "inmap_edge_link_length_m",
-    "inmap_zone_link_length_m",
+    "inmap_proportion",
+    "inmap_link_length_m",
     "geometry",
 ]
 _AERMOD_INTERSECTION_COLUMNS = [
     "linkId",
     "aermod_cell_id",
-    "aermod_zone_edge_proportion",
-    "aermod_edge_link_length_m",
-    "aermod_zone_link_length_m",
+    "aermod_proportion",
+    "aermod_link_length_m",
     "geometry",
 ]
 
@@ -222,12 +219,8 @@ def trace_and_filter_void_zone_rows(
 
 
 def _resolve_source_row_col(df: pd.DataFrame) -> str:
-    for candidate in (
-        _SOURCE_ROW_ID,
-        f"edge_{_SOURCE_ROW_ID}",
-    ):
-        if candidate in df.columns:
-            return candidate
+    if _SOURCE_ROW_ID in df.columns:
+        return _SOURCE_ROW_ID
     raise ValueError(f"Expected source row id column '{_SOURCE_ROW_ID}' in columns: {list(df.columns)}")
 
 
@@ -263,50 +256,37 @@ def _ensure_mapped_network_covers_car_beam_links(
     return augmented
 
 
-def _canonicalize_zone_intersection_schema(
+def _normalize_zone_intersection_schema(
     df: pd.DataFrame,
     *,
     zone_label: str,
 ) -> gpd.GeoDataFrame:
     canonical = df.copy()
+    canonical["linkId"] = pd.to_numeric(canonical["linkId"], errors="coerce")
 
-    def _combine(target: str, candidates: tuple[str, ...]) -> None:
-        result = None
-        for col in candidates:
-            if col not in canonical.columns:
-                continue
-            series = canonical[col]
-            result = series if result is None else series.combine_first(result)
-        if result is not None:
-            canonical[target] = result
-
-    _combine("linkId", ("edge_linkId", "linkId"))
     if zone_label == "county":
-        _combine("countyfp", ("countyfp", "county_COUNTYFP", "zone_COUNTYFP", "COUNTYFP"))
-        _combine("county_zone_edge_proportion", ("edge_county_zone_edge_proportion", "county_zone_edge_proportion"))
-        _combine("county_edge_link_length_m", ("edge_county_edge_link_length_m", "county_edge_link_length_m"))
-        _combine("county_zone_link_length_m", ("edge_county_zone_link_length_m", "county_zone_link_length_m"))
+        if "county_COUNTYFP" in canonical.columns and "countyfp" not in canonical.columns:
+            canonical["countyfp"] = canonical["county_COUNTYFP"]
+        canonical["countyfp"] = canonical["countyfp"].astype("string")
+        for col in ("county_proportion", "county_link_length_m"):
+            if col in canonical.columns:
+                canonical[col] = pd.to_numeric(canonical[col], errors="coerce")
         ordered_cols = [col for col in _COUNTY_INTERSECTION_COLUMNS if col in canonical.columns]
     elif zone_label == "inmap":
-        _combine("inmap_cell_id", ("edge_inmap_cell_id", "edge_inmap_inmap_cell_id", "inmap_cell_id"))
-        _combine("inmap_zone_edge_proportion", ("edge_inmap_zone_edge_proportion", "inmap_zone_edge_proportion"))
-        _combine("inmap_edge_link_length_m", ("edge_inmap_edge_link_length_m", "inmap_edge_link_length_m"))
-        _combine("inmap_zone_link_length_m", ("edge_inmap_zone_link_length_m", "inmap_zone_link_length_m"))
+        canonical["inmap_cell_id"] = pd.to_numeric(canonical.get("inmap_cell_id"), errors="coerce")
+        for col in ("inmap_proportion", "inmap_link_length_m"):
+            if col in canonical.columns:
+                canonical[col] = pd.to_numeric(canonical[col], errors="coerce")
         ordered_cols = [col for col in _INMAP_INTERSECTION_COLUMNS if col in canonical.columns]
     elif zone_label == "aermod":
-        _combine("aermod_cell_id", ("edge_aermod_cell_id", "aermod_aermod_cell_id", "aermod_cell_id"))
-        _combine("aermod_zone_edge_proportion", ("edge_aermod_zone_edge_proportion", "aermod_zone_edge_proportion"))
-        _combine("aermod_edge_link_length_m", ("edge_aermod_edge_link_length_m", "aermod_edge_link_length_m"))
-        _combine("aermod_zone_link_length_m", ("edge_aermod_zone_link_length_m", "aermod_zone_link_length_m"))
+        canonical["aermod_cell_id"] = pd.to_numeric(canonical.get("aermod_cell_id"), errors="coerce")
+        for col in ("aermod_proportion", "aermod_link_length_m"):
+            if col in canonical.columns:
+                canonical[col] = pd.to_numeric(canonical[col], errors="coerce")
         ordered_cols = [col for col in _AERMOD_INTERSECTION_COLUMNS if col in canonical.columns]
     else:
         raise ValueError(f"Unsupported zone_label {zone_label!r}")
 
-    for col in ("linkId", "aermod_cell_id", "inmap_cell_id"):
-        if col in canonical.columns:
-            canonical[col] = pd.to_numeric(canonical[col], errors="coerce")
-    if "countyfp" in canonical.columns:
-        canonical["countyfp"] = canonical["countyfp"].astype("string")
     if "geometry" in canonical.columns:
         sample = canonical["geometry"].dropna().head(1)
         if not sample.empty and isinstance(sample.iloc[0], (bytes, bytearray, memoryview)):
@@ -393,21 +373,18 @@ def _ensure_county_mass_conservation(
         return county_intersection
 
     result = county_intersection.copy()
-    result["county_zone_edge_proportion"] = pd.to_numeric(
-        result["county_zone_edge_proportion"], errors="coerce"
+    result["county_proportion"] = pd.to_numeric(
+        result["county_proportion"], errors="coerce"
     ).fillna(0.0)
-    result["county_edge_link_length_m"] = pd.to_numeric(
-        result["county_edge_link_length_m"], errors="coerce"
-    ).fillna(0.0)
-    result["county_zone_link_length_m"] = pd.to_numeric(
-        result["county_zone_link_length_m"], errors="coerce"
+    result["county_link_length_m"] = pd.to_numeric(
+        result["county_link_length_m"], errors="coerce"
     ).fillna(0.0)
 
     link_metrics = (
         result.groupby("linkId", dropna=False)
         .agg(
-            county_prop_sum=("county_zone_edge_proportion", "sum"),
-            county_zone_length_sum=("county_zone_link_length_m", "sum"),
+            county_prop_sum=("county_proportion", "sum"),
+            county_zone_length_sum=("county_link_length_m", "sum"),
         )
         .reset_index()
     )
@@ -441,15 +418,13 @@ def _ensure_county_mass_conservation(
         "linkId",
         "countyfp",
         "missing_share",
-        "source_edge_length_m",
         "missing_zone_length_m",
         "geometry",
     ]].copy()
     synthetic = synthetic.rename(
         columns={
-            "missing_share": "county_zone_edge_proportion",
-            "source_edge_length_m": "county_edge_link_length_m",
-            "missing_zone_length_m": "county_zone_link_length_m",
+            "missing_share": "county_proportion",
+            "missing_zone_length_m": "county_link_length_m",
         }
     )
     synthetic = synthetic.loc[synthetic["countyfp"].notna()].copy()
@@ -532,16 +507,16 @@ def run(
             epsg,
             pipeline.inmap_grid_path,
             output_epsg=epsg,
-            prefilter_zones_to_network_bbox=True,
+            prefilter_zones_to_bbox=True,
             zone_label="inmap",
         )
         inmap_intersection = trace_and_filter_void_zone_rows(
             inmap_intersection,
             zone_id_col="inmap_cell_id",
-            proportion_col="inmap_zone_edge_proportion",
+            proportion_col="inmap_proportion",
             context="Step 3.2",
         )
-        inmap_intersection = _canonicalize_zone_intersection_schema(inmap_intersection, zone_label="inmap")
+        inmap_intersection = _normalize_zone_intersection_schema(inmap_intersection, zone_label="inmap")
         inmap_intersection.to_parquet(inmap_intersection_path, index=False)
         inmap_intersection.to_file(inmap_intersection_path.with_suffix(".gpkg"), driver="GPKG")
         logger.info("Step 3.2 complete: %d rows → %s", len(inmap_intersection), inmap_intersection_path)
@@ -555,10 +530,10 @@ def run(
             epsg,
             pipeline.aermod_grid_path,
             output_epsg=epsg,
-            prefilter_zones_to_network_bbox=True,
+            prefilter_zones_to_bbox=True,
             zone_label="aermod",
         )
-        aermod_intersection = _canonicalize_zone_intersection_schema(aermod_intersection, zone_label="aermod")
+        aermod_intersection = _normalize_zone_intersection_schema(aermod_intersection, zone_label="aermod")
         aermod_intersection.to_parquet(aermod_intersection_path, index=False)
         aermod_intersection.to_file(aermod_intersection_path.with_suffix(".gpkg"), driver="GPKG")
         logger.info("Step 3.3 complete: %d rows → %s", len(aermod_intersection), aermod_intersection_path)
@@ -601,7 +576,7 @@ def run(
     persist_started = time.perf_counter()
     log_substep_banner("3.6", "write canonical county intersection outputs", logger=logger)
     logger.info("Step 3.6: canonicalizing and writing county intersection outputs")
-    county_intersection = _canonicalize_zone_intersection_schema(C, zone_label="county")
+    county_intersection = _normalize_zone_intersection_schema(C, zone_label="county")
     county_intersection = _ensure_county_mass_conservation(
         source_links=B,
         county_intersection=county_intersection,
