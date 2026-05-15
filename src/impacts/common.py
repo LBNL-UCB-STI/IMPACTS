@@ -111,25 +111,41 @@ def optional_local_path(path: Optional[str]) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def _scan_paths_with_progress(root: Path, desc: str):
-    progress = tqdm(
-        total=None,
-        desc=desc,
-        unit="dir",
-        dynamic_ncols=True,
-        file=sys.stdout,
-        leave=False,
-        disable=not logger.isEnabledFor(logging.INFO),
-    )
+    progress_enabled = logger.isEnabledFor(logging.INFO) and sys.stdout.isatty()
+    progress = None
+    if progress_enabled:
+        progress = tqdm(
+            total=None,
+            desc=desc,
+            unit="dir",
+            dynamic_ncols=True,
+            file=sys.stdout,
+            leave=False,
+        )
+    scan_count = 0
     try:
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames.sort()
-            progress.update(1)
-            progress.set_postfix_str(
-                f"dirs={len(dirnames)} files={len(filenames)} current={Path(dirpath).name or dirpath}",
-            )
+            scan_count += 1
+            current_label = Path(dirpath).name or dirpath
+            if progress is not None:
+                progress.update(1)
+                progress.set_postfix_str(
+                    f"dirs={len(dirnames)} files={len(filenames)} current={current_label}",
+                )
+            elif logger.isEnabledFor(logging.INFO) and (scan_count == 1 or scan_count % 250 == 0):
+                logger.info(
+                    "%s progress: scanned %d directories; current=%s dirs=%d files=%d",
+                    desc,
+                    scan_count,
+                    current_label,
+                    len(dirnames),
+                    len(filenames),
+                )
             yield Path(dirpath), dirnames, filenames
     finally:
-        progress.close()
+        if progress is not None:
+            progress.close()
 
 
 def find_first_matching(root: str, pattern: str) -> Optional[str]:

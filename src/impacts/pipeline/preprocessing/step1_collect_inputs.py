@@ -35,7 +35,13 @@ from ...manifest.file_ops import resolve_path
 logger = logging.getLogger(__name__)
 
 
-def _progress(total: int, desc: str) -> tqdm:
+def _progress_enabled() -> bool:
+    return logger.isEnabledFor(logging.INFO) and sys.stdout.isatty()
+
+
+def _progress(total: int, desc: str) -> Optional[tqdm]:
+    if not _progress_enabled():
+        return None
     return tqdm(
         total=total,
         desc=desc,
@@ -43,12 +49,24 @@ def _progress(total: int, desc: str) -> tqdm:
         dynamic_ncols=True,
         file=sys.stdout,
         leave=False,
-        disable=not logger.isEnabledFor(logging.INFO),
     )
 
 
-def _set_progress_task(progress: tqdm, label: str) -> None:
+def _set_progress_task(progress: Optional[tqdm], label: str, *, step_label: str) -> None:
+    if progress is None:
+        logger.info("%s progress: %s", step_label, label)
+        return
     progress.set_postfix_str(label)
+
+
+def _advance_progress(progress: Optional[tqdm]) -> None:
+    if progress is not None:
+        progress.update(1)
+
+
+def _close_progress(progress: Optional[tqdm]) -> None:
+    if progress is not None:
+        progress.close()
 
 
 def _register_manifest_input(
@@ -139,7 +157,7 @@ def run(
     with logging_redirect_tqdm():
         progress = _progress(3, "Preprocess Step 1.1")
         try:
-            _set_progress_task(progress, "network")
+            _set_progress_task(progress, "network", step_label="Preprocess Step 1.1")
             network_entry = find_latest_beam_network_reference(optional=True)
             if network_entry:
                 staged_network = _use_existing_reference(manifest_inputs, "network", network_entry)
@@ -154,9 +172,9 @@ def run(
                     artifact_key=BEAM_NETWORK_PREFIX,
                     metadata={"artifact_family": BEAM_NETWORK_PREFIX},
                 )
-            progress.update(1)
+            _advance_progress(progress)
 
-            _set_progress_task(progress, "skims")
+            _set_progress_task(progress, "skims", step_label="Preprocess Step 1.1")
             skims_source = resolve_emissions_skims_local_path(beam_output_root)
             staged_skims = _register_manifest_input(
                 manifest_inputs,
@@ -167,9 +185,9 @@ def run(
                 metadata={"artifact_family": "emissions_skims_input"},
                 optional=True,
             )
-            progress.update(1)
+            _advance_progress(progress)
 
-            _set_progress_task(progress, "events")
+            _set_progress_task(progress, "events", step_label="Preprocess Step 1.1")
             events_entry = find_latest_beam_events_reference(optional=True)
             if events_entry:
                 staged_events = _use_existing_reference(manifest_inputs, "events_input", events_entry)
@@ -186,9 +204,9 @@ def run(
                         metadata={"artifact_family": BEAM_EVENTS_PREFIX},
                         optional=True,
                     )
-            progress.update(1)
+            _advance_progress(progress)
         finally:
-            progress.close()
+            _close_progress(progress)
 
     log_substep_banner("1.2", "register production inputs", logger=logger)
     substep_12_total = 6
@@ -201,7 +219,7 @@ def run(
     with logging_redirect_tqdm():
         progress = _progress(substep_12_total, "Preprocess Step 1.2")
         try:
-            _set_progress_task(progress, "osm")
+            _set_progress_task(progress, "osm", step_label="Preprocess Step 1.2")
             osm_entry = find_beam_r5_osm_reference(optional=True)
             if osm_entry:
                 staged_osm = _use_existing_reference(manifest_inputs, "osm_network", osm_entry)
@@ -226,9 +244,9 @@ def run(
                     artifact_key=BEAM_R5_OSM_FILE_KEY,
                     metadata={"artifact_family": BEAM_R5_OSM_FILE_KEY},
                 )
-            progress.update(1)
+            _advance_progress(progress)
 
-            _set_progress_task(progress, "emissions rates")
+            _set_progress_task(progress, "emissions rates", step_label="Preprocess Step 1.2")
             emissions_rates_source = required_local_path(
                 _resolve_region_or_absolute_path(
                     emissions.emissions_rates_folder,
@@ -245,9 +263,9 @@ def run(
                 relative_target=emissions.emissions_rates_folder,
                 metadata={"artifact_family": "emissions_rates_folder"},
             )
-            progress.update(1)
+            _advance_progress(progress)
 
-            _set_progress_task(progress, "passenger inventory")
+            _set_progress_task(progress, "passenger inventory", step_label="Preprocess Step 1.2")
             passenger_inventory_source = required_local_path(
                 _resolve_region_or_absolute_path(
                     emissions.inventory.passenger_file,
@@ -274,9 +292,9 @@ def run(
                     relative_target=Path(passenger_inventory_emfacid_source).name,
                     metadata={"artifact_family": "passenger_inventory_emfacid_file"},
                 )
-            progress.update(1)
+            _advance_progress(progress)
 
-            _set_progress_task(progress, "freight inventory")
+            _set_progress_task(progress, "freight inventory", step_label="Preprocess Step 1.2")
             freight_inventory_source = required_local_path(
                 _resolve_region_or_absolute_path(
                     emissions.inventory.freight_file,
@@ -303,9 +321,9 @@ def run(
                     relative_target=Path(freight_inventory_emfacid_source).name,
                     metadata={"artifact_family": "freight_inventory_emfacid_file"},
                 )
-            progress.update(1)
+            _advance_progress(progress)
 
-            _set_progress_task(progress, "passenger vehicle types")
+            _set_progress_task(progress, "passenger vehicle types", step_label="Preprocess Step 1.2")
             passenger_vehicle_types_source = required_local_path(
                 _resolve_region_or_absolute_path(
                     beam_processing.passenger_vehicle_types_file,
@@ -322,9 +340,9 @@ def run(
                 relative_target=str(beam_processing.passenger_vehicle_types_file),
                 metadata={"artifact_family": "passenger_vehicle_types_input"},
             )
-            progress.update(1)
+            _advance_progress(progress)
 
-            _set_progress_task(progress, "freight vehicle types")
+            _set_progress_task(progress, "freight vehicle types", step_label="Preprocess Step 1.2")
             freight_vehicle_types_source = required_local_path(
                 _resolve_region_or_absolute_path(
                     beam_processing.freight_vehicle_types_file,
@@ -341,10 +359,10 @@ def run(
                 relative_target=str(beam_processing.freight_vehicle_types_file),
                 metadata={"artifact_family": "freight_vehicle_types_input"},
             )
-            progress.update(1)
+            _advance_progress(progress)
 
             if emissions.vehicle_category_metadata_file:
-                _set_progress_task(progress, "vehicle category metadata")
+                _set_progress_task(progress, "vehicle category metadata", step_label="Preprocess Step 1.2")
                 vehicle_category_metadata_source = required_local_path(
                     _resolve_region_or_absolute_path(
                         emissions.vehicle_category_metadata_file,
@@ -361,10 +379,10 @@ def run(
                     relative_target=Path(vehicle_category_metadata_source).name,
                     metadata={"artifact_family": "vehicle_category_metadata_file_input"},
                 )
-                progress.update(1)
+                _advance_progress(progress)
 
             if inmap.enabled:
-                _set_progress_task(progress, "inmap grid")
+                _set_progress_task(progress, "inmap grid", step_label="Preprocess Step 1.2")
                 inmap_grid_source = required_local_path(
                     str((region_input_root / inmap.grid_path).resolve()),
                     "impacts.dispersions.inmap.grid_path",
@@ -377,9 +395,9 @@ def run(
                     relative_target=inmap.grid_path,
                     metadata={"artifact_family": "inmap_grid"},
                 )
-                progress.update(1)
+                _advance_progress(progress)
 
-                _set_progress_task(progress, "nox-to-no2 ratios")
+                _set_progress_task(progress, "nox-to-no2 ratios", step_label="Preprocess Step 1.2")
                 no2_matrix_source = required_local_path(
                     str((region_input_root / inmap.isrm_nox_to_no2_ratios_file).resolve()),
                     "impacts.dispersions.inmap.isrm_nox_to_no2_ratios_file",
@@ -392,10 +410,10 @@ def run(
                     relative_target=inmap.isrm_nox_to_no2_ratios_file,
                     metadata={"artifact_family": "isrm_nox_to_no2_ratios_file"},
                 )
-                progress.update(1)
+                _advance_progress(progress)
 
             if aermod.enabled:
-                _set_progress_task(progress, "asrv patterns")
+                _set_progress_task(progress, "asrv patterns", step_label="Preprocess Step 1.2")
                 asrv_source = required_local_path(
                     str((region_input_root / aermod.asrv_patterns_file).resolve()),
                     "impacts.dispersions.aermod.asrv_patterns_file",
@@ -408,16 +426,16 @@ def run(
                     relative_target=aermod.asrv_patterns_file,
                     metadata={"artifact_family": "asrv_patterns_file"},
                 )
-                progress.update(1)
+                _advance_progress(progress)
         finally:
-            progress.close()
+            _close_progress(progress)
 
     log_substep_banner("1.3", "register external dispersion store", logger=logger)
     if inmap.enabled:
         with logging_redirect_tqdm():
             progress = _progress(1, "Preprocess Step 1.3")
             try:
-                _set_progress_task(progress, "isrm store")
+                _set_progress_task(progress, "isrm store", step_label="Preprocess Step 1.3")
                 isrm_source = required_local_path(
                     resolve_path(inmap.isrm_zarr, config_path),
                     "impacts.dispersions.inmap.isrm_zarr",
@@ -430,9 +448,9 @@ def run(
                     relative_target=Path(isrm_source).name,
                     metadata={"artifact_family": "isrm"},
                 )
-                progress.update(1)
+                _advance_progress(progress)
             finally:
-                progress.close()
+                _close_progress(progress)
 
     population_inputs: Dict[str, Any] = {}
     if exposure.enabled:
@@ -450,11 +468,11 @@ def run(
             progress = _progress(2, "Preprocess Step 1.4")
             try:
                 for stem in ("persons", "households"):
-                    _set_progress_task(progress, stem)
+                    _set_progress_task(progress, stem, step_label="Preprocess Step 1.4")
                     existing_entry = population_artifact_entries[stem]
                     if existing_entry is not None:
                         population_inputs[stem] = existing_entry
-                        progress.update(1)
+                        _advance_progress(progress)
                         continue
                     source_path = _locate_exchange_file(population_root, stem)
                     if source_path:
@@ -468,9 +486,9 @@ def run(
                             prefer_reference=True,
                             metadata={"artifact_family": population_artifact_keys[stem]},
                         )
-                    progress.update(1)
+                    _advance_progress(progress)
             finally:
-                progress.close()
+                _close_progress(progress)
 
     logger.info("Preprocess Step 1 complete")
     return {
