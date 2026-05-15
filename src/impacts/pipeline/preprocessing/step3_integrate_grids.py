@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _SOURCE_ROW_ID = "source_row_id"
 _COUNTY_INTERSECTION_COLUMNS = [
     "linkId",
-    "countyfp",
+    "county_COUNTYFP",
     "county_proportion",
     "county_link_length_m",
     "geometry",
@@ -266,7 +266,7 @@ def _normalize_zone_intersection_schema(
 
     if zone_label == "county":
         required_cols = _COUNTY_INTERSECTION_COLUMNS
-        canonical["countyfp"] = canonical["countyfp"].astype("string")
+        canonical["county_COUNTYFP"] = canonical["county_COUNTYFP"].astype("string")
         canonical["county_proportion"] = pd.to_numeric(canonical["county_proportion"], errors="coerce")
         canonical["county_link_length_m"] = pd.to_numeric(canonical["county_link_length_m"], errors="coerce")
     elif zone_label == "inmap":
@@ -348,20 +348,22 @@ def _assign_fallback_counties(
     fallback["geometry"] = fallback.geometry.representative_point()
     joined = gpd.sjoin(
         fallback,
-        county_gdf[["countyfp", "geometry"]],
+        county_gdf[["COUNTYFP", "geometry"]],
         how="left",
         predicate="within",
     ).drop(columns=["index_right"], errors="ignore")
-    missing = joined["countyfp"].isna()
+    joined = joined.rename(columns={"COUNTYFP": "county_COUNTYFP"})
+    missing = joined["county_COUNTYFP"].isna()
     if missing.any():
         nearest = gpd.sjoin_nearest(
             fallback.loc[missing, ["linkId", "geometry"]],
-            county_gdf[["countyfp", "geometry"]],
+            county_gdf[["COUNTYFP", "geometry"]],
             how="left",
         ).drop(columns=["index_right", "distance"], errors="ignore")
-        joined.loc[missing, "countyfp"] = nearest["countyfp"].to_numpy()
-    joined["countyfp"] = joined["countyfp"].astype("string")
-    return pd.DataFrame(joined[["linkId", "countyfp"]].copy())
+        nearest = nearest.rename(columns={"COUNTYFP": "county_COUNTYFP"})
+        joined.loc[missing, "county_COUNTYFP"] = nearest["county_COUNTYFP"].to_numpy()
+    joined["county_COUNTYFP"] = joined["county_COUNTYFP"].astype("string")
+    return pd.DataFrame(joined[["linkId", "county_COUNTYFP"]].copy())
 
 
 def _ensure_county_mass_conservation(
@@ -400,11 +402,11 @@ def _ensure_county_mass_conservation(
 
     affected = affected.merge(source[["linkId", "geometry", "source_edge_length_m"]], how="left", on="linkId")
     affected = affected.merge(
-        fallback_counties.rename(columns={"countyfp": "nearest_countyfp"}),
+        fallback_counties.rename(columns={"county_COUNTYFP": "nearest_county_COUNTYFP"}),
         how="left",
         on="linkId",
     )
-    affected["countyfp"] = affected["nearest_countyfp"].astype("string")
+    affected["county_COUNTYFP"] = affected["nearest_county_COUNTYFP"].astype("string")
     affected["missing_share"] = (1.0 - affected["county_prop_sum"]).clip(lower=0.0)
     affected["missing_zone_length_m"] = (
         affected["source_edge_length_m"] - affected["county_zone_length_sum"]
@@ -417,7 +419,7 @@ def _ensure_county_mass_conservation(
 
     synthetic = affected.loc[affected["missing_share"] > 0.0, [
         "linkId",
-        "countyfp",
+        "county_COUNTYFP",
         "missing_share",
         "missing_zone_length_m",
         "geometry",
@@ -428,12 +430,12 @@ def _ensure_county_mass_conservation(
             "missing_zone_length_m": "county_link_length_m",
         }
     )
-    synthetic = synthetic.loc[synthetic["countyfp"].notna()].copy()
+    synthetic = synthetic.loc[synthetic["county_COUNTYFP"].notna()].copy()
     if synthetic.empty:
         return result
 
     result = result.loc[
-        ~(result["linkId"].isin(synthetic["linkId"])) | result["countyfp"].notna()
+        ~(result["linkId"].isin(synthetic["linkId"])) | result["county_COUNTYFP"].notna()
     ].copy()
     combined = pd.concat([result, synthetic], ignore_index=True)
     logger.info(
@@ -548,8 +550,7 @@ def run(
     county_gdf = read_vector(county_path)
     if "COUNTYFP" not in county_gdf.columns:
         raise ValueError("County boundaries must include COUNTYFP.")
-    county_gdf = county_gdf.rename(columns={"COUNTYFP": "countyfp"})
-    county_gdf["countyfp"] = county_gdf["countyfp"].astype("string")
+    county_gdf["COUNTYFP"] = county_gdf["COUNTYFP"].astype("string")
     if county_gdf.crs is not None:
         county_gdf = county_gdf.to_crs(epsg=epsg)
     logger.info(

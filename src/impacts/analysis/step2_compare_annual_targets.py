@@ -75,17 +75,14 @@ def _load_vehicle_type_sectors(
     prepared["emfacVehicleCategory"] = prepared["emfacVehicleCategory"].map(_normalize_token)
     prepared = prepared.loc[prepared["vehicleTypeId"].ne("")].copy()
     prepared = prepared.merge(
-        category_mapping.rename(
-            columns={
-                "emfac_vehicle_category": "emfacVehicleCategory",
-                "generic_vehicle_category": "sector",
-            }
-        ),
+        category_mapping,
         how="left",
-        on="emfacVehicleCategory",
+        left_on="emfacVehicleCategory",
+        right_on="emfac_vehicle_category",
     )
     return (
-        prepared[["vehicleTypeId", "sector"]]
+        prepared[["vehicleTypeId", "generic_vehicle_category"]]
+        .rename(columns={"generic_vehicle_category": "sector"})
         .drop_duplicates(subset=["vehicleTypeId"], keep="first")
         .reset_index(drop=True)
     )
@@ -195,8 +192,12 @@ def _aggregate_modeled_to_targets(
 
 def _build_comparison_table(*, modeled_df: pd.DataFrame, targets_df: pd.DataFrame) -> pd.DataFrame:
     comparison = targets_df.merge(modeled_df, how="outer", on=["source", "sector", "pollutant"])
-    comparison["target_tons"] = pd.to_numeric(comparison.get("target_tons", 0.0), errors="coerce").fillna(0.0)
-    comparison["simulation_tons"] = pd.to_numeric(comparison.get("simulation_tons", 0.0), errors="coerce").fillna(0.0)
+    required_columns = {"target_tons", "simulation_tons"}
+    missing = sorted(required_columns - set(comparison.columns))
+    if missing:
+        raise ValueError(f"Annual target comparison is missing required columns after merge: {missing}")
+    comparison["target_tons"] = pd.to_numeric(comparison["target_tons"], errors="coerce").fillna(0.0)
+    comparison["simulation_tons"] = pd.to_numeric(comparison["simulation_tons"], errors="coerce").fillna(0.0)
     comparison["difference_tons"] = comparison["simulation_tons"] - comparison["target_tons"]
     comparison["simulation_to_target_ratio"] = (
         comparison["simulation_tons"] / comparison["target_tons"].where(comparison["target_tons"].ne(0.0))

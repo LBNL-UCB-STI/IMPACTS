@@ -613,10 +613,10 @@ def assign_grid_cells_to_zones(
             )
             overlap_zone_col = zone_id_col
             if overlap_zone_col not in overlap_candidates.columns:
-                for candidate in (f"{zone_id_col}_x", f"{zone_id_col}_y"):
-                    if candidate in overlap_candidates.columns:
-                        overlap_zone_col = candidate
-                        break
+                raise ValueError(
+                    f"Expected overlap zone id column '{zone_id_col}' after spatial join, "
+                    f"available columns: {list(overlap_candidates.columns)}"
+                )
             overlap_candidates["_overlap_area"] = overlap_candidates.geometry.intersection(
                 overlap_candidates["_zone_geometry"]
             ).area
@@ -930,15 +930,6 @@ def configure_duckdb_connection(
     return temp_dir
 
 
-def _emissions_value_expression(*, source_pollutant: str, emissions_column: str = "emissions") -> str:
-    escaped = re.escape(source_pollutant).replace("'", "''")
-    return (
-        "COALESCE("
-        f"TRY_CAST(regexp_extract(COALESCE(CAST({emissions_column} AS VARCHAR), ''), '(^|;){escaped}:([^;]+)', 2) AS DOUBLE), "
-        "0.0)"
-    )
-
-
 def _resolve_skims_pollutant_mode(
     *,
     available_columns: list[str],
@@ -946,11 +937,9 @@ def _resolve_skims_pollutant_mode(
 ) -> str:
     if all(col in available_columns for col in source_pollutants):
         return "explicit"
-    if "emissions" in available_columns:
-        return "compact"
     missing_pollutants = [col for col in source_pollutants if col not in available_columns]
     raise ValueError(
-        "Skims parquet must include either explicit pollutant columns or an emissions column for DuckDB aggregation: "
+        "Skims parquet must include explicit pollutant columns for DuckDB aggregation: "
         f"missing={missing_pollutants}"
     )
 
@@ -1022,48 +1011,18 @@ def _prepare_skims_for_grid_allocation_duckdb(
             )
             where_clauses.append(f"trim(CAST(vehicleTypeId AS VARCHAR)) IN ({allowed_literals})")
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        if pollutant_mode == "explicit":
-            value_select = [f"SUM({observations_expr}) AS observations"]
-            for pollutant, source_col in zip(required_pollutants, source_pollutants):
-                value_select.append(f'SUM(COALESCE(TRY_CAST("{source_col}" AS DOUBLE), 0.0)) AS "{pollutant}"')
-            query = f"""
-                SELECT
-                    {", ".join(select_cols + value_select)}
-                FROM {scan}
-                {where_sql}
-                GROUP BY {", ".join(group_by_exprs)}
-            """
-        else:
-            compact_group_exprs = list(group_by_exprs) + [str(len(group_by_exprs) + 1)]
-            compact_base_select = list(select_cols)
-            compact_base_select.append("COALESCE(CAST(emissions AS VARCHAR), '') AS emissions_text")
-            value_select = ["SUM(observations) AS observations"]
-            for pollutant, source_col in zip(required_pollutants, source_pollutants):
-                value_select.append(
-                    f'SUM({_emissions_value_expression(source_pollutant=source_col, emissions_column="emissions_text")} * observations) AS "{pollutant}"'
-                )
-            query = f"""
-                WITH compact_base AS (
-                    SELECT
-                        {", ".join(compact_base_select)},
-                        {observations_expr} AS observations
-                    FROM {scan}
-                    {where_sql}
-                ),
-                compact_collapsed AS (
-                    SELECT
-                        {", ".join(f'"{col}"' for col in prepared_group_cols)},
-                        emissions_text,
-                        SUM(observations) AS observations
-                    FROM compact_base
-                    GROUP BY {", ".join(compact_group_exprs)}
-                )
-                SELECT
-                    {", ".join(f'"{col}" AS "{col}"' for col in prepared_group_cols)},
-                    {", ".join(value_select)}
-                FROM compact_collapsed
-                GROUP BY {", ".join(str(index) for index in range(1, len(prepared_group_cols) + 1))}
-            """
+        if pollutant_mode != "explicit":
+            raise ValueError(f"Unsupported skims pollutant mode: {pollutant_mode}")
+        value_select = [f"SUM({observations_expr}) AS observations"]
+        for pollutant, source_col in zip(required_pollutants, source_pollutants):
+            value_select.append(f'SUM(COALESCE(TRY_CAST("{source_col}" AS DOUBLE), 0.0)) AS "{pollutant}"')
+        query = f"""
+            SELECT
+                {", ".join(select_cols + value_select)}
+            FROM {scan}
+            {where_sql}
+            GROUP BY {", ".join(group_by_exprs)}
+        """
         output_sql = str(output_path).replace("'", "''")
         if show_progress:
             _configure_duckdb_progress_bar(con, enabled=True)

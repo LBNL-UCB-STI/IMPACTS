@@ -40,7 +40,7 @@ def _load_county_lookup(county_boundaries_path: str) -> pd.DataFrame:
     lookup = county_gdf[["COUNTYFP", "NAME"]].drop_duplicates().copy()
     lookup["COUNTYFP"] = normalize_county_fips(lookup["COUNTYFP"])
     lookup["NAME"] = lookup["NAME"].astype("string")
-    return lookup.rename(columns={"COUNTYFP": "countyfp", "NAME": "county"})
+    return lookup
 
 
 def _aggregate_modeled_emissions(
@@ -49,15 +49,15 @@ def _aggregate_modeled_emissions(
     county_lookup: pd.DataFrame,
 ) -> pd.DataFrame:
     modeled = read_table(modeled_emissions_path)
-    required_columns = {"countyfp", "vehicleTypeId", "process"}
+    required_columns = {"county_COUNTYFP", "vehicleTypeId", "process"}
     missing = sorted(required_columns - set(modeled.columns))
     if missing:
         raise ValueError(
-            "County-intersected modeled emissions input must include countyfp, vehicleTypeId, and process "
+            "County-intersected modeled emissions input must include county_COUNTYFP, vehicleTypeId, and process "
             f"for analysis Step 3. Missing: {missing}"
         )
-    modeled["countyfp"] = normalize_county_fips(modeled["countyfp"])
-    modeled = modeled.loc[modeled["countyfp"].notna()].copy()
+    modeled["county_COUNTYFP"] = normalize_county_fips(modeled["county_COUNTYFP"])
+    modeled = modeled.loc[modeled["county_COUNTYFP"].notna()].copy()
     available = {
         pollutant: column
         for pollutant, column in _MODELED_POLLUTANT_COLUMNS.items()
@@ -68,17 +68,23 @@ def _aggregate_modeled_emissions(
             "Modeled emissions input does not include any supported pollutant columns for analysis Step 3."
         )
     grouped = (
-        modeled.groupby("countyfp", dropna=False)[list(available.values())]
+        modeled.groupby("county_COUNTYFP", dropna=False)[list(available.values())]
         .sum(numeric_only=True)
         .reset_index()
     )
-    grouped = grouped.merge(county_lookup, how="left", on="countyfp")
+    grouped = grouped.merge(county_lookup, how="left", left_on="county_COUNTYFP", right_on="COUNTYFP")
     rows: list[pd.DataFrame] = []
     for pollutant, column in available.items():
-        frame = grouped[["countyfp", "county", column]].copy()
-        frame["pollutant"] = pollutant
-        frame["simulation_tons"] = pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
-        rows.append(frame[["countyfp", "county", "pollutant", "simulation_tons"]])
+        rows.append(
+            pd.DataFrame(
+                {
+                    "countyfp": grouped["county_COUNTYFP"].astype("string"),
+                    "county": grouped["NAME"].astype("string"),
+                    "pollutant": pollutant,
+                    "simulation_tons": pd.to_numeric(grouped[column], errors="coerce").fillna(0.0),
+                }
+            )
+        )
     return pd.concat(rows, ignore_index=True)
 
 
@@ -148,15 +154,13 @@ def _build_comparison_table(
         how="outer",
         on=["county", "pollutant"],
     )
-    comparison["countyfp"] = comparison.get("countyfp", pd.Series(dtype="string")).astype("string")
-    comparison["simulation_tons"] = pd.to_numeric(
-        comparison.get("simulation_tons", 0.0),
-        errors="coerce",
-    ).fillna(0.0)
-    comparison["emfac_tons"] = pd.to_numeric(
-        comparison.get("emfac_tons", 0.0),
-        errors="coerce",
-    ).fillna(0.0)
+    required_columns = {"countyfp", "simulation_tons", "emfac_tons"}
+    missing = sorted(required_columns - set(comparison.columns))
+    if missing:
+        raise ValueError(f"County emissions comparison is missing required columns after merge: {missing}")
+    comparison["countyfp"] = comparison["countyfp"].astype("string")
+    comparison["simulation_tons"] = pd.to_numeric(comparison["simulation_tons"], errors="coerce").fillna(0.0)
+    comparison["emfac_tons"] = pd.to_numeric(comparison["emfac_tons"], errors="coerce").fillna(0.0)
     comparison["county"] = comparison["county"].astype("string")
     if county_order:
         comparison["county"] = pd.Categorical(

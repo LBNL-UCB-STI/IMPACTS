@@ -175,7 +175,7 @@ def _aggregate(obs_df: pd.DataFrame) -> pd.DataFrame:
 
 _INTERSECTION_ZONE_COLS = [
     "linkId",
-    "countyfp",
+    "county_COUNTYFP",
     "county_proportion",
     "aermod_cell_id",
     "aermod_proportion",
@@ -244,21 +244,35 @@ def _rate_row_mask(result: pd.DataFrame, rate_row: pd.Series, *, is_parked: pd.S
     if "vehicleTypeId" in rate_row.index and pd.notna(rate_row.get("vehicleTypeId")):
         mask &= result["vehicleTypeId"] == str(rate_row["vehicleTypeId"])
     if "countyfp" in rate_row.index and pd.notna(rate_row.get("countyfp")):
+        if "county_COUNTYFP" not in result.columns:
+            raise ValueError("Rates matching requires result column 'county_COUNTYFP' when countyfp is present in rates.")
         row_county = str(rate_row["countyfp"]).zfill(3)
-        counties = result.get("countyfp", pd.Series(pd.NA, index=result.index)).astype("string")
+        counties = result["county_COUNTYFP"].astype("string")
         counties = counties.str.extract(r"(\d+)")[0].astype("string")
         counties = counties.where(counties.isna(), counties.str.zfill(3))
         mask &= counties == row_county
     if "roadCategory" in rate_row.index and pd.notna(rate_row.get("roadCategory")):
-        mask &= result.get("roadCategory", pd.Series(pd.NA, index=result.index)).astype("string") == str(rate_row["roadCategory"])
+        if "roadCategory" not in result.columns:
+            raise ValueError("Rates matching requires result column 'roadCategory' when roadCategory is present in rates.")
+        mask &= result["roadCategory"].astype("string") == str(rate_row["roadCategory"])
     if "speed_mph_float_bins" in rate_row.index and pd.notna(rate_row.get("speed_mph_float_bins")):
-        mask &= _interval_mask(result.get("speedMph", pd.Series(np.nan, index=result.index)), rate_row["speed_mph_float_bins"])
+        if "speedMph" not in result.columns:
+            raise ValueError("Rates matching requires result column 'speedMph' when speed bins are present in rates.")
+        mask &= _interval_mask(result["speedMph"], rate_row["speed_mph_float_bins"])
     if "time_minutes_float_bins" in rate_row.index and pd.notna(rate_row.get("time_minutes_float_bins")):
+        if "parkingDurationInSecond" not in result.columns:
+            raise ValueError(
+                "Rates matching requires result column 'parkingDurationInSecond' when time bins are present in rates."
+            )
+        if "travelTimeInSecond" not in result.columns:
+            raise ValueError(
+                "Rates matching requires result column 'travelTimeInSecond' when time bins are present in rates."
+            )
         minutes = (
-            result.get("parkingDurationInSecond", pd.Series(0.0, index=result.index)).fillna(0.0) / 60.0
+            result["parkingDurationInSecond"].fillna(0.0) / 60.0
         ).where(
             is_parked,
-            result.get("travelTimeInSecond", pd.Series(0.0, index=result.index)).fillna(0.0) / 60.0,
+            result["travelTimeInSecond"].fillna(0.0) / 60.0,
         )
         mask &= _interval_mask(minutes, rate_row["time_minutes_float_bins"])
     return mask

@@ -37,6 +37,10 @@ def _prepare_inmap_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         raise ValueError("InMAP concentrations must include 'TotalPM25'.")
     if "PrimaryPM25" not in gdf.columns:
         raise ValueError("InMAP concentrations must include 'PrimaryPM25'.")
+    if "BC" not in gdf.columns:
+        raise ValueError("InMAP concentrations must include 'BC'.")
+    if "NO2" not in gdf.columns:
+        raise ValueError("InMAP concentrations must include 'NO2'.")
 
     prepared = gdf.copy()
     prepared["inmap_SecondaryPM25"] = (
@@ -44,10 +48,7 @@ def _prepare_inmap_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         - pd.to_numeric(prepared["PrimaryPM25"], errors="coerce").fillna(0.0)
     )
     prepared = prepared.rename(columns={"PrimaryPM25": "inmap_PrimaryPM25", "BC": "inmap_BC", "NO2": "inmap_NO2"})
-    keep = [_INMAP_SOURCE_ID_COLUMN, "inmap_PrimaryPM25", "inmap_SecondaryPM25"]
-    for col in ("inmap_BC", "inmap_NO2"):
-        if col in prepared.columns:
-            keep.append(col)
+    keep = [_INMAP_SOURCE_ID_COLUMN, "inmap_PrimaryPM25", "inmap_SecondaryPM25", "inmap_BC", "inmap_NO2"]
     return prepared[keep + (["geometry"] if "geometry" in prepared.columns else [])].copy()
 
 
@@ -143,12 +144,12 @@ def _build_full_exposure_grid(
     result["BC"] = np.where(
         result["has_aermod_bc"],
         result["aermod_BC"],
-        result.get("inmap_BC", 0.0),
+        result["inmap_BC"],
     )
     result["NO2"] = np.where(
         result["has_aermod_no2"],
         result["aermod_NO2"],
-        result.get("inmap_NO2", 0.0),
+        result["inmap_NO2"],
     )
 
     ordered = [

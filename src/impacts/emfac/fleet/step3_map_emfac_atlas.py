@@ -342,19 +342,9 @@ def _attach_vehicle_household_income(
 ) -> pd.DataFrame:
     _require_column(vehicles, "household_id", "ATLAS vehicles file")
     _require_column(households, "income_in_thousands", "ATLAS households file")
+    _require_column(households, "household_id", "ATLAS households file")
 
     households_prepared = households.copy()
-    if "household_id" not in households_prepared.columns:
-        households_prepared = households_prepared.reset_index()
-        candidate_columns = [
-            column_name
-            for column_name in households_prepared.columns
-            if column_name not in {"income_in_thousands"} and pd.api.types.is_numeric_dtype(households_prepared[column_name])
-        ]
-        if not candidate_columns:
-            raise ValueError("ATLAS households file is missing a usable household identifier column or index")
-        households_prepared = households_prepared.rename(columns={candidate_columns[0]: "household_id"})
-
     vehicle_income = vehicles.merge(
         households_prepared[["household_id", "income_in_thousands"]].drop_duplicates(),
         on="household_id",

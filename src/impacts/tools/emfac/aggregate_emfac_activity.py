@@ -185,12 +185,14 @@ def aggregate_emfac_activity(
     combined[county_col] = _normalize_countyfp(combined[county_col])
     combined[year_col] = pd.to_numeric(combined[year_col], errors="raise").astype(int)
     combined[vmt_col] = _annualize_daily_values_by_vehicle_category(
-        combined.rename(columns={vehicle_category_col: "vehicleCategory"}),
+        combined,
         source_column=vmt_col,
+        vehicle_category_column=vehicle_category_col,
     )
     combined[trips_col] = _annualize_daily_values_by_vehicle_category(
-        combined.rename(columns={vehicle_category_col: "vehicleCategory"}),
+        combined,
         source_column=trips_col,
+        vehicle_category_column=vehicle_category_col,
     )
 
     if county_fips_filters:

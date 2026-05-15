@@ -61,14 +61,6 @@ def _load_beam_vehicle_lookup(
     ].drop_duplicates(subset=["vehicleTypeId"], keep="first")
 
 
-def _build_beam_population_breakdown(vehicle_lookup: pd.DataFrame) -> pd.DataFrame:
-    return (
-        vehicle_lookup.groupby(["assignment_group", "emfacId"], dropna=False)["sampleProbabilityWithinCategory"]
-        .sum()
-        .reset_index(name="beam_population_weight")
-    )
-
-
 def _build_beam_population_breakdown_from_assignments(
     *,
     assignments_path: str,
@@ -106,9 +98,7 @@ def _build_beam_population_breakdown_with_actual_assignments(
     passenger_vehicles_path: Optional[str] = None,
     freight_carriers_path: Optional[str] = None,
 ) -> pd.DataFrame:
-    fallback = _build_beam_population_breakdown(vehicle_lookup)
     outputs: list[pd.DataFrame] = []
-    used_groups: set[str] = set()
     if passenger_vehicles_path:
         outputs.append(
             _build_beam_population_breakdown_from_assignments(
@@ -117,7 +107,6 @@ def _build_beam_population_breakdown_with_actual_assignments(
                 assignment_group="passenger",
             )
         )
-        used_groups.add("passenger")
     if freight_carriers_path:
         outputs.append(
             _build_beam_population_breakdown_from_assignments(
@@ -126,12 +115,11 @@ def _build_beam_population_breakdown_with_actual_assignments(
                 assignment_group="freight",
             )
         )
-        used_groups.add("freight")
-    fallback_groups = fallback.loc[~fallback["assignment_group"].isin(used_groups)].copy()
-    if not fallback_groups.empty:
-        outputs.append(fallback_groups)
     if not outputs:
-        return fallback
+        raise ValueError(
+            "Fleet comparison requires at least one BEAM assignment source "
+            "(passenger_vehicles_path or freight_carriers_path)."
+        )
     return pd.concat(outputs, ignore_index=True, sort=False)
 
 
@@ -229,8 +217,12 @@ def _build_comparison_table(
         ignore_index=True,
     )
     comparison = beam.merge(emfac, how="outer", on=["assignment_group", "emfacId"])
+    required_columns = {"beam_population_weight", "beam_vmt", "emfac_population", "emfac_vmt"}
+    missing = sorted(required_columns - set(comparison.columns))
+    if missing:
+        raise ValueError(f"Fleet comparison is missing required columns after merge: {missing}")
     for column in ["beam_population_weight", "beam_vmt", "emfac_population", "emfac_vmt"]:
-        comparison[column] = pd.to_numeric(comparison.get(column, 0.0), errors="coerce").fillna(0.0)
+        comparison[column] = pd.to_numeric(comparison[column], errors="coerce").fillna(0.0)
     for assignment_group, group in comparison.groupby("assignment_group", dropna=False):
         mask = comparison["assignment_group"] == assignment_group
         beam_population_total = group["beam_population_weight"].sum()

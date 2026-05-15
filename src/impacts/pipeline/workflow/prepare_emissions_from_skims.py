@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-import re
 import time
 from typing import Any
 from typing import Dict
@@ -67,7 +66,6 @@ _TRANSIT_VEHICLETYPE_PATTERN = re.compile(
 )
 _FREIGHT_CATEGORY_PATTERN = re.compile(r"^(class\d|class\d+[a-z]?|mdv|ldt\d|hdt|t\d)", re.IGNORECASE)
 _FREIGHT_CATEGORY_SUBSTRINGS = ("vocational", "tractor")
-_EMFAC_MODEL_YEAR_GROUP_PATTERN = re.compile(r"^(pre\d+|\d{4}to\d{4}|post\d+)")
 
 
 # ---------------------------------------------------------------------------
@@ -143,10 +141,9 @@ def _row_is_transit_vehicle_type(row: pd.Series) -> bool:
     vehicle_type_id = _normalize_vehicle_type_token(row.get("vehicleTypeId"))
     if vehicle_type_id and _TRANSIT_VEHICLETYPE_PATTERN.search(vehicle_type_id):
         return True
-    for candidate in ("emfacVehicleCategory", "vehicleCategory"):
-        token = _normalize_vehicle_type_token(row.get(candidate)).lower()
-        if token in _TRANSIT_CATEGORY_TOKENS:
-            return True
+    token = _normalize_vehicle_type_token(row.get("emfacVehicleCategory")).lower()
+    if token in _TRANSIT_CATEGORY_TOKENS:
+        return True
     return False
 
 
@@ -264,6 +261,10 @@ def _load_vehicle_type_activity_lookup(
         raise ValueError(
             "Vehicle types input must include emfacId for inventory-based activity correction."
         )
+    if "emfacResolvedModelYear" not in vehicle_types.columns:
+        raise ValueError(
+            "Vehicle types input must include emfacResolvedModelYear for inventory-based activity correction."
+        )
 
     prepared = vehicle_types.copy()
     prepared["vehicleTypeId"] = prepared["vehicleTypeId"].map(_normalize_vehicle_type_token)
@@ -273,7 +274,11 @@ def _load_vehicle_type_activity_lookup(
         axis=1,
     )
     prepared["emfacId"] = prepared["emfacId"].map(_normalize_vehicle_type_token)
-    prepared["modelYear"] = prepared["emfacId"].str.extract(_EMFAC_MODEL_YEAR_GROUP_PATTERN, expand=False)
+    prepared["modelYear"] = prepared["emfacResolvedModelYear"].astype(str).str.strip()
+    prepared["modelYear"] = prepared["modelYear"].where(
+        prepared["modelYear"].ne("") & ~prepared["modelYear"].str.lower().eq("nan"),
+        pd.NA,
+    )
     prepared = prepared.loc[prepared["assignment_group"].notna()].copy()
     correction_eligible = prepared["assignment_group"].isin({"passenger", "freight"})
     prepared = prepared.loc[~correction_eligible | prepared["modelYear"].notna()].copy()
@@ -375,7 +380,7 @@ def _build_zone_grouped_table(
 ) -> Optional[pd.DataFrame]:
     if not intersection_path and intersection_df is None:
         return None
-    zone_id_col = f"{zone_label}_cell_id" if zone_label != "county" else "countyfp"
+    zone_id_col = f"{zone_label}_cell_id" if zone_label != "county" else "county_COUNTYFP"
     proportion_col = f"{zone_label}_proportion"
     link_length_col = f"{zone_label}_link_length_m"
     required_cols = {"linkId", zone_id_col, proportion_col, link_length_col}
@@ -450,7 +455,7 @@ def _build_zone_allocated_table(
         c for c in ("totVMT", "totTrips")
         if c in skims_df.columns and pd.api.types.is_numeric_dtype(skims_df[c])
     ]
-    zone_id_col = f"{zone_label}_cell_id" if zone_label != "county" else "countyfp"
+    zone_id_col = f"{zone_label}_cell_id" if zone_label != "county" else "county_COUNTYFP"
     proportion_col = f"{zone_label}_proportion"
     link_length_col = f"{zone_label}_link_length_m"
 
@@ -506,23 +511,16 @@ def _build_zone_allocated_table(
 
 
 def _build_source_activity_totals(skims_df: pd.DataFrame) -> Optional[pd.DataFrame]:
-    if {"countyfp", "distanceMiles_county", "tripCount_county"}.issubset(skims_df.columns):
-        activity = skims_df[["countyfp", "distanceMiles_county", "tripCount_county"]].copy()
-        vmt_col = "distanceMiles_county"
-        trip_col = "tripCount_county"
-    elif {"countyfp", "totVMT", "totTrips"}.issubset(skims_df.columns):
-        activity = skims_df[["countyfp", "totVMT", "totTrips"]].copy()
-        vmt_col = "totVMT"
-        trip_col = "totTrips"
-    else:
+    if not {"countyfp", "totVMT", "totTrips"}.issubset(skims_df.columns):
         return None
+    activity = skims_df[["countyfp", "totVMT", "totTrips"]].copy()
 
     activity["countyfp"] = normalize_county_fips(activity["countyfp"])
-    activity[vmt_col] = pd.to_numeric(activity[vmt_col], errors="coerce").fillna(0.0)
-    activity[trip_col] = pd.to_numeric(activity[trip_col], errors="coerce").fillna(0.0)
+    activity["totVMT"] = pd.to_numeric(activity["totVMT"], errors="coerce").fillna(0.0)
+    activity["totTrips"] = pd.to_numeric(activity["totTrips"], errors="coerce").fillna(0.0)
     grouped = activity.groupby("countyfp", dropna=False).agg(
-        totVMT=(vmt_col, "sum"),
-        totTrips=(trip_col, "sum"),
+        totVMT=("totVMT", "sum"),
+        totTrips=("totTrips", "sum"),
     ).reset_index()
     zero_null_mask = grouped["countyfp"].isna() & grouped["totVMT"].eq(0.0) & grouped["totTrips"].eq(0.0)
     if zero_null_mask.any():

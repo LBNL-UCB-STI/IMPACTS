@@ -303,12 +303,8 @@ _DEFAULT_TAILPIPE_HEIGHT_METERS = 1.0
 
 def _load_vehicle_tailpipe_height_lookup(csv_path: str) -> dict[str, float]:
     frame = read_table(csv_path)
-    category_column = None
-    for candidate in ("emfac_vehicle_category", "vehicleCategory"):
-        if candidate in frame.columns:
-            category_column = candidate
-            break
-    if category_column is None or "tailpipe_height_meters" not in frame.columns:
+    category_column = "emfac_vehicle_category"
+    if category_column not in frame.columns or "tailpipe_height_meters" not in frame.columns:
         return {}
     lookup: dict[str, float] = {}
     for row in frame[[category_column, "tailpipe_height_meters"]].itertuples(index=False):
@@ -387,15 +383,10 @@ def _default_annualization_days(annualization_days: Optional[dict[str, float]]) 
 
 def _load_vehicle_operation_days_lookup(csv_path: str) -> tuple[dict[str, float], list[tuple[str, str]]]:
     frame = read_table(csv_path)
-    category_column = None
-    for candidate in ("emfac_vehicle_category", "vehicleCategory"):
-        if candidate in frame.columns:
-            category_column = candidate
-            break
-    if category_column is None:
+    category_column = "emfac_vehicle_category"
+    if category_column not in frame.columns:
         raise ValueError(
-            "Vehicle category metadata CSV is missing required columns: one of "
-            "['emfac_vehicle_category', 'vehicleCategory']"
+            "Vehicle category metadata CSV is missing required column 'emfac_vehicle_category'"
         )
     lookup: dict[str, float] = {}
     sanitized_categories: list[tuple[str, str]] = []
@@ -425,24 +416,6 @@ def _vehicle_group_for_emfac_category(category: object) -> str:
     return "medium_heavy_duty"
 
 
-def _infer_emfac_vehicle_category_from_emfac_id(
-    emfac_id: object,
-    *,
-    sanitized_categories: list[tuple[str, str]],
-) -> str:
-    token = str("" if pd.isna(emfac_id) else emfac_id).strip()
-    if not token:
-        raise ValueError("Encountered blank emfacId while resolving annualization days.")
-    sanitized_emfac_id = _sanitize_emfac_token(token)
-    matches = [category for category, sanitized in sanitized_categories if sanitized and sanitized in sanitized_emfac_id]
-    if not matches:
-        raise ValueError(
-            "Could not infer EMFAC vehicle category from emfacId="
-            f"{token!r} using the configured annualization CSV."
-        )
-    return matches[0]
-
-
 def _load_vehicle_type_category_lookup(
     passenger_vehicle_types_path: str,
     freight_vehicle_types_path: str,
@@ -460,46 +433,31 @@ def _load_vehicle_type_category_lookup(
     prepared["vehicleTypeId"] = prepared["vehicleTypeId"].astype(str).str.strip()
     prepared = prepared.loc[prepared["vehicleTypeId"].ne("")].copy()
 
-    for candidate in ("emfacVehicleCategory", "vehicleCategory"):
-        if candidate not in prepared.columns:
-            continue
-        prepared[candidate] = prepared[candidate].where(prepared[candidate].notna(), "")
-        prepared[candidate] = prepared[candidate].astype(str).str.strip()
+    if "emfacVehicleCategory" in prepared.columns:
+        prepared["emfacVehicleCategory"] = prepared["emfacVehicleCategory"].where(
+            prepared["emfacVehicleCategory"].notna(), ""
+        )
+        prepared["emfacVehicleCategory"] = prepared["emfacVehicleCategory"].astype(str).str.strip()
         category_rows = prepared.loc[
-            prepared[candidate].ne("") & ~prepared[candidate].str.lower().eq("nan")
+            prepared["emfacVehicleCategory"].ne("") & ~prepared["emfacVehicleCategory"].str.lower().eq("nan")
         ].copy()
-        if category_rows.empty:
-            continue
-        missing_categories = sorted(set(category_rows[candidate]) - set(category_lookup))
-        if missing_categories:
-            raise ValueError(
-                "Vehicle types input contains EMFAC categories not present in the configured annualization CSV: "
-                f"{missing_categories[:10]}"
+        if not category_rows.empty:
+            missing_categories = sorted(set(category_rows["emfacVehicleCategory"]) - set(category_lookup))
+            if missing_categories:
+                raise ValueError(
+                    "Vehicle types input contains EMFAC categories not present in the configured annualization CSV: "
+                    f"{missing_categories[:10]}"
+                )
+            return (
+                category_rows[["vehicleTypeId", "emfacVehicleCategory"]]
+                .drop_duplicates(subset=["vehicleTypeId"], keep="first")
+                .set_index("vehicleTypeId")["emfacVehicleCategory"]
+                .to_dict()
             )
-        return (
-            category_rows[["vehicleTypeId", candidate]]
-            .drop_duplicates(subset=["vehicleTypeId"], keep="first")
-            .set_index("vehicleTypeId")[candidate]
-            .to_dict()
-        )
 
-    if "emfacId" not in prepared.columns:
-        raise ValueError(
-            "Vehicle types input must include emfacVehicleCategory or emfacId when resolving "
-            "annualization days from vehicle_category_metadata_file."
-        )
-
-    prepared["resolved_emfac_category"] = prepared["emfacId"].map(
-        lambda value: _infer_emfac_vehicle_category_from_emfac_id(
-            value,
-            sanitized_categories=sanitized_categories,
-        )
-    )
-    return (
-        prepared[["vehicleTypeId", "resolved_emfac_category"]]
-        .drop_duplicates(subset=["vehicleTypeId"], keep="first")
-        .set_index("vehicleTypeId")["resolved_emfac_category"]
-        .to_dict()
+    raise ValueError(
+        "Vehicle types input must include non-empty emfacVehicleCategory when resolving "
+        "annualization days from vehicle_category_metadata_file."
     )
 
 

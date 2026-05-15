@@ -112,7 +112,6 @@ def build_comprehensive_project_analysis(
 ) -> pd.DataFrame:
     supported_emfac_combinations = (
         emfac_category_fuel_mapping[["emfac_vehicle_category", "emfac_fuel"]]
-        .rename(columns={"emfac_vehicle_category": "vehicleCategory", "emfac_fuel": "fuel"})
         .drop_duplicates()
         .reset_index(drop=True)
     )
@@ -121,9 +120,11 @@ def build_comprehensive_project_analysis(
         .drop_duplicates()
         .merge(
             supported_emfac_combinations,
-            on=["vehicleCategory", "fuel"],
+            left_on=["vehicleCategory", "fuel"],
+            right_on=["emfac_vehicle_category", "emfac_fuel"],
             how="inner",
         )
+        .drop(columns=["emfac_vehicle_category", "emfac_fuel"])
         .reset_index(drop=True)
     )
 
@@ -193,11 +194,10 @@ def build_comprehensive_project_analysis(
         how="inner",
     )
     if "speed_time" in rates.columns:
-        speed_time = rates.pop("speed_time")
-        if ACTIVITY_COLUMN in rates.columns:
-            rates[ACTIVITY_COLUMN] = speed_time.combine_first(rates[ACTIVITY_COLUMN])
-        else:
-            rates[ACTIVITY_COLUMN] = speed_time
+        raise ValueError(
+            "Rates input uses disallowed column alias 'speed_time'. "
+            f"Provide '{ACTIVITY_COLUMN}' directly."
+        )
     values = pd.Series(pd.NA, index=rates.index, dtype="object")
     process = rates["process"].astype(str)
     speed_values = pd.to_numeric(rates[ACTIVITY_COLUMN], errors="coerce")

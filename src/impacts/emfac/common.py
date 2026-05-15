@@ -29,16 +29,7 @@ def _read_full_input_table(path_like: str) -> pd.DataFrame:
 
 def read_atlas_vehicles_input(path_like: str) -> pd.DataFrame:
     vehicles = _read_full_input_table(path_like)
-
-    rename_map: dict[str, str] = {}
-    if "household_id" not in vehicles.columns and "householdId" in vehicles.columns:
-        rename_map["householdId"] = "household_id"
-    if "vehicle_id" not in vehicles.columns:
-        if "sourceVehicleId" in vehicles.columns:
-            rename_map["sourceVehicleId"] = "vehicle_id"
-        elif "vehicleId" in vehicles.columns:
-            rename_map["vehicleId"] = "vehicle_id"
-    prepared = vehicles.rename(columns=rename_map).copy()
+    prepared = vehicles.copy()
 
     for column_name, dtype_name in ATLAS_VEHICLES_SCHEMA.items():
         if column_name not in prepared.columns:
@@ -211,8 +202,6 @@ def frame_summary(frame: pd.DataFrame, *, name: str) -> dict[str, Any]:
         }
     if "county" in frame.columns:
         summary["county_count"] = int(frame["county"].nunique(dropna=True))
-    elif "sub_area" in frame.columns:
-        summary["county_count"] = int(frame["sub_area"].nunique(dropna=True))
     return summary
 
 
@@ -340,39 +329,17 @@ def load_idle_time_fraction_lookup(metadata_path: str) -> dict[str, float]:
     )
 
 
-def _infer_emfac_vehicle_category_from_id(emfac_id: object, known_categories: list[str]) -> str:
-    emfac_id_token = str("" if pd.isna(emfac_id) else emfac_id).strip()
-    if emfac_id_token == "":
-        return ""
-    for category in sorted(known_categories, key=len, reverse=True):
-        if category and category in emfac_id_token:
-            return category
-    return ""
-
-
 def attach_idle_time_fraction(
     vehicle_types: pd.DataFrame,
     *,
     idle_time_fraction_lookup: dict[str, float],
 ) -> pd.DataFrame:
     prepared = vehicle_types.copy()
-    if "emfacVehicleCategory" not in prepared.columns and "emfacId" not in prepared.columns:
+    if "emfacVehicleCategory" not in prepared.columns:
         raise ValueError(
-            "Vehicle types table is missing both 'emfacVehicleCategory' and 'emfacId' required for idleTimeFraction"
+            "Vehicle types table is missing required column 'emfacVehicleCategory' for idleTimeFraction"
         )
-
-    known_categories = [str(category).strip() for category in idle_time_fraction_lookup if str(category).strip()]
-    if "emfacVehicleCategory" in prepared.columns:
-        categories = prepared["emfacVehicleCategory"].fillna("").astype(str).str.strip()
-    else:
-        categories = pd.Series("", index=prepared.index, dtype="object")
-
-    if "emfacId" in prepared.columns:
-        missing_category_mask = categories.eq("")
-        if missing_category_mask.any():
-            categories.loc[missing_category_mask] = prepared.loc[missing_category_mask, "emfacId"].map(
-                lambda value: _infer_emfac_vehicle_category_from_id(value, known_categories)
-            )
+    categories = prepared["emfacVehicleCategory"].fillna("").astype(str).str.strip()
 
     prepared["idleTimeFraction"] = categories.map(idle_time_fraction_lookup)
     prepared.loc[categories.ne("") & prepared["idleTimeFraction"].isna(), "idleTimeFraction"] = 0.0
@@ -437,7 +404,9 @@ def attach_emissions_rates_filepaths(
     relative_paths: dict[str, str],
 ) -> pd.DataFrame:
     prepared = vehicle_types.copy()
-    emfac_ids = prepared.get("emfacId", pd.Series(index=prepared.index, dtype="object")).fillna("").astype(str)
+    if "emfacId" not in prepared.columns:
+        raise ValueError("Vehicle types table is missing required column 'emfacId' for emissionsRatesFile.")
+    emfac_ids = prepared["emfacId"].fillna("").astype(str)
     prepared["emfacId"] = emfac_ids
     prepared["emissionsRatesFile"] = emfac_ids.map(relative_paths).fillna("")
     return prepared
@@ -451,11 +420,13 @@ def attach_emissions_rates_filepaths_from_config(
     output_root: str | Path,
     step_label: str,
 ) -> pd.DataFrame:
+    if "emfacId" not in vehicle_types.columns:
+        raise ValueError(f"{step_label} requires vehicle types with required column 'emfacId'.")
     required_emfac_ids = sorted(
         [
-            emfac_id
-            for emfac_id in vehicle_types.get("emfacId", pd.Series(dtype="string")).fillna("").astype(str).unique().tolist()
-            if emfac_id
+            str(emfac_id).strip()
+            for emfac_id in vehicle_types["emfacId"].fillna("").astype(str).unique().tolist()
+            if str(emfac_id).strip()
         ]
     )
     relative_paths = load_rates_store_relative_paths(
