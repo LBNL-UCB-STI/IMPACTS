@@ -47,6 +47,10 @@ def _progress(total: int, desc: str) -> tqdm:
     )
 
 
+def _set_progress_task(progress: tqdm, label: str) -> None:
+    progress.set_postfix_str(label)
+
+
 def _register_manifest_input(
     manifest_inputs: Dict[str, Any],
     *,
@@ -135,6 +139,7 @@ def run(
     with logging_redirect_tqdm():
         progress = _progress(3, "Preprocess Step 1.1")
         try:
+            _set_progress_task(progress, "network")
             network_entry = find_latest_beam_network_reference(optional=True)
             if network_entry:
                 staged_network = _use_existing_reference(manifest_inputs, "network", network_entry)
@@ -151,6 +156,7 @@ def run(
                 )
             progress.update(1)
 
+            _set_progress_task(progress, "skims")
             skims_source = resolve_emissions_skims_local_path(beam_output_root)
             staged_skims = _register_manifest_input(
                 manifest_inputs,
@@ -163,6 +169,7 @@ def run(
             )
             progress.update(1)
 
+            _set_progress_task(progress, "events")
             events_entry = find_latest_beam_events_reference(optional=True)
             if events_entry:
                 staged_events = _use_existing_reference(manifest_inputs, "events_input", events_entry)
@@ -194,6 +201,7 @@ def run(
     with logging_redirect_tqdm():
         progress = _progress(substep_12_total, "Preprocess Step 1.2")
         try:
+            _set_progress_task(progress, "osm")
             osm_entry = find_beam_r5_osm_reference(optional=True)
             if osm_entry:
                 staged_osm = _use_existing_reference(manifest_inputs, "osm_network", osm_entry)
@@ -220,6 +228,7 @@ def run(
                 )
             progress.update(1)
 
+            _set_progress_task(progress, "emissions rates")
             emissions_rates_source = required_local_path(
                 _resolve_region_or_absolute_path(
                     emissions.emissions_rates_folder,
@@ -238,6 +247,7 @@ def run(
             )
             progress.update(1)
 
+            _set_progress_task(progress, "passenger inventory")
             passenger_inventory_source = required_local_path(
                 _resolve_region_or_absolute_path(
                     emissions.inventory.passenger_file,
@@ -266,6 +276,7 @@ def run(
                 )
             progress.update(1)
 
+            _set_progress_task(progress, "freight inventory")
             freight_inventory_source = required_local_path(
                 _resolve_region_or_absolute_path(
                     emissions.inventory.freight_file,
@@ -294,6 +305,7 @@ def run(
                 )
             progress.update(1)
 
+            _set_progress_task(progress, "passenger vehicle types")
             passenger_vehicle_types_source = required_local_path(
                 _resolve_region_or_absolute_path(
                     beam_processing.passenger_vehicle_types_file,
@@ -312,6 +324,7 @@ def run(
             )
             progress.update(1)
 
+            _set_progress_task(progress, "freight vehicle types")
             freight_vehicle_types_source = required_local_path(
                 _resolve_region_or_absolute_path(
                     beam_processing.freight_vehicle_types_file,
@@ -331,6 +344,7 @@ def run(
             progress.update(1)
 
             if emissions.vehicle_category_metadata_file:
+                _set_progress_task(progress, "vehicle category metadata")
                 vehicle_category_metadata_source = required_local_path(
                     _resolve_region_or_absolute_path(
                         emissions.vehicle_category_metadata_file,
@@ -350,6 +364,7 @@ def run(
                 progress.update(1)
 
             if inmap.enabled:
+                _set_progress_task(progress, "inmap grid")
                 inmap_grid_source = required_local_path(
                     str((region_input_root / inmap.grid_path).resolve()),
                     "impacts.dispersions.inmap.grid_path",
@@ -364,6 +379,7 @@ def run(
                 )
                 progress.update(1)
 
+                _set_progress_task(progress, "nox-to-no2 ratios")
                 no2_matrix_source = required_local_path(
                     str((region_input_root / inmap.isrm_nox_to_no2_ratios_file).resolve()),
                     "impacts.dispersions.inmap.isrm_nox_to_no2_ratios_file",
@@ -379,6 +395,7 @@ def run(
                 progress.update(1)
 
             if aermod.enabled:
+                _set_progress_task(progress, "asrv patterns")
                 asrv_source = required_local_path(
                     str((region_input_root / aermod.asrv_patterns_file).resolve()),
                     "impacts.dispersions.aermod.asrv_patterns_file",
@@ -400,6 +417,7 @@ def run(
         with logging_redirect_tqdm():
             progress = _progress(1, "Preprocess Step 1.3")
             try:
+                _set_progress_task(progress, "isrm store")
                 isrm_source = required_local_path(
                     resolve_path(inmap.isrm_zarr, config_path),
                     "impacts.dispersions.inmap.isrm_zarr",
@@ -432,6 +450,7 @@ def run(
             progress = _progress(2, "Preprocess Step 1.4")
             try:
                 for stem in ("persons", "households"):
+                    _set_progress_task(progress, stem)
                     existing_entry = population_artifact_entries[stem]
                     if existing_entry is not None:
                         population_inputs[stem] = existing_entry

@@ -110,6 +110,28 @@ def optional_local_path(path: Optional[str]) -> Optional[str]:
 # Input discovery
 # ---------------------------------------------------------------------------
 
+def _scan_paths_with_progress(root: Path, desc: str):
+    progress = tqdm(
+        total=None,
+        desc=desc,
+        unit="dir",
+        dynamic_ncols=True,
+        file=sys.stdout,
+        leave=False,
+        disable=not logger.isEnabledFor(logging.INFO),
+    )
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames.sort()
+            progress.update(1)
+            progress.set_postfix_str(
+                f"dirs={len(dirnames)} files={len(filenames)} current={Path(dirpath).name or dirpath}",
+            )
+            yield Path(dirpath), dirnames, filenames
+    finally:
+        progress.close()
+
+
 def find_first_matching(root: str, pattern: str) -> Optional[str]:
     if not root or is_remote_path(root):
         return None
@@ -121,9 +143,11 @@ def find_first_matching(root: str, pattern: str) -> Optional[str]:
     matches = sorted(candidate for candidate in path.glob(pattern) if candidate.is_file())
     if matches:
         return str(matches[0])
-    recursive_matches = sorted(candidate for candidate in path.rglob(pattern) if candidate.is_file())
+    recursive_matches: list[Path] = []
+    for dirpath, _, _ in _scan_paths_with_progress(path, f"Scanning {path.name} for {pattern}"):
+        recursive_matches.extend(candidate for candidate in dirpath.glob(pattern) if candidate.is_file())
     if recursive_matches:
-        return str(recursive_matches[0])
+        return str(sorted(recursive_matches)[0])
     return None
 
 
@@ -135,10 +159,20 @@ def find_preferred_file(root: str, names: list[str]) -> Optional[str]:
         direct = path / name
         if direct.exists():
             return str(direct)
+    pending = set(names)
+    found: dict[str, Path] = {}
+    for dirpath, _, _ in _scan_paths_with_progress(path, f"Scanning {path.name} for preferred files"):
+        for name in list(pending):
+            matches = sorted(candidate for candidate in dirpath.glob(name) if candidate.is_file())
+            if not matches:
+                continue
+            found[name] = matches[0]
+            pending.remove(name)
+        if not pending:
+            break
     for name in names:
-        matches = sorted(candidate for candidate in path.rglob(name) if candidate.is_file())
-        if matches:
-            return str(matches[0])
+        if name in found:
+            return str(found[name])
     return None
 
 
@@ -146,10 +180,19 @@ def find_latest_iters_dir(root: str) -> Optional[Path]:
     path = Path(root)
     if not path.exists():
         return None
-    candidates = [candidate for candidate in path.rglob("ITERS") if candidate.is_dir()]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda candidate: candidate.stat().st_mtime)
+    latest_candidate: Optional[Path] = None
+    latest_mtime = -1.0
+    for dirpath, dirnames, _ in _scan_paths_with_progress(path, f"Scanning {path.name} for ITERS"):
+        if "ITERS" not in dirnames:
+            continue
+        candidate = dirpath / "ITERS"
+        if not candidate.is_dir():
+            continue
+        candidate_mtime = candidate.stat().st_mtime
+        if candidate_mtime > latest_mtime:
+            latest_candidate = candidate
+            latest_mtime = candidate_mtime
+    return latest_candidate
 
 
 def find_latest_iteration_events(iters_dir: Path) -> Optional[Path]:
