@@ -508,7 +508,7 @@ def run(
             epsg,
             pipeline.inmap_grid_path,
             output_epsg=epsg,
-            prefilter_zones_to_bbox=True,
+            prefilter_zones_to_network_bbox=True,
             zone_label="inmap",
         )
         inmap_intersection = trace_and_filter_void_zone_rows(
@@ -531,7 +531,7 @@ def run(
             epsg,
             pipeline.aermod_grid_path,
             output_epsg=epsg,
-            prefilter_zones_to_bbox=True,
+            prefilter_zones_to_network_bbox=True,
             zone_label="aermod",
         )
         aermod_intersection = _normalize_zone_intersection_schema(aermod_intersection, zone_label="aermod")
