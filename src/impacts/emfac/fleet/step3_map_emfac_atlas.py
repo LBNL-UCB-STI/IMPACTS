@@ -1003,7 +1003,7 @@ def _build_passenger_car_emfac_mapping(
     expanded_rows: list[dict[str, Any]] = []
     for row in prepared.itertuples(index=False):
         row_payload = row._asdict()
-        atlas_vehicle_type_id = str(getattr(row, "atlasVehicleTypeId", getattr(row, "vehicleTypeId")))
+        atlas_vehicle_type_id = str(row.atlasVehicleTypeId)
         candidates = _build_passenger_emfac_candidates(
             vehicle_type_id=str(row.vehicleTypeId),
             bodytype=row.bodytype,

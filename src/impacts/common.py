@@ -809,12 +809,6 @@ def read_table(path: str | Path) -> pd.DataFrame:
     raise ValueError(f"Unsupported table format: {target}")
 
 
-def first_existing(df: pd.DataFrame, candidates) -> Optional[str]:
-    for col in candidates:
-        if col in df.columns:
-            return col
-    return None
-
 
 def normalize_county_fips(series: pd.Series) -> pd.Series:
     extracted = series.astype("string").str.extract(r"(\d+)")[0]
