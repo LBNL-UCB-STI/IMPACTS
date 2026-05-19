@@ -8,6 +8,7 @@ import pandas as pd
 from impacts.pipeline.workflow.step1_process_emissions import _derive_county_correction_factors
 from impacts.pipeline.workflow.step1_process_emissions import _derive_inventory_activity_targets_for_assignment
 from impacts.pipeline.workflow.step1_process_emissions import _build_county_corrected_table
+from impacts.pipeline.workflow.step1_process_emissions import _aggregate_aermod_emissions_for_export
 from impacts.pipeline.workflow.step1_process_emissions import apply_county_corrections
 
 
@@ -256,3 +257,82 @@ def test_build_county_corrected_table_skips_when_inventory_corrections_disabled(
     assert beam_activity_totals is None
     assert county_correction_factors is None
     pd.testing.assert_frame_equal(corrected, county_allocated)
+
+
+def test_aggregate_aermod_emissions_for_export_collapses_to_source_cells(tmp_path: Path) -> None:
+    aermod_allocated = pd.DataFrame(
+        [
+            {
+                "aermod_cell_id": 101,
+                "source_temporal_class": "FREEWAY",
+                "source_release_height": 3.0,
+                "source_urban_class": 1000,
+                "tons_per_year_NOx_aermod_allocated": 1.25,
+                "tons_per_year_PM2_5_aermod_allocated": 0.25,
+            },
+            {
+                "aermod_cell_id": 101,
+                "source_temporal_class": "FREEWAY",
+                "source_release_height": 3.0,
+                "source_urban_class": 1000,
+                "tons_per_year_NOx_aermod_allocated": 2.75,
+                "tons_per_year_PM2_5_aermod_allocated": 0.75,
+            },
+            {
+                "aermod_cell_id": 202,
+                "source_temporal_class": "CITYSTREET",
+                "source_release_height": 1.0,
+                "source_urban_class": 0,
+                "tons_per_year_NOx_aermod_allocated": 5.0,
+                "tons_per_year_PM2_5_aermod_allocated": 1.5,
+            },
+        ]
+    )
+
+    aggregated = _aggregate_aermod_emissions_for_export(
+        aermod_allocated,
+        scratch_dir=tmp_path,
+    ).sort_values("aermod_cell_id").reset_index(drop=True)
+
+    assert aggregated.to_dict("records") == [
+        {
+            "aermod_cell_id": 101,
+            "source_temporal_class": "FREEWAY",
+            "source_release_height": 3.0,
+            "source_urban_class": 1000,
+            "tons_per_year_NOx_aermod_allocated": 4.0,
+            "tons_per_year_PM2_5_aermod_allocated": 1.0,
+        },
+        {
+            "aermod_cell_id": 202,
+            "source_temporal_class": "CITYSTREET",
+            "source_release_height": 1.0,
+            "source_urban_class": 0,
+            "tons_per_year_NOx_aermod_allocated": 5.0,
+            "tons_per_year_PM2_5_aermod_allocated": 1.5,
+        },
+    ]
+
+
+def test_aggregate_aermod_emissions_for_export_requires_canonical_source_columns(tmp_path: Path) -> None:
+    aermod_allocated = pd.DataFrame(
+        [
+            {
+                "aermod_cell_id": 101,
+                "tons_per_year_NOx_aermod_allocated": 1.25,
+            },
+        ]
+    )
+
+    try:
+        _aggregate_aermod_emissions_for_export(
+            aermod_allocated,
+            scratch_dir=tmp_path,
+        )
+    except ValueError as exc:
+        assert str(exc) == (
+            "AERMOD allocated emissions table is missing required columns: "
+            "['source_temporal_class', 'source_release_height', 'source_urban_class']"
+        )
+    else:
+        raise AssertionError("expected canonical AERMOD export columns to be required")
