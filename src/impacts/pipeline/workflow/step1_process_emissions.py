@@ -825,11 +825,19 @@ def run(
         cell_population_path = (manifest_inputs or {}).get("aermod_cell_population")
         if cell_population_path:
             cell_population_path = resolve_required_manifest_input(manifest_inputs, key="aermod_cell_population")
-            cell_pop = read_table(cell_population_path)[["aermod_cell_id", "source_urban_class"]]
+            cell_pop = read_table(cell_population_path)[["aermod_cell_id", "source_urban_class"]].rename(
+                columns={"source_urban_class": "cell_source_urban_class"}
+            )
             cell_pop["aermod_cell_id"] = pd.to_numeric(cell_pop["aermod_cell_id"], errors="coerce")
             aermod_allocated_df["aermod_cell_id"] = pd.to_numeric(aermod_allocated_df["aermod_cell_id"], errors="coerce")
             aermod_allocated_df = aermod_allocated_df.merge(cell_pop, on="aermod_cell_id", how="left")
-            aermod_allocated_df["source_urban_class"] = aermod_allocated_df["source_urban_class"].fillna(0).astype(int)
+            aermod_allocated_df["source_urban_class"] = (
+                pd.to_numeric(aermod_allocated_df["cell_source_urban_class"], errors="coerce")
+                .fillna(aermod_allocated_df["source_urban_class"])
+                .fillna(0)
+                .astype(int)
+            )
+            aermod_allocated_df = aermod_allocated_df.drop(columns=["cell_source_urban_class"])
         _log_step1_elapsed(
             "1.4",
             "AERMOD source attributes prepared",

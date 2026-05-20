@@ -382,3 +382,29 @@ def test_build_corrected_source_totals_preserves_aermod_source_attributes(tmp_pa
             "tons_per_year_NOx": 2.0,
         },
     ]
+
+
+def test_aermod_cell_population_merge_preserves_source_urban_class_column_name() -> None:
+    aermod_allocated_df = pd.DataFrame(
+        [
+            {"aermod_cell_id": 101, "source_urban_class": 0},
+            {"aermod_cell_id": 202, "source_urban_class": 0},
+        ]
+    )
+    cell_pop = pd.DataFrame(
+        [
+            {"aermod_cell_id": 101, "source_urban_class": 1000},
+        ]
+    ).rename(columns={"source_urban_class": "cell_source_urban_class"})
+
+    merged = aermod_allocated_df.merge(cell_pop, on="aermod_cell_id", how="left")
+    merged["source_urban_class"] = (
+        pd.to_numeric(merged["cell_source_urban_class"], errors="coerce")
+        .fillna(merged["source_urban_class"])
+        .fillna(0)
+        .astype(int)
+    )
+    merged = merged.drop(columns=["cell_source_urban_class"])
+
+    assert list(merged.columns) == ["aermod_cell_id", "source_urban_class"]
+    assert merged["source_urban_class"].tolist() == [1000, 0]
