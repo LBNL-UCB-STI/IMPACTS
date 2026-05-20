@@ -74,6 +74,34 @@ def _require_columns(df: pd.DataFrame, *, columns: list[str], label: str) -> Non
         raise ValueError(f"{label} is missing required columns: {missing}")
 
 
+def _log_aermod_urban_class_trace(label: str, df: pd.DataFrame) -> None:
+    tracked_cols = [
+        "aermod_cell_id",
+        "source_urban_class",
+        "source_urban_class_x",
+        "source_urban_class_y",
+        "cell_source_urban_class",
+    ]
+    present_cols = [col for col in tracked_cols if col in df.columns]
+    logger.info("%s trace %s columns=%s", _step_label("1.4"), label, list(df.columns))
+    logger.info(
+        "%s trace %s tracked_present=%s row_count=%d columns_unique=%s duplicate_columns=%s",
+        _step_label("1.4"),
+        label,
+        {col: (col in df.columns) for col in tracked_cols},
+        len(df),
+        bool(df.columns.is_unique),
+        df.columns[df.columns.duplicated()].tolist(),
+    )
+    if present_cols and not df.empty:
+        logger.info(
+            "%s trace %s sample=%s",
+            _step_label("1.4"),
+            label,
+            df[present_cols].head(5).to_dict(orient="records"),
+        )
+
+
 def _safe_ratio(
     numerator: pd.Series,
     denominator: pd.Series,
@@ -808,6 +836,8 @@ def run(
         inmap_rows=0 if inmap_allocated_df is None else len(inmap_allocated_df),
         aermod_rows=0 if aermod_allocated_df is None else len(aermod_allocated_df),
     )
+    if aermod_allocated_df is not None and not aermod_allocated_df.empty:
+        _log_aermod_urban_class_trace("post zone allocation output", aermod_allocated_df)
 
     if aermod_allocated_df is not None and not aermod_allocated_df.empty:
         aermod_attrs_started = time.perf_counter()
@@ -821,7 +851,9 @@ def run(
             lambda cats: "FREEWAY" if cats.map(_OSM_TO_AERMOD_TEMPORAL).fillna("CITYSTREET").eq("FREEWAY").any() else "CITYSTREET"
         )
         aermod_allocated_df["source_release_height"] = aermod_allocated_df.groupby("aermod_cell_id")["source_release_height"].transform("max")
+        _log_aermod_urban_class_trace("before source_urban_class init", aermod_allocated_df)
         aermod_allocated_df["source_urban_class"] = 0
+        _log_aermod_urban_class_trace("after source_urban_class init", aermod_allocated_df)
         cell_population_path = (manifest_inputs or {}).get("aermod_cell_population")
         if cell_population_path:
             cell_population_path = resolve_required_manifest_input(manifest_inputs, key="aermod_cell_population")
@@ -830,7 +862,18 @@ def run(
             )
             cell_pop["aermod_cell_id"] = pd.to_numeric(cell_pop["aermod_cell_id"], errors="coerce")
             aermod_allocated_df["aermod_cell_id"] = pd.to_numeric(aermod_allocated_df["aermod_cell_id"], errors="coerce")
+            _log_aermod_urban_class_trace("before population merge", aermod_allocated_df)
+            logger.info(
+                "%s trace aermod cell population rows=%d duplicate_aermod_cell_id=%d null_aermod_cell_id=%d null_cell_source_urban_class=%d sample=%s",
+                _step_label("1.4"),
+                len(cell_pop),
+                int(cell_pop["aermod_cell_id"].duplicated().sum()),
+                int(cell_pop["aermod_cell_id"].isna().sum()),
+                int(cell_pop["cell_source_urban_class"].isna().sum()),
+                cell_pop[["aermod_cell_id", "cell_source_urban_class"]].head(5).to_dict(orient="records"),
+            )
             aermod_allocated_df = aermod_allocated_df.merge(cell_pop, on="aermod_cell_id", how="left")
+            _log_aermod_urban_class_trace("after population merge", aermod_allocated_df)
             aermod_allocated_df["source_urban_class"] = (
                 pd.to_numeric(aermod_allocated_df["cell_source_urban_class"], errors="coerce")
                 .fillna(aermod_allocated_df["source_urban_class"])
