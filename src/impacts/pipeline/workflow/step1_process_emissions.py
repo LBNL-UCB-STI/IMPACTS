@@ -696,6 +696,7 @@ def run(
         include_passenger=bool(pipeline.include_passenger),
         include_freight=bool(pipeline.include_freight),
         manifest_inputs=manifest_inputs,
+        require_aermod_support=bool(pipeline.aermod_grid_path),
     )
     _log_step1_elapsed("1.0", "prepare skims inputs complete", skims_started, rows=len(skims_df))
 

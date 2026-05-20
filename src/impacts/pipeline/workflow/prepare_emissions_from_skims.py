@@ -15,6 +15,7 @@ import duckdb
 import pandas as pd
 
 from ...common import configure_duckdb_connection
+from ...common import _table_available_columns
 from ...common import normalize_county_fips
 from ...common import prepare_skims_for_grid_allocation
 from ...common import prepared_table_target
@@ -85,6 +86,19 @@ def _existing_valid_skims_parquet(path: Path) -> Optional[str]:
     except Exception:
         pass
     return None
+
+
+def _validate_prepared_skims_schema(*, path: str, require_aermod_support: bool) -> None:
+    if not require_aermod_support:
+        return
+    available = set(_table_available_columns(path))
+    required = {"roadCategory", "source_release_height"}
+    missing = sorted(required - available)
+    if missing:
+        raise ValueError(
+            "Prepared skims cache is stale for AERMOD processing and must be rebuilt. "
+            f"Cached file {path} is missing required columns: {missing}"
+        )
 
 
 def _load_intersection_subset(path: str, columns: List[str]) -> pd.DataFrame:
@@ -565,11 +579,16 @@ def prepare_staged_skims_for_processing(
     transit_sample: float,
     include_passenger: bool,
     include_freight: bool,
+    require_aermod_support: bool = False,
 ) -> pd.DataFrame:
     started = time.perf_counter()
     prepared_skims_path = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
     prepared_skims_existing = _existing_valid_skims_parquet(prepared_skims_path)
     if prepared_skims_existing:
+        _validate_prepared_skims_schema(
+            path=prepared_skims_existing,
+            require_aermod_support=require_aermod_support,
+        )
         logger.info("Step 1: reusing prepared skims %s", prepared_skims_path)
         return read_table(prepared_skims_path)
 
@@ -639,9 +658,14 @@ def load_or_prepare_skims_df(
     include_passenger: bool,
     include_freight: bool,
     manifest_inputs: Optional[Dict[str, Any]] = None,
+    require_aermod_support: bool = False,
 ) -> pd.DataFrame:
     prepared_path = resolve_prepared_skims_path(input_root)
     if prepared_path:
+        _validate_prepared_skims_schema(
+            path=prepared_path,
+            require_aermod_support=require_aermod_support,
+        )
         logger.info("Step 1: using prepared skims %s", prepared_path)
         return read_table(prepared_path)
 
@@ -669,6 +693,7 @@ def load_or_prepare_skims_df(
             transit_sample=transit_sample,
             include_passenger=include_passenger,
             include_freight=include_freight,
+            require_aermod_support=require_aermod_support,
         )
 
     from .prepare_emissions_from_events import build_staged_skims_from_events
@@ -703,4 +728,5 @@ def load_or_prepare_skims_df(
         transit_sample=transit_sample,
         include_passenger=include_passenger,
         include_freight=include_freight,
+        require_aermod_support=require_aermod_support,
     )

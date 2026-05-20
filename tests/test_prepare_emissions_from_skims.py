@@ -455,6 +455,35 @@ def test_prepare_staged_skims_for_processing_reuses_grouped_intermediate(tmp_pat
     ]
 
 
+def test_load_or_prepare_skims_df_rejects_stale_prepared_cache_for_aermod(tmp_path: Path) -> None:
+    input_root = tmp_path / "inputs"
+    prepared_path = input_root / "skims" / "prepared_skims_for_grid_allocation.parquet"
+    prepared_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {"linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "totTrips": 10.0, "totVMT": 3.0, "tons_per_year_NOx": 0.1},
+        ]
+    ).to_parquet(prepared_path, index=False)
+
+    with pytest.raises(ValueError, match="Prepared skims cache is stale for AERMOD processing and must be rebuilt"):
+        prepare_skims_module.load_or_prepare_skims_df(
+            input_root=input_root,
+            intersection_path="",
+            beam_length_col="length",
+            prepared_skims_group_cols=["linkId", "vehicleTypeId", "process"],
+            pollutants=["NOx"],
+            pollutants_map={},
+            vehicle_category_metadata_file=str(tmp_path / "vehicle_categories.csv"),
+            annualization_days={"light_duty": 327.0},
+            population_sample=1.0,
+            transit_sample=1.0,
+            include_passenger=True,
+            include_freight=False,
+            manifest_inputs=None,
+            require_aermod_support=True,
+        )
+
+
 def test_prepare_staged_skims_for_processing_rebuilds_invalid_grouped_intermediate(tmp_path: Path, monkeypatch) -> None:
     input_root = tmp_path / "inputs"
     grouped_path = input_root / "skims" / "prepared_skims_grouped_for_grid_allocation.parquet"
