@@ -383,6 +383,11 @@ def _build_corrected_source_totals(
     if county_corrected_df is None or county_corrected_df.empty:
         return None
     group_cols = ["linkId", "vehicleTypeId", "process"]
+    passthrough_cols = []
+    if "roadCategory" in county_corrected_df.columns:
+        passthrough_cols.append("roadCategory")
+    if "source_release_height" in county_corrected_df.columns:
+        passthrough_cols.append("source_release_height")
     required = set(group_cols)
     missing = sorted(required - set(county_corrected_df.columns))
     if missing:
@@ -393,6 +398,12 @@ def _build_corrected_source_totals(
         configure_duckdb_connection(con, working_dir=scratch_dir, show_progress=True, profile="memory_heavy")
         con.register("county_corrected_df", county_corrected_df)
         select_parts = [f'"{col}"' for col in group_cols]
+        if "roadCategory" in passthrough_cols:
+            select_parts.append('ANY_VALUE("roadCategory") AS "roadCategory"')
+        if "source_release_height" in passthrough_cols:
+            select_parts.append(
+                'MAX(COALESCE(TRY_CAST("source_release_height" AS DOUBLE), 1.0)) AS "source_release_height"'
+            )
         select_parts.extend(
             f'SUM(COALESCE(TRY_CAST("{col}" AS DOUBLE), 0.0)) AS "{col}"'
             for col in value_cols

@@ -8,6 +8,7 @@ import pandas as pd
 from impacts.pipeline.workflow.step1_process_emissions import _derive_county_correction_factors
 from impacts.pipeline.workflow.step1_process_emissions import _derive_inventory_activity_targets_for_assignment
 from impacts.pipeline.workflow.step1_process_emissions import _build_county_corrected_table
+from impacts.pipeline.workflow.step1_process_emissions import _build_corrected_source_totals
 from impacts.pipeline.workflow.step1_process_emissions import _aggregate_aermod_emissions_for_export
 from impacts.pipeline.workflow.step1_process_emissions import apply_county_corrections
 
@@ -336,3 +337,48 @@ def test_aggregate_aermod_emissions_for_export_requires_canonical_source_columns
         )
     else:
         raise AssertionError("expected canonical AERMOD export columns to be required")
+
+
+def test_build_corrected_source_totals_preserves_aermod_source_attributes(tmp_path: Path) -> None:
+    county_corrected = pd.DataFrame(
+        [
+            {
+                "linkId": 101,
+                "vehicleTypeId": "pax-car",
+                "process": "RUNEX",
+                "roadCategory": "motorway",
+                "source_release_height": 3.0,
+                "totVMT_county_allocated": 10.0,
+                "totTrips_county_allocated": 2.0,
+                "tons_per_year_NOx_county_allocated": 1.25,
+            },
+            {
+                "linkId": 101,
+                "vehicleTypeId": "pax-car",
+                "process": "RUNEX",
+                "roadCategory": "motorway",
+                "source_release_height": 3.0,
+                "totVMT_county_allocated": 5.0,
+                "totTrips_county_allocated": 1.0,
+                "tons_per_year_NOx_county_allocated": 0.75,
+            },
+        ]
+    )
+
+    corrected = _build_corrected_source_totals(
+        county_corrected,
+        scratch_dir=tmp_path,
+    )
+
+    assert corrected.to_dict("records") == [
+        {
+            "linkId": 101,
+            "vehicleTypeId": "pax-car",
+            "process": "RUNEX",
+            "roadCategory": "motorway",
+            "source_release_height": 3.0,
+            "totVMT": 15.0,
+            "totTrips": 3.0,
+            "tons_per_year_NOx": 2.0,
+        },
+    ]
