@@ -98,14 +98,6 @@ def _use_existing_reference(manifest_inputs: Dict[str, Any], key: str, entry: Di
     return resolve_logged_path(entry)
 
 
-def _derive_emfacid_activity_path(path_like: str) -> Optional[str]:
-    source = Path(str(path_like)).expanduser().resolve()
-    name = source.name
-    if name.endswith("-activity.parquet"):
-        derived = source.with_name(name.replace("-activity.parquet", "-activity-by-emfacid.parquet"))
-    else:
-        derived = source.with_name(f"{source.stem}-by-emfacid{source.suffix}")
-    return str(derived) if derived.exists() else None
 
 
 def _locate_exchange_file(folder: Path, stem: str) -> Optional[str]:
@@ -208,13 +200,9 @@ def run(
         finally:
             _close_progress(progress)
 
-    log_substep_banner("1.2", "register production inputs", logger=logger)
-    substep_12_total = 6
+    log_substep_banner("1.2", "register emissions processing inputs", logger=logger)
+    substep_12_total = 4  # osm, rates, passenger vehicle types, freight vehicle types
     if emissions.vehicle_category_metadata_file:
-        substep_12_total += 1
-    if inmap.enabled:
-        substep_12_total += 2
-    if aermod.enabled:
         substep_12_total += 1
     with logging_redirect_tqdm():
         progress = _progress(substep_12_total, "Preprocess Step 1.2")
@@ -263,64 +251,6 @@ def run(
                 relative_target=emissions.emissions_rates_folder,
                 metadata={"artifact_family": "emissions_rates_folder"},
             )
-            _advance_progress(progress)
-
-            _set_progress_task(progress, "passenger inventory", step_label="Preprocess Step 1.2")
-            passenger_inventory_source = required_local_path(
-                _resolve_region_or_absolute_path(
-                    emissions.inventory.passenger_file,
-                    region_input_root=region_input_root,
-                    config_path=config_path,
-                ),
-                "impacts.emissions.inventory.passenger_file",
-            )
-            staged_passenger_inventory_file = _register_manifest_input(
-                manifest_inputs,
-                input_root=input_root,
-                key="passenger_inventory_file",
-                source_path=passenger_inventory_source,
-                relative_target=str(emissions.inventory.passenger_file),
-                metadata={"artifact_family": "passenger_inventory_file"},
-            )
-            passenger_inventory_emfacid_source = _derive_emfacid_activity_path(passenger_inventory_source)
-            if passenger_inventory_emfacid_source:
-                _register_manifest_input(
-                    manifest_inputs,
-                    input_root=input_root,
-                    key="passenger_inventory_emfacid_file",
-                    source_path=passenger_inventory_emfacid_source,
-                    relative_target=Path(passenger_inventory_emfacid_source).name,
-                    metadata={"artifact_family": "passenger_inventory_emfacid_file"},
-                )
-            _advance_progress(progress)
-
-            _set_progress_task(progress, "freight inventory", step_label="Preprocess Step 1.2")
-            freight_inventory_source = required_local_path(
-                _resolve_region_or_absolute_path(
-                    emissions.inventory.freight_file,
-                    region_input_root=region_input_root,
-                    config_path=config_path,
-                ),
-                "impacts.emissions.inventory.freight_file",
-            )
-            staged_freight_inventory_file = _register_manifest_input(
-                manifest_inputs,
-                input_root=input_root,
-                key="freight_inventory_file",
-                source_path=freight_inventory_source,
-                relative_target=str(emissions.inventory.freight_file),
-                metadata={"artifact_family": "freight_inventory_file"},
-            )
-            freight_inventory_emfacid_source = _derive_emfacid_activity_path(freight_inventory_source)
-            if freight_inventory_emfacid_source:
-                _register_manifest_input(
-                    manifest_inputs,
-                    input_root=input_root,
-                    key="freight_inventory_emfacid_file",
-                    source_path=freight_inventory_emfacid_source,
-                    relative_target=Path(freight_inventory_emfacid_source).name,
-                    metadata={"artifact_family": "freight_inventory_emfacid_file"},
-                )
             _advance_progress(progress)
 
             _set_progress_task(progress, "passenger vehicle types", step_label="Preprocess Step 1.2")
@@ -380,81 +310,176 @@ def run(
                     metadata={"artifact_family": "vehicle_category_metadata_file_input"},
                 )
                 _advance_progress(progress)
-
-            if inmap.enabled:
-                _set_progress_task(progress, "inmap grid", step_label="Preprocess Step 1.2")
-                inmap_grid_source = required_local_path(
-                    str((region_input_root / inmap.grid_path).resolve()),
-                    "impacts.dispersions.inmap.grid_path",
-                )
-                staged_inmap_grid = _register_manifest_input(
-                    manifest_inputs,
-                    input_root=input_root,
-                    key="inmap_grid",
-                    source_path=inmap_grid_source,
-                    relative_target=inmap.grid_path,
-                    metadata={"artifact_family": "inmap_grid"},
-                )
-                _advance_progress(progress)
-
-                _set_progress_task(progress, "nox-to-no2 ratios", step_label="Preprocess Step 1.2")
-                no2_matrix_source = required_local_path(
-                    str((region_input_root / inmap.isrm_nox_to_no2_ratios_file).resolve()),
-                    "impacts.dispersions.inmap.isrm_nox_to_no2_ratios_file",
-                )
-                staged_isrm_nox_to_no2_ratios_file = _register_manifest_input(
-                    manifest_inputs,
-                    input_root=input_root,
-                    key="isrm_nox_to_no2_ratios_file",
-                    source_path=no2_matrix_source,
-                    relative_target=inmap.isrm_nox_to_no2_ratios_file,
-                    metadata={"artifact_family": "isrm_nox_to_no2_ratios_file"},
-                )
-                _advance_progress(progress)
-
-            if aermod.enabled:
-                _set_progress_task(progress, "asrv patterns", step_label="Preprocess Step 1.2")
-                asrv_source = required_local_path(
-                    str((region_input_root / aermod.asrv_patterns_file).resolve()),
-                    "impacts.dispersions.aermod.asrv_patterns_file",
-                )
-                staged_asrv_patterns_file = _register_manifest_input(
-                    manifest_inputs,
-                    input_root=input_root,
-                    key="asrv_patterns_file",
-                    source_path=asrv_source,
-                    relative_target=aermod.asrv_patterns_file,
-                    metadata={"artifact_family": "asrv_patterns_file"},
-                )
-                _advance_progress(progress)
         finally:
             _close_progress(progress)
 
-    log_substep_banner("1.3", "register external dispersion store", logger=logger)
-    if inmap.enabled:
-        with logging_redirect_tqdm():
-            progress = _progress(1, "Preprocess Step 1.3")
-            try:
-                _set_progress_task(progress, "isrm store", step_label="Preprocess Step 1.3")
-                isrm_source = required_local_path(
-                    resolve_path(inmap.isrm_zarr, config_path),
-                    "impacts.dispersions.inmap.isrm_zarr",
+    log_substep_banner("1.3", "register EMFAC inventory inputs", logger=logger)
+    from ...emfac.config import load_activities_workflow
+    emfac_paths = load_activities_workflow(config_path)["paths"]
+    for _key, _label in [
+        ("final_activity_emfacid_output_passenger", "passenger"),
+        ("final_activity_emfacid_output_freight", "freight"),
+    ]:
+        if not Path(emfac_paths[_key]).exists():
+            raise FileNotFoundError(
+                f"Preprocess Step 1.3 requires the EMFAC {_label} activity-by-emfacId file "
+                f"at {emfac_paths[_key]}, but it was not found. "
+                f"Re-run the EMFAC activities workflow to generate it: "
+                f"python -m impacts emfac activities --config <config>"
+            )
+    passenger_emfacid_source = emfac_paths["final_activity_emfacid_output_passenger"]
+    freight_emfacid_source = emfac_paths["final_activity_emfacid_output_freight"]
+    staged_passenger_inventory_file = None
+    staged_freight_inventory_file = None
+    substep_13_total = 2  # passenger emfacid, freight emfacid
+    if emissions.inventory.enable_passenger_activity_correction:
+        substep_13_total += 1
+    if emissions.inventory.enable_freight_activity_correction:
+        substep_13_total += 1
+    with logging_redirect_tqdm():
+        progress = _progress(substep_13_total, "Preprocess Step 1.3")
+        try:
+            if emissions.inventory.enable_passenger_activity_correction:
+                _set_progress_task(progress, "passenger inventory", step_label="Preprocess Step 1.3")
+                passenger_inventory_source = required_local_path(
+                    _resolve_region_or_absolute_path(
+                        emissions.inventory.passenger_file,
+                        region_input_root=region_input_root,
+                        config_path=config_path,
+                    ),
+                    "impacts.emissions.inventory.passenger_file",
                 )
-                staged_isrm = _register_manifest_input(
+                staged_passenger_inventory_file = _register_manifest_input(
                     manifest_inputs,
                     input_root=input_root,
-                    key="isrm",
-                    source_path=isrm_source,
-                    relative_target=Path(isrm_source).name,
-                    metadata={"artifact_family": "isrm"},
+                    key="passenger_inventory_file",
+                    source_path=passenger_inventory_source,
+                    relative_target=str(emissions.inventory.passenger_file),
+                    metadata={"artifact_family": "passenger_inventory_file"},
                 )
                 _advance_progress(progress)
+
+            _set_progress_task(progress, "passenger emfac inventory", step_label="Preprocess Step 1.3")
+            _register_manifest_input(
+                manifest_inputs,
+                input_root=input_root,
+                key="passenger_inventory_emfacid_file",
+                source_path=passenger_emfacid_source,
+                relative_target=Path(passenger_emfacid_source).name,
+                metadata={"artifact_family": "passenger_inventory_emfacid_file"},
+            )
+            _advance_progress(progress)
+
+            if emissions.inventory.enable_freight_activity_correction:
+                _set_progress_task(progress, "freight inventory", step_label="Preprocess Step 1.3")
+                freight_inventory_source = required_local_path(
+                    _resolve_region_or_absolute_path(
+                        emissions.inventory.freight_file,
+                        region_input_root=region_input_root,
+                        config_path=config_path,
+                    ),
+                    "impacts.emissions.inventory.freight_file",
+                )
+                staged_freight_inventory_file = _register_manifest_input(
+                    manifest_inputs,
+                    input_root=input_root,
+                    key="freight_inventory_file",
+                    source_path=freight_inventory_source,
+                    relative_target=str(emissions.inventory.freight_file),
+                    metadata={"artifact_family": "freight_inventory_file"},
+                )
+                _advance_progress(progress)
+
+            _set_progress_task(progress, "freight emfac inventory", step_label="Preprocess Step 1.3")
+            _register_manifest_input(
+                manifest_inputs,
+                input_root=input_root,
+                key="freight_inventory_emfacid_file",
+                source_path=freight_emfacid_source,
+                relative_target=Path(freight_emfacid_source).name,
+                metadata={"artifact_family": "freight_inventory_emfacid_file"},
+            )
+            _advance_progress(progress)
+        finally:
+            _close_progress(progress)
+
+    if inmap.enabled or aermod.enabled:
+        log_substep_banner("1.4", "register dispersion inputs", logger=logger)
+        substep_14_total = 0
+        if inmap.enabled:
+            substep_14_total += 3  # grid, nox-to-no2 ratios, isrm store
+        if aermod.enabled:
+            substep_14_total += 1  # asrv patterns
+        with logging_redirect_tqdm():
+            progress = _progress(substep_14_total, "Preprocess Step 1.4")
+            try:
+                if inmap.enabled:
+                    _set_progress_task(progress, "inmap grid", step_label="Preprocess Step 1.4")
+                    inmap_grid_source = required_local_path(
+                        str((region_input_root / inmap.grid_path).resolve()),
+                        "impacts.dispersions.inmap.grid_path",
+                    )
+                    staged_inmap_grid = _register_manifest_input(
+                        manifest_inputs,
+                        input_root=input_root,
+                        key="inmap_grid",
+                        source_path=inmap_grid_source,
+                        relative_target=inmap.grid_path,
+                        metadata={"artifact_family": "inmap_grid"},
+                    )
+                    _advance_progress(progress)
+
+                    _set_progress_task(progress, "nox-to-no2 ratios", step_label="Preprocess Step 1.4")
+                    no2_matrix_source = required_local_path(
+                        str((region_input_root / inmap.isrm_nox_to_no2_ratios_file).resolve()),
+                        "impacts.dispersions.inmap.isrm_nox_to_no2_ratios_file",
+                    )
+                    staged_isrm_nox_to_no2_ratios_file = _register_manifest_input(
+                        manifest_inputs,
+                        input_root=input_root,
+                        key="isrm_nox_to_no2_ratios_file",
+                        source_path=no2_matrix_source,
+                        relative_target=inmap.isrm_nox_to_no2_ratios_file,
+                        metadata={"artifact_family": "isrm_nox_to_no2_ratios_file"},
+                    )
+                    _advance_progress(progress)
+
+                    _set_progress_task(progress, "isrm store", step_label="Preprocess Step 1.4")
+                    isrm_source = required_local_path(
+                        resolve_path(inmap.isrm_zarr, config_path),
+                        "impacts.dispersions.inmap.isrm_zarr",
+                    )
+                    staged_isrm = _register_manifest_input(
+                        manifest_inputs,
+                        input_root=input_root,
+                        key="isrm",
+                        source_path=isrm_source,
+                        relative_target=Path(isrm_source).name,
+                        metadata={"artifact_family": "isrm"},
+                    )
+                    _advance_progress(progress)
+
+                if aermod.enabled:
+                    _set_progress_task(progress, "asrv patterns", step_label="Preprocess Step 1.4")
+                    asrv_source = required_local_path(
+                        str((region_input_root / aermod.asrv_patterns_file).resolve()),
+                        "impacts.dispersions.aermod.asrv_patterns_file",
+                    )
+                    staged_asrv_patterns_file = _register_manifest_input(
+                        manifest_inputs,
+                        input_root=input_root,
+                        key="asrv_patterns_file",
+                        source_path=asrv_source,
+                        relative_target=aermod.asrv_patterns_file,
+                        metadata={"artifact_family": "asrv_patterns_file"},
+                    )
+                    _advance_progress(progress)
             finally:
                 _close_progress(progress)
 
     population_inputs: Dict[str, Any] = {}
     if exposure.enabled:
-        log_substep_banner("1.4", "register exposure population inputs", logger=logger)
+        log_substep_banner("1.5", "register exposure population inputs", logger=logger)
         population_root = region_input_root / str(exposure.population_folder)
         population_artifact_entries = {
             "persons": find_latest_beam_population_reference(optional=True),
@@ -465,10 +490,10 @@ def run(
             "households": BEAM_HOUSEHOLDS_PREFIX,
         }
         with logging_redirect_tqdm():
-            progress = _progress(2, "Preprocess Step 1.4")
+            progress = _progress(2, "Preprocess Step 1.5")
             try:
                 for stem in ("persons", "households"):
-                    _set_progress_task(progress, stem, step_label="Preprocess Step 1.4")
+                    _set_progress_task(progress, stem, step_label="Preprocess Step 1.5")
                     existing_entry = population_artifact_entries[stem]
                     if existing_entry is not None:
                         population_inputs[stem] = existing_entry

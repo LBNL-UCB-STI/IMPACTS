@@ -219,48 +219,21 @@ def _resolve_analysis_inventory_target_path(settings_path: str | Path, raw: str)
     )
 
 
-def _resolve_analysis_inventory_paths(settings_path: str | Path) -> tuple[Path, Path]:
-    _, _, _, inputs = _load_analysis_context(settings_path)
-    passenger_candidate = Path(resolve_required_manifest_input(inputs, key="passenger_inventory_file")).resolve()
-    freight_candidate = Path(resolve_required_manifest_input(inputs, key="freight_inventory_file")).resolve()
-    if not passenger_candidate.exists():
-        raise FileNotFoundError(
-            "Analysis requires staged passenger EMFAC inventory activity input from preprocess. "
-            f"Expected {passenger_candidate}."
-        )
-    if not freight_candidate.exists():
-        raise FileNotFoundError(
-            "Analysis requires staged freight EMFAC inventory activity input from preprocess. "
-            f"Expected {freight_candidate}."
-        )
-    return passenger_candidate, freight_candidate
-
 
 def _resolve_analysis_inventory_emfacid_activity_path(
     settings_path: str | Path,
     *,
-    source: str | Path,
-    manifest_key: str | None = None,
+    manifest_key: str,
 ) -> Path:
-    if manifest_key:
-        _, _, _, inputs = _load_analysis_context(settings_path)
-        candidate_raw = inputs.get(manifest_key)
-        if candidate_raw:
-            candidate = Path(resolve_required_manifest_input(inputs, key=manifest_key)).resolve()
-            if candidate.exists():
-                return candidate
-    source = Path(source).resolve()
-    name = source.name
-    if name.endswith("-activity.parquet"):
-        derived = source.with_name(name.replace("-activity.parquet", "-activity-by-emfacid.parquet"))
-    else:
-        derived = source.with_name(f"{source.stem}-by-emfacid{source.suffix}")
-    if derived.exists():
-        return derived
-    raise FileNotFoundError(
-        "Analysis Step 1 requires an EMFAC activity-by-emfacId file, but it was not found. "
-        f"Expected {derived}."
-    )
+    _, _, _, inputs = _load_analysis_context(settings_path)
+    candidate = Path(resolve_required_manifest_input(inputs, key=manifest_key)).resolve()
+    if not candidate.exists():
+        raise FileNotFoundError(
+            f"Analysis Step 1 requires the EMFAC activity-by-emfacId file registered as "
+            f"'{manifest_key}', but it was not found at {candidate}. "
+            f"Re-run the EMFAC activities workflow: python -m impacts emfac activities --config <config>"
+        )
+    return candidate
 
 
 def _resolve_analysis_vehicle_category_metadata_path(settings_path: str | Path) -> Path:
@@ -304,15 +277,12 @@ def run_analysis_from_settings(
     outputs: Dict[str, str] = {}
     passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_analysis_vehicle_types_paths(settings_path)
     passenger_vehicles_path, freight_carriers_path = _resolve_optional_analysis_population_assignment_paths(settings_path)
-    passenger_inventory_path, freight_inventory_path = _resolve_analysis_inventory_paths(settings_path)
     passenger_activity_path = _resolve_analysis_inventory_emfacid_activity_path(
         settings_path,
-        source=passenger_inventory_path,
         manifest_key="passenger_inventory_emfacid_file",
     )
     freight_activity_path = _resolve_analysis_inventory_emfacid_activity_path(
         settings_path,
-        source=freight_inventory_path,
         manifest_key="freight_inventory_emfacid_file",
     )
     fleet_outputs = run_step1(

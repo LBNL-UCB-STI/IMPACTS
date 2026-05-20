@@ -639,8 +639,6 @@ def _build_county_corrected_table(
         dynamic_ncols=True,
         disable=not logger.isEnabledFor(logging.INFO),
     )
-    passenger_inventory_path = pipeline.passenger_inventory_file
-    freight_inventory_path = pipeline.freight_inventory_file
     passenger_vehicle_types_path = resolve_required_manifest_input(manifest_inputs, key="passenger_vehicle_types_input")
     freight_vehicle_types_path = resolve_required_manifest_input(manifest_inputs, key="freight_vehicle_types_input")
     county_boundaries_path = resolve_required_manifest_input(manifest_inputs, key="county_boundaries")
@@ -655,6 +653,7 @@ def _build_county_corrected_table(
         county_name_lookup = _build_county_name_lookup(county_boundaries_path)
         inventory_targets_frames: list[pd.DataFrame] = []
         if pipeline.enable_passenger_inventory_activity_correction:
+            passenger_inventory_path = pipeline.passenger_inventory_file
             logger.info(
                 "%s deriving passenger county activity correction factors from inventory %s",
                 _step_label("1.3"),
@@ -668,6 +667,7 @@ def _build_county_corrected_table(
                 )
             )
         if pipeline.enable_freight_inventory_activity_correction:
+            freight_inventory_path = pipeline.freight_inventory_file
             logger.info(
                 "%s deriving freight county activity correction factors from inventory %s",
                 _step_label("1.3"),

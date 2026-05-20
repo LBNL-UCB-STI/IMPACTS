@@ -132,14 +132,6 @@ class PipelineConfig:
             start_year=_required_int(payload.get("start_year"), "pipeline.start_year"),
             county_state_fips=_required_string(payload.get("county_state_fips"), "pipeline.county_state_fips"),
             county_fips_codes=_coerce_string_list(payload.get("county_fips_codes")),
-            passenger_inventory_file=_required_string(
-                payload.get("passenger_inventory_file"),
-                "pipeline.passenger_inventory_file",
-            ),
-            freight_inventory_file=_required_string(
-                payload.get("freight_inventory_file"),
-                "pipeline.freight_inventory_file",
-            ),
             enable_passenger_inventory_activity_correction=(
                 _required_bool(
                     payload.get("enable_passenger_inventory_activity_correction"),
@@ -155,6 +147,22 @@ class PipelineConfig:
                 )
                 if payload.get("enable_freight_inventory_activity_correction") is not None
                 else True
+            ),
+            passenger_inventory_file=(
+                _required_string(
+                    payload.get("passenger_inventory_file"),
+                    "pipeline.passenger_inventory_file",
+                )
+                if payload.get("enable_passenger_inventory_activity_correction", True)
+                else _optional_string(payload.get("passenger_inventory_file"))
+            ),
+            freight_inventory_file=(
+                _required_string(
+                    payload.get("freight_inventory_file"),
+                    "pipeline.freight_inventory_file",
+                )
+                if payload.get("enable_freight_inventory_activity_correction", True)
+                else _optional_string(payload.get("freight_inventory_file"))
             ),
             passenger_vehicle_types_file=_required_string(
                 payload.get("passenger_vehicle_types_file"),
