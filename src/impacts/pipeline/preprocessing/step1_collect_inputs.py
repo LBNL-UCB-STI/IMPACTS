@@ -125,6 +125,8 @@ def _resolve_region_or_absolute_path(raw_path: str, *, region_input_root: Path, 
     raw = str(raw_path).strip()
     if raw.startswith("~") or Path(raw).is_absolute():
         return resolve_path(raw, config_path) or raw
+    if raw.startswith("./") or raw.startswith("../"):
+        return str((config_path.parent / raw).resolve())
     return str((region_input_root / raw).resolve())
 
 

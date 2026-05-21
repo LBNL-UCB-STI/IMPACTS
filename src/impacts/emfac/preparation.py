@@ -156,8 +156,7 @@ def build_activities_workflow_from_settings(
     if emfac_root_config.get("activities", {}).get("model_year_groups"):
         activities_override["model_year_groups"] = emfac_root_config["activities"]["model_year_groups"]
 
-    # Output under beam data vehicle-tech so activities/ lands alongside other beam artifacts
-    output_root = beam_input_folder / region_name / "vehicle-tech"
+    output_root = local_input_folder / "emfac"
     merged_emfac = {**emfac_root_config, "output": str(output_root)}
     merged_emfac.setdefault("activities", {})
     merged_emfac["activities"] = {**merged_emfac.get("activities", {}), **activities_override}
