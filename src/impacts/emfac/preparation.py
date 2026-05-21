@@ -70,7 +70,6 @@ def _ensure_raw_data(emfac_root: Path, beam_input_folder: Path, region_name: str
             f"EMFAC activities outputs are missing and the raw data archive was not found at {archive}. "
             f"Place {_ARCHIVE_NAME} there or pre-extract the data to {emfac_root}."
         )
-    logger.info("Extracting %s → %s", archive, emfac_root)
     _extract_archive(archive, emfac_root)
     if not _is_extracted(emfac_root, region_name):
         raise RuntimeError(

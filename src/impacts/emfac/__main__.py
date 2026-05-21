@@ -53,6 +53,8 @@ def _ensure_activities(config_path: str) -> None:
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     workflow, config_path = _parse_workflow_and_config(args)
+    if not config_path:
+        raise SystemExit("--config is required. Usage: python -m impacts.emfac --config <settings.yaml>")
     if workflow == "activities":
         _ensure_activities(config_path)
         return
