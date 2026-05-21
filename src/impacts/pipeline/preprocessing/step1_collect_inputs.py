@@ -100,6 +100,24 @@ def _use_existing_reference(manifest_inputs: Dict[str, Any], key: str, entry: Di
 
 
 
+def _emfacid_exists(inventory_path: str) -> bool:
+    source = Path(inventory_path).resolve()
+    name = source.name
+    if name.endswith("-activity.parquet"):
+        derived = source.with_name(name.replace("-activity.parquet", "-activity-by-emfacid.parquet"))
+    else:
+        derived = source.with_name(f"{source.stem}-by-emfacid{source.suffix}")
+    return derived.exists()
+
+
+def _maybe_run_emfac_activities(settings, config_path: Path) -> None:
+    from ...emfac.preparation import build_activities_workflow_from_settings
+    from ...emfac.activities.main import run_workflow as run_activities_workflow
+    log_substep_banner("1.3a", "generate EMFAC inventory via activities workflow", logger=logger)
+    workflow = build_activities_workflow_from_settings(settings, config_path)
+    run_activities_workflow(workflow)
+
+
 def _resolve_emfacid_path(inventory_path: str, *, label: str) -> str:
     source = Path(inventory_path).resolve()
     name = source.name
@@ -333,12 +351,15 @@ def run(
             _close_progress(progress)
 
     log_substep_banner("1.3", "register EMFAC inventory inputs", logger=logger)
+    _passenger_inventory_resolved = _resolve_region_or_absolute_path(
+        emissions.inventory.passenger_file,
+        region_input_root=region_input_root,
+        config_path=config_path,
+    )
+    if not _emfacid_exists(_passenger_inventory_resolved):
+        _maybe_run_emfac_activities(settings, config_path)
     passenger_emfacid_source = _resolve_emfacid_path(
-        _resolve_region_or_absolute_path(
-            emissions.inventory.passenger_file,
-            region_input_root=region_input_root,
-            config_path=config_path,
-        ),
+        _passenger_inventory_resolved,
         label="passenger",
     )
     freight_emfacid_source = _resolve_emfacid_path(
