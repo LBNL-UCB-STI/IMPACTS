@@ -568,19 +568,6 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
     }
 
 
-def load_activities_workflow(config_path: str | Path | None = None) -> dict[str, object]:
-    source_path = Path(config_path) if config_path is not None else DEFAULT_CONFIG_PATH
-    raw = _build_activities_config_from_root(_load_emfac_root(source_path))
-    return _build_activities_workflow(raw, source_path)
-
-
-def load_activities_workflow_from_data(raw: dict[str, object], *, source_label: str = "<in-memory>") -> dict[str, object]:
-    return _build_activities_workflow(deepcopy(raw), Path(source_label))
-
-
-def load_default_activities_workflow() -> dict[str, object]:
-    return load_activities_workflow(DEFAULT_CONFIG_PATH)
-
 
 def _load_model_spec(model_spec_path: str) -> dict:
     spec_path = Path(model_spec_path)

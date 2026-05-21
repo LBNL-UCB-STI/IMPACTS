@@ -1,10 +1,5 @@
-"""Main entrypoint for the step-based EMFAC assembly workflow."""
+from __future__ import annotations
 
-from pathlib import Path
-import sys
-
-from impacts.emfac.config import load_activities_workflow
-from impacts.emfac.config import load_default_activities_workflow
 from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import run_step1
 from impacts.emfac.activities.step2_build_comprehensive_project_analysis import run_step2
 from impacts.emfac.activities.step3_fill_project_analysis_rates import run_step3
@@ -12,12 +7,6 @@ from impacts.emfac.activities.step4_finalize_output import run_step4
 from impacts.emfac.common import raise_runtime_error
 from impacts.emfac.common import write_failure_trace
 from impacts.emfac.common import write_trace
-
-
-def _configure_run(config_path: str | Path | None = None) -> dict[str, object]:
-    if config_path is None:
-        return load_default_activities_workflow()
-    return load_activities_workflow(config_path)
 
 
 def _print_run_banner(workflow: dict[str, object]) -> None:
@@ -69,19 +58,3 @@ def run_workflow(workflow: dict[str, object]) -> dict[str, object]:
     write_trace(workflow, "workflow_success", {"status": "completed"})
     print("  DONE")
     return workflow
-
-
-def run_all_steps(config_path: str | Path | None = None) -> None:
-    try:
-        workflow = _configure_run(config_path)
-    except Exception as error:
-        raise_runtime_error("config_load", error)
-    run_workflow(workflow)
-
-
-def main(config_path: str | Path | None = None) -> None:
-    run_all_steps(config_path)
-
-
-if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else None)
