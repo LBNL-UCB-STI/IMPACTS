@@ -1,0 +1,86 @@
+run:
+  region: sfbay
+  scenario: base
+  start_year: 2018
+
+shared:
+  geography:
+    FIPS:
+      state: "06"
+      counties:
+        - "001"
+        - "013"
+        - "041"
+        - "055"
+        - "075"
+        - "081"
+        - "085"
+        - "095"
+        - "097"
+    local_crs: EPSG:26910
+
+
+beam:
+  local_input_folder: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/production/
+  local_output_folder: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/beam_output/
+
+impacts:
+  local_output_folder: /global/scratch/users/hmlaarabi/sources/impacts/examples/pipeline/pilates/impacts/impacts_output/
+  beam:
+    passenger_vehicle_types_file: vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv
+    freight_vehicle_types_file: vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv
+    population_sample: 0.1
+    transit_sample: 1.0
+    include_non_osm_car_links: true
+    include_passenger: true
+    include_freight: true
+  emissions:
+    osm_network_folder: r5/sfbay-cbg5500-weakConn-network
+    emissions_rates_folder: vehicle-tech/emissions/2018-Baseline
+    inventory:
+      passenger_file: vehicle-tech/activities/sf-emfac-2018-inventory-final-passenger-activity.parquet
+      freight_file: vehicle-tech/activities/sf-emfac-2018-inventory-final-freight-activity.parquet
+      enable_passenger_activity_correction: false
+      enable_freight_activity_correction: false
+    vehicle_category_metadata_file: vehicle-tech/_emissions_vehicle_catalog.csv
+    defaults:
+      annualization_days:
+        light_duty: 327.0
+        medium_heavy_duty: 312.0
+    pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
+  dispersions:
+    inmap:
+      enabled: true
+      isrm_zarr: /global/home/users/hmlaarabi/scratch/isrm_v1.2.1.zarr
+      isrm_nox_to_no2_ratios_file: vehicle-tech/dispersions/inmap/nox_to_no2_full_isrm_matrix.npz
+      grid_path: vehicle-tech/dispersions/inmap/isrm_polygon_wgs84.gpkg
+      grid_id: isrm
+      grid_epsg: 4326
+    aermod:
+      enabled: true
+      grid_size_meters: 100.0
+      asrv_patterns_file: vehicle-tech/dispersions/aermod/aermod_patterns_wgs84.parquet
+      asrv_patterns_epsg: 4326
+      asrv_nox_to_no2_ratios_file:
+
+  exposure:
+    enabled: true
+    population_folder: urbansim/atlas-2019
+  analysis:
+    targets:
+      pm25_annual_short_tons:
+        mobile_onroad:
+          passenger_cars: 714.26
+          light_duty_trucks: 313.92
+          medium_duty_trucks: 151.68
+          heavy_duty_trucks: 486.16
+          other: 43.62
+        road_dust:
+          all: 1499.25
+      nox_annual_short_tons:
+        mobile_onroad:
+          passenger_cars: 3964.37
+          light_duty_trucks: 3083.81
+          medium_duty_trucks: 1880.14
+          heavy_duty_trucks: 16524.57
+          other: 1429.61
