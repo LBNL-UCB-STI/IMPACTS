@@ -90,6 +90,9 @@ def _build_workflow(settings, config_path: Path) -> dict[str, Any]:
     region_name = settings.run.region
     emfac_root = _emfac_raw_root(local_input_folder)
     emfac_root_config = _load_yaml_path(config_path, "emfac")
+    # Inject region_name and calendar_year from pipeline settings — no need to repeat in emfac: section
+    emfac_root_config.setdefault("region", {})["name"] = region_name
+    emfac_root_config.setdefault("scenario", {})["year"] = settings.run.start_year
 
     activities_override: dict[str, Any] = {
         "project_analysis": [

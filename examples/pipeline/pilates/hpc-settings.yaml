@@ -19,7 +19,6 @@ shared:
         - "097"
     local_crs: EPSG:26910
 
-
 beam:
   local_input_folder: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/production/
   local_output_folder: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/beam_output/
@@ -63,7 +62,6 @@ impacts:
       asrv_patterns_file: vehicle-tech/dispersions/aermod/aermod_patterns_wgs84.parquet
       asrv_patterns_epsg: 4326
       asrv_nox_to_no2_ratios_file:
-
   exposure:
     enabled: true
     population_folder: urbansim/atlas-2019
@@ -86,12 +84,12 @@ impacts:
           heavy_duty_trucks: 16524.57
           other: 1429.61
 
+# EMFAC activities and fleet configuration.
+# run.region and run.start_year are injected automatically — not repeated here.
 emfac:
   region:
-    name: sfbay
     label: SF
   scenario:
-    year: 2018
     name: Baseline
   seed: 0
   activities:
@@ -136,3 +134,25 @@ emfac:
       Gas: [Gasoline]
       NG: [Natural Gas]
       Phe: [Plug-in Hybrid]
+  fleet:
+    vehicle_type_assignment_model_settings: examples/emfac/fleet_assignment.yaml
+    atlas:
+      year: 2019
+      vehicles_file: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/production/sfbay/urbansim/atlas-2019/vehicles.parquet
+      households_file: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/production/sfbay/urbansim/atlas-2019/households.parquet
+      persons_file: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/production/sfbay/urbansim/atlas-2019/persons.parquet
+      income_bins: [0, 30, 60, 100, 200, 9999]
+      fuel_map:
+        gasoline: [conv, hybrid, cng]
+        electricity: [ev]
+        hydrogen: [fuelcell]
+        electricity+gasoline: [phev]
+    frism:
+      year: 2018
+      carriers_file: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/production/sfbay/beam-ft/2018-Baseline/carriers--2018-Baseline.parquet
+      payloads_file: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/production/sfbay/beam-ft/2018-Baseline/payloads--2018-Baseline.parquet
+      tours_file: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/production/sfbay/beam-ft/2018-Baseline/tours--2018-Baseline.parquet
+    beam:
+      passenger_vehicle_types_file: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/production/sfbay/vehicle-tech/vehicleTypes_inventory.csv
+      freight_vehicle_types_file: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/production/sfbay/vehicle-tech/vehicletypes--frism--2018-Baseline.csv
+      fuel_consumption_catalog: examples/emfac/2018_mappings/fastsim_catalog_breakdown.csv
