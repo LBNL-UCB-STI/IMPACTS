@@ -4,13 +4,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from impacts.emfac.activities.main import main as run_activities
 from impacts.emfac.activities.main import run_workflow as run_activities_workflow
-from impacts.emfac.config import load_activities_workflow_from_data
-from impacts.emfac.config import load_fleet_workflow
-from impacts.emfac.fleet.main import main as run_fleet
 from impacts.emfac.fleet.main import run_workflow as run_fleet_workflow
-from impacts.emfac.fleet.main import _missing_activities_outputs
+from impacts.emfac.fleet.main import main as run_fleet
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,15 +18,14 @@ def build_parser() -> argparse.ArgumentParser:
         "args",
         nargs="*",
         help="Optional workflow name and/or config path. Supported forms: "
-        "'python -m impacts.emfac', "
-        "'python -m impacts.emfac examples/emfac/settings.yaml', "
-        "'python -m impacts.emfac activities examples/emfac/settings.yaml', "
-        "'python -m impacts.emfac fleet examples/emfac/settings.yaml'.",
+        "'python -m impacts.emfac --config settings.yaml', "
+        "'python -m impacts.emfac activities --config settings.yaml', "
+        "'python -m impacts.emfac fleet --config settings.yaml'.",
     )
     parser.add_argument(
         "--config",
         dest="config_path",
-        help="Path to the EMFAC settings YAML file.",
+        help="Path to the impacts settings YAML file.",
     )
     return parser
 
@@ -43,25 +38,14 @@ def _parse_workflow_and_config(args: argparse.Namespace) -> tuple[str | None, st
         workflow = positional.pop(0)
     if positional:
         if config_path is not None:
-            raise SystemExit("Specify the EMFAC config path either positionally or with --config, not both.")
+            raise SystemExit("Specify the config path either positionally or with --config, not both.")
         if len(positional) > 1:
             raise SystemExit("Too many positional arguments. Expected at most one config path.")
         config_path = positional[0]
     return workflow, config_path
 
 
-def _is_impacts_settings(config_path: str | None) -> bool:
-    if not config_path:
-        return False
-    from impacts.config.settings_builder import load_settings_from_yaml
-    try:
-        load_settings_from_yaml(config_path)
-        return True
-    except Exception:
-        return False
-
-
-def _run_activities_from_settings(config_path: str) -> None:
+def _run_activities(config_path: str) -> None:
     from impacts.config.settings_builder import load_settings_from_yaml
     from impacts.emfac.preparation import build_activities_workflow_from_settings
     settings = load_settings_from_yaml(config_path)
@@ -69,7 +53,7 @@ def _run_activities_from_settings(config_path: str) -> None:
     run_activities_workflow(workflow)
 
 
-def _ensure_activities_for_settings(config_path: str) -> None:
+def _ensure_activities(config_path: str) -> None:
     from impacts.config.settings_builder import load_settings_from_yaml
     from impacts.emfac.preparation import build_activities_workflow_from_settings
     settings = load_settings_from_yaml(config_path)
@@ -84,32 +68,11 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     workflow, config_path = _parse_workflow_and_config(args)
     if workflow == "activities":
-        if _is_impacts_settings(config_path):
-            _run_activities_from_settings(config_path)
-        else:
-            run_activities(config_path)
+        _run_activities(config_path)
         return
-    if workflow == "fleet":
-        if _is_impacts_settings(config_path):
-            _ensure_activities_for_settings(config_path)
-        run_fleet(config_path)
-        return
-    if _is_impacts_settings(config_path):
-        _ensure_activities_for_settings(config_path)
-        run_fleet(config_path)
-        return
-    fleet_workflow = load_fleet_workflow(config_path)
-    missing = _missing_activities_outputs(fleet_workflow)
-    if missing:
-        print("Running EMFAC activities first because required activities outputs are missing:")
-        for path in missing.values():
-            print(f"  missing: {path}")
-        activities_workflow = load_activities_workflow_from_data(
-            dict(fleet_workflow["config"]["activities"]),
-            source_label="<emfac.activities>",
-        )
-        run_activities_workflow(activities_workflow)
-    run_fleet_workflow(fleet_workflow)
+    # fleet or full run: ensure activities outputs exist, then run fleet
+    _ensure_activities(config_path)
+    run_fleet(config_path)
 
 
 if __name__ == "__main__":
