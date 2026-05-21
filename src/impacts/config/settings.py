@@ -652,16 +652,18 @@ class Impacts:
     dispersions: Dispersions
     exposure: "Exposure"
     analysis: Analysis = field(default_factory=Analysis)
+    local_input_folder: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Impacts":
         _reject_unknown_keys(
             payload,
-            {"local_output_folder", "beam", "emissions", "dispersions", "exposure", "analysis"},
+            {"local_output_folder", "local_input_folder", "beam", "emissions", "dispersions", "exposure", "analysis"},
             "impacts",
         )
         result = cls(
             local_output_folder=_required_string(payload.get("local_output_folder"), "impacts.local_output_folder"),
+            local_input_folder=_optional_string(payload.get("local_input_folder")),
             beam=ImpactsBeamProcessing.from_dict(dict(payload.get("beam", {}) or {})),
             emissions=Emissions.from_dict(dict(payload.get("emissions", {}) or {})),
             dispersions=Dispersions.from_dict(dict(payload.get("dispersions", {}) or {})),
@@ -731,6 +733,7 @@ class ImpactsSettings:
             },
             "impacts": {
                 "local_output_folder": self.impacts.local_output_folder,
+                "local_input_folder": self.impacts.local_input_folder,
                 "beam": {
                     "passenger_vehicle_types_file": self.impacts.beam.passenger_vehicle_types_file,
                     "freight_vehicle_types_file": self.impacts.beam.freight_vehicle_types_file,
