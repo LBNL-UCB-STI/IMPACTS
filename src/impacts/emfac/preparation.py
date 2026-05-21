@@ -63,15 +63,15 @@ def _extract_archive(archive: Path, destination: Path) -> None:
 
 def _ensure_raw_data(emfac_root: Path, beam_input_folder: Path, region_name: str) -> None:
     if _is_extracted(emfac_root, region_name):
-        logger.info("EMFAC raw data already present at %s", emfac_root)
+        logger.info("Raw data already present at %s — skipping extraction.", emfac_root)
         return
     archive = _archive_path(beam_input_folder, region_name)
     if not archive.exists():
         raise FileNotFoundError(
             f"EMFAC activities outputs are missing and the raw data archive was not found at {archive}. "
-            f"Place {_ARCHIVE_NAME} there or pre-extract data to {emfac_root}."
+            f"Place {_ARCHIVE_NAME} there or pre-extract the data to {emfac_root}."
         )
-    log_substep_banner("prepare", f"extract EMFAC raw data from {archive.name}", logger=logger)
+    logger.info("Extracting %s → %s", archive, emfac_root)
     _extract_archive(archive, emfac_root)
     if not _is_extracted(emfac_root, region_name):
         raise RuntimeError(
@@ -79,7 +79,6 @@ def _ensure_raw_data(emfac_root: Path, beam_input_folder: Path, region_name: str
             f"{emfac_root / f'{region_name}-emfac-project-analysis'} was not found. "
             f"Check the archive structure."
         )
-    logger.info("EMFAC raw data extracted to %s", emfac_root)
 
 
 def _build_workflow(settings, config_path: Path) -> Dict[str, Any]:
@@ -145,27 +144,30 @@ def ensure_emfac_activities_outputs(settings, config_path: Path) -> Dict[str, An
     local_input_folder = Path(resolve_path(settings.impacts.local_input_folder, config_path)).resolve()
     beam_input_folder = Path(resolve_path(settings.beam.local_input_folder, config_path)).resolve()
     region_name = settings.run.region
+    emfac_root = _emfac_raw_root(local_input_folder)
 
-    log_step_banner("EMFAC Activities", "Ensure outputs", logger=logger)
+    log_step_banner("EMFAC Activities", "Ensure inventory outputs", logger=logger)
 
+    log_substep_banner("1", "build workflow config", logger=logger)
     workflow = _build_workflow(settings, config_path)
 
-    # 1. Outputs already exist — nothing to do
+    log_substep_banner("2", "check existing outputs", logger=logger)
     if _outputs_exist(workflow):
-        logger.info("EMFAC activities outputs already present, skipping.")
+        logger.info("Outputs already present — skipping activities run.")
         return workflow
 
-    # 2. Outputs missing — find and extract archive, fail fast if not found
-    _ensure_raw_data(_emfac_raw_root(local_input_folder), beam_input_folder, region_name)
+    log_substep_banner("3", "extract raw data from beam archive", logger=logger)
+    _ensure_raw_data(emfac_root, beam_input_folder, region_name)
 
-    # 3. Run the 4-step activities workflow
+    log_substep_banner("4", "run activities workflow", logger=logger)
     run_activities_workflow(workflow)
 
-    # 4. Validate outputs — fail if still missing after the run
+    log_substep_banner("5", "validate outputs", logger=logger)
     if not _outputs_exist(workflow):
         output_dir = Path(str(workflow["paths"]["final_activity_emfacid_output_passenger"])).parent
         raise RuntimeError(
             f"EMFAC activities workflow completed but expected outputs not found in {output_dir}."
         )
+    logger.info("EMFAC activities outputs validated.")
 
     return workflow
