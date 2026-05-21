@@ -6,7 +6,6 @@ from pathlib import Path
 
 from impacts.emfac.activities.main import main as run_activities
 from impacts.emfac.activities.main import run_workflow as run_activities_workflow
-from impacts.emfac.config import load_activities_workflow
 from impacts.emfac.config import load_activities_workflow_from_data
 from impacts.emfac.config import load_fleet_workflow
 from impacts.emfac.fleet.main import main as run_fleet
@@ -70,6 +69,17 @@ def _run_activities_from_settings(config_path: str) -> None:
     run_activities_workflow(workflow)
 
 
+def _ensure_activities_for_settings(config_path: str) -> None:
+    from impacts.config.settings_builder import load_settings_from_yaml
+    from impacts.emfac.preparation import build_activities_workflow_from_settings
+    settings = load_settings_from_yaml(config_path)
+    workflow = build_activities_workflow_from_settings(settings, Path(config_path))
+    sentinel = Path(str(workflow["paths"]["final_activity_emfacid_output_passenger"]))
+    if not sentinel.exists():
+        print(f"Running EMFAC activities first — outputs missing under {sentinel.parent}")
+        run_activities_workflow(workflow)
+
+
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     workflow, config_path = _parse_workflow_and_config(args)
@@ -80,6 +90,12 @@ def main(argv: list[str] | None = None) -> None:
             run_activities(config_path)
         return
     if workflow == "fleet":
+        if _is_impacts_settings(config_path):
+            _ensure_activities_for_settings(config_path)
+        run_fleet(config_path)
+        return
+    if _is_impacts_settings(config_path):
+        _ensure_activities_for_settings(config_path)
         run_fleet(config_path)
         return
     fleet_workflow = load_fleet_workflow(config_path)
