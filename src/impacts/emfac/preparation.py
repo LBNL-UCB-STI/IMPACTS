@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 from typing import Dict
@@ -24,14 +23,16 @@ def _archive_path(beam_input_folder: Path, region: str) -> Path:
 
 
 def _is_extracted(emfac_root: Path, region_name: str) -> bool:
-    sentinel = emfac_root / f"{region_name}-emfac-project-analysis"
-    return sentinel.exists()
+    return (emfac_root / f"{region_name}-emfac-project-analysis").exists()
+
+
+def _outputs_exist(workflow: Dict[str, Any]) -> bool:
+    return Path(str(workflow["paths"]["final_activity_emfacid_output_passenger"])).exists()
 
 
 def _extract_archive(archive: Path, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     logger.info("Extracting %s → %s", archive, destination)
-    # Try zstd pipeline (most compatible on HPC)
     try:
         zstd = subprocess.run(
             ["zstd", "-d", str(archive), "--stdout"],
@@ -39,24 +40,15 @@ def _extract_archive(archive: Path, destination: Path) -> None:
             stderr=subprocess.PIPE,
             check=True,
         )
-        subprocess.run(
-            ["tar", "-xf", "-", "-C", str(destination)],
-            input=zstd.stdout,
-            check=True,
-        )
+        subprocess.run(["tar", "-xf", "-", "-C", str(destination)], input=zstd.stdout, check=True)
         return
     except (FileNotFoundError, subprocess.CalledProcessError):
         pass
-    # Fall back to tar --zstd (GNU tar 1.31+)
     try:
-        subprocess.run(
-            ["tar", "--zstd", "-xf", str(archive), "-C", str(destination)],
-            check=True,
-        )
+        subprocess.run(["tar", "--zstd", "-xf", str(archive), "-C", str(destination)], check=True)
         return
     except (FileNotFoundError, subprocess.CalledProcessError):
         pass
-    # Fall back to Python tarfile with zstd filter (Python 3.12+)
     try:
         import tarfile
         with tarfile.open(str(archive), "r:zst") as tf:
@@ -69,20 +61,15 @@ def _extract_archive(archive: Path, destination: Path) -> None:
     )
 
 
-def ensure_emfac_raw_data(
-    local_input_folder: Path,
-    beam_input_folder: Path,
-    region_name: str,
-) -> Path:
-    emfac_root = _emfac_raw_root(local_input_folder)
+def _ensure_raw_data(emfac_root: Path, beam_input_folder: Path, region_name: str) -> None:
     if _is_extracted(emfac_root, region_name):
         logger.info("EMFAC raw data already present at %s", emfac_root)
-        return emfac_root
+        return
     archive = _archive_path(beam_input_folder, region_name)
     if not archive.exists():
         raise FileNotFoundError(
-            f"EMFAC raw data not found at {emfac_root} and archive not found at {archive}. "
-            f"Place {_ARCHIVE_NAME} at {archive} or pre-extract data to {emfac_root}."
+            f"EMFAC activities outputs are missing and the raw data archive was not found at {archive}. "
+            f"Place {_ARCHIVE_NAME} there or pre-extract data to {emfac_root}."
         )
     log_substep_banner("prepare", f"extract EMFAC raw data from {archive.name}", logger=logger)
     _extract_archive(archive, emfac_root)
@@ -93,33 +80,20 @@ def ensure_emfac_raw_data(
             f"Check the archive structure."
         )
     logger.info("EMFAC raw data extracted to %s", emfac_root)
-    return emfac_root
 
 
-def build_activities_workflow_from_settings(
-    settings,
-    config_path: Path,
-) -> Dict[str, Any]:
+def _build_workflow(settings, config_path: Path) -> Dict[str, Any]:
     from .config import _build_activities_config_from_root
     from .config import _build_activities_workflow
+    from .config import _load_yaml_path
     from ..manifest.file_ops import resolve_path
 
-    local_input_folder = Path(
-        resolve_path(settings.impacts.local_input_folder, config_path)
-    ).resolve()
-    beam_input_folder = Path(
-        resolve_path(settings.beam.local_input_folder, config_path)
-    ).resolve()
+    local_input_folder = Path(resolve_path(settings.impacts.local_input_folder, config_path)).resolve()
+    beam_input_folder = Path(resolve_path(settings.beam.local_input_folder, config_path)).resolve()
     region_name = settings.run.region
-
-    log_step_banner("EMFAC Activities", "Prepare inputs", logger=logger)
-    emfac_root = ensure_emfac_raw_data(local_input_folder, beam_input_folder, region_name)
-
-    # Load the emfac: section from the settings YAML for region/scenario/model_year_groups etc.
-    from .config import _load_yaml_path
+    emfac_root = _emfac_raw_root(local_input_folder)
     emfac_root_config = _load_yaml_path(config_path, "emfac")
 
-    # Derive all input paths from emfac_root — known archive structure
     activities_override: Dict[str, Any] = {
         "project_analysis": [
             {
@@ -158,8 +132,40 @@ def build_activities_workflow_from_settings(
 
     output_root = local_input_folder / "emfac"
     merged_emfac = {**emfac_root_config, "output": str(output_root)}
-    merged_emfac.setdefault("activities", {})
     merged_emfac["activities"] = {**merged_emfac.get("activities", {}), **activities_override}
 
     raw = _build_activities_config_from_root(merged_emfac)
     return _build_activities_workflow(raw, config_path)
+
+
+def ensure_emfac_activities_outputs(settings, config_path: Path) -> Dict[str, Any]:
+    from .activities.main import run_workflow as run_activities_workflow
+    from ..manifest.file_ops import resolve_path
+
+    local_input_folder = Path(resolve_path(settings.impacts.local_input_folder, config_path)).resolve()
+    beam_input_folder = Path(resolve_path(settings.beam.local_input_folder, config_path)).resolve()
+    region_name = settings.run.region
+
+    log_step_banner("EMFAC Activities", "Ensure outputs", logger=logger)
+
+    workflow = _build_workflow(settings, config_path)
+
+    # 1. Outputs already exist — nothing to do
+    if _outputs_exist(workflow):
+        logger.info("EMFAC activities outputs already present, skipping.")
+        return workflow
+
+    # 2. Outputs missing — find and extract archive, fail fast if not found
+    _ensure_raw_data(_emfac_raw_root(local_input_folder), beam_input_folder, region_name)
+
+    # 3. Run the 4-step activities workflow
+    run_activities_workflow(workflow)
+
+    # 4. Validate outputs — fail if still missing after the run
+    if not _outputs_exist(workflow):
+        output_dir = Path(str(workflow["paths"]["final_activity_emfacid_output_passenger"])).parent
+        raise RuntimeError(
+            f"EMFAC activities workflow completed but expected outputs not found in {output_dir}."
+        )
+
+    return workflow

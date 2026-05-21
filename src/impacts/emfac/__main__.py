@@ -4,8 +4,6 @@ import argparse
 import sys
 from pathlib import Path
 
-from impacts.emfac.activities.main import run_workflow as run_activities_workflow
-from impacts.emfac.fleet.main import run_workflow as run_fleet_workflow
 from impacts.emfac.fleet.main import main as run_fleet
 
 
@@ -45,32 +43,20 @@ def _parse_workflow_and_config(args: argparse.Namespace) -> tuple[str | None, st
     return workflow, config_path
 
 
-def _run_activities(config_path: str) -> None:
-    from impacts.config.settings_builder import load_settings_from_yaml
-    from impacts.emfac.preparation import build_activities_workflow_from_settings
-    settings = load_settings_from_yaml(config_path)
-    workflow = build_activities_workflow_from_settings(settings, Path(config_path))
-    run_activities_workflow(workflow)
-
-
 def _ensure_activities(config_path: str) -> None:
     from impacts.config.settings_builder import load_settings_from_yaml
-    from impacts.emfac.preparation import build_activities_workflow_from_settings
+    from impacts.emfac.preparation import ensure_emfac_activities_outputs
     settings = load_settings_from_yaml(config_path)
-    workflow = build_activities_workflow_from_settings(settings, Path(config_path))
-    sentinel = Path(str(workflow["paths"]["final_activity_emfacid_output_passenger"]))
-    if not sentinel.exists():
-        print(f"Running EMFAC activities first — outputs missing under {sentinel.parent}")
-        run_activities_workflow(workflow)
+    ensure_emfac_activities_outputs(settings, Path(config_path))
 
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     workflow, config_path = _parse_workflow_and_config(args)
     if workflow == "activities":
-        _run_activities(config_path)
+        _ensure_activities(config_path)
         return
-    # fleet or full run: ensure activities outputs exist, then run fleet
+    # fleet or full run: ensure activities outputs, then run fleet
     _ensure_activities(config_path)
     run_fleet(config_path)
 
