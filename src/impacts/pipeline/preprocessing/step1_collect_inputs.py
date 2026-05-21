@@ -100,6 +100,23 @@ def _use_existing_reference(manifest_inputs: Dict[str, Any], key: str, entry: Di
 
 
 
+def _resolve_emfacid_path(inventory_path: str, *, label: str) -> str:
+    source = Path(inventory_path).resolve()
+    name = source.name
+    if name.endswith("-activity.parquet"):
+        derived = source.with_name(name.replace("-activity.parquet", "-activity-by-emfacid.parquet"))
+    else:
+        derived = source.with_name(f"{source.stem}-by-emfacid{source.suffix}")
+    if not derived.exists():
+        raise FileNotFoundError(
+            f"Preprocess Step 1.3 requires the EMFAC {label} activity-by-emfacId file "
+            f"at {derived}, but it was not found. "
+            f"Re-run the EMFAC activities workflow to generate it: "
+            f"python -m impacts emfac activities --config <config>"
+        )
+    return str(derived)
+
+
 def _locate_exchange_file(folder: Path, stem: str) -> Optional[str]:
     return find_preferred_file(str(folder), [f"{stem}.csv.gz", f"{stem}.csv", f"{stem}.parquet"])
 
@@ -314,21 +331,22 @@ def run(
             _close_progress(progress)
 
     log_substep_banner("1.3", "register EMFAC inventory inputs", logger=logger)
-    from ...emfac.config import load_activities_workflow
-    emfac_paths = load_activities_workflow(config_path)["paths"]
-    for _key, _label in [
-        ("final_activity_emfacid_output_passenger", "passenger"),
-        ("final_activity_emfacid_output_freight", "freight"),
-    ]:
-        if not Path(emfac_paths[_key]).exists():
-            raise FileNotFoundError(
-                f"Preprocess Step 1.3 requires the EMFAC {_label} activity-by-emfacId file "
-                f"at {emfac_paths[_key]}, but it was not found. "
-                f"Re-run the EMFAC activities workflow to generate it: "
-                f"python -m impacts emfac activities --config <config>"
-            )
-    passenger_emfacid_source = emfac_paths["final_activity_emfacid_output_passenger"]
-    freight_emfacid_source = emfac_paths["final_activity_emfacid_output_freight"]
+    passenger_emfacid_source = _resolve_emfacid_path(
+        _resolve_region_or_absolute_path(
+            emissions.inventory.passenger_file,
+            region_input_root=region_input_root,
+            config_path=config_path,
+        ),
+        label="passenger",
+    )
+    freight_emfacid_source = _resolve_emfacid_path(
+        _resolve_region_or_absolute_path(
+            emissions.inventory.freight_file,
+            region_input_root=region_input_root,
+            config_path=config_path,
+        ),
+        label="freight",
+    )
     staged_passenger_inventory_file = None
     staged_freight_inventory_file = None
     substep_13_total = 2  # passenger emfacid, freight emfacid
