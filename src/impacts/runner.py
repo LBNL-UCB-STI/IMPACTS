@@ -219,7 +219,6 @@ def _resolve_analysis_inventory_target_path(settings_path: str | Path, raw: str)
     )
 
 
-
 def _resolve_analysis_inventory_emfacid_activity_path(
     settings_path: str | Path,
     *,

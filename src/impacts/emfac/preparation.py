@@ -4,7 +4,6 @@ import logging
 import subprocess
 from pathlib import Path
 from typing import Any
-from typing import Dict
 
 from ..common import log_step_banner
 from ..common import log_substep_banner
@@ -26,7 +25,7 @@ def _is_extracted(emfac_root: Path, region_name: str) -> bool:
     return (emfac_root / f"{region_name}-emfac-project-analysis").exists()
 
 
-def _outputs_exist(workflow: Dict[str, Any]) -> bool:
+def _outputs_exist(workflow: dict[str, Any]) -> bool:
     return Path(str(workflow["paths"]["final_activity_emfacid_output_passenger"])).exists()
 
 
@@ -81,7 +80,7 @@ def _ensure_raw_data(emfac_root: Path, beam_input_folder: Path, region_name: str
         )
 
 
-def _build_workflow(settings, config_path: Path) -> Dict[str, Any]:
+def _build_workflow(settings, config_path: Path) -> dict[str, Any]:
     from .config import _build_activities_config_from_root
     from .config import _build_activities_workflow
     from .config import _load_yaml_path
@@ -93,7 +92,7 @@ def _build_workflow(settings, config_path: Path) -> Dict[str, Any]:
     emfac_root = _emfac_raw_root(local_input_folder)
     emfac_root_config = _load_yaml_path(config_path, "emfac")
 
-    activities_override: Dict[str, Any] = {
+    activities_override: dict[str, Any] = {
         "project_analysis": [
             {
                 "main": [
@@ -137,7 +136,7 @@ def _build_workflow(settings, config_path: Path) -> Dict[str, Any]:
     return _build_activities_workflow(raw, config_path)
 
 
-def ensure_emfac_activities_outputs(settings, config_path: Path) -> Dict[str, Any]:
+def ensure_emfac_activities_outputs(settings, config_path: Path) -> dict[str, Any]:
     from .activities.main import run_workflow as run_activities_workflow
     from ..manifest.file_ops import resolve_path
 
