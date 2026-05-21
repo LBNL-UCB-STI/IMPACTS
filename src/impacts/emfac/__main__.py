@@ -56,8 +56,8 @@ def _is_impacts_settings(config_path: str | None) -> bool:
         return False
     from impacts.config.settings_builder import load_settings_from_yaml
     try:
-        settings = load_settings_from_yaml(config_path)
-        return bool(settings.impacts.local_input_folder)
+        load_settings_from_yaml(config_path)
+        return True
     except Exception:
         return False
 

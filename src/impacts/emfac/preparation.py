@@ -106,11 +106,9 @@ def build_activities_workflow_from_settings(
 
     local_input_folder = Path(
         resolve_path(settings.impacts.local_input_folder, config_path)
-        or settings.impacts.local_input_folder
     ).resolve()
     beam_input_folder = Path(
         resolve_path(settings.beam.local_input_folder, config_path)
-        or settings.beam.local_input_folder
     ).resolve()
     region_name = settings.run.region
 

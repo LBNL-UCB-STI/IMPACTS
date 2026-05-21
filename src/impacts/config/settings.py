@@ -647,12 +647,12 @@ class Analysis:
 @dataclass(frozen=True)
 class Impacts:
     local_output_folder: str
+    local_input_folder: str
     beam: ImpactsBeamProcessing
     emissions: Emissions
     dispersions: Dispersions
     exposure: "Exposure"
     analysis: Analysis = field(default_factory=Analysis)
-    local_input_folder: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Impacts":
@@ -663,7 +663,7 @@ class Impacts:
         )
         result = cls(
             local_output_folder=_required_string(payload.get("local_output_folder"), "impacts.local_output_folder"),
-            local_input_folder=_optional_string(payload.get("local_input_folder")),
+            local_input_folder=_required_string(payload.get("local_input_folder"), "impacts.local_input_folder"),
             beam=ImpactsBeamProcessing.from_dict(dict(payload.get("beam", {}) or {})),
             emissions=Emissions.from_dict(dict(payload.get("emissions", {}) or {})),
             dispersions=Dispersions.from_dict(dict(payload.get("dispersions", {}) or {})),
