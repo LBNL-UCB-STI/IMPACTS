@@ -17,7 +17,7 @@ from impacts.tools.beam.sample_beam_output import sample_skims_by_fraction
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Sample large BEAM events or skims files into examples/pipeline/pilates/beam."
+        description="Sample large BEAM events or skims files into examples/pilates/beam."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

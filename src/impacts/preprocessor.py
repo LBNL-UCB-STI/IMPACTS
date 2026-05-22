@@ -43,9 +43,10 @@ def build_inputs_manifest(
     settings = load_settings_from_yaml(config_path)
     geography = settings.shared.geography
     emissions = settings.impacts.emissions
-    beam_processing = settings.impacts.beam
+    beam_processing = settings.impacts.emissions.beam
     inmap = settings.impacts.dispersions.inmap
     aermod = settings.impacts.dispersions.aermod
+    pipeline = settings.impacts.pipeline
 
     output_root = Path(resolve_path(settings.impacts.local_output_folder, config_path)).resolve()
     input_root = _derive_impacts_tmp_root(output_root).resolve()
@@ -75,7 +76,7 @@ def build_inputs_manifest(
     staged_asrv_patterns_file = step1_outputs["staged_asrv_patterns_file"]
     staged_inmap_grid_source = step1_outputs["staged_inmap_grid"]
     inmap_grid_epsg = None
-    if inmap.enabled and staged_inmap_grid_source:
+    if pipeline.inmap and staged_inmap_grid_source:
         inmap_grid_epsg = (
             infer_vector_epsg(staged_inmap_grid_source)
             or inmap.grid_epsg
@@ -102,26 +103,25 @@ def build_inputs_manifest(
     if resolved_inmap_grid_id:
         mapping_columns["grid_id"] = resolved_inmap_grid_id
     asrv_patterns_epsg = None
-    if aermod.enabled and staged_asrv_patterns_file:
+    if pipeline.aermod and staged_asrv_patterns_file:
         asrv_patterns_epsg = (
             infer_vector_epsg(staged_asrv_patterns_file)
             or aermod.asrv_patterns_epsg
         )
-    if aermod.enabled and staged_asrv_patterns_file and asrv_patterns_epsg is None:
+    if pipeline.aermod and staged_asrv_patterns_file and asrv_patterns_epsg is None:
         raise ValueError(
             "Could not determine EPSG for impacts.dispersions.aermod.asrv_patterns_file. "
             "Set impacts.dispersions.aermod.asrv_patterns_epsg explicitly or provide CRS metadata in the file."
         )
 
     pipeline_payload = {
-        "inmap_enabled": bool(inmap.enabled),
-        "aermod_enabled": bool(aermod.enabled),
+        "inmap_enabled": bool(pipeline.inmap),
+        "aermod_enabled": bool(pipeline.aermod),
         "inmap_grid_path": staged_inmap_grid,
         "aermod_full_grid_path": staged_aermod_full_grid,
         "aermod_grid_path": staged_aermod_grid,
         "isrm_url": staged_isrm,
         "isrm_nox_to_no2_ratios_file": staged_isrm_nox_to_no2_ratios_file,
-        "asrv_nox_to_no2_ratios_file": aermod.asrv_nox_to_no2_ratios_file,
         "asrv_patterns_file": staged_asrv_patterns_file,
         "asrv_patterns_epsg": int(asrv_patterns_epsg) if asrv_patterns_epsg is not None else None,
         "grid_size_meters": float(aermod.grid_size_meters) if aermod.grid_size_meters is not None else None,
@@ -151,11 +151,11 @@ def build_inputs_manifest(
             else None
         ),
         "annualization_days": {
-            "light_duty": float(emissions.defaults.annualization_days.light_duty),
-            "medium_heavy_duty": float(emissions.defaults.annualization_days.medium_heavy_duty),
+            "light_duty": float(emissions.defaults.default_annualization_days.light_duty),
+            "medium_heavy_duty": float(emissions.defaults.default_annualization_days.medium_heavy_duty),
         },
-        "population_sample": float(beam_processing.population_sample),
-        "transit_sample": float(beam_processing.transit_sample),
+        "population_sample": float(settings.impacts.population.population_sample),
+        "transit_sample": float(settings.impacts.population.transit_sample),
         "include_non_osm_car_links": bool(beam_processing.include_non_osm_car_links),
         "include_passenger": bool(beam_processing.include_passenger),
         "include_freight": bool(beam_processing.include_freight),
@@ -204,9 +204,9 @@ def build_inputs_manifest(
         )
 
     maintained_execution_path = ["impacts.pipeline.workflow.step1_process_emissions"]
-    if inmap.enabled:
+    if pipeline.inmap:
         maintained_execution_path.append("impacts.pipeline.workflow.step2_compute_inmap_concentrations")
-    if aermod.enabled:
+    if pipeline.aermod:
         maintained_execution_path.append("impacts.pipeline.workflow.step3_compute_aermod_concentrations")
 
     manifest: Dict[str, Any] = {

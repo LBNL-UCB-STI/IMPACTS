@@ -20,15 +20,16 @@ shared:
     local_crs: EPSG:26910
 
 beam:
-  local_input_folder: beam/production/
+  local_input_folder: ~/Workspace/Models/beam/beam-data/beam-data-sfbay
   local_output_folder: beam/beam_output/
-  router_directory: <set-local-or-absolute-path>
+  router_directory: ${beam.local_output_folder}/r5/sfbay-cbg5500-weakConn-network
 
 impacts:
   local_input_folder: impacts/impacts_inputs/
   local_output_folder: impacts/impacts_output/
   seed: 0
-  scenario: <set-scenario>
+  scenario: 2018-Baseline
+
   pipeline:
     activities: true
     fleet: true
@@ -36,16 +37,18 @@ impacts:
     inmap: true
     aermod: true
     exposure: true
+
   population:
-    passenger_folder: urbansim/atlas-2019
-    freight_folder: <set-local-or-absolute-path>
-    vehicle_folder: <set-local-or-absolute-path>
-    rates_folder: <set-local-or-absolute-path>
-    dispersions_folder: <set-local-or-absolute-path>
+    passenger_folder: ${beam.local_output_folder}/urbansim/atlas-2019
+    freight_folder: ${beam.local_input_folder}/freight/20250730/2018-Baseline
+    vehicle_folder: ${beam.local_input_folder}/vehicle-tech
+    rates_folder: ${population.vehicle_folder}/emissions
+    dispersions_folder: ${population.vehicle_folder}/dispersions
     atlas_year: 2019
     frism_year: 2018
-    population_sample: 0.001
+    population_sample: 0.1
     transit_sample: 1.0
+
   activities:
     region_label: SF
     raw_inputs_archive: ${population.rates_folder}/emfac.tar.zst
@@ -63,7 +66,7 @@ impacts:
         - ">=2016"
     project_analysis:
       main:
-        folder: impacts/impacts_inputs/emfac/sfbay-emfac-project-analysis
+        folder: ${local_input_folder}/sfbay-emfac-project-analysis
         pto_as_process:
           enabled: true
           vehicle_category:
@@ -74,10 +77,10 @@ impacts:
             - T7 Single Other Class 8
             - T7 SWCV Class 8
       black_carbon:
-        folder: impacts/impacts_inputs/emfac/sfbay-emfac-moves-bc
+        folder: ${local_input_folder}/sfbay-emfac-moves-bc
         pollutant: BCh
       paved_road_dust:
-        folder: impacts/impacts_inputs/emfac/statewide-carb-road-dust
+        folder: ${local_input_folder}/statewide-carb-road-dust
         road_category_map:
           motorway: Freeway
           motorway_link: Freeway
@@ -93,14 +96,15 @@ impacts:
           residential: Local Urban
           residential_link: Local Urban
     emissions_inventory:
-      inventory_folder: impacts/impacts_inputs/emfac/sfbay-emfac-emissions-inventory
-      fallback_folder: impacts/impacts_inputs/emfac/statewide-emfac-emissions-inventory
+      inventory_folder: ${local_input_folder}/sfbay-emfac-emissions-inventory
+      fallback_folder: ${local_input_folder}/statewide-emfac-emissions-inventory
       fuel_map:
         Dsl: [Diesel]
         Elec: [Electricity]
         Gas: [Gasoline]
         NG: [Natural Gas]
         Phe: [Plug-in Hybrid]
+
   fleet:
     assignment_model: examples/pilates/fleet_assignment.yaml
     atlas:
@@ -110,6 +114,7 @@ impacts:
         hydrogen: [fuelcell]
         electricity+gasoline: [phev]
       income_bins: [0, 30, 60, 100, 200, 9999]
+
   emissions:
     pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
     include_non_osm_car_links: true
@@ -120,6 +125,7 @@ impacts:
     default_annualization_days:
       light_duty: 327.0
       medium_heavy_duty: 312.0
+
   dispersions:
     inmap:
       isrm_zarr: ~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr
@@ -131,21 +137,22 @@ impacts:
       grid_size_meters: 100.0
       asrv_patterns_file: ${population.dispersions_folder}/aermod/aermod_patterns_wgs84.parquet
       asrv_patterns_epsg: 4326
+
   analysis:
     targets:
       pm25_annual_short_tons:
         mobile_onroad:
           passenger_cars: 714.26
-          heavy_duty_trucks: 486.16
           light_duty_trucks: 313.92
           medium_duty_trucks: 151.68
+          heavy_duty_trucks: 486.16
           other: 43.62
         road_dust:
           all: 1499.25
       nox_annual_short_tons:
         mobile_onroad:
           passenger_cars: 3964.37
-          heavy_duty_trucks: 16524.57
           light_duty_trucks: 3083.81
           medium_duty_trucks: 1880.14
+          heavy_duty_trucks: 16524.57
           other: 1429.61

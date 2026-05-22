@@ -8,7 +8,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from impacts.emfac.config import _apply_table_schema
+from impacts.config.settings import _apply_table_schema
 from impacts.common import _configure_duckdb_progress_bar
 from impacts.common import _should_show_duckdb_progress_bar
 from impacts.common import configure_duckdb_connection

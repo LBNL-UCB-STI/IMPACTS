@@ -17,10 +17,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from impacts.emfac.config import ATLAS_HOUSEHOLDS_SCHEMA
-from impacts.emfac.config import ATLAS_PERSONS_SCHEMA
-from impacts.emfac.config import read_table
-from impacts.emfac.config import resolve_workflow_path
+from impacts.config.settings import ATLAS_HOUSEHOLDS_SCHEMA
+from impacts.config.settings import ATLAS_PERSONS_SCHEMA
+from impacts.config.settings import read_table
+from impacts.config.settings import resolve_workflow_path
 from impacts.emfac.common import read_atlas_vehicles_input
 from impacts.emfac.common import read_frism_carriers_input
 

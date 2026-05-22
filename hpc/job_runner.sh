@@ -74,7 +74,7 @@ fi
 if [ -z "$account_arg" ]; then
     echo "ERROR: Slurm account is required. Use -a <account>" >&2
     echo "Example:" >&2
-    echo "  ./hpc/job_runner.sh -c examples/pipeline/pilates/settings.yaml -a my_account" >&2
+    echo "  ./hpc/job_runner.sh -c examples/pilates/settings.yaml -a my_account" >&2
     exit 2
 fi
 

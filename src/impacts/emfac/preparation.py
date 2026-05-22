@@ -21,12 +21,31 @@ def _archive_path(beam_input_folder: Path, region: str) -> Path:
     return beam_input_folder / region / "vehicle-tech" / "emissions" / _ARCHIVE_NAME
 
 
-def _is_extracted(emfac_root: Path, region_name: str) -> bool:
-    return (emfac_root / f"{region_name}-emfac-project-analysis").exists()
-
-
 def _outputs_exist(workflow: dict[str, Any]) -> bool:
     return Path(str(workflow["paths"]["final_activity_emfacid_output_passenger"])).exists()
+
+
+def _expected_output_path(cfg: dict[str, Any], start_year: int) -> Path:
+    region_slug = str(cfg["region_label"]).lower()
+    base_name = f"{region_slug}-emfac-{int(start_year)}-inventory-final"
+    return Path(str(cfg["output_root"])) / "activities" / f"{base_name}-passenger-activity-by-emfacid.parquet"
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _entry_folder(value: Any) -> str | None:
+    mapping = _mapping(value)
+    if "folder" in mapping and mapping["folder"] not in (None, ""):
+        return str(mapping["folder"])
+    return None
+
+
+def _entry_value(value: Any, key: str) -> Any:
+    mapping = _mapping(value)
+    result = mapping.get(key)
+    return None if result in (None, "") else result
 
 
 def _extract_archive(archive: Path, destination: Path) -> None:
@@ -60,105 +79,193 @@ def _extract_archive(archive: Path, destination: Path) -> None:
     )
 
 
-def _ensure_raw_data(emfac_root: Path, beam_input_folder: Path, region_name: str) -> None:
-    if _is_extracted(emfac_root, region_name):
-        logger.info("Raw data already present at %s — skipping extraction.", emfac_root)
-        return
-    archive = _archive_path(beam_input_folder, region_name)
-    if not archive.exists():
-        raise FileNotFoundError(
-            f"EMFAC activities outputs are missing and the raw data archive was not found at {archive}. "
-            f"Place {_ARCHIVE_NAME} there or pre-extract the data to {emfac_root}."
-        )
-    _extract_archive(archive, emfac_root)
-    if not _is_extracted(emfac_root, region_name):
-        raise RuntimeError(
-            f"Extraction of {archive} completed but expected folder "
-            f"{emfac_root / f'{region_name}-emfac-project-analysis'} was not found. "
-            f"Check the archive structure."
-        )
-
-
-def _build_workflow(settings, config_path: Path) -> dict[str, Any]:
-    from .config import _build_activities_config_from_root
-    from .config import _build_activities_workflow
-    from .config import _load_yaml_path
+def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
     from ..manifest.file_ops import resolve_path
 
     local_input_folder = Path(resolve_path(settings.impacts.local_input_folder, config_path)).resolve()
     beam_input_folder = Path(resolve_path(settings.beam.local_input_folder, config_path)).resolve()
+    cfg_activities = settings.impacts.activities if isinstance(settings.impacts.activities, dict) else {}
+    project_analysis = _mapping(cfg_activities.get("project_analysis"))
+    emissions_inventory = _mapping(cfg_activities.get("emissions_inventory"))
     region_name = settings.run.region
     emfac_root = _emfac_raw_root(local_input_folder)
-    emfac_root_config = _load_yaml_path(config_path, "emfac")
-    # Inject region_name and calendar_year from pipeline settings — no need to repeat in emfac: section
-    emfac_root_config.setdefault("region", {})["name"] = region_name
-    emfac_root_config.setdefault("scenario", {})["year"] = settings.run.start_year
 
+    configured_project_main = _mapping(project_analysis.get("main"))
+    configured_black_carbon = _mapping(project_analysis.get("black_carbon"))
+    configured_road_dust = _mapping(project_analysis.get("paved_road_dust"))
+
+    project_analysis_folder = Path(
+        resolve_path(_entry_folder(project_analysis.get("main")), config_path)
+        if _entry_folder(project_analysis.get("main"))
+        else str(emfac_root / f"{region_name}-emfac-project-analysis")
+    ).resolve()
+    black_carbon_folder = Path(
+        resolve_path(_entry_folder(project_analysis.get("black_carbon")), config_path)
+        if _entry_folder(project_analysis.get("black_carbon"))
+        else str(emfac_root / f"{region_name}-emfac-moves-bc")
+    ).resolve()
+    road_dust_folder = Path(
+        resolve_path(_entry_folder(project_analysis.get("paved_road_dust")), config_path)
+        if _entry_folder(project_analysis.get("paved_road_dust"))
+        else str(emfac_root / "statewide-carb-road-dust")
+    ).resolve()
+    inventory_folder = Path(
+        resolve_path(str(emissions_inventory.get("inventory_folder")), config_path)
+        if emissions_inventory.get("inventory_folder")
+        else str(emfac_root / f"{region_name}-emfac-emissions-inventory")
+    ).resolve()
+    fallback_folder = Path(
+        resolve_path(str(emissions_inventory.get("fallback_folder")), config_path)
+        if emissions_inventory.get("fallback_folder")
+        else str(emfac_root / "statewide-emfac-emissions-inventory")
+    ).resolve()
+    metadata_path = settings.impacts.emissions.vehicle_category_metadata_file
+    if not metadata_path:
+        raise ValueError("Missing required value: impacts.emissions.vehicle_category_metadata_file")
+    vehicle_category_metadata_file = Path(resolve_path(str(metadata_path), config_path)).resolve()
+    configured_archive = cfg_activities.get("raw_inputs_archive")
+    archive = Path(
+        resolve_path(str(configured_archive), config_path)
+        if configured_archive
+        else _archive_path(beam_input_folder, region_name)
+    ).resolve()
+
+    return {
+        "region_name": region_name,
+        "region_label": cfg_activities.get("region_label", region_name.upper()),
+        "scenario": settings.impacts.scenario,
+        "seed": settings.impacts.seed,
+        "output_root": emfac_root,
+        "archive": archive,
+        "extract_root": inventory_folder.parent,
+        "project_analysis_folder": project_analysis_folder,
+        "black_carbon_folder": black_carbon_folder,
+        "road_dust_folder": road_dust_folder,
+        "inventory_folder": inventory_folder,
+        "fallback_folder": fallback_folder,
+        "vehicle_category_metadata_file": vehicle_category_metadata_file,
+        "pto_as_process": configured_project_main.get("pto_as_process"),
+        "black_carbon_pollutant": _entry_value(project_analysis.get("black_carbon"), "pollutant") or "BCh",
+        "road_category_map": _entry_value(project_analysis.get("paved_road_dust"), "road_category_map") or {},
+        "fuel_map": emissions_inventory.get("fuel_map") or {},
+        "model_year_groups": cfg_activities.get("model_year_groups"),
+    }
+
+
+def _find_matching_file(path: Path, patterns: tuple[str, ...]) -> bool:
+    if not path.exists() or not path.is_dir():
+        return False
+    lowered = tuple(pattern.lower() for pattern in patterns)
+    return any(
+        child.is_file() and any(pattern in child.name.lower() for pattern in lowered)
+        for child in path.iterdir()
+    )
+
+
+def _missing_raw_inputs(cfg: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    if not Path(cfg["project_analysis_folder"]).exists():
+        missing.append(str(cfg["project_analysis_folder"]))
+    if not _find_matching_file(Path(cfg["black_carbon_folder"]), ("bc",)):
+        missing.append(f"{cfg['black_carbon_folder']} (bc)")
+    if not _find_matching_file(Path(cfg["road_dust_folder"]), ("rainy_days",)):
+        missing.append(f"{cfg['road_dust_folder']} (rainy_days)")
+    if not _find_matching_file(Path(cfg["road_dust_folder"]), ("silt_loading",)):
+        missing.append(f"{cfg['road_dust_folder']} (silt_loading)")
+    if not _find_matching_file(Path(cfg["fallback_folder"]), ("statewide",)):
+        missing.append(f"{cfg['fallback_folder']} (statewide)")
+    for label in ("population", "trips", "vmt", "emission"):
+        if not _find_matching_file(Path(cfg["inventory_folder"]), (label,)):
+            missing.append(f"{cfg['inventory_folder']} ({label})")
+    return missing
+
+
+def _ensure_raw_data(cfg: dict[str, Any]) -> None:
+    missing_before = _missing_raw_inputs(cfg)
+    if not missing_before:
+        logger.info("Raw activities inputs already present — skipping extraction.")
+        return
+    archive = Path(cfg["archive"])
+    if not archive.exists():
+        raise FileNotFoundError(
+            f"EMFAC activities raw inputs are missing ({', '.join(missing_before)}) and the archive "
+            f"was not found at {archive}. Place {_ARCHIVE_NAME} there or pre-extract the raw inputs."
+        )
+    _extract_archive(archive, Path(cfg["extract_root"]))
+    missing_after = _missing_raw_inputs(cfg)
+    if missing_after:
+        raise RuntimeError(
+            f"Extraction of {archive} completed, but required EMFAC raw inputs are still missing: "
+            f"{', '.join(missing_after)}. Check the archive structure and configured folder paths."
+        )
+
+
+def _build_workflow(settings, config_path: Path) -> dict[str, Any]:
+    from ..config.settings import _build_activities_config_from_root
+    from ..config.settings import _build_activities_workflow
+
+    cfg = _resolve_activities_config(settings, config_path)
     activities_override: dict[str, Any] = {
         "project_analysis": [
             {
                 "main": [
-                    {"folder": str(emfac_root / f"{region_name}-emfac-project-analysis")},
-                    *([{"pto_as_process": emfac_root_config.get("activities", {}).get("pto_as_process", {})}]
-                      if emfac_root_config.get("activities", {}).get("pto_as_process") else []),
+                    {"folder": str(cfg["project_analysis_folder"])},
+                    *([{"pto_as_process": cfg["pto_as_process"]}] if cfg["pto_as_process"] else []),
                 ],
             },
             {
                 "black_carbon": [
-                    {"folder": str(emfac_root / f"{region_name}-emfac-moves-bc")},
-                    {"pollutant": "BCh"},
+                    {"folder": str(cfg["black_carbon_folder"])},
+                    {"pollutant": str(cfg["black_carbon_pollutant"])},
                 ],
             },
             {
                 "paved_road_dust": [
-                    {"folder": str(emfac_root / "statewide-carb-road-dust")},
-                    *([{"road_category_map": emfac_root_config.get("activities", {}).get("road_category_map", {})}]
-                      if emfac_root_config.get("activities", {}).get("road_category_map") else []),
+                    {"folder": str(cfg["road_dust_folder"])},
+                    *([{"road_category_map": cfg["road_category_map"]}] if cfg["road_category_map"] else []),
                 ],
             },
         ],
         "emissions_inventory": [
-            {"inventory_folder": str(emfac_root / f"{region_name}-emfac-emissions-inventory")},
-            {"fallback_folder": str(emfac_root / "statewide-emfac-emissions-inventory")},
-            {"vehicle_category_attributes_file": str(
-                beam_input_folder / region_name / "vehicle-tech" / "emissions" / "emfac_vehicle_category_attributes.csv"
-            )},
-            *([{"fuel_map": emfac_root_config.get("activities", {}).get("fuel_map", {})}]
-              if emfac_root_config.get("activities", {}).get("fuel_map") else []),
+            {"inventory_folder": str(cfg["inventory_folder"])},
+            {"fallback_folder": str(cfg["fallback_folder"])},
+            {"vehicle_category_metadata_file": str(cfg["vehicle_category_metadata_file"])},
+            *([{"fuel_map": cfg["fuel_map"]}] if cfg["fuel_map"] else []),
         ],
     }
-    if emfac_root_config.get("activities", {}).get("model_year_groups"):
-        activities_override["model_year_groups"] = emfac_root_config["activities"]["model_year_groups"]
+    if cfg["model_year_groups"]:
+        activities_override["model_year_groups"] = cfg["model_year_groups"]
 
-    output_root = local_input_folder / "emfac"
-    merged_emfac = {**emfac_root_config, "output": str(output_root)}
-    merged_emfac["activities"] = {**merged_emfac.get("activities", {}), **activities_override}
-
+    merged_emfac = {
+        "region": {"name": cfg["region_name"], "label": cfg["region_label"]},
+        "scenario": {"year": settings.run.start_year, "name": cfg["scenario"]},
+        "seed": cfg["seed"],
+        "output": str(cfg["output_root"]),
+        "fleet": settings.impacts.fleet if isinstance(settings.impacts.fleet, dict) else {},
+        "activities": activities_override,
+    }
     raw = _build_activities_config_from_root(merged_emfac)
     return _build_activities_workflow(raw, config_path)
 
 
 def ensure_emfac_activities_outputs(settings, config_path: Path) -> dict[str, Any]:
     from .activities.main import run_workflow as run_activities_workflow
-    from ..manifest.file_ops import resolve_path
 
-    local_input_folder = Path(resolve_path(settings.impacts.local_input_folder, config_path)).resolve()
-    beam_input_folder = Path(resolve_path(settings.beam.local_input_folder, config_path)).resolve()
-    region_name = settings.run.region
-    emfac_root = _emfac_raw_root(local_input_folder)
+    cfg = _resolve_activities_config(settings, config_path)
 
     log_step_banner("EMFAC Activities", "Ensure inventory outputs", logger=logger)
 
-    log_substep_banner("1", "build workflow config", logger=logger)
+    log_substep_banner("1", "check existing outputs", logger=logger)
+    expected_output = _expected_output_path(cfg, settings.run.start_year)
+    if expected_output.exists():
+        logger.info("Outputs already present at %s — skipping activities run.", expected_output)
+        return {"paths": {"final_activity_emfacid_output_passenger": str(expected_output)}}
+
+    log_substep_banner("2", "ensure raw activity inputs", logger=logger)
+    _ensure_raw_data(cfg)
+
+    log_substep_banner("3", "build workflow config", logger=logger)
     workflow = _build_workflow(settings, config_path)
-
-    log_substep_banner("2", "check existing outputs", logger=logger)
-    if _outputs_exist(workflow):
-        logger.info("Outputs already present — skipping activities run.")
-        return workflow
-
-    log_substep_banner("3", "extract raw data from beam archive", logger=logger)
-    _ensure_raw_data(emfac_root, beam_input_folder, region_name)
 
     log_substep_banner("4", "run activities workflow", logger=logger)
     run_activities_workflow(workflow)

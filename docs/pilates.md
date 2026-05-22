@@ -1,11 +1,11 @@
 # PILATES Integration
 
-This document describes the `impacts` integration pattern for PILATES and the example scenario under `examples/pipeline/pilates/`.
+This document describes the `impacts` integration pattern for PILATES and the example scenario under `examples/pilates/`.
 
 ## Example layout
 
 ```text
-examples/pipeline/pilates/
+examples/pilates/
   beam/
     beam_output/
     production/
@@ -22,7 +22,7 @@ Meaning:
 
 The example uses one user-managed settings file:
 
-- `examples/pipeline/pilates/settings.yaml`
+- `examples/pilates/settings.yaml`
 - `src/impacts/config/settings.yaml` is the maintained starting template for the impacts overlay inside PILATES settings.
 
 That file is a thin impacts overlay kept with the example tree.
@@ -90,16 +90,16 @@ impacts:
 From the repo root:
 
 ```bash
-python -m impacts pipeline --config examples/pipeline/pilates/settings.yaml
+python -m impacts pipeline --config examples/pilates/settings.yaml
 ```
 
 The full pipeline command produces:
 
-- `examples/pipeline/pilates/impacts/impacts_output/inputs_manifest.yaml`
-- `examples/pipeline/pilates/impacts/impacts_output/run_manifest.yaml`
-- `examples/pipeline/pilates/impacts/impacts_output/beam_emissions_for_inmap.parquet`
-- optionally `examples/pipeline/pilates/impacts/impacts_output/beam_emissions_for_aermod.parquet`
-- `examples/pipeline/pilates/impacts/impacts_output/beam_concentration_distribution.parquet`
+- `examples/pilates/impacts/impacts_output/inputs_manifest.yaml`
+- `examples/pilates/impacts/impacts_output/run_manifest.yaml`
+- `examples/pilates/impacts/impacts_output/beam_emissions_for_inmap.parquet`
+- optionally `examples/pilates/impacts/impacts_output/beam_emissions_for_aermod.parquet`
+- `examples/pilates/impacts/impacts_output/beam_concentration_distribution.parquet`
 
 ## Preparing smaller sample inputs
 
@@ -108,18 +108,18 @@ If your BEAM artifacts are too large, create smaller samples first.
 Events are sampled by vehicle id, so each selected vehicle keeps its full trace. Skims are sampled by row fraction.
 
 ```bash
-python examples/pipeline/pilates/prepare_sample_data.py events \
+python examples/pilates/prepare_sample_data.py events \
   --input /path/to/0.events.parquet \
   --fraction 0.05
 ```
 
 ```bash
-python examples/pipeline/pilates/prepare_sample_data.py skims \
+python examples/pilates/prepare_sample_data.py skims \
   --input /path/to/0.skimsEmissions.parquet \
   --fraction 0.05
 ```
 
 Outputs land in:
 
-- `examples/pipeline/pilates/beam/events_sample.parquet`
-- `examples/pipeline/pilates/beam/skimsEmissions_sample.parquet`
+- `examples/pilates/beam/events_sample.parquet`
+- `examples/pilates/beam/skimsEmissions_sample.parquet`

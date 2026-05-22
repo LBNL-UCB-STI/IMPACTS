@@ -5,9 +5,9 @@ from pathlib import Path
 import pandas as pd
 
 from impacts.emfac.common import frame_summary
-from impacts.emfac.config import _apply_table_schema
-from impacts.emfac.config import build_model_category_fuel_mapping
-from impacts.emfac.config import read_table
+from impacts.config.settings import _apply_table_schema
+from impacts.config.settings import build_model_category_fuel_mapping
+from impacts.config.settings import read_table
 from impacts.emfac.common import write_trace
 
 ACTIVITY_COLUMN = "speedMph_timeMin"
@@ -241,7 +241,7 @@ def _load_step2_inputs(workflow: dict[str, object]) -> tuple[pd.DataFrame, pd.Da
         _enforce_inventory_schema(
             pd.read_parquet(Path(workflow["paths"]["emissions_inventory"]).expanduser().resolve())
         ),
-        build_model_category_fuel_mapping(workflow["inputs"]["vehicle_type_assignment_model_settings"])[
+        build_model_category_fuel_mapping(workflow["inputs"]["assignment_model"])[
             ["group", "emfac_vehicle_category", "emfac_fuel"]
         ],
     )

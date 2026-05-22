@@ -3,8 +3,8 @@
 from pathlib import Path
 import sys
 
-from impacts.emfac.config import load_default_fleet_workflow
-from impacts.emfac.config import load_fleet_workflow
+from impacts.config.settings import load_default_fleet_workflow
+from impacts.config.settings import load_fleet_workflow
 from impacts.emfac.common import raise_runtime_error
 from impacts.emfac.common import write_failure_trace
 from impacts.emfac.common import write_trace
@@ -44,8 +44,8 @@ def _missing_activities_outputs(workflow: dict[str, object]) -> dict[str, Path]:
     activities = workflow["config"]["activities"]
     activities_output_root = Path(str(activities["outputs"])).expanduser().resolve()
     frism_year = workflow["config"]["frism"]["year"]
-    scenario_name = str(workflow["scenario"])
-    rates_store_root = activities_output_root / "emissions" / f"{frism_year}-{scenario_name}"
+    scenario_id = str(workflow["scenario"])
+    rates_store_root = activities_output_root / "emissions" / f"{frism_year}-{scenario_id}"
     rates_store_dataset = rates_store_root / "dataset"
     rates_store_duckdb = rates_store_root / "dataset.duckdb"
     required_outputs = {

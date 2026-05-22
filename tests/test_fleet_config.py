@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from impacts.emfac.config import _ingest_fleet_sources
-from impacts.emfac.config import _normalize_activities_inputs
-from impacts.emfac.config import _normalize_alias_mapping
-from impacts.emfac.config import _normalize_model_spec_path
+from impacts.config.settings import _ingest_fleet_sources
+from impacts.config.settings import _normalize_activities_inputs
+from impacts.config.settings import _normalize_alias_mapping
+from impacts.config.settings import _normalize_model_spec_path
 
 
 def _write_required_model_file(model_file: Path) -> None:

@@ -39,7 +39,6 @@ class PipelineConfig:
     aermod_grid_path: Optional[str] = None
     aermod_grid_epsg: Optional[int] = None
     aermod_grid_id: Optional[str] = None
-    asrv_nox_to_no2_ratios_file: Optional[str] = None
     region: Optional[str] = None
     start_year: Optional[int] = None
     county_state_fips: Optional[str] = None
@@ -85,7 +84,6 @@ class PipelineConfig:
                 "aermod_grid_path",
                 "aermod_grid_epsg",
                 "aermod_grid_id",
-                "asrv_nox_to_no2_ratios_file",
                 "region",
                 "start_year",
                 "county_state_fips",
@@ -127,7 +125,6 @@ class PipelineConfig:
             aermod_grid_path=_optional_string(payload.get("aermod_grid_path")),
             aermod_grid_epsg=_optional_int(payload.get("aermod_grid_epsg")),
             aermod_grid_id=_optional_string(payload.get("aermod_grid_id")),
-            asrv_nox_to_no2_ratios_file=_optional_string(payload.get("asrv_nox_to_no2_ratios_file")),
             region=_required_string(payload.get("region"), "pipeline.region"),
             start_year=_required_int(payload.get("start_year"), "pipeline.start_year"),
             county_state_fips=_required_string(payload.get("county_state_fips"), "pipeline.county_state_fips"),

@@ -19,12 +19,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from impacts.emfac.config import ATLAS_HOUSEHOLDS_SCHEMA
-from impacts.emfac.config import build_fuel_consumption_emfac_assignment_catalog
-from impacts.emfac.config import EMFAC_ACTIVITY_SCHEMA
-from impacts.emfac.config import EMFAC_KEY_SCHEMA
-from impacts.emfac.config import read_table
-from impacts.emfac.config import resolve_workflow_path
+from impacts.config.settings import ATLAS_HOUSEHOLDS_SCHEMA
+from impacts.config.settings import build_fuel_consumption_emfac_assignment_catalog
+from impacts.config.settings import EMFAC_ACTIVITY_SCHEMA
+from impacts.config.settings import EMFAC_KEY_SCHEMA
+from impacts.config.settings import read_table
+from impacts.config.settings import resolve_workflow_path
 from impacts.emfac.common import attach_emissions_rates_filepaths_from_config
 from impacts.emfac.common import attach_idle_time_fraction_from_config
 from impacts.emfac.common import assign_model_year_groups

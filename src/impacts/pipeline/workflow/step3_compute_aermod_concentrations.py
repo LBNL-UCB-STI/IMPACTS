@@ -935,7 +935,7 @@ def run(
     )
 
     log_substep_banner("3.5", "compute NO2 from ISRM NO2/NOx column-sum ratios", logger=logger)
-    _no2_matrix_path = pipeline.asrv_nox_to_no2_ratios_file or pipeline.isrm_nox_to_no2_ratios_file
+    _no2_matrix_path = pipeline.isrm_nox_to_no2_ratios_file
     if _no2_matrix_path and "NO2" in result_gdf.columns:
         result_gdf = _compute_no2_from_isrm_matrix(
             concentrations_gdf=result_gdf,
@@ -945,7 +945,7 @@ def run(
         _trace_frame("5", "aermod_concentrations_with_isrm_no2", pd.DataFrame(result_gdf.drop(columns="geometry", errors="ignore")), key_cols=[target_id_col])
     elif "NO2" in result_gdf.columns:
         logger.info(
-            "%s no ISRM NO2/NOx matrix configured (asrv_nox_to_no2_ratios_file / isrm_nox_to_no2_ratios_file); "
+            "%s no ISRM NO2/NOx matrix configured (isrm_nox_to_no2_ratios_file); "
             "NO2 column will not be produced",
             _step_label("3.5"),
         )

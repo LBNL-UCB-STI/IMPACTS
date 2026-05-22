@@ -10,10 +10,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from impacts.emfac.config import read_table
-from impacts.emfac.config import resolve_workflow_path
-from impacts.emfac.config import ATLAS_VEHICLES_SCHEMA
-from impacts.emfac.config import VEHICLE_CATEGORY_METADATA_SCHEMA
+from impacts.config.settings import read_table
+from impacts.config.settings import resolve_workflow_path
+from impacts.config.settings import ATLAS_VEHICLES_SCHEMA
+from impacts.config.settings import VEHICLE_CATEGORY_METADATA_SCHEMA
 
 
 LIGHT_DUTY_VEHICLE_CATEGORIES = {"LDA", "LDT1", "LDT2"}
@@ -352,9 +352,9 @@ def attach_idle_time_fraction_from_config(
     config: dict[str, Any],
     step_label: str,
 ) -> pd.DataFrame:
-    metadata_path = config.get("vehicle_category_attributes_file")
+    metadata_path = config.get("vehicle_category_metadata_file")
     if not metadata_path:
-        raise ValueError(f"{step_label} requires vehicle_category_attributes_file in the EMFAC config.")
+        raise ValueError(f"{step_label} requires vehicle_category_metadata_file in the EMFAC config.")
     return attach_idle_time_fraction(
         vehicle_types,
         idle_time_fraction_lookup=load_idle_time_fraction_lookup(str(metadata_path)),
@@ -371,8 +371,8 @@ def load_rates_store_relative_paths(
 ) -> dict[str, str]:
     activities_output_root = Path(str(config["activities"]["outputs"])).expanduser().resolve()
     frism_year = config["frism"]["year"]
-    scenario_name = str(scenario).strip()
-    store_root = activities_output_root / "emissions" / f"{frism_year}-{scenario_name}"
+    scenario_id = str(scenario).strip()
+    store_root = activities_output_root / "emissions" / f"{frism_year}-{scenario_id}"
     parquet_root = store_root / "dataset"
     duckdb_path = store_root / "dataset.duckdb"
     output_root_path = Path(str(output_root)).expanduser().resolve()

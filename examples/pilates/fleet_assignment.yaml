@@ -45,7 +45,6 @@ fleet_assignment:
           sigma_ratio: 0.1
 
   mappings:
-
     freight:
       vehicle_categories:
         Class12aVocational: [ LDA, LDT1, LDT2 ]

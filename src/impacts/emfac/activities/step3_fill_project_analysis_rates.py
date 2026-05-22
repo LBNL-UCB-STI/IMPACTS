@@ -6,7 +6,7 @@ import pandas as pd
 
 from impacts.emfac.common import frame_summary
 from impacts.emfac.common import write_trace
-from impacts.emfac.config import _apply_table_schema
+from impacts.config.settings import _apply_table_schema
 
 ACTIVITY_COLUMN = "speedMph_timeMin"
 SURFACE_KEYS = ["county", "vehicleCategory", "fuel", "modelYear", "process", ACTIVITY_COLUMN, "roadCategory"]

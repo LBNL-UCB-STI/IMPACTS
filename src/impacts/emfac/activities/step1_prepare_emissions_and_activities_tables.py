@@ -10,9 +10,9 @@ import pandas as pd
 
 from impacts.emfac.common import frame_summary
 from impacts.emfac.common import write_trace
-from impacts.emfac.config import _apply_table_schema
-from impacts.emfac.config import _normalize_alias_mapping
-from impacts.emfac.config import read_table
+from impacts.config.settings import _apply_table_schema
+from impacts.config.settings import _normalize_alias_mapping
+from impacts.config.settings import read_table
 
 GRAMS_PER_SHORT_TON = 907_184.74
 METRIC_TONS_PER_SHORT_TON = 0.90718474
@@ -389,7 +389,7 @@ def _prepare_emissions_inventory(workflow: dict[str, object]) -> tuple[str, pd.D
         region_label=workflow["run"]["region_label"],
         year=workflow["run"]["calendar_year"],
         pto_config=pto_config,
-        operation_days_path=str(workflow["inputs"]["vehicle_category_attributes_file"]),
+        operation_days_path=str(workflow["inputs"]["vehicle_category_metadata_file"]),
     )
     return emissions_inventory_path, _read_emissions_inventory(emissions_inventory_path)
 

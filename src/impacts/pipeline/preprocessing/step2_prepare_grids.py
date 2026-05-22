@@ -34,7 +34,7 @@ def run(
 
     staged_inmap_grid = None
     resolved_inmap_grid_id = None
-    if inmap.enabled:
+    if settings.impacts.pipeline.inmap:
         staged_inmap_grid = resolve_required_manifest_input(manifest_inputs, key="inmap_grid")
         log_substep_banner("2.1", "ensure InMAP grid id", logger=logger)
         staged_inmap_grid, resolved_inmap_grid_id = ensure_grid_cell_id(
@@ -56,7 +56,7 @@ def run(
     staged_aermod_grid = None
     staged_aermod_full_grid = None
     resolved_aermod_grid_id = None
-    if settings.impacts.dispersions.aermod.enabled:
+    if settings.impacts.pipeline.aermod:
         log_substep_banner("2.3", "generate AERMOD grid", logger=logger)
         staged_inmap = read_vector(staged_inmap_grid) if staged_inmap_grid else None
         if staged_inmap is None or staged_inmap.empty:

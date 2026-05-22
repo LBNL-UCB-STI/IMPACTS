@@ -141,11 +141,12 @@ def run(
     log_step_banner("Preprocess Step 1", "Collect Inputs", logger=logger)
     beam = settings.beam
     impacts = settings.impacts
-    beam_processing = impacts.beam
+    beam_processing = impacts.emissions.beam
     emissions = impacts.emissions
     inmap = impacts.dispersions.inmap
     aermod = impacts.dispersions.aermod
-    exposure = impacts.exposure
+    population = impacts.population
+    pipeline = impacts.pipeline
 
     beam_output_root = required_local_path(
         resolve_path(beam.local_output_folder, config_path),
@@ -257,19 +258,19 @@ def run(
             _set_progress_task(progress, "emissions rates", step_label="Preprocess Step 1.2")
             emissions_rates_source = required_local_path(
                 _resolve_region_or_absolute_path(
-                    emissions.emissions_rates_folder,
+                    emissions.rates_folder,
                     region_input_root=region_input_root,
                     config_path=config_path,
                 ),
-                "impacts.emissions.emissions_rates_folder",
+                "impacts.emissions.rates_folder",
             )
             _register_manifest_input(
                 manifest_inputs,
                 input_root=input_root,
-                key="emissions_rates_folder",
+                key="rates_folder",
                 source_path=emissions_rates_source,
-                relative_target=emissions.emissions_rates_folder,
-                metadata={"artifact_family": "emissions_rates_folder"},
+                relative_target=emissions.rates_folder,
+                metadata={"artifact_family": "rates_folder"},
             )
             _advance_progress(progress)
 
@@ -280,7 +281,7 @@ def run(
                     region_input_root=region_input_root,
                     config_path=config_path,
                 ),
-                "impacts.beam.passenger_vehicle_types_file",
+                "impacts.emissions.passenger_vehicle_types_file",
             )
             _register_manifest_input(
                 manifest_inputs,
@@ -299,7 +300,7 @@ def run(
                     region_input_root=region_input_root,
                     config_path=config_path,
                 ),
-                "impacts.beam.freight_vehicle_types_file",
+                "impacts.emissions.freight_vehicle_types_file",
             )
             _register_manifest_input(
                 manifest_inputs,
@@ -424,17 +425,17 @@ def run(
         finally:
             _close_progress(progress)
 
-    if inmap.enabled or aermod.enabled:
+    if pipeline.inmap or pipeline.aermod:
         log_substep_banner("1.4", "register dispersion inputs", logger=logger)
         substep_14_total = 0
-        if inmap.enabled:
+        if pipeline.inmap:
             substep_14_total += 3  # grid, nox-to-no2 ratios, isrm store
-        if aermod.enabled:
+        if pipeline.aermod:
             substep_14_total += 1  # asrv patterns
         with logging_redirect_tqdm():
             progress = _progress(substep_14_total, "Preprocess Step 1.4")
             try:
-                if inmap.enabled:
+                if pipeline.inmap:
                     _set_progress_task(progress, "inmap grid", step_label="Preprocess Step 1.4")
                     inmap_grid_source = required_local_path(
                         str((region_input_root / inmap.grid_path).resolve()),
@@ -480,7 +481,7 @@ def run(
                     )
                     _advance_progress(progress)
 
-                if aermod.enabled:
+                if pipeline.aermod:
                     _set_progress_task(progress, "asrv patterns", step_label="Preprocess Step 1.4")
                     asrv_source = required_local_path(
                         str((region_input_root / aermod.asrv_patterns_file).resolve()),
@@ -499,9 +500,9 @@ def run(
                 _close_progress(progress)
 
     population_inputs: Dict[str, Any] = {}
-    if exposure.enabled:
+    if pipeline.exposure:
         log_substep_banner("1.5", "register exposure population inputs", logger=logger)
-        population_root = region_input_root / str(exposure.population_folder)
+        population_root = region_input_root / str(population.passenger_folder)
         population_artifact_entries = {
             "persons": find_latest_beam_population_reference(optional=True),
             "households": find_latest_beam_households_reference(optional=True),
@@ -527,7 +528,7 @@ def run(
                             input_root=input_root,
                             key=stem,
                             source_path=source_path,
-                            relative_target=str(Path(exposure.population_folder) / Path(source_path).name),
+                            relative_target=str(Path(population.passenger_folder) / Path(source_path).name),
                             artifact_key=population_artifact_keys[stem],
                             prefer_reference=True,
                             metadata={"artifact_family": population_artifact_keys[stem]},

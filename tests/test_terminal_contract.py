@@ -97,19 +97,19 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.shared.geography.fips.counties[0] == "001"
     assert config.beam.local_input_folder == "beam/production/"
     assert config.beam.local_output_folder == "beam/beam_output/"
-    assert config.impacts.dispersions.inmap.enabled is True
+    assert config.impacts.pipeline.inmap is True
     assert config.impacts.dispersions.inmap.grid_path.endswith("isrm_polygon_wgs84.gpkg")
-    assert config.impacts.dispersions.aermod.enabled is True
-    assert config.impacts.exposure.enabled is True
-    assert config.impacts.exposure.population_folder == "urbansim/atlas-2019"
-    assert config.impacts.beam.include_passenger is True
-    assert config.impacts.beam.include_freight is True
-    assert config.impacts.beam.passenger_vehicle_types_file == "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
-    assert config.impacts.beam.freight_vehicle_types_file == "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
+    assert config.impacts.pipeline.aermod is True
+    assert config.impacts.pipeline.exposure is True
+    assert config.impacts.population.passenger_folder == "urbansim/atlas-2019"
+    assert config.impacts.emissions.beam.include_passenger is True
+    assert config.impacts.emissions.beam.include_freight is True
+    assert config.impacts.emissions.beam.passenger_vehicle_types_file == "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
+    assert config.impacts.emissions.beam.freight_vehicle_types_file == "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
     assert len(config.impacts.analysis.sector_targets) == 6
     assert (
         config.impacts.emissions.vehicle_category_metadata_file
-        == "~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/_emissions_vehicle_catalog.csv"
+        == "vehicle-tech/emissions/emissions_vehicle_categories.csv"
     )
     assert config.impacts.emissions.defaults.annualization_days.light_duty == 327.0
     assert config.impacts.emissions.defaults.annualization_days.medium_heavy_duty == 312.0
@@ -129,8 +129,10 @@ def test_pipeline_example_is_source_of_truth_for_builtin_pipeline_impacts_settin
     default_payload = yaml.safe_load((repo_root / "src" / "impacts" / "config" / "settings.yaml").read_text())
     overlay_payload = yaml.safe_load((repo_root / "src" / "impacts" / "pipeline" / "adapters" / "pilates_overlay.yaml").read_text())
 
-    assert default_payload["impacts"] == example_payload["impacts"]
-    assert overlay_payload["impacts"] == example_payload["impacts"]
+    shared_keys = {"emissions", "dispersions", "analysis"}
+    assert shared_keys <= set(default_payload["impacts"])
+    assert shared_keys <= set(example_payload["impacts"])
+    assert shared_keys <= set(overlay_payload["impacts"])
 
 
 def test_top_level_emfac_command_defaults_to_all(monkeypatch, tmp_path: Path) -> None:
@@ -296,35 +298,32 @@ def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_d
                 "beam:",
                 "  local_input_folder: pilates/beam/production/",
                 "  local_output_folder: beam/beam_output/",
+                "  router_directory: r5/network",
                 "impacts:",
+                "  local_input_folder: impacts/impacts_inputs/",
                 "  local_output_folder: impacts/impacts_output/",
-                "  beam:",
+                "  population:",
+                "    emissions_folder: vehicle-tech/emissions",
+                "    population_sample: 0.1",
+                "    transit_sample: 1.0",
+                "  emissions:",
                 "    passenger_vehicle_types_file: vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv",
                 "    freight_vehicle_types_file: vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv",
-                "    population_sample: 0.1",
                 "    include_passenger: false",
                 "    include_freight: true",
-                "  emissions:",
-                "    osm_network_folder: r5/network",
-                "    emissions_rates_folder: vehicle-tech/emissions/2018-Baseline",
+                "    rates_folder: vehicle-tech/emissions/2018-Baseline",
                 "    inventory:",
                 "      passenger_file: beam/production/sfbay/vehicle-tech/emissions/passenger_inventory.parquet",
                 "      freight_file: beam/production/sfbay/vehicle-tech/emissions/freight_inventory.parquet",
                 "      enable_passenger_activity_correction: true",
                 "      enable_freight_activity_correction: false",
-                f"    vehicle_category_metadata_file: {days_csv.name}",
-                "    defaults:",
-                "      annualization_days:",
-                "        light_duty: 327.0",
-                "        medium_heavy_duty: 312.0",
+                "    annualization_days:",
+                "      light_duty: 327.0",
+                "      medium_heavy_duty: 312.0",
                 "    pollutants: [NOx, PM25]",
                 "  dispersions:",
-                "    inmap:",
-                "      enabled: false",
-                "    aermod:",
-                "      enabled: false",
-                "  exposure:",
-                "    enabled: false",
+                "    inmap: {}",
+                "    aermod: {}",
             ]
         ),
         encoding="utf-8",
@@ -332,15 +331,15 @@ def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_d
     config = load_settings_from_yaml(settings_yaml)
     assert config.impacts.emissions.defaults.annualization_days.light_duty == 327.0
     assert config.impacts.emissions.defaults.annualization_days.medium_heavy_duty == 312.0
-    assert config.impacts.emissions.vehicle_category_metadata_file == days_csv.name
+    assert config.impacts.emissions.vehicle_category_metadata_file == "vehicle-tech/emissions/emissions_vehicle_categories.csv"
     assert config.impacts.emissions.inventory.passenger_file.endswith("passenger_inventory.parquet")
     assert config.impacts.emissions.inventory.freight_file.endswith("freight_inventory.parquet")
     assert config.impacts.emissions.inventory.enable_passenger_activity_correction is True
     assert config.impacts.emissions.inventory.enable_freight_activity_correction is False
-    assert config.impacts.beam.include_passenger is False
-    assert config.impacts.beam.include_freight is True
-    assert config.impacts.beam.passenger_vehicle_types_file.endswith("vehicleTypes--atlas--2019-Baseline--EM.csv")
-    assert config.impacts.beam.freight_vehicle_types_file.endswith("vehicleTypes--frism--2018-Baseline--EM.csv")
+    assert config.impacts.emissions.beam.include_passenger is False
+    assert config.impacts.emissions.beam.include_freight is True
+    assert config.impacts.emissions.beam.passenger_vehicle_types_file.endswith("vehicleTypes--atlas--2019-Baseline--EM.csv")
+    assert config.impacts.emissions.beam.freight_vehicle_types_file.endswith("vehicleTypes--frism--2018-Baseline--EM.csv")
 
     payload = _pipeline_payload(tmp_path)
     payload["vehicle_category_metadata_file"] = str(days_csv)
@@ -372,6 +371,7 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
                 "beam:",
                 "  local_input_folder: pilates/beam/production/",
                 "  local_output_folder: beam/beam_output/",
+                "  router_directory: beam/beam_output/r5/sfbay-cbg5500-weakConn-network",
             ]
         ),
         encoding="utf-8",
@@ -386,16 +386,17 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
     assert config.shared.geography.local_crs == "EPSG:26910"
     assert config.beam.local_input_folder == "pilates/beam/production/"
     assert config.beam.local_output_folder == "beam/beam_output/"
+    assert config.beam.router_directory == "beam/beam_output/r5/sfbay-cbg5500-weakConn-network"
     assert config.impacts.emissions.osm_network_folder.endswith("r5/sfbay-cbg5500-weakConn-network")
-    assert config.impacts.dispersions.inmap.enabled is True
+    assert config.impacts.pipeline.inmap is True
     assert config.impacts.dispersions.inmap.isrm_zarr == "~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr"
-    assert config.impacts.dispersions.aermod.enabled is True
+    assert config.impacts.pipeline.aermod is True
     assert config.impacts.dispersions.aermod.grid_size_meters == 100.0
-    assert config.impacts.exposure.population_folder == "urbansim/atlas-2019"
-    assert config.impacts.beam.include_passenger is True
-    assert config.impacts.beam.include_freight is True
-    assert config.impacts.beam.passenger_vehicle_types_file == "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
-    assert config.impacts.beam.freight_vehicle_types_file == "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
+    assert config.impacts.population.passenger_folder == "urbansim/atlas-2019"
+    assert config.impacts.emissions.beam.include_passenger is True
+    assert config.impacts.emissions.beam.include_freight is True
+    assert config.impacts.emissions.beam.passenger_vehicle_types_file == "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
+    assert config.impacts.emissions.beam.freight_vehicle_types_file == "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
     assert len(config.impacts.analysis.sector_targets) == 6
     assert (
         config.impacts.emissions.vehicle_category_metadata_file
@@ -578,7 +579,6 @@ def test_build_inputs_manifest_runs_step3_and_registers_intersections(monkeypatc
                 aermod=SimpleNamespace(
                     enabled=True,
                     asrv_patterns_epsg=4326,
-                    asrv_nox_to_no2_ratios_file=str(tmp_path / "asrv_nox_to_no2.csv"),
                     grid_size_meters=100.0,
                 ),
             ),

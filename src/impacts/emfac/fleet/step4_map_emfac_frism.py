@@ -10,11 +10,11 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from impacts.emfac.config import build_fuel_consumption_emfac_assignment_catalog
-from impacts.emfac.config import EMFAC_ACTIVITY_SCHEMA
-from impacts.emfac.config import EMFAC_KEY_SCHEMA
-from impacts.emfac.config import read_table
-from impacts.emfac.config import resolve_workflow_path
+from impacts.config.settings import build_fuel_consumption_emfac_assignment_catalog
+from impacts.config.settings import EMFAC_ACTIVITY_SCHEMA
+from impacts.config.settings import EMFAC_KEY_SCHEMA
+from impacts.config.settings import read_table
+from impacts.config.settings import resolve_workflow_path
 from impacts.emfac.common import attach_emissions_rates_filepaths_from_config
 from impacts.emfac.common import attach_idle_time_fraction_from_config
 from impacts.emfac.common import build_hashed_vehicle_type_ids
@@ -693,9 +693,9 @@ def _parse_gvwr_lbs_upper_bound(value: object) -> float | None:
 
 
 def _load_emfac_gvwr_kg_lookup(config: dict[str, Any]) -> dict[str, float]:
-    metadata_path = config.get("vehicle_category_attributes_file")
+    metadata_path = config.get("vehicle_category_metadata_file")
     if metadata_path in (None, ""):
-        raise ValueError("Freight Step 4.4 requires vehicle_category_attributes_file in the EMFAC config.")
+        raise ValueError("Freight Step 4.4 requires vehicle_category_metadata_file in the EMFAC config.")
     metadata = read_table(str(metadata_path), schema=_GVWR_METADATA_SCHEMA)
     prepared = metadata[["emfac_vehicle_category", "gvwr_lbs"]].copy()
     prepared["emfac_vehicle_category"] = prepared["emfac_vehicle_category"].fillna("").str.strip()
