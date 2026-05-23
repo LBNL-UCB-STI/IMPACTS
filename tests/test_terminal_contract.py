@@ -16,8 +16,9 @@ from impacts.manifest.schema import InputsManifest
 from impacts.manifest.schema import PipelineConfig
 from impacts.manifest.schema import PostprocessManifest
 from impacts.manifest.schema import RunManifest
+from impacts.manifest.schema import ActivitiesManifest
 from impacts.postprocessor import postprocess_from_settings
-from impacts.runner import run_from_input_manifest
+from impacts.runner import run_emissions_from_run_manifest
 
 
 def _pipeline_payload(tmp_path: Path) -> dict:
@@ -25,8 +26,10 @@ def _pipeline_payload(tmp_path: Path) -> dict:
         "beam_osm_id_col": "attributeOrigId",
         "beam_length_col": "linkLength",
         "output_epsg": 26910,
+        "emissions_enabled": True,
         "inmap_enabled": True,
         "aermod_enabled": True,
+        "exposure_enabled": True,
         "inmap_grid_path": str(tmp_path / "inmap_grid.parquet"),
         "inmap_grid_epsg": 26910,
         "mapping_columns": {"link_id": "linkId", "grid_id": "isrm"},
@@ -87,7 +90,7 @@ def _inputs_manifest_payload(tmp_path: Path) -> dict:
 
 
 def test_example_settings_yaml_is_current_settings_file():
-    settings_yaml = Path(__file__).resolve().parents[1] / "examples" / "pipeline" / "pilates" / "settings.yaml"
+    settings_yaml = Path(__file__).resolve().parents[1] / "examples" / "pilates" / "settings.yaml"
 
     config = load_settings_from_yaml(settings_yaml)
 
@@ -95,24 +98,27 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.run.scenario == "base"
     assert config.shared.geography.fips.state == "06"
     assert config.shared.geography.fips.counties[0] == "001"
-    assert config.beam.local_input_folder == "beam/production/"
+    assert config.beam.local_input_folder == "~/Workspace/Models/beam/beam-data/beam-data-sfbay"
     assert config.beam.local_output_folder == "beam/beam_output/"
     assert config.impacts.pipeline.inmap is True
     assert config.impacts.dispersions.inmap.grid_path.endswith("isrm_polygon_wgs84.gpkg")
     assert config.impacts.pipeline.aermod is True
     assert config.impacts.pipeline.exposure is True
-    assert config.impacts.population.passenger_folder == "urbansim/atlas-2019"
+    assert config.impacts.population.passenger_folder == "beam/beam_output/urbansim/atlas-2019"
     assert config.impacts.emissions.beam.include_passenger is True
     assert config.impacts.emissions.beam.include_freight is True
-    assert config.impacts.emissions.beam.passenger_vehicle_types_file == "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
-    assert config.impacts.emissions.beam.freight_vehicle_types_file == "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
-    assert len(config.impacts.analysis.sector_targets) == 6
-    assert (
-        config.impacts.emissions.vehicle_category_metadata_file
-        == "vehicle-tech/emissions/emissions_vehicle_categories.csv"
+    assert config.impacts.emissions.beam.passenger_vehicle_types_file.endswith(
+        "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
     )
-    assert config.impacts.emissions.defaults.annualization_days.light_duty == 327.0
-    assert config.impacts.emissions.defaults.annualization_days.medium_heavy_duty == 312.0
+    assert config.impacts.emissions.beam.freight_vehicle_types_file.endswith(
+        "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
+    )
+    assert len(config.impacts.analysis.sector_targets) == 6
+    assert config.impacts.emissions.vehicle_category_metadata_file.endswith(
+        "vehicle-tech/emissions/emissions_vehicle_categories.csv"
+    )
+    assert config.impacts.emissions.defaults.default_annualization_days.light_duty == 327.0
+    assert config.impacts.emissions.defaults.default_annualization_days.medium_heavy_duty == 312.0
     assert config.impacts.analysis.sector_targets[0].source == "mobile_onroad"
     assert config.impacts.analysis.sector_targets[0].sector == "passenger_cars"
     assert config.impacts.analysis.sector_targets[0].annual_pm25_short_tons == 714.26
@@ -125,7 +131,7 @@ def test_example_settings_yaml_is_current_settings_file():
 
 def test_pipeline_example_is_source_of_truth_for_builtin_pipeline_impacts_settings() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    example_payload = yaml.safe_load((repo_root / "examples" / "pipeline" / "pilates" / "settings.yaml").read_text())
+    example_payload = yaml.safe_load((repo_root / "examples" / "pilates" / "settings.yaml").read_text())
     default_payload = yaml.safe_load((repo_root / "src" / "impacts" / "config" / "settings.yaml").read_text())
     overlay_payload = yaml.safe_load((repo_root / "src" / "impacts" / "pipeline" / "adapters" / "pilates_overlay.yaml").read_text())
 
@@ -133,106 +139,6 @@ def test_pipeline_example_is_source_of_truth_for_builtin_pipeline_impacts_settin
     assert shared_keys <= set(default_payload["impacts"])
     assert shared_keys <= set(example_payload["impacts"])
     assert shared_keys <= set(overlay_payload["impacts"])
-
-
-def test_top_level_emfac_command_defaults_to_all(monkeypatch, tmp_path: Path) -> None:
-    config_path = tmp_path / "emfac.yaml"
-    config_path.write_text("emfac: {}\n", encoding="utf-8")
-    captured: dict[str, object] = {}
-
-    def _fake_main(argv=None):
-        captured["argv"] = list(argv or [])
-
-    monkeypatch.setattr("impacts.emfac.__main__.main", _fake_main)
-
-    assert main(["emfac", "--config", str(config_path)]) == 0
-    assert captured["argv"] == ["--config", str(config_path)]
-
-
-def test_run_profile_memray_relaunches_under_impacts_output(monkeypatch, tmp_path: Path) -> None:
-    input_manifest_path = tmp_path / "inputs_manifest.yaml"
-    input_manifest_path.write_text("model: impacts\n", encoding="utf-8")
-    captured: dict[str, object] = {}
-
-    monkeypatch.setattr("impacts.__main__.load_structured_file", lambda _: {"settings_source": str(tmp_path / "settings.yaml")})
-    monkeypatch.setattr(
-        "impacts.__main__.load_settings_from_yaml",
-        lambda _: SimpleNamespace(impacts=SimpleNamespace(local_output_folder="impacts_output")),
-    )
-    monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
-
-    def _fake_run(command, env=None, check=False):
-        captured["command"] = command
-        captured["env"] = env
-        return subprocess.CompletedProcess(command, 0)
-
-    monkeypatch.setattr("impacts.__main__.subprocess.run", _fake_run)
-
-    assert main(["run", "--input-manifest", str(input_manifest_path), "--profile", "memray", "--allow-heavy-profile"]) == 0
-    assert captured["command"] == [
-        sys.executable,
-        "-m",
-        "memray",
-        "run",
-        "-o",
-        str((tmp_path / "impacts_output" / "profiling" / "run.memray").resolve()),
-        "-m",
-        "impacts",
-        "run",
-        "--input-manifest",
-        str(input_manifest_path),
-        "--profile",
-        "none",
-    ]
-    assert captured["env"]["IMPACTS_PROFILE_ACTIVE"] == "1"
-
-
-def test_run_profile_memray_requires_allow_heavy_profile(tmp_path: Path) -> None:
-    input_manifest_path = tmp_path / "inputs_manifest.yaml"
-    input_manifest_path.write_text("model: impacts\n", encoding="utf-8")
-
-    with pytest.raises(SystemExit):
-        main(["run", "--input-manifest", str(input_manifest_path), "--profile", "memray"])
-
-
-def test_run_profile_time_relaunches_under_impacts_output(monkeypatch, tmp_path: Path) -> None:
-    input_manifest_path = tmp_path / "inputs_manifest.yaml"
-    input_manifest_path.write_text("model: impacts\n", encoding="utf-8")
-    captured: dict[str, object] = {}
-
-    monkeypatch.setattr("impacts.__main__.load_structured_file", lambda _: {"settings_source": str(tmp_path / "settings.yaml")})
-    monkeypatch.setattr(
-        "impacts.__main__.load_settings_from_yaml",
-        lambda _: SimpleNamespace(impacts=SimpleNamespace(local_output_folder="impacts_output")),
-    )
-    monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
-
-    def _fake_run(command, env=None, check=False):
-        captured["command"] = command
-        captured["env"] = env
-        return subprocess.CompletedProcess(command, 0)
-
-    monkeypatch.setattr("impacts.__main__.subprocess.run", _fake_run)
-
-    assert main(["run", "--input-manifest", str(input_manifest_path), "--profile", "time"]) == 0
-    assert captured["command"] == [
-        "/usr/bin/time",
-        "-l",
-        "-o",
-        str((tmp_path / "impacts_output" / "profiling" / "run.time.txt").resolve()),
-        sys.executable,
-        "-m",
-        "impacts",
-        "run",
-        "--input-manifest",
-        str(input_manifest_path),
-        "--profile",
-        "none",
-    ]
-    assert captured["env"]["IMPACTS_PROFILE_ACTIVE"] == "1"
-
-
-
 def test_pipeline_profile_memray_is_rejected(tmp_path: Path) -> None:
     config_path = tmp_path / "settings.yaml"
     config_path.write_text("impacts:\n  local_output_folder: impacts_output\n", encoding="utf-8")
@@ -302,22 +208,27 @@ def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_d
                 "impacts:",
                 "  local_input_folder: impacts/impacts_inputs/",
                 "  local_output_folder: impacts/impacts_output/",
+                "  scenario: 2018-Baseline",
+                "  pipeline:",
+                "    postsim:",
+                "      emissions: true",
+                "      inmap: false",
+                "      aermod: false",
+                "      exposure: false",
                 "  population:",
-                "    emissions_folder: vehicle-tech/emissions",
+                "    vehicle_folder: vehicle-tech",
+                "    rates_folder: vehicle-tech/emissions",
+                "    dispersions_folder: vehicle-tech/dispersions",
+                "    atlas_year: 2019",
+                "    frism_year: 2018",
                 "    population_sample: 0.1",
                 "    transit_sample: 1.0",
                 "  emissions:",
-                "    passenger_vehicle_types_file: vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv",
-                "    freight_vehicle_types_file: vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv",
                 "    include_passenger: false",
                 "    include_freight: true",
-                "    rates_folder: vehicle-tech/emissions/2018-Baseline",
-                "    inventory:",
-                "      passenger_file: beam/production/sfbay/vehicle-tech/emissions/passenger_inventory.parquet",
-                "      freight_file: beam/production/sfbay/vehicle-tech/emissions/freight_inventory.parquet",
-                "      enable_passenger_activity_correction: true",
-                "      enable_freight_activity_correction: false",
-                "    annualization_days:",
+                "    enable_passenger_activity_correction: true",
+                "    enable_freight_activity_correction: false",
+                "    default_annualization_days:",
                 "      light_duty: 327.0",
                 "      medium_heavy_duty: 312.0",
                 "    pollutants: [NOx, PM25]",
@@ -329,17 +240,19 @@ def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_d
         encoding="utf-8",
     )
     config = load_settings_from_yaml(settings_yaml)
-    assert config.impacts.emissions.defaults.annualization_days.light_duty == 327.0
-    assert config.impacts.emissions.defaults.annualization_days.medium_heavy_duty == 312.0
+    assert config.impacts.emissions.defaults.default_annualization_days.light_duty == 327.0
+    assert config.impacts.emissions.defaults.default_annualization_days.medium_heavy_duty == 312.0
     assert config.impacts.emissions.vehicle_category_metadata_file == "vehicle-tech/emissions/emissions_vehicle_categories.csv"
-    assert config.impacts.emissions.inventory.passenger_file.endswith("passenger_inventory.parquet")
-    assert config.impacts.emissions.inventory.freight_file.endswith("freight_inventory.parquet")
+    assert config.impacts.emissions.rates_folder == "vehicle-tech/emissions/2018-Baseline/rates"
+    assert config.impacts.emissions.inventory.inventory_folder == "vehicle-tech/emissions/2018-Baseline/inventory"
+    assert config.impacts.emissions.inventory.passenger_file is None
+    assert config.impacts.emissions.inventory.freight_file is None
     assert config.impacts.emissions.inventory.enable_passenger_activity_correction is True
     assert config.impacts.emissions.inventory.enable_freight_activity_correction is False
     assert config.impacts.emissions.beam.include_passenger is False
     assert config.impacts.emissions.beam.include_freight is True
-    assert config.impacts.emissions.beam.passenger_vehicle_types_file.endswith("vehicleTypes--atlas--2019-Baseline--EM.csv")
-    assert config.impacts.emissions.beam.freight_vehicle_types_file.endswith("vehicleTypes--frism--2018-Baseline--EM.csv")
+    assert config.impacts.emissions.beam.passenger_vehicle_types_file is None
+    assert config.impacts.emissions.beam.freight_vehicle_types_file is None
 
     payload = _pipeline_payload(tmp_path)
     payload["vehicle_category_metadata_file"] = str(days_csv)
@@ -388,6 +301,7 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
     assert config.beam.local_output_folder == "beam/beam_output/"
     assert config.beam.router_directory == "beam/beam_output/r5/sfbay-cbg5500-weakConn-network"
     assert config.impacts.emissions.osm_network_folder.endswith("r5/sfbay-cbg5500-weakConn-network")
+    assert config.impacts.scenario == "2017-Baseline"
     assert config.impacts.pipeline.inmap is True
     assert config.impacts.dispersions.inmap.isrm_zarr == "~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr"
     assert config.impacts.pipeline.aermod is True
@@ -395,12 +309,13 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
     assert config.impacts.population.passenger_folder == "urbansim/atlas-2019"
     assert config.impacts.emissions.beam.include_passenger is True
     assert config.impacts.emissions.beam.include_freight is True
-    assert config.impacts.emissions.beam.passenger_vehicle_types_file == "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
-    assert config.impacts.emissions.beam.freight_vehicle_types_file == "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
+    assert config.impacts.population.vehicle_folder == "vehicle-tech"
+    assert config.impacts.emissions.beam.passenger_vehicle_types_file is None
+    assert config.impacts.emissions.beam.freight_vehicle_types_file is None
     assert len(config.impacts.analysis.sector_targets) == 6
     assert (
         config.impacts.emissions.vehicle_category_metadata_file
-        == "~/Workspace/Models/beam-data/beam-data-sfbay/vehicle-tech/_emissions_vehicle_catalog.csv"
+        == "vehicle-tech/emissions/emissions_vehicle_categories.csv"
     )
     assert config.impacts.analysis.inventory_targets == []
 
@@ -408,6 +323,38 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
 def test_manifest_models_round_trip_current_shape(tmp_path: Path):
     pipeline = PipelineConfig.from_dict(_pipeline_payload(tmp_path)).to_dict()
     inputs_manifest = InputsManifest.from_dict(_inputs_manifest_payload(tmp_path)).to_dict()
+    activities_manifest = ActivitiesManifest.from_dict(
+        {
+            "contract_version": "1",
+            "model": "impacts",
+            "settings_source": str(tmp_path / "settings.yaml"),
+            "output_dir": str(tmp_path / "emfac"),
+            "region_label": "SFBAY",
+            "calendar_year": 2018,
+            "scenario": "2018-Baseline",
+            "vehicle_category_metadata_file": str(tmp_path / "vehicle_category_metadata.csv"),
+            "outputs": {
+                "outputs_root": str(tmp_path / "emfac"),
+                "activities_output_root": str(tmp_path / "emfac" / "activities"),
+                "tmp_root": str(tmp_path / "emfac" / "_tmp"),
+                "emissions_store_root": str(tmp_path / "emfac" / "emissions" / "2018-2018-Baseline"),
+                "passenger_rates_file": str(tmp_path / "emfac" / "activities" / "passenger-rates.parquet"),
+                "passenger_activity_file": str(tmp_path / "emfac" / "_tmp" / "passenger-activity.parquet"),
+                "passenger_fleet_file": str(tmp_path / "emfac" / "activities" / "passenger-fleet.parquet"),
+                "freight_rates_file": str(tmp_path / "emfac" / "activities" / "freight-rates.parquet"),
+                "freight_activity_file": str(tmp_path / "emfac" / "_tmp" / "freight-activity.parquet"),
+                "freight_fleet_file": str(tmp_path / "emfac" / "activities" / "freight-fleet.parquet"),
+                "final_activity_emfacid_output_passenger": str(
+                    tmp_path / "emfac" / "activities" / "passenger-activity-by-emfacid.parquet"
+                ),
+                "final_activity_emfacid_output_freight": str(
+                    tmp_path / "emfac" / "activities" / "freight-activity-by-emfacid.parquet"
+                ),
+            },
+            "notes": [],
+            "activities_manifest_path": str(tmp_path / "emfac" / "activities_manifest.yaml"),
+        }
+    ).to_dict()
     run_manifest = RunManifest.from_dict(
         {
             "contract_version": "1",
@@ -415,7 +362,7 @@ def test_manifest_models_round_trip_current_shape(tmp_path: Path):
             "input_manifest_path": inputs_manifest["inputs_manifest_path"],
             "output_dir": str(tmp_path / "workspace"),
             "outputs_dir": str(tmp_path / "workspace" / "outputs"),
-            "command": "python -m impacts run",
+            "command": "python -m impacts emissions",
             "image": "unknown",
             "outputs": {"skims_emissions": str(tmp_path / "prepared.parquet")},
             "pipeline": pipeline,
@@ -431,7 +378,7 @@ def test_manifest_models_round_trip_current_shape(tmp_path: Path):
             "model": "impacts",
             "run_manifest_path": run_manifest["run_manifest_path"],
             "output_dir": str(tmp_path / "impacts"),
-            "canonical_artifact": {"path": str(tmp_path / "impacts" / "impacts_exposure_table.parquet")},
+                "canonical_artifact": {"path": str(tmp_path / "impacts" / "impacts_complete.txt")},
             "analysis_outputs": {},
             "validation": {},
             "notes": [],
@@ -439,9 +386,10 @@ def test_manifest_models_round_trip_current_shape(tmp_path: Path):
         }
     ).to_dict()
 
+    assert activities_manifest["outputs"]["outputs_root"].endswith("emfac")
     assert inputs_manifest["pipeline"]["region"] == "sfbay"
     assert run_manifest["execution"]["stopped_after"] == "step1_process_emissions"
-    assert postprocess_manifest["canonical_artifact"]["path"].endswith(".parquet")
+    assert postprocess_manifest["canonical_artifact"]["path"].endswith(".txt")
 
 
 def test_pipeline_manifest_allows_disabled_inmap_without_inmap_inputs(tmp_path: Path):
@@ -477,7 +425,7 @@ def test_pipeline_manifest_allows_disabled_aermod_without_aermod_inputs(tmp_path
     assert config.asrv_patterns_file is None
 
 
-def test_run_from_input_manifest_uses_staged_intersections_from_preprocess(monkeypatch, tmp_path: Path):
+def test_run_emissions_from_run_manifest_uses_staged_intersections_from_preprocess(monkeypatch, tmp_path: Path):
     import impacts.pipeline.workflow.prepare_emissions_from_skims as prepare_emissions_from_skims
     import impacts.pipeline.workflow.step1_process_emissions as step1_process_emissions
     import impacts.runner as runner_module
@@ -489,7 +437,29 @@ def test_run_from_input_manifest_uses_staged_intersections_from_preprocess(monke
     ):
         (tmp_path / name).write_text("", encoding="utf-8")
 
-    monkeypatch.setattr(runner_module, "load_structured_file", lambda _: _inputs_manifest_payload(tmp_path))
+    run_manifest_path = tmp_path / "workspace" / "run_manifest.yaml"
+
+    def _fake_load_structured_file(path):
+        path = Path(path)
+        if path == run_manifest_path:
+            return {
+                "contract_version": "1",
+                "model": "impacts",
+                "input_manifest_path": str(tmp_path / "workspace" / "inputs_manifest.yaml"),
+                "output_dir": str(tmp_path / "impacts_output"),
+                "outputs_dir": str(tmp_path / "impacts_output"),
+                "command": "python -m impacts emissions",
+                "image": "unknown",
+                "outputs": {"skims_emissions": str(tmp_path / "prepared_skims.parquet")},
+                "pipeline": _pipeline_payload(tmp_path),
+                "population_inputs": {},
+                "deterministic_contract": {},
+                "execution": {"dispersion_completed": False, "stopped_after": "preprocess"},
+                "run_manifest_path": str(run_manifest_path),
+            }
+        return _inputs_manifest_payload(tmp_path)
+
+    monkeypatch.setattr(runner_module, "load_structured_file", _fake_load_structured_file)
     monkeypatch.setattr(
         runner_module,
         "load_settings_from_yaml",
@@ -516,9 +486,8 @@ def test_run_from_input_manifest_uses_staged_intersections_from_preprocess(monke
         lambda input_root: str(tmp_path / "prepared_skims.parquet"),
     )
 
-    result = run_from_input_manifest(
-        input_manifest_path=tmp_path / "workspace" / "inputs_manifest.yaml",
-        run_dispersion=False,
+    result = run_emissions_from_run_manifest(
+        run_manifest_path=run_manifest_path,
     )
 
     assert result["execution"]["dispersion_completed"] is False
@@ -530,9 +499,11 @@ def test_run_from_input_manifest_uses_staged_intersections_from_preprocess(monke
 
 
 def test_build_inputs_manifest_runs_step3_and_registers_intersections(monkeypatch, tmp_path: Path):
+    import sys
+    from types import ModuleType
+
     import impacts.pipeline.preprocessing.step1_collect_inputs as step1_collect_inputs
     import impacts.pipeline.preprocessing.step2_prepare_grids as step2_prepare_grids
-    import impacts.pipeline.preprocessing.step3_integrate_grids as step3_integrate_grids
     import impacts.preprocessor as preprocessor_module
 
     config_path = tmp_path / "settings.yaml"
@@ -551,13 +522,13 @@ def test_build_inputs_manifest_runs_step3_and_registers_intersections(monkeypatc
         ),
         impacts=SimpleNamespace(
             local_output_folder="impacts_output",
-            beam=SimpleNamespace(
-                population_sample=0.1,
-                transit_sample=0.25,
-                include_non_osm_car_links=True,
-                include_passenger=True,
-                include_freight=True,
+            pipeline=SimpleNamespace(
+                emissions=True,
+                inmap=True,
+                aermod=True,
+                exposure=True,
             ),
+            population=SimpleNamespace(population_sample=0.1, transit_sample=0.25),
             emissions=SimpleNamespace(
                 mapping_columns={"link_id": "linkId"},
                 beam_osm_id_col="attributeOrigId",
@@ -570,14 +541,18 @@ def test_build_inputs_manifest_runs_step3_and_registers_intersections(monkeypatc
                     enable_passenger_activity_correction=True,
                     enable_freight_activity_correction=True,
                 ),
+                beam=SimpleNamespace(
+                    include_non_osm_car_links=True,
+                    include_passenger=True,
+                    include_freight=True,
+                ),
                 defaults=SimpleNamespace(
-                    annualization_days=SimpleNamespace(light_duty=327.0, medium_heavy_duty=312.0)
+                    default_annualization_days=SimpleNamespace(light_duty=327.0, medium_heavy_duty=312.0)
                 ),
             ),
             dispersions=SimpleNamespace(
-                inmap=SimpleNamespace(enabled=True, grid_epsg=26910),
+                inmap=SimpleNamespace(grid_epsg=26910),
                 aermod=SimpleNamespace(
-                    enabled=True,
                     asrv_patterns_epsg=4326,
                     grid_size_meters=100.0,
                 ),
@@ -637,7 +612,9 @@ def test_build_inputs_manifest_runs_step3_and_registers_intersections(monkeypatc
 
     monkeypatch.setattr(step1_collect_inputs, "run", _fake_step1)
     monkeypatch.setattr(step2_prepare_grids, "run", _fake_step2)
-    monkeypatch.setattr(step3_integrate_grids, "run", _fake_step3)
+    fake_step3_module = ModuleType("impacts.pipeline.preprocessing.step3_integrate_grids")
+    fake_step3_module.run = _fake_step3
+    monkeypatch.setitem(sys.modules, "impacts.pipeline.preprocessing.step3_integrate_grids", fake_step3_module)
 
     manifest = preprocessor_module.build_inputs_manifest(config_path)
 
@@ -652,10 +629,21 @@ def test_build_inputs_manifest_runs_step3_and_registers_intersections(monkeypatc
     assert manifest["inputs"]["inmap_intersection"]["source_path"].endswith("beam_osm_inmap_intersection.parquet")
     assert manifest["inputs"]["aermod_intersection"]["source_path"].endswith("beam_osm_aermod_intersection.parquet")
 
-
-def test_cli_run_requires_input_manifest(tmp_path: Path):
+def test_cli_rejects_removed_run_command() -> None:
     with pytest.raises(SystemExit):
         main(["run"])
+
+
+def test_cli_fleet_uses_activities_manifest(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+
+    def _fake_run_fleet_main(*, activities_manifest_path):
+        captured["activities_manifest_path"] = str(activities_manifest_path)
+
+    monkeypatch.setattr("impacts.emfac.fleet.main.main", _fake_run_fleet_main)
+
+    assert main(["fleet", "--activities-manifest", str(tmp_path / "activities_manifest.yaml")]) == 0
+    assert captured["activities_manifest_path"].endswith("activities_manifest.yaml")
 
 
 def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_path: Path):
@@ -664,32 +652,37 @@ def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_pat
     class _Settings:
         class impacts:
             local_output_folder = "impacts"
+            pipeline = SimpleNamespace(
+                postsim=SimpleNamespace(
+                    emissions=True,
+                    inmap=False,
+                    aermod=False,
+                    exposure=False,
+                )
+            )
 
     def _fake_preprocess(settings_path):
         calls["preprocess"] = {
             "settings_path": str(settings_path),
         }
-        return {"inputs_manifest_path": str(tmp_path / "workspace" / "inputs_manifest.yaml")}
+        return {"run_manifest_path": str(tmp_path / "workspace" / "run_manifest.yaml")}
 
-    def _fake_manifest_run(input_manifest_path, run_dispersion=True):
-        calls["manifest_run"] = {
-            "input_manifest_path": str(input_manifest_path),
-            "run_dispersion": run_dispersion,
+    def _fake_emissions_run(run_manifest_path):
+        calls["emissions_run"] = {
+            "run_manifest_path": str(run_manifest_path),
         }
         return {"run_manifest_path": str(tmp_path / "workspace" / "run_manifest.yaml")}
 
-    def _fake_postprocess(run_manifest_path, output_dir, manifest_path=None):
+    def _fake_postprocess(run_manifest_path, manifest_path=None):
         calls["postprocess"] = {
             "run_manifest_path": str(run_manifest_path),
-            "output_dir": str(output_dir),
             "manifest_path": manifest_path,
         }
         return {"postprocess_manifest_path": str(tmp_path / "impacts" / "postprocess_manifest.yaml")}
 
     monkeypatch.setattr("impacts.postprocessor.load_settings_from_yaml", lambda _: _Settings())
-    monkeypatch.setattr("impacts.postprocessor.resolve_path", lambda path, _: path)
     monkeypatch.setattr("impacts.preprocessor.preprocess_workflow", _fake_preprocess)
-    monkeypatch.setattr("impacts.runner.run_from_input_manifest", _fake_manifest_run)
+    monkeypatch.setattr("impacts.runner.run_emissions_from_run_manifest", _fake_emissions_run)
     monkeypatch.setattr("impacts.postprocessor.postprocess_from_run_manifest", _fake_postprocess)
 
     result = postprocess_from_settings(
@@ -698,10 +691,8 @@ def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_pat
 
     assert result["postprocess_manifest_path"].endswith("postprocess_manifest.yaml")
     assert calls["preprocess"]["settings_path"].endswith("settings.yaml")
-    assert calls["manifest_run"]["input_manifest_path"].endswith("inputs_manifest.yaml")
-    assert calls["manifest_run"]["run_dispersion"] is True
+    assert calls["emissions_run"]["run_manifest_path"].endswith("run_manifest.yaml")
     assert calls["postprocess"]["run_manifest_path"].endswith("run_manifest.yaml")
-    assert calls["postprocess"]["output_dir"].endswith("impacts")
 
 
 def test_analysis_runner_resolves_modeled_emissions_from_run_manifest(monkeypatch, tmp_path: Path):
@@ -720,7 +711,7 @@ def test_analysis_runner_resolves_modeled_emissions_from_run_manifest(monkeypatc
                 "input_manifest_path": str(output_root / "inputs_manifest.yaml"),
                 "output_dir": str(output_root),
                 "outputs_dir": str(output_root),
-                "command": "python -m impacts run",
+                "command": "python -m impacts emissions",
                 "image": "unknown",
                 "outputs": {"beam_emissions_by_county_process": str(emissions_path)},
                 "pipeline": _pipeline_payload(tmp_path),
@@ -786,7 +777,7 @@ def test_analysis_runner_resolves_county_boundaries_from_input_manifest(monkeypa
                 "input_manifest_path": str(input_manifest_path),
                 "output_dir": str(output_root),
                 "outputs_dir": str(output_root),
-                "command": "python -m impacts run",
+                "command": "python -m impacts emissions",
                 "image": "unknown",
                 "outputs": {"skims_emissions": str(input_root / "skims" / "prepared.parquet")},
                 "pipeline": _pipeline_payload(tmp_path),

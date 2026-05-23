@@ -58,31 +58,46 @@ beam:
   local_output_folder: beam/beam_output/
 
 impacts:
-  local_input_folder: impacts/input/
+  local_input_folder: impacts/impacts_input/
   local_output_folder: impacts/impacts_output/
-  emissions:
-    osm_network_folder: r5/sfbay-cbg5500-weakConn-network
-    emissions_rates_folder: vehicle-tech/emissions/2018-Baseline
-    activity_totals_file: vehicle-tech/emissions/SFBay_2018_Annual_activity_totals.parquet
-    annualization_days_or_file: src/impacts/emfac/activities/vehicle_operation_days_per_year.csv
+  scenario: 2018-Baseline
+  pipeline:
+    presim:
+      activities: true
+      fleet: true
+    postsim:
+      emissions: true
+      inmap: true
+      aermod: true
+      exposure: true
+  population:
+    passenger_folder: urbansim/atlas-2019
+    vehicle_folder: vehicle-tech
+    rates_folder: vehicle-tech/emissions
+    dispersions_folder: vehicle-tech/dispersions
+    atlas_year: 2019
+    frism_year: 2018
     population_sample: 0.1
+    transit_sample: 1.0
+  emissions:
+    include_non_osm_car_links: true
+    include_passenger: true
+    include_freight: true
+    default_annualization_days:
+      light_duty: 327.0
+      medium_heavy_duty: 312.0
     pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
   dispersions:
     inmap:
-      enabled: true
       isrm_zarr: ~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr
-      isrm_nox_to_no2_matrix_npz: vehicle-tech/dispersions/inmap/nox_to_no2_full_isrm_matrix.npz
+      isrm_nox_to_no2_ratios_file: vehicle-tech/dispersions/inmap/nox_to_no2_full_isrm_matrix.npz
       grid_path: vehicle-tech/dispersions/inmap/isrm_polygon_wgs84.gpkg
       grid_id: isrm
       grid_epsg: 4326
     aermod:
-      enabled: true
       grid_size_meters: 100.0
       asrv_patterns_file: vehicle-tech/dispersions/aermod/aermod_patterns_wgs84.parquet
       asrv_patterns_epsg: 4326
-  exposure:
-    enabled: true
-    population_folder: urbansim/2018
 ```
 
 ## Running the example

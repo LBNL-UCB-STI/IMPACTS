@@ -149,9 +149,9 @@ def _build_valid_emfac_candidates(config: dict[str, Any]) -> pd.DataFrame:
 
 
 def _load_emfac_category_fuel_mapping(config: dict[str, Any]) -> pd.DataFrame:
-    model_file = config.get("vehicle_type_assignment", {}).get("model_file")
+    model_file = config.get("assignment_model")
     if model_file in (None, ""):
-        raise ValueError("Fleet Step 2 requires vehicle_type_assignment.model_file in the EMFAC config.")
+        raise ValueError("Fleet Step 2 requires assignment_model in the EMFAC config.")
     frame = build_model_category_fuel_mapping(str(model_file))
     for column_name in [
         "group",
@@ -374,11 +374,8 @@ def _prepare_and_write_other_vehicle_types(
 ) -> tuple[pd.DataFrame, str]:
     other_vehicle_types = _read_step2_vehicle_types(str(other_file))
     other_with_emfac = _ensure_empty_emfac_id_column(other_vehicle_types)
-    other_with_emfac = attach_idle_time_fraction_from_config(
-        other_with_emfac,
-        config=config,
-        step_label="Fleet Step 2",
-    )
+    if "idleTimeFraction" not in other_with_emfac.columns:
+        other_with_emfac["idleTimeFraction"] = pd.Series(pd.NA, index=other_with_emfac.index, dtype="Float64")
     other_with_emfac = attach_emissions_rates_filepaths_from_config(
         other_with_emfac,
         config=config,

@@ -70,7 +70,7 @@ def test_normalize_model_spec_path_requires_expected_model_file(tmp_path: Path) 
     model_file = tmp_path / "fleet_assignment.yaml"
 
     with pytest.raises(FileNotFoundError, match="fleet_assignment.yaml"):
-        _normalize_model_spec_path(str(model_file), path_label="vehicle_type_assignment.model_file")
+        _normalize_model_spec_path(str(model_file), path_label="assignment_model")
 
 
 def test_normalize_activities_inputs_preserves_residential_link_road_category_map(tmp_path: Path) -> None:
@@ -160,7 +160,7 @@ def test_normalize_model_spec_path_requires_expected_evidence_sources(tmp_path: 
     )
 
     with pytest.raises(ValueError, match="models.freight_bayesian_dag.evidence.naics_sector"):
-        _normalize_model_spec_path(str(model_file), path_label="vehicle_type_assignment.model_file")
+        _normalize_model_spec_path(str(model_file), path_label="assignment_model")
 
 
 def test_normalize_model_spec_path_requires_embedded_rows_to_exist(tmp_path: Path) -> None:
@@ -220,7 +220,7 @@ def test_normalize_model_spec_path_requires_embedded_rows_to_exist(tmp_path: Pat
     )
 
     with pytest.raises(ValueError, match="models.freight_bayesian_dag.evidence.port_location"):
-        _normalize_model_spec_path(str(model_file), path_label="vehicle_type_assignment.model_file")
+        _normalize_model_spec_path(str(model_file), path_label="assignment_model")
 
 
 def test_ingest_fleet_sources_requires_likelihood_floor_in_model_scoring(tmp_path: Path) -> None:
@@ -294,7 +294,7 @@ def test_ingest_fleet_sources_requires_likelihood_floor_in_model_scoring(tmp_pat
     with pytest.raises(ValueError, match="freight_bayesian_dag.scoring.likelihood_floor"):
         _ingest_fleet_sources(
             {
-                "vehicle_type_assignment_model_settings": str(model_file),
+                "assignment_model": str(model_file),
                 "activities": {
                     "region_label": "SF",
                     "calendar_year": 2018,
@@ -379,7 +379,7 @@ def test_ingest_fleet_sources_requires_scoring_weights_in_model_scoring(tmp_path
     with pytest.raises(ValueError, match="freight_bayesian_dag.scoring.weights"):
         _ingest_fleet_sources(
             {
-                "vehicle_type_assignment_model_settings": str(model_file),
+                "assignment_model": str(model_file),
                 "activities": {
                     "region_label": "SF",
                     "calendar_year": 2018,
@@ -465,7 +465,7 @@ def test_ingest_fleet_sources_disables_payload_mass_when_freight_evidence_is_abs
 
     config = _ingest_fleet_sources(
         {
-            "vehicle_type_assignment_model_settings": str(model_file),
+            "assignment_model": str(model_file),
             "activities": {
                 "region_label": "SF",
                 "calendar_year": 2018,
@@ -550,7 +550,7 @@ def test_ingest_fleet_sources_disables_income_when_passenger_evidence_is_absent(
 
     config = _ingest_fleet_sources(
         {
-            "vehicle_type_assignment_model_settings": str(model_file),
+            "assignment_model": str(model_file),
             "activities": {
                 "region_label": "SF",
                 "calendar_year": 2018,

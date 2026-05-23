@@ -5,9 +5,13 @@
 ## Main commands
 
 ```bash
+python -m impacts presim --config /path/settings.yaml
 python -m impacts preprocess --config /path/settings.yaml
-python -m impacts run --input-manifest /path/workspace/inputs_manifest.yaml
-python -m impacts postprocess --run-manifest /path/workspace/run_manifest.yaml --output-dir /path/impacts
+python -m impacts emissions --run-manifest /path/workspace/run_manifest.yaml
+python -m impacts inmap --run-manifest /path/workspace/run_manifest.yaml
+python -m impacts aermod --run-manifest /path/workspace/run_manifest.yaml
+python -m impacts exposure --run-manifest /path/workspace/run_manifest.yaml
+python -m impacts postprocess --run-manifest /path/workspace/run_manifest.yaml
 python -m impacts pipeline --config /path/settings.yaml
 ```
 
@@ -15,13 +19,13 @@ python -m impacts pipeline --config /path/settings.yaml
 
 - internal working files: `/path/workspace/staged` and `/path/workspace/outputs`
 - run metadata: `/path/workspace/inputs_manifest.yaml` and `/path/workspace/run_manifest.yaml`
-- published artifact: `/path/impacts/impacts_exposure_table.parquet`
+- published artifact: `/path/impacts/impacts_complete.txt`
 
 ## Notes
 
 - The default ISRM location is `s3://inmap-model/isrm_v1.2.1.zarr/`.
-- Legacy or exploratory code under `src/impacts/scratch/` is not part of the maintained execution path.
-- A maintained PILATES overlay template lives at [pilates_settings.yaml](/Users/haitamlaarabi/Workspace/Models/inmap-aermod/impacts/src/impacts/adapters/pilates_settings.yaml).
+- Exploratory code under `src/impacts/scratch/` is not part of the maintained execution path.
+- The maintained Pilates overlay template lives at [pilates_overlay.yaml](src/impacts/pipeline/adapters/pilates_overlay.yaml).
 
 ## PILATES
 

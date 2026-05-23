@@ -738,11 +738,9 @@ def test_assign_passenger_fuel_consumption_fields_attach_fastsim_id_and_rewrite_
     result = _assign_passenger_fuel_consumption_fields(
         passenger_car_vehicle_types=passenger_vehicle_types,
         config={
-            "vehicle_type_assignment": {"model_file": str(model_file)},
-            "beam": {
-                "fuel_consumption_catalog": str(catalog_file),
-                "passenger_vehicle_types_file": str(source_vehicle_types_file),
-            },
+            "assignment_model": str(model_file),
+            "fuel_consumption_catalog": str(catalog_file),
+            "passenger_vehicle_types_file": str(source_vehicle_types_file),
             "fuel_consumption_mapping": [
                 {
                     "fastsim_id": "2015_gasoline_Chrysler_200",
@@ -790,11 +788,9 @@ def test_assign_passenger_fuel_consumption_fields_raise_when_no_match_exists(tmp
         _assign_passenger_fuel_consumption_fields(
             passenger_car_vehicle_types=passenger_vehicle_types,
             config={
-                "vehicle_type_assignment": {"model_file": str(model_file)},
-                "beam": {
-                    "fuel_consumption_catalog": str(catalog_file),
-                    "passenger_vehicle_types_file": str(source_vehicle_types_file),
-                },
+                "assignment_model": str(model_file),
+                "fuel_consumption_catalog": str(catalog_file),
+                "passenger_vehicle_types_file": str(source_vehicle_types_file),
                 "fuel_consumption_mapping": [
                     {
                         "fastsim_id": "2015_gasoline_Chrysler_200",
@@ -840,11 +836,9 @@ def test_assign_passenger_fuel_consumption_fields_keep_baseline_values_when_mapp
     result = _assign_passenger_fuel_consumption_fields(
         passenger_car_vehicle_types=passenger_vehicle_types,
         config={
-            "vehicle_type_assignment": {"model_file": str(model_file)},
-            "beam": {
-                "fuel_consumption_catalog": str(catalog_file),
-                "passenger_vehicle_types_file": str(source_vehicle_types_file),
-            },
+            "assignment_model": str(model_file),
+            "fuel_consumption_catalog": str(catalog_file),
+            "passenger_vehicle_types_file": str(source_vehicle_types_file),
             "fuel_consumption_mapping": [
                 {
                     "fastsim_id": "2015_gasoline_Chrysler_200",

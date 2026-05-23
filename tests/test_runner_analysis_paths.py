@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from impacts.runner import _resolve_analysis_inventory_emfacid_activity_path
 from impacts.runner import _resolve_analysis_vehicle_category_metadata_path
 
@@ -12,27 +14,33 @@ def test_resolve_analysis_inventory_emfacid_activity_path_uses_colocated_emfacid
 ) -> None:
     settings_path = tmp_path / "settings.yaml"
     settings_path.write_text("impacts:\n  local_output_folder: impacts_output\n")
-    repo_root = tmp_path / "repo"
-    production_dir = repo_root / "examples" / "pipeline" / "pilates" / "beam" / "production" / "sfbay" / "vehicle-tech" / "emissions"
-    production_dir.mkdir(parents=True, exist_ok=True)
-    source = production_dir / "sf-emfac-2018-inventory-final-passenger-activity.parquet"
-    source.write_text("")
+    missing_path = tmp_path / "passenger-activity-by-emfacid.parquet"
 
-    monkeypatch.setattr("impacts.runner._REPO_ROOT", repo_root)
-    monkeypatch.setattr("impacts.runner._load_analysis_context", lambda _: (None, None, None, {}))
+    monkeypatch.setattr(
+        "impacts.runner._load_analysis_context",
+        lambda _: (
+            None,
+            None,
+            None,
+            {
+                "passenger_inventory_emfacid_file": {
+                    "kind": "local",
+                    "source_path": str(missing_path),
+                    "staged_path": str(missing_path),
+                    "optional": False,
+                    "exists": False,
+                }
+            },
+        ),
+    )
 
-    try:
+    with pytest.raises(FileNotFoundError) as error:
         _resolve_analysis_inventory_emfacid_activity_path(
             settings_path,
-            source=source,
             manifest_key="passenger_inventory_emfacid_file",
         )
-    except FileNotFoundError as error:
-        assert str(source.with_name("sf-emfac-2018-inventory-final-passenger-activity-by-emfacid.parquet").resolve()) in str(
-            error
-        )
-    else:
-        raise AssertionError("Expected FileNotFoundError when colocated EMFAC activity-by-emfacId file is missing")
+
+    assert str(missing_path.resolve()) in str(error.value)
 
 
 def test_resolve_analysis_vehicle_category_metadata_path_prefers_manifest_input(
@@ -41,7 +49,7 @@ def test_resolve_analysis_vehicle_category_metadata_path_prefers_manifest_input(
 ) -> None:
     settings_path = tmp_path / "settings.yaml"
     settings_path.write_text("impacts:\n  local_output_folder: impacts_output\n")
-    metadata_path = tmp_path / "emfac_vehicle_category_attributes.csv"
+    metadata_path = tmp_path / "emissions_vehicle_categories.csv"
     metadata_path.write_text("emfac_vehicle_category,generic_vehicle_category,operation_days_per_year,idle_time_fraction\n")
     monkeypatch.setattr(
         "impacts.runner._load_analysis_context",

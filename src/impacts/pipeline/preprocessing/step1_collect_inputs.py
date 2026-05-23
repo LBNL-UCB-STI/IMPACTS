@@ -113,7 +113,7 @@ def _resolve_emfacid_path(inventory_path: str, *, label: str) -> str:
             f"Preprocess Step 1.3 requires the EMFAC {label} activity-by-emfacId file "
             f"at {derived}, but it was not found. "
             f"Re-run the EMFAC activities workflow to generate it: "
-            f"python -m impacts emfac activities --config <config>"
+            f"python -m impacts activities --config <config>"
         )
     return str(derived)
 

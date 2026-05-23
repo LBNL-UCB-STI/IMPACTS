@@ -21,10 +21,9 @@ The current manifest keys are already close to what Consist needs. These should 
 - `emissions_skims_input`
 - `events_input`
 - `osm_network`
-- `emissions_rates_folder`
-- `activity_totals_file`
+- `rates_folder`
 - `inmap_grid`
-- `isrm_nox_to_no2_matrix_npz`
+- `isrm_nox_to_no2_ratios_file`
 - `asrv_patterns_file`
 - `isrm`
 

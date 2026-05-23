@@ -7,7 +7,6 @@ import subprocess
 import sys
 
 from impacts.config.settings_builder import load_settings_from_yaml
-from impacts.manifest.file_ops import load_structured_file
 from impacts.manifest.file_ops import resolve_path
 
 
@@ -28,16 +27,76 @@ def _resolve_pipeline_output_root(settings_path: str) -> Path:
     ).resolve()
 
 
+def _resolve_pipeline_manifest_path(settings_path: str, manifest_name: str) -> Path:
+    candidate = _resolve_pipeline_output_root(settings_path) / manifest_name
+    if not candidate.exists():
+        raise FileNotFoundError(
+            f"Expected {manifest_name} in the configured impacts.local_output_folder, but it was not found: {candidate}"
+        )
+    return candidate
 
-def _resolve_run_output_root(*, input_manifest_path: str | None) -> Path:
-    if not input_manifest_path:
-        raise ValueError("run profiling requires input_manifest_path")
-    manifest = load_structured_file(input_manifest_path)
-    settings_source = manifest.get("settings_source")
-    if not settings_source:
-        raise ValueError("Input manifest is missing settings_source; cannot resolve impacts.local_output_folder.")
-    return _resolve_pipeline_output_root(str(settings_source))
 
+def _run_presim_from_settings(settings_path: str) -> None:
+    from impacts.emfac.fleet.main import main as run_fleet_main
+    from impacts.emfac.preparation import ensure_emfac_activities_outputs
+
+    settings = load_settings_from_yaml(settings_path)
+    activities_manifest_path: str | None = None
+    if settings.impacts.pipeline.presim.activities or settings.impacts.pipeline.presim.fleet:
+        activities_manifest = ensure_emfac_activities_outputs(settings, Path(settings_path))
+        activities_manifest_path = activities_manifest["activities_manifest_path"]
+    if settings.impacts.pipeline.presim.fleet:
+        run_fleet_main(activities_manifest_path=activities_manifest_path)
+
+
+def _run_postsim_from_settings(
+    settings_path: str,
+) -> None:
+    from impacts.postprocessor import postprocess_from_run_manifest
+    from impacts.preprocessor import preprocess_workflow
+
+    settings = load_settings_from_yaml(settings_path)
+    run_manifest_path: Path
+    preprocess_manifest = preprocess_workflow(
+        settings_path=settings_path,
+    )
+    run_manifest_path = Path(preprocess_manifest["run_manifest_path"]).resolve()
+    if (
+        settings.impacts.pipeline.postsim.emissions
+        or settings.impacts.pipeline.postsim.inmap
+        or settings.impacts.pipeline.postsim.aermod
+        or settings.impacts.pipeline.postsim.exposure
+    ):
+        from impacts.runner import run_aermod_from_run_manifest
+        from impacts.runner import run_emissions_from_run_manifest
+        from impacts.runner import run_exposure_from_run_manifest
+        from impacts.runner import run_inmap_from_run_manifest
+
+        if settings.impacts.pipeline.postsim.emissions:
+            run_manifest = run_emissions_from_run_manifest(
+                run_manifest_path=run_manifest_path,
+            )
+            run_manifest_path = Path(run_manifest["run_manifest_path"]).resolve()
+        if settings.impacts.pipeline.postsim.inmap:
+            run_manifest = run_inmap_from_run_manifest(
+                run_manifest_path=run_manifest_path,
+            )
+            run_manifest_path = Path(run_manifest["run_manifest_path"]).resolve()
+        if settings.impacts.pipeline.postsim.aermod:
+            run_manifest = run_aermod_from_run_manifest(
+                run_manifest_path=run_manifest_path,
+            )
+            run_manifest_path = Path(run_manifest["run_manifest_path"]).resolve()
+        if settings.impacts.pipeline.postsim.exposure:
+            run_manifest = run_exposure_from_run_manifest(
+                run_manifest_path=run_manifest_path,
+            )
+            run_manifest_path = Path(run_manifest["run_manifest_path"]).resolve()
+    else:
+        run_manifest_path = _resolve_pipeline_manifest_path(settings_path, "run_manifest.yaml")
+    postprocess_from_run_manifest(
+        run_manifest_path=run_manifest_path,
+    )
 
 def _resolve_profile_output(*, output_root: Path, stem: str) -> Path:
     candidate = output_root / "profiling" / stem
@@ -53,25 +112,11 @@ def _resolve_profile_target(args: argparse.Namespace) -> tuple[Path, list[str], 
         forwarded_args = ["pipeline", "--config", args.config, "--profile", "none"]
         default_name = "pipeline"
         return output_root, forwarded_args, default_name
-    if args.command == "run":
-        output_root = _resolve_run_output_root(
-            input_manifest_path=args.input_manifest,
-        )
-        forwarded_args = [
-            "run",
-            "--input-manifest",
-            args.input_manifest,
-            *(["--run-manifest", args.run_manifest] if args.run_manifest else []),
-            "--profile",
-            "none",
-        ]
-        default_name = "run"
-        return output_root, forwarded_args, default_name
     return None
 
 
 def _maybe_relaunch_with_profiler(args: argparse.Namespace) -> int | None:
-    if args.profile == "none":
+    if getattr(args, "profile", "none") == "none":
         return None
     if os.environ.get("IMPACTS_PROFILE_ACTIVE") == "1":
         return None
@@ -122,37 +167,40 @@ def build_parser() -> argparse.ArgumentParser:
     preprocess.add_argument("--config", required=True)
     preprocess.add_argument("--manifest-path")
 
-    run = subparsers.add_parser("run", help="Run the maintained impacts pipeline from staged inputs only")
-    run.add_argument("--input-manifest", required=True)
-    run.add_argument("--run-manifest")
-    run.add_argument("--profile", choices=("none", "memray", "time"), default="none")
-    run.add_argument(
-        "--allow-heavy-profile",
-        action="store_true",
-        help="Explicitly opt in to memray profiling for full run executions.",
-    )
+    presim = subparsers.add_parser("presim", help="Run the pre-simulation group from settings")
+    presim.add_argument("--config", required=True)
+
+    activities = subparsers.add_parser("activities", help="Run only the EMFAC activities stage from settings")
+    activities.add_argument("--config", required=True)
+
+    fleet = subparsers.add_parser("fleet", help="Run only the EMFAC fleet stage from an activities manifest")
+    fleet.add_argument("--activities-manifest", required=True)
+
+    emissions = subparsers.add_parser("emissions", help="Run only the emissions stage from a run manifest")
+    emissions.add_argument("--run-manifest", required=True)
+
+    inmap = subparsers.add_parser("inmap", help="Run only the InMAP concentration stage from a run manifest")
+    inmap.add_argument("--run-manifest", required=True)
+
+    aermod = subparsers.add_parser("aermod", help="Run only the AERMOD concentration stage from a run manifest")
+    aermod.add_argument("--run-manifest", required=True)
+
+    exposure = subparsers.add_parser("exposure", help="Run only the exposure preparation stage from a run manifest")
+    exposure.add_argument("--run-manifest", required=True)
+
+    postsim = subparsers.add_parser("postsim", help="Run the post-simulation group from settings")
+    postsim.add_argument("--config", required=True)
 
     postprocess = subparsers.add_parser("postprocess", help="Publish the canonical impacts exposure table artifact")
     postprocess_group = postprocess.add_mutually_exclusive_group(required=True)
     postprocess_group.add_argument("--run-manifest")
     postprocess_group.add_argument("--config")
-    postprocess.add_argument("--output-dir")
     postprocess.add_argument("--postprocess-manifest")
 
     analysis = subparsers.add_parser("analysis", help="Run maintained analysis outputs from workflow artifacts")
     analysis.add_argument("--config", required=True)
 
-    emfac = subparsers.add_parser("emfac", help="Run EMFAC activities, fleet, or the full EMFAC workflow")
-    emfac.add_argument(
-        "workflow",
-        nargs="?",
-        choices=("activities", "fleet"),
-        default=None,
-        help="Optional workflow to run. Omit to run the full EMFAC workflow.",
-    )
-    emfac.add_argument("--config", required=True)
-
-    pipeline = subparsers.add_parser("pipeline", help="Run preprocess, run, and postprocess end-to-end")
+    pipeline = subparsers.add_parser("pipeline", help="Run the maintained stage sequence from settings, honoring impacts.pipeline flags")
     pipeline.add_argument("--config", required=True)
     pipeline.add_argument("--profile", choices=("none", "memray", "time"), default="none")
     derive_settings = subparsers.add_parser(
@@ -235,11 +283,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "pipeline" and args.profile == "memray":
-        parser.error("--profile memray is only supported on 'run'; full pipeline profiling is too expensive.")
-    if args.command == "run" and args.profile == "memray" and not args.allow_heavy_profile:
-        parser.error(
-            "--profile memray for 'run' requires --allow-heavy-profile; use /usr/bin/time -l for full real runs."
-        )
+        parser.error("--profile memray is not supported for 'pipeline'; use --profile time for full runs.")
     profiling_exit_code = _maybe_relaunch_with_profiler(args)
     if profiling_exit_code is not None:
         return profiling_exit_code
@@ -253,11 +297,51 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    if args.command == "run":
-        from impacts.runner import run_from_input_manifest
+    if args.command == "presim":
+        _run_presim_from_settings(args.config)
+        return 0
 
-        run_from_input_manifest(
-            input_manifest_path=args.input_manifest,
+    if args.command == "activities":
+        from impacts.emfac.preparation import ensure_emfac_activities_outputs
+
+        settings = load_settings_from_yaml(args.config)
+        ensure_emfac_activities_outputs(settings, Path(args.config))
+        return 0
+
+    if args.command == "fleet":
+        from impacts.emfac.fleet.main import main as run_fleet_main
+
+        run_fleet_main(activities_manifest_path=args.activities_manifest)
+        return 0
+
+    if args.command == "emissions":
+        from impacts.runner import run_emissions_from_run_manifest
+
+        run_emissions_from_run_manifest(
+            run_manifest_path=args.run_manifest,
+        )
+        return 0
+
+    if args.command == "inmap":
+        from impacts.runner import run_inmap_from_run_manifest
+
+        run_inmap_from_run_manifest(
+            run_manifest_path=args.run_manifest,
+        )
+        return 0
+
+    if args.command == "aermod":
+        from impacts.runner import run_aermod_from_run_manifest
+
+        run_aermod_from_run_manifest(
+            run_manifest_path=args.run_manifest,
+        )
+        return 0
+
+    if args.command == "exposure":
+        from impacts.runner import run_exposure_from_run_manifest
+
+        run_exposure_from_run_manifest(
             run_manifest_path=args.run_manifest,
         )
         return 0
@@ -267,11 +351,8 @@ def main(argv: list[str] | None = None) -> int:
         from impacts.postprocessor import postprocess_from_settings
 
         if args.run_manifest:
-            if not args.output_dir:
-                parser.error("--output-dir is required with --run-manifest")
             postprocess_from_run_manifest(
                 run_manifest_path=args.run_manifest,
-                output_dir=args.output_dir,
                 manifest_path=args.postprocess_manifest,
             )
         else:
@@ -281,24 +362,16 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0
 
-    if args.command == "pipeline":
-        from impacts.postprocessor import postprocess_from_run_manifest
-        from impacts.preprocessor import preprocess_workflow
-        from impacts.runner import run_from_input_manifest
+    if args.command == "postsim":
+        _run_postsim_from_settings(args.config)
+        return 0
 
+    if args.command == "pipeline":
         _print_pipeline_banner()
-        downstream_output_root = _resolve_pipeline_output_root(args.config)
-        preprocess_manifest = preprocess_workflow(
-            settings_path=args.config,
-        )
-        run_manifest = run_from_input_manifest(
-            input_manifest_path=preprocess_manifest["inputs_manifest_path"],
-            run_dispersion=True,
-        )
-        postprocess_from_run_manifest(
-            run_manifest_path=run_manifest["run_manifest_path"],
-            output_dir=downstream_output_root,
-        )
+        settings = load_settings_from_yaml(args.config)
+        if settings.impacts.pipeline.presim.activities or settings.impacts.pipeline.presim.fleet:
+            _run_presim_from_settings(args.config)
+        _run_postsim_from_settings(args.config)
         return 0
 
     if args.command == "analysis":
@@ -306,18 +379,6 @@ def main(argv: list[str] | None = None) -> int:
 
         run_analysis_from_settings(
             settings_path=args.config,
-        )
-        return 0
-
-    if args.command == "emfac":
-        from impacts.emfac.__main__ import main as run_emfac_main
-
-        run_emfac_main(
-            [
-                *([args.workflow] if args.workflow else []),
-                "--config",
-                args.config,
-            ]
         )
         return 0
 

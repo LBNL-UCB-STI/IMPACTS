@@ -66,7 +66,7 @@ def _expand_impacts_placeholders(
             replacement = _lookup_dotted(expanded, key) or _lookup_dotted(pilates_settings, key)
             if replacement is not None:
                 updated = updated.replace(f"${{{key}}}", replacement)
-        matches = re.findall(r"\{([^}]+)\}", updated)
+        matches = re.findall(r"(?<!\$)\{([^}]+)\}", updated)
         for key in matches:
             replacement = _lookup_dotted(expanded, key) or _lookup_dotted(pilates_settings, key)
             if replacement is not None:

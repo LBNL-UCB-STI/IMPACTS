@@ -9,8 +9,10 @@ from .manifest.file_ops import resolve_path
 from .manifest.file_ops import write_structured_file
 from .manifest.schema import InputsManifest
 from .manifest.schema import PipelineConfig
+from .manifest.schema import RunManifest
 from .common import infer_vector_epsg
 from .common import parse_epsg
+from .common import prepared_table_target
 from .common import register_local_input
 from .common import resolve_required_manifest_input
 
@@ -115,8 +117,10 @@ def build_inputs_manifest(
         )
 
     pipeline_payload = {
+        "emissions_enabled": bool(pipeline.emissions),
         "inmap_enabled": bool(pipeline.inmap),
         "aermod_enabled": bool(pipeline.aermod),
+        "exposure_enabled": bool(pipeline.exposure),
         "inmap_grid_path": staged_inmap_grid,
         "aermod_full_grid_path": staged_aermod_full_grid,
         "aermod_grid_path": staged_aermod_grid,
@@ -228,8 +232,8 @@ def build_inputs_manifest(
             "local_output_dir": str(Path(resolve_path(settings.impacts.local_output_folder, config_path)).resolve()),
             "container_input_dir": "/input",
             "container_output_dir": "/output",
-            "entrypoint": "python -m impacts run",
-            "command_template": "python -m impacts run --input-manifest {input_manifest}",
+            "entrypoint": "python -m impacts emissions",
+            "command_template": "python -m impacts emissions --run-manifest {run_manifest}",
             "canonical_output_filenames": ["impacts_exposure_table.parquet"],
             "manifest_filenames": ["inputs_manifest.yaml", "run_manifest.yaml", "postprocess_manifest.yaml"],
         },
@@ -257,5 +261,57 @@ def preprocess_workflow(
     manifest["inputs_manifest_path"] = str(output_manifest)
     typed_manifest = InputsManifest.from_dict(manifest)
     write_structured_file(output_manifest, typed_manifest.to_dict())
+    run_manifest_path = Path(manifest["inputs_manifest_path"]).resolve().parent / "run_manifest.yaml"
+    pipeline = PipelineConfig.from_dict(typed_manifest.to_dict()["pipeline"])
+    inputs_payload = typed_manifest.to_dict()["inputs"]
+    output_root = run_manifest_path.parent.resolve()
+    input_root = Path(typed_manifest.to_dict()["input_dir"]).resolve()
+    prepared_skims_candidate = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
+    initial_run_manifest = {
+        "contract_version": typed_manifest.contract_version,
+        "model": "impacts",
+        "input_manifest_path": str(Path(manifest["inputs_manifest_path"]).resolve()),
+        "output_dir": str(output_root),
+        "outputs_dir": str(output_root),
+        "command": "python -m impacts preprocess",
+        "image": "not_recorded",
+        "outputs": {
+            "skims_emissions": str(prepared_skims_candidate) if prepared_skims_candidate.exists() else None,
+            "county_intersection": inputs_payload.get("county_intersection", {}).get("path"),
+            "inmap_intersection": inputs_payload.get("inmap_intersection", {}).get("path") if pipeline.inmap_enabled else None,
+            "aermod_intersection": inputs_payload.get("aermod_intersection", {}).get("path") if pipeline.aermod_enabled else None,
+            "aermod_full_grid": pipeline.aermod_full_grid_path,
+            "beam_emissions_by_county_process": None,
+            "beam_emissions_for_inmap": None,
+            "beam_inmap_study_area_grid": None,
+            "beam_emissions_for_aermod": None,
+            "beam_inmap_concentrations": None,
+            "beam_inmap_concentrations_gpkg": None,
+            "beam_aermod_concentrations": None,
+            "beam_aermod_concentrations_gpkg": None,
+            "beam_concentration_distribution": None,
+            "beam_concentration_distribution_gpkg": None,
+            "beam_population_distribution": None,
+            "beam_population_counts": None,
+            "beam_population_counts_gpkg": None,
+        },
+        "pipeline": typed_manifest.to_dict()["pipeline"],
+        "population_inputs": typed_manifest.to_dict()["population_inputs"],
+        "deterministic_contract": {
+            "uses_only_manifest_paths": True,
+            "uses_baked_work_data": False,
+        },
+        "execution": {
+            "dispersion_completed": False,
+            "stage_timings_seconds": {},
+            "stopped_after": "preprocess",
+        },
+        "run_manifest_path": str(run_manifest_path),
+    }
+    typed_run_manifest = RunManifest.from_dict(initial_run_manifest)
+    write_structured_file(run_manifest_path, typed_run_manifest.to_dict())
     logger.info("Preprocess complete: wrote inputs manifest %s", output_manifest)
-    return typed_manifest.to_dict()
+    logger.info("Preprocess seeded run manifest %s", run_manifest_path)
+    result = typed_manifest.to_dict()
+    result["run_manifest_path"] = str(run_manifest_path)
+    return result

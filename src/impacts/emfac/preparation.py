@@ -7,6 +7,8 @@ from typing import Any
 
 from ..common import log_step_banner
 from ..common import log_substep_banner
+from ..manifest.file_ops import write_structured_file
+from ..manifest.schema import ActivitiesManifest
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +27,129 @@ def _outputs_exist(workflow: dict[str, Any]) -> bool:
     return Path(str(workflow["paths"]["final_activity_emfacid_output_passenger"])).exists()
 
 
+def _activities_manifest_path(output_root: Path) -> Path:
+    return output_root / "activities_manifest.yaml"
+
+
 def _expected_output_path(cfg: dict[str, Any], start_year: int) -> Path:
     region_slug = str(cfg["region_label"]).lower()
     base_name = f"{region_slug}-emfac-{int(start_year)}-inventory-final"
     return Path(str(cfg["output_root"])) / "activities" / f"{base_name}-passenger-activity-by-emfacid.parquet"
+
+
+def _build_activities_manifest_payload(
+    *,
+    workflow: dict[str, Any],
+    settings_path: Path,
+    manifest_path: Path,
+) -> dict[str, Any]:
+    paths = workflow["paths"]
+    run = workflow["run"]
+    return {
+        "contract_version": "1",
+        "model": "impacts",
+        "settings_source": str(settings_path.resolve()),
+        "output_dir": str(Path(str(paths["outputs_root"])).resolve()),
+        "region_label": str(run["region_label"]),
+        "calendar_year": int(run["calendar_year"]),
+        "scenario": str(run["scenario"]),
+        "vehicle_category_metadata_file": str(workflow["inputs"]["vehicle_category_metadata_file"]),
+        "outputs": {
+            "outputs_root": str(Path(str(paths["outputs_root"])).resolve()),
+            "activities_output_root": str(Path(str(paths["activities_output_root"])).resolve()),
+            "tmp_root": str(Path(str(paths["tmp_root"])).resolve()),
+            "emissions_store_root": str(Path(str(paths["emissions_store_root"])).resolve()),
+            "passenger_rates_file": str(Path(str(paths["final_output_passenger"])).resolve()),
+            "passenger_activity_file": str(Path(str(paths["matching_activity_output_passenger"])).resolve()),
+            "passenger_fleet_file": str(Path(str(paths["final_fleet_output_passenger"])).resolve()),
+            "freight_rates_file": str(Path(str(paths["final_output_freight"])).resolve()),
+            "freight_activity_file": str(Path(str(paths["matching_activity_output_freight"])).resolve()),
+            "freight_fleet_file": str(Path(str(paths["final_fleet_output_freight"])).resolve()),
+            "final_activity_emfacid_output_passenger": str(
+                Path(str(paths["final_activity_emfacid_output_passenger"])).resolve()
+            ),
+            "final_activity_emfacid_output_freight": str(
+                Path(str(paths["final_activity_emfacid_output_freight"])).resolve()
+            ),
+        },
+        "notes": [
+            "Activities manifest is the contract boundary between EMFAC activities and fleet.",
+            "Fleet consumes this manifest instead of rediscovering activities outputs from settings.",
+        ],
+        "activities_manifest_path": str(manifest_path.resolve()),
+    }
+
+
+def _write_activities_manifest_from_cfg(
+    *,
+    cfg: dict[str, Any],
+    settings_path: Path,
+    calendar_year: int,
+    manifest_path: Path,
+) -> dict[str, Any]:
+    region_slug = str(cfg["region_label"]).lower()
+    outputs_root = Path(str(cfg["output_root"])).resolve()
+    activities_output_root = outputs_root / "activities"
+    tmp_root = outputs_root / "_tmp"
+    project_analysis_name = f"{region_slug}-emfac-{int(calendar_year)}-project-analysis-final"
+    inventory_final_name = f"{region_slug}-emfac-{int(calendar_year)}-inventory-final"
+    inventory_matching_name = f"{region_slug}-emfac-{int(calendar_year)}-inventory-matching"
+    typed_manifest = ActivitiesManifest.from_dict(
+        {
+            "contract_version": "1",
+            "model": "impacts",
+            "settings_source": str(settings_path.resolve()),
+            "output_dir": str(outputs_root),
+            "region_label": str(cfg["region_label"]),
+            "calendar_year": int(calendar_year),
+            "scenario": str(cfg["scenario"]),
+            "vehicle_category_metadata_file": str(Path(str(cfg["vehicle_category_metadata_file"])).resolve()),
+            "outputs": {
+                "outputs_root": str(outputs_root),
+                "activities_output_root": str(activities_output_root.resolve()),
+                "tmp_root": str(tmp_root.resolve()),
+                "emissions_store_root": str((outputs_root / "emissions" / f"{int(calendar_year)}-{cfg['scenario']}").resolve()),
+                "passenger_rates_file": str((activities_output_root / f"{project_analysis_name}-passenger-rates.parquet").resolve()),
+                "passenger_activity_file": str((tmp_root / f"{inventory_matching_name}-passenger-activity.parquet").resolve()),
+                "passenger_fleet_file": str((activities_output_root / f"{inventory_final_name}-passenger-fleet.parquet").resolve()),
+                "freight_rates_file": str((activities_output_root / f"{project_analysis_name}-freight-rates.parquet").resolve()),
+                "freight_activity_file": str((tmp_root / f"{inventory_matching_name}-freight-activity.parquet").resolve()),
+                "freight_fleet_file": str((activities_output_root / f"{inventory_final_name}-freight-fleet.parquet").resolve()),
+                "final_activity_emfacid_output_passenger": str(
+                    (activities_output_root / f"{inventory_final_name}-passenger-activity-by-emfacid.parquet").resolve()
+                ),
+                "final_activity_emfacid_output_freight": str(
+                    (activities_output_root / f"{inventory_final_name}-freight-activity-by-emfacid.parquet").resolve()
+                ),
+            },
+            "notes": [
+                "Activities manifest is the contract boundary between EMFAC activities and fleet.",
+                "Fleet consumes this manifest instead of rediscovering activities outputs from settings.",
+            ],
+            "activities_manifest_path": str(manifest_path.resolve()),
+        }
+    )
+    write_structured_file(manifest_path, typed_manifest.to_dict())
+    logger.info("Activities manifest written: %s", manifest_path)
+    return typed_manifest.to_dict()
+
+
+def _write_activities_manifest(
+    *,
+    workflow: dict[str, Any],
+    settings_path: Path,
+    manifest_path: Path,
+) -> dict[str, Any]:
+    typed_manifest = ActivitiesManifest.from_dict(
+        _build_activities_manifest_payload(
+            workflow=workflow,
+            settings_path=settings_path,
+            manifest_path=manifest_path,
+        )
+    )
+    write_structured_file(manifest_path, typed_manifest.to_dict())
+    logger.info("Activities manifest written: %s", manifest_path)
+    return typed_manifest.to_dict()
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -252,6 +373,7 @@ def ensure_emfac_activities_outputs(settings, config_path: Path) -> dict[str, An
     from .activities.main import run_workflow as run_activities_workflow
 
     cfg = _resolve_activities_config(settings, config_path)
+    manifest_path = _activities_manifest_path(Path(str(cfg["output_root"])).resolve())
 
     log_step_banner("EMFAC Activities", "Ensure inventory outputs", logger=logger)
 
@@ -259,7 +381,12 @@ def ensure_emfac_activities_outputs(settings, config_path: Path) -> dict[str, An
     expected_output = _expected_output_path(cfg, settings.run.start_year)
     if expected_output.exists():
         logger.info("Outputs already present at %s — skipping activities run.", expected_output)
-        return {"paths": {"final_activity_emfacid_output_passenger": str(expected_output)}}
+        return _write_activities_manifest_from_cfg(
+            cfg=cfg,
+            settings_path=config_path,
+            calendar_year=settings.run.start_year,
+            manifest_path=manifest_path,
+        )
 
     log_substep_banner("2", "ensure raw activity inputs", logger=logger)
     _ensure_raw_data(cfg)
@@ -277,5 +404,8 @@ def ensure_emfac_activities_outputs(settings, config_path: Path) -> dict[str, An
             f"EMFAC activities workflow completed but expected outputs not found in {output_dir}."
         )
     logger.info("EMFAC activities outputs validated.")
-
-    return workflow
+    return _write_activities_manifest(
+        workflow=workflow,
+        settings_path=config_path,
+        manifest_path=manifest_path,
+    )

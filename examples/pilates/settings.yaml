@@ -25,18 +25,20 @@ beam:
   router_directory: ${beam.local_output_folder}/r5/sfbay-cbg5500-weakConn-network
 
 impacts:
-  local_input_folder: impacts/impacts_inputs/
+  local_input_folder: impacts/impacts_input/
   local_output_folder: impacts/impacts_output/
   seed: 0
   scenario: 2018-Baseline
 
   pipeline:
-    activities: true
-    fleet: true
-    emissions: true
-    inmap: true
-    aermod: true
-    exposure: true
+    presim:
+      activities: true
+      fleet: true
+    postsim:
+      emissions: true
+      inmap: true
+      aermod: true
+      exposure: true
 
   population:
     passenger_folder: ${beam.local_output_folder}/urbansim/atlas-2019

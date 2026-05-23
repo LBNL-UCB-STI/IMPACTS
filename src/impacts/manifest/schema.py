@@ -22,12 +22,14 @@ def _required_dict(value: Any, label: str) -> Dict[str, Any]:
 
 @dataclass(frozen=True)
 class PipelineConfig:
+    emissions_enabled: bool
     beam_osm_id_col: str
     beam_length_col: str
     output_epsg: int
     mapping_columns: Dict[str, Any]
     inmap_enabled: bool
     aermod_enabled: bool
+    exposure_enabled: bool
     grid_size_meters: Optional[float] = None
     inmap_grid_path: Optional[str] = None
     inmap_grid_epsg: Optional[int] = None
@@ -70,8 +72,10 @@ class PipelineConfig:
                 "beam_osm_id_col",
                 "beam_length_col",
                 "output_epsg",
+                "emissions_enabled",
                 "inmap_enabled",
                 "aermod_enabled",
+                "exposure_enabled",
                 "inmap_grid_path",
                 "inmap_grid_epsg",
                 "mapping_columns",
@@ -108,12 +112,14 @@ class PipelineConfig:
             "pipeline",
         )
         result = cls(
+            emissions_enabled=_required_bool(payload.get("emissions_enabled"), "pipeline.emissions_enabled"),
             beam_osm_id_col=_required_string(payload.get("beam_osm_id_col"), "pipeline.beam_osm_id_col"),
             beam_length_col=_required_string(payload.get("beam_length_col"), "pipeline.beam_length_col"),
             output_epsg=int(_required_string(payload.get("output_epsg"), "pipeline.output_epsg")),
             mapping_columns=_required_dict(payload.get("mapping_columns"), "pipeline.mapping_columns"),
             inmap_enabled=_required_bool(payload.get("inmap_enabled"), "pipeline.inmap_enabled"),
             aermod_enabled=_required_bool(payload.get("aermod_enabled"), "pipeline.aermod_enabled"),
+            exposure_enabled=_required_bool(payload.get("exposure_enabled"), "pipeline.exposure_enabled"),
             grid_size_meters=_optional_float(payload.get("grid_size_meters")),
             inmap_grid_path=_optional_string(payload.get("inmap_grid_path")),
             inmap_grid_epsg=_optional_int(payload.get("inmap_grid_epsg")),
@@ -351,6 +357,80 @@ class RunManifest:
 
     def path(self) -> Path:
         return Path(self.run_manifest_path)
+
+
+@dataclass(frozen=True)
+class ActivitiesManifest:
+    contract_version: str
+    model: str
+    settings_source: str
+    output_dir: str
+    region_label: str
+    calendar_year: int
+    scenario: str
+    vehicle_category_metadata_file: str
+    outputs: Dict[str, Any]
+    notes: List[str]
+    activities_manifest_path: str
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "ActivitiesManifest":
+        _reject_unknown_keys(
+            payload,
+            {
+                "contract_version",
+                "model",
+                "settings_source",
+                "output_dir",
+                "region_label",
+                "calendar_year",
+                "scenario",
+                "vehicle_category_metadata_file",
+                "outputs",
+                "notes",
+                "activities_manifest_path",
+            },
+            "activities manifest",
+        )
+        outputs = _required_dict(payload.get("outputs"), "outputs")
+        required_outputs = {
+            "outputs_root",
+            "passenger_rates_file",
+            "passenger_activity_file",
+            "passenger_fleet_file",
+            "freight_rates_file",
+            "freight_activity_file",
+            "freight_fleet_file",
+            "emissions_store_root",
+        }
+        missing = sorted(key for key in required_outputs if key not in outputs or outputs.get(key) in (None, ""))
+        if missing:
+            raise ValueError("Activities manifest missing " + ", ".join(f"outputs.{key}" for key in missing))
+        return cls(
+            contract_version=_required_string(payload.get("contract_version"), "contract_version"),
+            model=_required_string(payload.get("model"), "model"),
+            settings_source=_required_string(payload.get("settings_source"), "settings_source"),
+            output_dir=_required_string(payload.get("output_dir"), "output_dir"),
+            region_label=_required_string(payload.get("region_label"), "region_label"),
+            calendar_year=_required_int(payload.get("calendar_year"), "calendar_year"),
+            scenario=_required_string(payload.get("scenario"), "scenario"),
+            vehicle_category_metadata_file=_required_string(
+                payload.get("vehicle_category_metadata_file"),
+                "vehicle_category_metadata_file",
+            ),
+            outputs=outputs,
+            notes=_coerce_string_list(payload.get("notes")),
+            activities_manifest_path=_required_string(
+                payload.get("activities_manifest_path"),
+                "activities_manifest_path",
+            ),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    def path(self) -> Path:
+        return Path(self.activities_manifest_path)
 
 
 @dataclass(frozen=True)

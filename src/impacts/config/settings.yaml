@@ -30,12 +30,14 @@ impacts:
   seed: 0
   scenario: <set-scenario>
   pipeline:
-    activities: true
-    fleet: true
-    emissions: true
-    inmap: true
-    aermod: true
-    exposure: true
+    presim:
+      activities: true
+      fleet: true
+    postsim:
+      emissions: true
+      inmap: true
+      aermod: true
+      exposure: true
   population:
     passenger_folder: urbansim/atlas-2019
     freight_folder: <set-local-or-absolute-path>

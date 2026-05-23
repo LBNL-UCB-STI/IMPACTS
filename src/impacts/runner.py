@@ -64,6 +64,42 @@ def _resolve_runtime_output_root(
     return Path(resolved).resolve()
 
 
+def _resolve_existing_run_manifest_path(
+    *,
+    output_root: Path,
+    run_manifest_path: str | Path | None,
+) -> Path | None:
+    if run_manifest_path:
+        candidate = Path(run_manifest_path).resolve()
+        return candidate if candidate.exists() else None
+    candidate = output_root / "run_manifest.yaml"
+    return candidate if candidate.exists() else None
+
+
+def _load_existing_run_manifest(
+    *,
+    output_root: Path,
+    run_manifest_path: str | Path | None,
+) -> Dict[str, Any]:
+    candidate = _resolve_existing_run_manifest_path(output_root=output_root, run_manifest_path=run_manifest_path)
+    if candidate is None:
+        return {}
+    return RunManifest.from_dict(load_structured_file(candidate)).to_dict()
+
+
+def _load_run_manifest_context(
+    run_manifest_path: str | Path,
+) -> tuple[dict[str, Any], Path, str]:
+    manifest = RunManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
+    input_manifest_path = manifest.get("input_manifest_path")
+    if not input_manifest_path:
+        raise ValueError("Run manifest is missing input_manifest_path.")
+    output_dir = manifest.get("output_dir") or manifest.get("outputs_dir")
+    if not output_dir:
+        raise ValueError("Run manifest is missing output_dir.")
+    return manifest, Path(str(output_dir)).resolve(), str(input_manifest_path)
+
+
 def _resolve_staged_intersection_paths(
     *,
     manifest_inputs: Dict[str, Any],
@@ -230,7 +266,7 @@ def _resolve_analysis_inventory_emfacid_activity_path(
         raise FileNotFoundError(
             f"Analysis Step 1 requires the EMFAC activity-by-emfacId file registered as "
             f"'{manifest_key}', but it was not found at {candidate}. "
-            f"Re-run the EMFAC activities workflow: python -m impacts emfac activities --config <config>"
+            f"Re-run the EMFAC activities workflow: python -m impacts activities --config <config>"
         )
     return candidate
 
@@ -364,10 +400,14 @@ def run_analysis_from_run_manifest(
     return run_analysis_from_settings(settings_path=_resolve_run_manifest_settings_path(run_manifest_path))
 
 
-def run_from_input_manifest(
+def _run_stages_from_input_manifest(
     input_manifest_path: str | Path,
     run_manifest_path: str | Path | None = None,
     run_dispersion: bool = False,
+    run_emissions: bool | None = None,
+    run_inmap: bool | None = None,
+    run_aermod: bool | None = None,
+    run_exposure: bool | None = None,
 ) -> Dict[str, Any]:
     logging.basicConfig(
         level=logging.INFO,
@@ -387,38 +427,89 @@ def run_from_input_manifest(
     logger.info("Loaded input manifest: %s", Path(input_manifest_path).resolve())
     logger.info("Output directory: %s", output_root)
 
-    from .pipeline.workflow.step1_process_emissions import run as run_emissions_processing
     from .common import prepared_table_target
     stage_timings: dict[str, float] = {}
     grid_intersection_paths = _resolve_staged_intersection_paths(
         manifest_inputs=manifest_inputs,
         pipeline=pipeline,
     )
-
-    _log_step_banner("STEP 1", "emissions processing")
-    logger.info("Using Step 1 implementation: emissions_processing")
-    stage_started = time.perf_counter()
-    emissions_outputs = run_emissions_processing(
-        pipeline,
-        output_root,
-        input_root,
-        grid_intersection_paths,
-        manifest_inputs=manifest_inputs,
+    existing_run_manifest = _load_existing_run_manifest(
+        output_root=output_root,
+        run_manifest_path=run_manifest_path,
     )
-    _record_stage_timing(stage_timings, "step1_process_emissions", stage_started)
+    existing_outputs = dict(existing_run_manifest.get("outputs", {}) or {})
+
+    execute_emissions = pipeline.emissions_enabled if run_emissions is None else bool(run_emissions)
+    execute_inmap = pipeline.inmap_enabled if run_inmap is None else bool(run_inmap)
+    execute_aermod = pipeline.aermod_enabled if run_aermod is None else bool(run_aermod)
+    execute_exposure = pipeline.exposure_enabled if run_exposure is None else bool(run_exposure)
+    if run_dispersion:
+        execute_inmap = execute_inmap and pipeline.inmap_enabled
+        execute_aermod = execute_aermod and pipeline.aermod_enabled
+        execute_exposure = execute_exposure and pipeline.exposure_enabled
+    elif run_inmap is None and run_aermod is None and run_exposure is None:
+        execute_inmap = False
+        execute_aermod = False
+        execute_exposure = False
+
+    emissions_outputs = {
+        key: existing_outputs.get(key)
+        for key in (
+            "beam_emissions_by_county_process",
+            "beam_emissions_for_inmap",
+            "beam_inmap_study_area_grid",
+            "beam_emissions_for_aermod",
+        )
+    }
+    if execute_emissions:
+        from .pipeline.workflow.step1_process_emissions import run as run_emissions_processing
+
+        _log_step_banner("STEP 1", "emissions processing")
+        logger.info("Using Step 1 implementation: emissions_processing")
+        stage_started = time.perf_counter()
+        emissions_outputs = run_emissions_processing(
+            pipeline,
+            output_root,
+            input_root,
+            grid_intersection_paths,
+            manifest_inputs=manifest_inputs,
+        )
+        _record_stage_timing(stage_timings, "step1_process_emissions", stage_started)
+    else:
+        logger.info("Emissions processing skipped")
     prepared_skims_candidate = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
     prepared_skims_path = str(prepared_skims_candidate) if prepared_skims_candidate.exists() else None
 
-    concentration_path: Optional[Path] = None
-    aermod_concentration_path: Optional[Path] = None
-    exposure_grid_path: Optional[Path] = None
-    population_distribution_path: Optional[Path] = None
-    population_counts_path: Optional[Path] = None
-    if run_dispersion:
+    concentration_path = (
+        Path(existing_outputs["beam_inmap_concentrations"]).resolve()
+        if existing_outputs.get("beam_inmap_concentrations")
+        else None
+    )
+    aermod_concentration_path = (
+        Path(existing_outputs["beam_aermod_concentrations"]).resolve()
+        if existing_outputs.get("beam_aermod_concentrations")
+        else None
+    )
+    exposure_grid_path = (
+        Path(existing_outputs["beam_concentration_distribution"]).resolve()
+        if existing_outputs.get("beam_concentration_distribution")
+        else None
+    )
+    population_distribution_path = (
+        Path(existing_outputs["beam_population_distribution"]).resolve()
+        if existing_outputs.get("beam_population_distribution")
+        else None
+    )
+    population_counts_path = (
+        Path(existing_outputs["beam_population_counts"]).resolve()
+        if existing_outputs.get("beam_population_counts")
+        else None
+    )
+    if execute_inmap or execute_aermod or execute_exposure:
         from .pipeline.workflow.step2_compute_inmap_concentrations import run as run_inmap_dispersion
         from .pipeline.workflow.step3_compute_aermod_concentrations import run as run_aermod_dispersion
         from .pipeline.workflow.step4_prepare_exposure import run as run_prepare_exposure
-        if pipeline.inmap_enabled and emissions_outputs.get("beam_emissions_for_inmap"):
+        if execute_inmap and emissions_outputs.get("beam_emissions_for_inmap"):
             _log_step_banner("STEP 2", "inmap concentrations")
             logger.info("Using Step 2 implementation: inmap_concentrations_and_export")
             stage_started = time.perf_counter()
@@ -433,10 +524,10 @@ def run_from_input_manifest(
         else:
             logger.info(
                 "InMAP concentrations skipped: inmap_enabled=%s beam_emissions_for_inmap=%s",
-                pipeline.inmap_enabled,
+                execute_inmap,
                 emissions_outputs.get("beam_emissions_for_inmap"),
             )
-        if pipeline.aermod_enabled and pipeline.asrv_patterns_file and emissions_outputs.get("beam_emissions_for_aermod"):
+        if execute_aermod and pipeline.asrv_patterns_file and emissions_outputs.get("beam_emissions_for_aermod"):
             _log_step_banner("STEP 3", "aermod concentrations")
             logger.info("Using Step 3 implementation: aermod_concentrations_and_export")
             stage_started = time.perf_counter()
@@ -450,11 +541,11 @@ def run_from_input_manifest(
         else:
             logger.info(
                 "AERMOD concentrations skipped: aermod_enabled=%s asrv_patterns_file=%s beam_emissions_for_aermod=%s",
-                pipeline.aermod_enabled,
+                execute_aermod,
                 pipeline.asrv_patterns_file,
                 emissions_outputs.get("beam_emissions_for_aermod"),
             )
-        if concentration_path is not None:
+        if execute_exposure and concentration_path is not None:
             _log_step_banner("STEP 4", "prepare exposure")
             logger.info("Using Step 4 implementation: prepare_exposure")
             stage_started = time.perf_counter()
@@ -472,9 +563,13 @@ def run_from_input_manifest(
             if population_counts_path is not None:
                 logger.info("Population counts complete: wrote %s", population_counts_path)
         else:
-            logger.info("Exposure preparation skipped: beam_inmap_concentrations was not produced")
+            logger.info(
+                "Exposure preparation skipped: exposure_enabled=%s beam_inmap_concentrations=%s",
+                execute_exposure,
+                concentration_path,
+            )
     else:
-        logger.info("Dispersion skipped")
+        logger.info("Concentration and exposure stages skipped")
 
     _log_stage_timing_summary(stage_timings)
     run_manifest = {
@@ -486,6 +581,7 @@ def run_from_input_manifest(
         "command": " ".join(sys.argv),
         "image": "not_recorded",
         "outputs": {
+            **existing_outputs,
             "skims_emissions": prepared_skims_path,
             "county_intersection": grid_intersection_paths.get("county"),
             "inmap_intersection": grid_intersection_paths.get("inmap"),
@@ -521,7 +617,7 @@ def run_from_input_manifest(
             "uses_baked_work_data": False,
         },
         "execution": {
-            "dispersion_completed": run_dispersion,
+            "dispersion_completed": bool(execute_inmap or execute_aermod),
             "stage_timings_seconds": stage_timings,
             "stopped_after": (
                 "step4_prepare_exposure"
@@ -544,3 +640,63 @@ def run_from_input_manifest(
     write_structured_file(output_manifest, typed_manifest.to_dict())
     logger.info("Run manifest written: %s", output_manifest)
     return typed_manifest.to_dict()
+
+
+def run_emissions_from_run_manifest(
+    *,
+    run_manifest_path: str | Path,
+) -> Dict[str, Any]:
+    _, _, input_manifest_path = _load_run_manifest_context(run_manifest_path)
+    return _run_stages_from_input_manifest(
+        input_manifest_path=input_manifest_path,
+        run_manifest_path=run_manifest_path,
+        run_emissions=True,
+        run_inmap=False,
+        run_aermod=False,
+        run_exposure=False,
+    )
+
+
+def run_inmap_from_run_manifest(
+    *,
+    run_manifest_path: str | Path,
+) -> Dict[str, Any]:
+    _, _, input_manifest_path = _load_run_manifest_context(run_manifest_path)
+    return _run_stages_from_input_manifest(
+        input_manifest_path=input_manifest_path,
+        run_manifest_path=run_manifest_path,
+        run_emissions=False,
+        run_inmap=True,
+        run_aermod=False,
+        run_exposure=False,
+    )
+
+
+def run_aermod_from_run_manifest(
+    *,
+    run_manifest_path: str | Path,
+) -> Dict[str, Any]:
+    _, _, input_manifest_path = _load_run_manifest_context(run_manifest_path)
+    return _run_stages_from_input_manifest(
+        input_manifest_path=input_manifest_path,
+        run_manifest_path=run_manifest_path,
+        run_emissions=False,
+        run_inmap=False,
+        run_aermod=True,
+        run_exposure=False,
+    )
+
+
+def run_exposure_from_run_manifest(
+    *,
+    run_manifest_path: str | Path,
+) -> Dict[str, Any]:
+    _, _, input_manifest_path = _load_run_manifest_context(run_manifest_path)
+    return _run_stages_from_input_manifest(
+        input_manifest_path=input_manifest_path,
+        run_manifest_path=run_manifest_path,
+        run_emissions=False,
+        run_inmap=False,
+        run_aermod=False,
+        run_exposure=True,
+    )

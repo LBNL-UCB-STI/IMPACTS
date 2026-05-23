@@ -5,6 +5,7 @@ import sys
 
 from impacts.config.settings import load_default_fleet_workflow
 from impacts.config.settings import load_fleet_workflow
+from impacts.config.settings import load_fleet_workflow_from_activities_manifest
 from impacts.emfac.common import raise_runtime_error
 from impacts.emfac.common import write_failure_trace
 from impacts.emfac.common import write_trace
@@ -14,7 +15,13 @@ from impacts.emfac.fleet.step3_map_emfac_atlas import run_step3
 from impacts.emfac.fleet.step4_map_emfac_frism import run_step4
 
 
-def _configure_run(config_path: str | Path | None = None) -> dict[str, object]:
+def _configure_run(
+    config_path: str | Path | None = None,
+    *,
+    activities_manifest_path: str | Path | None = None,
+) -> dict[str, object]:
+    if activities_manifest_path is not None:
+        return load_fleet_workflow_from_activities_manifest(activities_manifest_path)
     if config_path is None:
         return load_default_fleet_workflow()
     return load_fleet_workflow(config_path)
@@ -116,19 +123,27 @@ def run_workflow(workflow: dict[str, object]) -> dict[str, object]:
     return workflow
 
 
-def run_all_steps(config_path: str | Path | None = None) -> None:
+def run_all_steps(
+    config_path: str | Path | None = None,
+    *,
+    activities_manifest_path: str | Path | None = None,
+) -> None:
     """Run the fleet-only workflow against existing activities outputs."""
     try:
-        workflow = _configure_run(config_path)
+        workflow = _configure_run(config_path, activities_manifest_path=activities_manifest_path)
     except Exception as error:
         raise_runtime_error("config_load", error)
     workflow = ensure_activities_outputs_exist(workflow)
     run_workflow(workflow)
 
 
-def main(config_path: str | Path | None = None) -> None:
+def main(
+    config_path: str | Path | None = None,
+    *,
+    activities_manifest_path: str | Path | None = None,
+) -> None:
     """CLI-friendly entrypoint for the fleet workflow."""
-    run_all_steps(config_path)
+    run_all_steps(config_path, activities_manifest_path=activities_manifest_path)
 
 
 if __name__ == "__main__":

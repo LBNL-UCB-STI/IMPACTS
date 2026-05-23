@@ -424,11 +424,11 @@ def _load_passenger_bayesian_dag(config: dict[str, Any]) -> dict[str, float]:
 
 
 def _load_fuel_consumption_msrp_lookup(config: dict[str, Any]) -> dict[str, float]:
-    model_file = str(config.get("vehicle_type_assignment", {}).get("model_file", "")).strip()
-    breakdown_path = str(config.get("beam", {}).get("fuel_consumption_catalog", "")).strip()
+    model_file = str(config.get("assignment_model", "")).strip()
+    breakdown_path = str(config.get("fuel_consumption_catalog", "")).strip()
     if not model_file or not breakdown_path:
         raise ValueError(
-            "Passenger fuel-consumption assignment requires vehicle_type_assignment.model_file and beam.fuel_consumption_catalog"
+            "Passenger fuel-consumption assignment requires assignment_model and fuel_consumption_catalog"
         )
     assignment_catalog = build_fuel_consumption_emfac_assignment_catalog(model_file, breakdown_path)
     assignment_catalog["msrp_usd"] = pd.to_numeric(assignment_catalog["msrp_usd"], errors="coerce")
@@ -501,12 +501,12 @@ def _assign_passenger_fuel_consumption_fields(
 
     mapping = _load_passenger_fuel_consumption_mapping(config)
     msrp_lookup = _load_fuel_consumption_msrp_lookup(config)
-    breakdown_path = str(config.get("beam", {}).get("fuel_consumption_catalog", "")).strip()
-    model_file = str(config.get("vehicle_type_assignment", {}).get("model_file", "")).strip()
+    breakdown_path = str(config.get("fuel_consumption_catalog", "")).strip()
+    model_file = str(config.get("assignment_model", "")).strip()
     if not breakdown_path or not model_file:
         raise ValueError(
-            "Passenger fuel-consumption assignment requires beam.fuel_consumption_catalog "
-            "and vehicle_type_assignment.model_file"
+            "Passenger fuel-consumption assignment requires fuel_consumption_catalog "
+            "and assignment_model"
         )
     assignment_catalog = build_fuel_consumption_emfac_assignment_catalog(model_file, breakdown_path)
     random = _coerce_random_generator(seed)

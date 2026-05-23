@@ -738,31 +738,88 @@ class Impacts:
 
 @dataclass(frozen=True)
 class Pipeline:
-    activities: bool = True
-    fleet: bool = True
-    emissions: bool = True
-    inmap: bool = True
-    aermod: bool = True
-    exposure: bool = True
+    @dataclass(frozen=True)
+    class Presim:
+        activities: bool = True
+        fleet: bool = True
+
+        @classmethod
+        def from_dict(cls, payload: Dict[str, Any]) -> "Pipeline.Presim":
+            _reject_unknown_keys(payload, {"activities", "fleet"}, "impacts.pipeline.presim")
+            def _flag(key: str) -> bool:
+                val = payload.get(key)
+                return True if val is None else bool(val)
+            return cls(
+                activities=_flag("activities"),
+                fleet=_flag("fleet"),
+            )
+
+    @dataclass(frozen=True)
+    class Postsim:
+        emissions: bool = True
+        inmap: bool = True
+        aermod: bool = True
+        exposure: bool = True
+
+        @classmethod
+        def from_dict(cls, payload: Dict[str, Any]) -> "Pipeline.Postsim":
+            _reject_unknown_keys(
+                payload,
+                {"emissions", "inmap", "aermod", "exposure"},
+                "impacts.pipeline.postsim",
+            )
+            def _flag(key: str) -> bool:
+                val = payload.get(key)
+                return True if val is None else bool(val)
+            return cls(
+                emissions=_flag("emissions"),
+                inmap=_flag("inmap"),
+                aermod=_flag("aermod"),
+                exposure=_flag("exposure"),
+            )
+
+    presim: "Pipeline.Presim" = field(default_factory=Presim)
+    postsim: "Pipeline.Postsim" = field(default_factory=Postsim)
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Pipeline":
-        _reject_unknown_keys(
-            payload,
-            {"activities", "fleet", "emissions", "inmap", "aermod", "exposure"},
-            "impacts.pipeline",
-        )
-        def _flag(key: str) -> bool:
-            val = payload.get(key)
-            return True if val is None else bool(val)
+        _reject_unknown_keys(payload, {"presim", "postsim"}, "impacts.pipeline")
         return cls(
-            activities=_flag("activities"),
-            fleet=_flag("fleet"),
-            emissions=_flag("emissions"),
-            inmap=_flag("inmap"),
-            aermod=_flag("aermod"),
-            exposure=_flag("exposure"),
+            presim=Pipeline.Presim.from_dict(dict(payload.get("presim", {}) or {})),
+            postsim=Pipeline.Postsim.from_dict(dict(payload.get("postsim", {}) or {})),
         )
+
+    @property
+    def activities(self) -> bool:
+        return self.presim.activities
+
+    @property
+    def fleet(self) -> bool:
+        return self.presim.fleet
+
+    @property
+    def preprocess(self) -> bool:
+        return True
+
+    @property
+    def emissions(self) -> bool:
+        return self.postsim.emissions
+
+    @property
+    def inmap(self) -> bool:
+        return self.postsim.inmap
+
+    @property
+    def aermod(self) -> bool:
+        return self.postsim.aermod
+
+    @property
+    def exposure(self) -> bool:
+        return self.postsim.exposure
+
+    @property
+    def postprocess(self) -> bool:
+        return True
 
 
 @dataclass(frozen=True)
@@ -865,12 +922,16 @@ class ImpactsSettings:
                 "seed": self.impacts.seed,
                 "scenario": self.impacts.scenario,
                 "pipeline": {
-                    "activities": self.impacts.pipeline.activities,
-                    "fleet": self.impacts.pipeline.fleet,
-                    "emissions": self.impacts.pipeline.emissions,
-                    "inmap": self.impacts.pipeline.inmap,
-                    "aermod": self.impacts.pipeline.aermod,
-                    "exposure": self.impacts.pipeline.exposure,
+                    "presim": {
+                        "activities": self.impacts.pipeline.presim.activities,
+                        "fleet": self.impacts.pipeline.presim.fleet,
+                    },
+                    "postsim": {
+                        "emissions": self.impacts.pipeline.postsim.emissions,
+                        "inmap": self.impacts.pipeline.postsim.inmap,
+                        "aermod": self.impacts.pipeline.postsim.aermod,
+                        "exposure": self.impacts.pipeline.postsim.exposure,
+                    },
                 },
                 "population": {
                     "passenger_folder": self.impacts.population.passenger_folder,
@@ -1107,19 +1168,16 @@ def _build_emfac_root_from_settings_file(path: Path) -> dict[str, object]:
         fleet["frism"] = frism
     vehicle_folder = settings.impacts.population.vehicle_folder
     scenario = settings.impacts.scenario
-    beam: dict[str, object] = {}
     if vehicle_folder and scenario:
         passenger_vehicle_types_file = _find_em_vehicle_types_file(vehicle_folder, "atlas")
         if passenger_vehicle_types_file:
-            beam.setdefault("passenger_vehicle_types_file", passenger_vehicle_types_file)
+            fleet.setdefault("passenger_vehicle_types_file", passenger_vehicle_types_file)
         freight_vehicle_types_file = _find_em_vehicle_types_file(vehicle_folder, "frism")
         if freight_vehicle_types_file:
-            beam.setdefault("freight_vehicle_types_file", freight_vehicle_types_file)
+            fleet.setdefault("freight_vehicle_types_file", freight_vehicle_types_file)
         else:
-            beam.setdefault("freight_vehicle_types_file", f"{vehicle_folder}/vehicletypes--frism--{scenario}.csv")
-        beam.setdefault("fuel_consumption_catalog", _default_fuel_consumption_catalog(vehicle_folder))
-    if beam:
-        fleet["beam"] = beam
+            fleet.setdefault("freight_vehicle_types_file", f"{vehicle_folder}/vehicletypes--frism--{scenario}.csv")
+        fleet.setdefault("fuel_consumption_catalog", _default_fuel_consumption_catalog(vehicle_folder))
     assignment_model = fleet_settings.get("assignment_model")
     if assignment_model not in (None, ""):
         fleet["assignment_model"] = assignment_model
@@ -2092,15 +2150,8 @@ def _derive_emfac_output_paths(emfac: dict[str, object]) -> dict[str, object]:
 
 def _ingest_fleet_sources(config: dict) -> dict:
     config = deepcopy(config)
-    flat_model_file = config.get("assignment_model")
-    if flat_model_file not in (None, ""):
-        vta = config.get("vehicle_type_assignment", {})
-        if not isinstance(vta, dict):
-            vta = {}
-        vta["model_file"] = flat_model_file
-        config["vehicle_type_assignment"] = vta
     model_spec: dict | None = None
-    model_file = config.get("vehicle_type_assignment", {}).get("model_file")
+    model_file = config.get("assignment_model")
     if model_file not in (None, ""):
         model_spec = _load_model_spec(str(model_file))
     config["output"] = _normalize_configured_path(config.get("output"), path_label="output", must_exist=False)
@@ -2146,181 +2197,174 @@ def _ingest_fleet_sources(config: dict) -> dict:
             frism["tours_file"] = _find_matching_file(carriers_folder, ("tour",))
         frism["carriers_folder"] = carriers_folder
         config["frism"] = frism
-    beam = config.get("beam", {})
-    if isinstance(beam, dict):
-        beam["passenger_vehicle_types_file"] = _normalize_configured_path(
-            beam.get("passenger_vehicle_types_file"),
-            path_label="beam.passenger_vehicle_types_file",
+    config["passenger_vehicle_types_file"] = _normalize_configured_path(
+        config.get("passenger_vehicle_types_file"),
+        path_label="passenger_vehicle_types_file",
+    )
+    config["freight_vehicle_types_file"] = _normalize_configured_path(
+        config.get("freight_vehicle_types_file"),
+        path_label="freight_vehicle_types_file",
+    )
+    config["fuel_consumption_catalog"] = _normalize_configured_path(
+        config.get("fuel_consumption_catalog"),
+        path_label="fuel_consumption_catalog",
+    )
+    model_file = _normalize_model_spec_path(config.get("assignment_model"), path_label="assignment_model")
+    if model_file is not None:
+        config["assignment_model"] = model_file
+        model_spec = _load_model_spec(model_file)
+        freight_model = _extract_named_model(
+            model_spec,
+            model_name="freight_bayesian_dag",
+            model_spec_path=Path(model_file),
         )
-        beam["freight_vehicle_types_file"] = _normalize_configured_path(
-            beam.get("freight_vehicle_types_file"),
-            path_label="beam.freight_vehicle_types_file",
-        )
-        beam["fuel_consumption_catalog"] = _normalize_configured_path(
-            beam.get("fuel_consumption_catalog"),
-            path_label="beam.fuel_consumption_catalog",
-        )
-        config["beam"] = beam
-    vta = config.get("vehicle_type_assignment", {})
-    if isinstance(vta, dict):
-        model_file = _normalize_model_spec_path(vta.get("model_file"), path_label="vehicle_type_assignment.model_file")
-        if model_file is not None:
-            vta["model_file"] = model_file
-            model_spec = _load_model_spec(model_file)
-            freight_model = _extract_named_model(
-                model_spec,
-                model_name="freight_bayesian_dag",
-                model_spec_path=Path(model_file),
+        scoring = freight_model.get("scoring", {})
+        evidence = freight_model.get("evidence", {}) if isinstance(freight_model.get("evidence", {}), dict) else {}
+        if "likelihood_floor" not in scoring:
+            raise ValueError(
+                "assignment_model must define models.freight_bayesian_dag.scoring.likelihood_floor"
             )
-            scoring = freight_model.get("scoring", {})
-            evidence = freight_model.get("evidence", {}) if isinstance(freight_model.get("evidence", {}), dict) else {}
-            if "likelihood_floor" not in scoring:
-                raise ValueError(
-                    "vehicle_type_assignment.model_file must define models.freight_bayesian_dag.scoring.likelihood_floor"
-                )
-            floor_value = float(scoring["likelihood_floor"])
-            if not (0.0 < floor_value < 1.0):
-                raise ValueError(
-                    f"vehicle_type_assignment likelihood_floor must be between 0 and 1 exclusive, got {floor_value}"
-                )
-            vta["likelihood_floor"] = floor_value
-            weights = scoring.get("weights", {})
-            missing_weights = [
-                key
-                for key in ("fleet_vmt_prior", "fleet_population_prior", "naics_sector", "payload_mass", "port_location")
-                if key not in weights
-            ]
-            if missing_weights:
-                raise ValueError(
-                    "vehicle_type_assignment.model_file must define models.freight_bayesian_dag.scoring.weights for: "
-                    + ", ".join(missing_weights)
-                )
-            for key in ("fleet_vmt_prior", "fleet_population_prior", "naics_sector", "payload_mass", "port_location"):
-                value = float(weights[key])
-                if value < 0.0:
-                    raise ValueError(f"vehicle_type_assignment {key} weight must be non-negative, got {value}")
-                vta[key] = value
-            fleet_assignment = _extract_fleet_assignment_root(model_spec, model_spec_path=Path(model_file))
-            mappings = fleet_assignment.get("mappings", {})
-            freight_mapping = mappings.get("freight", {}) if isinstance(mappings, dict) else {}
-            freight_vehicle_categories = freight_mapping.get("vehicle_categories", {})
-            freight_fuel_types = freight_mapping.get("fuel_types", {})
-            config["freight_bayesian_dag"] = {
-                "likelihood_floor": floor_value,
-                "fleet_vmt_prior": float(weights["fleet_vmt_prior"]),
-                "fleet_population_prior": float(weights["fleet_population_prior"]),
-                "naics_sector": float(weights["naics_sector"]),
-                "payload_mass": float(weights["payload_mass"]),
-                "port_location": float(weights["port_location"]),
-                "payload_mass_enabled": isinstance(evidence.get("payload_mass"), dict),
-                "payload_mass_source": str(evidence.get("payload_mass", {}).get("source", "")).strip(),
-                "payload_mass_unit": str(evidence.get("payload_mass", {}).get("unit", "")).strip(),
-                "payload_mass_overload_penalty_power": float(
-                    evidence.get("payload_mass", {}).get("overload_penalty_power", 2.0)
-                ),
-            }
-            config["freight_mapping"] = {
-                "vehicle_categories": {
-                    str(category).strip(): [
-                        str(emfac_category).strip()
-                        for emfac_category in emfac_categories
-                        if str(emfac_category).strip()
-                    ]
-                    for category, emfac_categories in freight_vehicle_categories.items()
+        floor_value = float(scoring["likelihood_floor"])
+        if not (0.0 < floor_value < 1.0):
+            raise ValueError(
+                f"assignment_model likelihood_floor must be between 0 and 1 exclusive, got {floor_value}"
+            )
+        weights = scoring.get("weights", {})
+        missing_weights = [
+            key
+            for key in ("fleet_vmt_prior", "fleet_population_prior", "naics_sector", "payload_mass", "port_location")
+            if key not in weights
+        ]
+        if missing_weights:
+            raise ValueError(
+                "assignment_model must define models.freight_bayesian_dag.scoring.weights for: "
+                + ", ".join(missing_weights)
+            )
+        for key in ("fleet_vmt_prior", "fleet_population_prior", "naics_sector", "payload_mass", "port_location"):
+            value = float(weights[key])
+            if value < 0.0:
+                raise ValueError(f"assignment_model {key} weight must be non-negative, got {value}")
+            config[key] = value
+        fleet_assignment = _extract_fleet_assignment_root(model_spec, model_spec_path=Path(model_file))
+        mappings = fleet_assignment.get("mappings", {})
+        freight_mapping = mappings.get("freight", {}) if isinstance(mappings, dict) else {}
+        freight_vehicle_categories = freight_mapping.get("vehicle_categories", {})
+        freight_fuel_types = freight_mapping.get("fuel_types", {})
+        config["freight_bayesian_dag"] = {
+            "likelihood_floor": floor_value,
+            "fleet_vmt_prior": float(weights["fleet_vmt_prior"]),
+            "fleet_population_prior": float(weights["fleet_population_prior"]),
+            "naics_sector": float(weights["naics_sector"]),
+            "payload_mass": float(weights["payload_mass"]),
+            "port_location": float(weights["port_location"]),
+            "payload_mass_enabled": isinstance(evidence.get("payload_mass"), dict),
+            "payload_mass_source": str(evidence.get("payload_mass", {}).get("source", "")).strip(),
+            "payload_mass_unit": str(evidence.get("payload_mass", {}).get("unit", "")).strip(),
+            "payload_mass_overload_penalty_power": float(
+                evidence.get("payload_mass", {}).get("overload_penalty_power", 2.0)
+            ),
+        }
+        config["freight_mapping"] = {
+            "vehicle_categories": {
+                str(category).strip(): [
+                    str(emfac_category).strip()
+                    for emfac_category in emfac_categories
+                    if str(emfac_category).strip()
+                ]
+                for category, emfac_categories in freight_vehicle_categories.items()
+                if str(category).strip()
+            },
+            "fuel_types": {
+                str(fuel).strip(): [
+                    str(emfac_fuel).strip()
+                    for emfac_fuel in emfac_fuels
+                    if str(emfac_fuel).strip()
+                ]
+                for fuel, emfac_fuels in freight_fuel_types.items()
+                if str(fuel).strip()
+            },
+        }
+        passenger_model = _extract_named_model(
+            model_spec,
+            model_name="passenger_bayesian_dag",
+            model_spec_path=Path(model_file),
+        )
+        passenger_scoring = passenger_model.get("scoring", {})
+        passenger_weights = passenger_scoring.get("weights", {})
+        passenger_evidence = passenger_model.get("evidence", {})
+        passenger_income_evidence = passenger_evidence.get("income", {}) if isinstance(passenger_evidence, dict) else {}
+        passenger_mapping = mappings.get("passenger", {}) if isinstance(mappings, dict) else {}
+        passenger_vehicle_categories = passenger_mapping.get("body_types", {})
+        passenger_fuel_types = passenger_mapping.get("fuel_types", {})
+        config["passenger_bayesian_dag"] = {
+            "likelihood_floor": float(passenger_scoring.get("likelihood_floor", 1e-3)),
+            "fleet_vmt_prior_weight": float(passenger_weights.get("fleet_vmt_prior", 1.0)),
+            "fleet_population_prior_weight": float(passenger_weights.get("fleet_population_prior", 1.0)),
+            "income_weight": float(passenger_weights.get("income", 1.0)),
+            "income_enabled": isinstance(passenger_income_evidence, dict) and bool(passenger_income_evidence),
+            "income_center_ratio": float(passenger_income_evidence.get("center_ratio", 0.30)),
+            "income_sigma_ratio": float(passenger_income_evidence.get("sigma_ratio", 0.10)),
+        }
+        config["passenger_mapping"] = {
+            "body_types": {
+                str(bodytype).strip().lower(): [
+                    str(category).strip()
+                    for category in categories
                     if str(category).strip()
-                },
-                "fuel_types": {
-                    str(fuel).strip(): [
-                        str(emfac_fuel).strip()
-                        for emfac_fuel in emfac_fuels
-                        if str(emfac_fuel).strip()
-                    ]
-                    for fuel, emfac_fuels in freight_fuel_types.items()
-                    if str(fuel).strip()
-                },
-            }
-            passenger_model = _extract_named_model(
-                model_spec,
-                model_name="passenger_bayesian_dag",
-                model_spec_path=Path(model_file),
-            )
-            passenger_scoring = passenger_model.get("scoring", {})
-            passenger_weights = passenger_scoring.get("weights", {})
-            passenger_evidence = passenger_model.get("evidence", {})
-            passenger_income_evidence = passenger_evidence.get("income", {}) if isinstance(passenger_evidence, dict) else {}
-            passenger_mapping = mappings.get("passenger", {}) if isinstance(mappings, dict) else {}
-            passenger_vehicle_categories = passenger_mapping.get("body_types", {})
-            passenger_fuel_types = passenger_mapping.get("fuel_types", {})
-            config["passenger_bayesian_dag"] = {
-                "likelihood_floor": float(passenger_scoring.get("likelihood_floor", 1e-3)),
-                "fleet_vmt_prior_weight": float(passenger_weights.get("fleet_vmt_prior", 1.0)),
-                "fleet_population_prior_weight": float(passenger_weights.get("fleet_population_prior", 1.0)),
-                "income_weight": float(passenger_weights.get("income", 1.0)),
-                "income_enabled": isinstance(passenger_income_evidence, dict) and bool(passenger_income_evidence),
-                "income_center_ratio": float(passenger_income_evidence.get("center_ratio", 0.30)),
-                "income_sigma_ratio": float(passenger_income_evidence.get("sigma_ratio", 0.10)),
-            }
-            config["passenger_mapping"] = {
-                "body_types": {
-                    str(bodytype).strip().lower(): [
-                        str(category).strip()
-                        for category in categories
-                        if str(category).strip()
-                    ]
-                    for bodytype, categories in passenger_vehicle_categories.items()
-                    if str(bodytype).strip()
-                },
-                "fuel_types": {
-                    str(fuel).strip(): [
-                        str(emfac_fuel).strip()
-                        for emfac_fuel in emfac_fuels
-                        if str(emfac_fuel).strip()
-                    ]
-                    for fuel, emfac_fuels in passenger_fuel_types.items()
-                    if str(fuel).strip()
-                },
-                "fuel_fallbacks": [
-                    {
-                        "source_fuel": str(item.get("source_fuel", "")).strip().lower(),
-                        "if_model_year": str(item.get("if_model_year", "")).strip(),
-                        "fallback_emfac_fuels": [
-                            str(emfac_fuel).strip()
-                            for emfac_fuel in item.get("fallback_emfac_fuels", [])
-                            if str(emfac_fuel).strip()
-                        ],
-                        "reason": str(item.get("reason", "")).strip(),
-                    }
-                    for item in passenger_mapping.get("fuel_fallbacks", [])
-                    if isinstance(item, dict) and str(item.get("source_fuel", "")).strip()
-                ],
-                "vehicle_categories": {
-                    str(beam_category).strip(): [
-                        str(category).strip()
-                        for category in categories
-                        if str(category).strip()
-                    ]
-                    for beam_category, categories in passenger_mapping.get("vehicle_categories", {}).items()
-                    if str(beam_category).strip()
-                },
-            }
-            config["fuel_consumption_mapping"] = [
+                ]
+                for bodytype, categories in passenger_vehicle_categories.items()
+                if str(bodytype).strip()
+            },
+            "fuel_types": {
+                str(fuel).strip(): [
+                    str(emfac_fuel).strip()
+                    for emfac_fuel in emfac_fuels
+                    if str(emfac_fuel).strip()
+                ]
+                for fuel, emfac_fuels in passenger_fuel_types.items()
+                if str(fuel).strip()
+            },
+            "fuel_fallbacks": [
                 {
-                    "fastsim_id": str(item.get("fastsim_id", "")).strip(),
-                    "vehicle_categories": [
-                        str(category).strip()
-                        for category in item.get("vehicle_categories", [])
-                        if str(category).strip()
+                    "source_fuel": str(item.get("source_fuel", "")).strip().lower(),
+                    "if_model_year": str(item.get("if_model_year", "")).strip(),
+                    "fallback_emfac_fuels": [
+                        str(emfac_fuel).strip()
+                        for emfac_fuel in item.get("fallback_emfac_fuels", [])
+                        if str(emfac_fuel).strip()
                     ],
-                    "fuel_types": [
-                        str(fuel).strip()
-                        for fuel in item.get("fuel_types", [])
-                        if str(fuel).strip()
-                    ],
+                    "reason": str(item.get("reason", "")).strip(),
                 }
-                for item in mappings.get("fuel_consumption", [])
-                if isinstance(item, dict)
-            ]
-        config["vehicle_type_assignment"] = vta
+                for item in passenger_mapping.get("fuel_fallbacks", [])
+                if isinstance(item, dict) and str(item.get("source_fuel", "")).strip()
+            ],
+            "vehicle_categories": {
+                str(beam_category).strip(): [
+                    str(category).strip()
+                    for category in categories
+                    if str(category).strip()
+                ]
+                for beam_category, categories in passenger_mapping.get("vehicle_categories", {}).items()
+                if str(beam_category).strip()
+            },
+        }
+        config["fuel_consumption_mapping"] = [
+            {
+                "fastsim_id": str(item.get("fastsim_id", "")).strip(),
+                "vehicle_categories": [
+                    str(category).strip()
+                    for category in item.get("vehicle_categories", [])
+                    if str(category).strip()
+                ],
+                "fuel_types": [
+                    str(fuel).strip()
+                    for fuel in item.get("fuel_types", [])
+                    if str(fuel).strip()
+                ],
+            }
+            for item in mappings.get("fuel_consumption", [])
+            if isinstance(item, dict)
+        ]
     atlas = config.get("atlas", {})
     if isinstance(atlas, dict):
         population_folder = _normalize_configured_path(
@@ -2380,9 +2424,8 @@ def _validate_fleet(raw: dict, source_path: Path) -> None:
         ("atlas", "population_folder"),
         ("frism",),
         ("frism", "carriers_folder"),
-        ("beam",),
-        ("beam", "passenger_vehicle_types_file"),
-        ("beam", "fuel_consumption_catalog"),
+        ("passenger_vehicle_types_file",),
+        ("fuel_consumption_catalog",),
     ]
     missing = []
     for path in required_paths:
@@ -2398,6 +2441,10 @@ def load_fleet_workflow(config_path: str | Path | None = None) -> dict:
     raw = _build_fleet_config_from_root(_build_emfac_root_from_settings_file(source_path))
     _validate_fleet(raw, source_path)
     raw = _ingest_fleet_sources(raw)
+    return _build_loaded_fleet_workflow(raw)
+
+
+def _build_loaded_fleet_workflow(raw: dict) -> dict:
     output_root = raw["output"]
     config = {
         "seed": raw["seed"],
@@ -2406,9 +2453,11 @@ def load_fleet_workflow(config_path: str | Path | None = None) -> dict:
         "activities": raw["activities"],
         "atlas": raw["atlas"],
         "frism": raw["frism"],
-        "beam": raw["beam"],
+        "passenger_vehicle_types_file": raw.get("passenger_vehicle_types_file"),
+        "freight_vehicle_types_file": raw.get("freight_vehicle_types_file"),
+        "fuel_consumption_catalog": raw.get("fuel_consumption_catalog"),
         "rates": raw.get("rates", {}),
-        "vehicle_type_assignment": raw.get("vehicle_type_assignment", {}),
+        "assignment_model": raw.get("assignment_model"),
         "freight_bayesian_dag": raw.get("freight_bayesian_dag", {}),
         "passenger_bayesian_dag": raw.get("passenger_bayesian_dag", {}),
         "freight_mapping": raw.get("freight_mapping", {}),
@@ -2423,6 +2472,29 @@ def load_fleet_workflow(config_path: str | Path | None = None) -> dict:
             "trace_dir": str(Path(str(output_root)).expanduser() / "_tmp" / "traces"),
         },
     }
+
+
+def load_fleet_workflow_from_activities_manifest(activities_manifest_path: str | Path) -> dict:
+    from ..manifest.file_ops import load_structured_file
+    from ..manifest.schema import ActivitiesManifest
+
+    manifest = ActivitiesManifest.from_dict(load_structured_file(activities_manifest_path)).to_dict()
+    settings_source = Path(manifest["settings_source"]).resolve()
+    raw = _build_fleet_config_from_root(_build_emfac_root_from_settings_file(settings_source))
+    _validate_fleet(raw, settings_source)
+    raw = _ingest_fleet_sources(raw)
+    raw["activities"] = {
+        "outputs": manifest["outputs"]["outputs_root"],
+        "passenger_rates_file": manifest["outputs"]["passenger_rates_file"],
+        "passenger_activity_file": manifest["outputs"]["passenger_activity_file"],
+        "passenger_fleet_file": manifest["outputs"]["passenger_fleet_file"],
+        "freight_rates_file": manifest["outputs"]["freight_rates_file"],
+        "freight_activity_file": manifest["outputs"]["freight_activity_file"],
+        "freight_fleet_file": manifest["outputs"]["freight_fleet_file"],
+        "emissions_store_root": manifest["outputs"]["emissions_store_root"],
+    }
+    raw["vehicle_category_metadata_file"] = manifest["vehicle_category_metadata_file"]
+    return _build_loaded_fleet_workflow(raw)
 
 
 def load_default_fleet_workflow() -> dict:

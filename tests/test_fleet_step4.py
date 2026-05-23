@@ -103,7 +103,7 @@ def _write_model_file(tmp_path: Path, *, port_rows: list[str] | None = None) -> 
         ),
         encoding="utf-8",
     )
-    return {"vehicle_type_assignment": {"model_file": str(model_file)}}
+    return {"assignment_model": str(model_file)}
 
 
 def test_build_freight_bayesian_log_score_uses_grouped_geometric_means() -> None:
@@ -185,7 +185,7 @@ def test_load_vehicle_type_assignment_table_expands_naics_code_lists(tmp_path: P
         ),
         encoding="utf-8",
     )
-    config = {"vehicle_type_assignment": {"model_file": str(model_file)}}
+    config = {"assignment_model": str(model_file)}
 
     frame = _load_vehicle_type_assignment_table(config, "naics_sector")
 
@@ -526,8 +526,8 @@ def test_attach_freight_fuel_consumption_templates_keeps_baseline_values_when_ma
         ]
     )
     config = {
-        "vehicle_type_assignment": {"model_file": "fleet_assignment.yaml"},
-        "beam": {"fuel_consumption_catalog": "fuel_catalog.csv"},
+        "assignment_model": "fleet_assignment.yaml",
+        "fuel_consumption_catalog": "fuel_catalog.csv",
     }
 
     result = _attach_freight_fuel_consumption_templates(
@@ -563,8 +563,8 @@ def test_attach_freight_fuel_consumption_templates_rebuilds_vehicle_type_id_with
         ]
     )
     config = {
-        "vehicle_type_assignment": {"model_file": "fleet_assignment.yaml"},
-        "beam": {"fuel_consumption_catalog": "fuel_catalog.csv"},
+        "assignment_model": "fleet_assignment.yaml",
+        "fuel_consumption_catalog": "fuel_catalog.csv",
     }
 
     original_catalog = _attach_freight_fuel_consumption_templates.__globals__["build_fuel_consumption_emfac_assignment_catalog"]
@@ -623,8 +623,8 @@ def test_attach_freight_fuel_consumption_templates_still_errors_without_baseline
         ]
     )
     config = {
-        "vehicle_type_assignment": {"model_file": "fleet_assignment.yaml"},
-        "beam": {"fuel_consumption_catalog": "fuel_catalog.csv"},
+        "assignment_model": "fleet_assignment.yaml",
+        "fuel_consumption_catalog": "fuel_catalog.csv",
     }
 
     try:

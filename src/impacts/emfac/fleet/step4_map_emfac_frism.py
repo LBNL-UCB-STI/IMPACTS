@@ -326,7 +326,7 @@ def _zone_id_candidates(value: object) -> list[str]:
 
 
 def _load_model_spec(config: dict[str, Any]) -> dict[str, Any]:
-    model_file = _normalize_text(config.get("vehicle_type_assignment", {}).get("model_file"))
+    model_file = _normalize_text(config.get("assignment_model"))
     if not model_file:
         return {}
     path = Path(model_file)
@@ -397,7 +397,7 @@ def _load_vehicle_type_assignment_table(config: dict[str, Any], evidence_source:
                     )
         return pd.DataFrame(expanded_rows).fillna("")
     raise ValueError(
-        f"Could not resolve evidence source '{evidence_source}' from vehicle_type_assignment.model_file."
+        f"Could not resolve evidence source '{evidence_source}' from assignment_model."
     )
 
 
@@ -1102,12 +1102,12 @@ def _attach_freight_fuel_consumption_templates(
     config: dict[str, Any],
     seed: int | np.random.Generator,
 ) -> pd.DataFrame:
-    model_file = str(config.get("vehicle_type_assignment", {}).get("model_file", "")).strip()
-    breakdown_path = str(config.get("beam", {}).get("fuel_consumption_catalog", "")).strip()
+    model_file = str(config.get("assignment_model", "")).strip()
+    breakdown_path = str(config.get("fuel_consumption_catalog", "")).strip()
     if not model_file or not breakdown_path:
         raise ValueError(
             "Freight fuel-consumption template attachment requires "
-            "vehicle_type_assignment.model_file and beam.fuel_consumption_catalog"
+            "assignment_model and fuel_consumption_catalog"
         )
     assignment_catalog = build_fuel_consumption_emfac_assignment_catalog(model_file, breakdown_path)
     random = _coerce_random_generator(seed)

@@ -957,9 +957,8 @@ def _run_step1_passenger_substeps(
     *,
     config: dict[str, Any],
 ) -> dict[str, Any]:
-    source_vehicle_types_config = config["beam"]
     vehicle_types = _read_csv(
-        source_vehicle_types_config["passenger_vehicle_types_file"],
+        config["passenger_vehicle_types_file"],
         columns=[
             "vehicleTypeId",
             "curbWeightInKg",
@@ -1009,7 +1008,6 @@ def _run_step1_freight_substeps(
     *,
     config: dict[str, Any],
 ) -> dict[str, Any]:
-    source_vehicle_types_config = config["beam"]
     print("=== Step 1.4: build freight vehicle-type targets from FRISM carriers and tours ===")
     frism_carriers = read_frism_carriers_input(config["frism"]["carriers_file"])
     frism_tours = _read_csv(
@@ -1023,7 +1021,7 @@ def _run_step1_freight_substeps(
 
     print("=== Step 1.5: materialize and write freight vehicle types from freight vehicle-type targets ===")
     freight_vehicle_types = _read_csv(
-        source_vehicle_types_config["freight_vehicle_types_file"],
+        config["freight_vehicle_types_file"],
     )
     freight_vehicle_type_population = _round_fleet_share(freight_vehicle_type_population)
     built_freight_vehicle_types = _build_freight_vehicle_types_from_population(

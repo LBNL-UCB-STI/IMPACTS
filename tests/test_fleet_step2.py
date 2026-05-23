@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import pandas as pd
+import pytest
 
 from impacts.emfac.common import attach_idle_time_fraction
 from impacts.emfac.fleet.step2_map_emfac_bus_bike import _matched_emfac_fuels
@@ -180,8 +181,8 @@ def test_run_step2_assigns_bus_and_bike_and_leaves_other_empty(tmp_path) -> None
                 "passenger_fleet_file": str(fleet_file),
                 "outputs": str(activities_output_root),
             },
-            "vehicle_type_assignment": {"model_file": str(model_file)},
-            "vehicle_category_attributes_file": str(metadata_file),
+            "assignment_model": str(model_file),
+            "vehicle_category_metadata_file": str(metadata_file),
             "frism": {"year": 2018},
             "output": str(output_root),
         },
@@ -261,11 +262,26 @@ def test_read_step2_vehicle_types_preserves_full_vehicle_type_columns(tmp_path) 
     assert result.loc[0, "automationLevel"] == 3.0
 
 
-def test_attach_idle_time_fraction_can_fallback_to_emfac_id_for_mcy_and_ubus() -> None:
+def test_attach_idle_time_fraction_requires_emfac_vehicle_category() -> None:
     vehicle_types = pd.DataFrame(
         [
             {"vehicleTypeId": "bus-1", "emfacId": "2019UBUSGas"},
             {"vehicleTypeId": "bike-1", "emfacId": "2019MCYGas"},
+        ]
+    )
+
+    with pytest.raises(ValueError, match="emfacVehicleCategory"):
+        attach_idle_time_fraction(
+            vehicle_types,
+            idle_time_fraction_lookup={"UBUS": 0.25, "MCY": 0.05},
+        )
+
+
+def test_attach_idle_time_fraction_uses_emfac_vehicle_category() -> None:
+    vehicle_types = pd.DataFrame(
+        [
+            {"vehicleTypeId": "bus-1", "emfacVehicleCategory": "UBUS"},
+            {"vehicleTypeId": "bike-1", "emfacVehicleCategory": "MCY"},
         ]
     )
 

@@ -1,13 +1,16 @@
 impacts:
   local_input_folder: impacts/impacts_inputs/
   local_output_folder: impacts/impacts_output/
+  scenario: ${run.start_year}-Baseline
   pipeline:
-    activities: true
-    fleet: true
-    emissions: true
-    inmap: true
-    aermod: true
-    exposure: true
+    presim:
+      activities: true
+      fleet: true
+    postsim:
+      emissions: true
+      inmap: true
+      aermod: true
+      exposure: true
   population:
     passenger_folder: urbansim/atlas-2019
     vehicle_folder: vehicle-tech
