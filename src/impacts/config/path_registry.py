@@ -45,13 +45,20 @@ def build_registry(settings, config_path: Path) -> PathRegistry:
     from ..manifest.file_ops import resolve_path
 
     roots: list[Path] = []
-    for folder in (
-        settings.beam.local_input_folder,
-        settings.beam.local_output_folder,
-        settings.impacts.local_input_folder,
-    ):
-        if folder:
-            resolved = resolve_path(folder, config_path)
-            if resolved:
-                roots.append(Path(resolved))
+
+    beam_input = resolve_path(settings.beam.local_input_folder, config_path)
+    if beam_input:
+        roots.append(Path(beam_input))
+        vehicle_folder = settings.impacts.population.vehicle_folder
+        if vehicle_folder:
+            roots.append(Path(beam_input) / vehicle_folder / "emissions")
+
+    beam_output = resolve_path(settings.beam.local_output_folder, config_path)
+    if beam_output:
+        roots.append(Path(beam_output))
+
+    impacts_input = resolve_path(settings.impacts.local_input_folder, config_path)
+    if impacts_input:
+        roots.append(Path(impacts_input))
+
     return PathRegistry(roots)
