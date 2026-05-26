@@ -83,15 +83,15 @@ def test_complete_sparse_inventory_counties_imputes_missing_sf_counties(source_t
     assert sparse_slice["is_imputed_county"].tolist() == [True, False, False]
 
 
-def test_normalize_emissions_inventory_fuel_accepts_alias_list_mapping() -> None:
+def test_normalize_emissions_inventory_fuel_maps_raw_values_to_canonical_tokens() -> None:
     _set_activities_mappings(
         {
             "fuel_map": {
-                "Dsl": ["Diesel"],
-                "Elec": ["Electricity"],
-                "Gas": ["Gasoline"],
-                "NG": ["Natural Gas"],
-                "Phe": ["Plug-in Hybrid"],
+                "Diesel": "Dsl",
+                "Electricity": "Elec",
+                "Gasoline": "Gas",
+                "Natural Gas": "NG",
+                "Plug-in Hybrid": "Phe",
             }
         }
     )

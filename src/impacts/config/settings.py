@@ -99,7 +99,7 @@ def _validate_activities_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
     activities = _mapping_payload(payload, path="impacts.activities")
     _reject_unknown_keys(
         activities,
-        {"region_label", "raw_inputs_archive", "model_year_groups", "project_analysis", "emissions_inventory"},
+        {"region_label", "model_year_groups", "project_analysis", "emissions_inventory"},
         "impacts.activities",
     )
     project_analysis = _mapping_payload(activities.get("project_analysis"), path="impacts.activities.project_analysis")
@@ -668,9 +668,9 @@ class Impacts:
     analysis: Analysis = field(default_factory=Analysis)
 
     @classmethod
-    def from_dict(cls, payload: Dict[str, Any]) -> "Impacts":
+    def from_dict(cls, impacts_settings: Dict[str, Any]) -> "Impacts":
         _reject_unknown_keys(
-            payload,
+            impacts_settings,
             {
                 "local_output_folder", "local_input_folder", "seed", "scenario",
                 "pipeline", "population",
@@ -678,11 +678,15 @@ class Impacts:
             },
             "impacts",
         )
-        population = Population.from_dict(dict(payload.get("population", {}) or {}))
-        activities = _validate_activities_settings(payload.get("activities", {}) or {})
-        fleet = _validate_fleet_settings(payload.get("fleet", {}) or {})
-        emissions_payload = dict(payload.get("emissions", {}) or {})
-        scenario = _optional_string(payload.get("scenario"))
+        population = Population.from_dict(dict(impacts_settings.get("population", {}) or {}))
+        activities = _validate_activities_settings(impacts_settings.get("activities", {}) or {})
+        fleet = _validate_fleet_settings(impacts_settings.get("fleet", {}) or {})
+        emissions_payload = dict(impacts_settings.get("emissions", {}) or {})
+        scenario = _optional_string(impacts_settings.get("scenario"))
+        local_input_folder = impacts_settings.get("local_input_folder")
+        emissions_folder = (
+            str(Path(population.vehicle_folder) / "emissions") if population.vehicle_folder else None
+        )
         if population.vehicle_folder:
             if not emissions_payload.get("passenger_vehicle_types_file"):
                 derived = _find_em_vehicle_types_file(population.vehicle_folder, "atlas")
@@ -693,29 +697,29 @@ class Impacts:
                 if derived:
                     emissions_payload["freight_vehicle_types_file"] = derived
         if not emissions_payload.get("vehicle_category_metadata_file"):
-            derived = _default_vehicle_category_metadata_file(population.rates_folder)
+            derived = _default_vehicle_category_metadata_file(emissions_folder)
             if derived:
                 emissions_payload["vehicle_category_metadata_file"] = derived
         if not emissions_payload.get("rates_folder"):
-            derived = _default_emissions_rates_folder(population.rates_folder, scenario)
+            derived = _default_emissions_rates_folder(emissions_folder, scenario)
             if derived:
                 emissions_payload["rates_folder"] = derived
         if not emissions_payload.get("inventory_folder"):
-            derived = _default_emissions_inventory_folder(population.rates_folder, scenario)
+            derived = _default_emissions_inventory_folder(local_input_folder, scenario)
             if derived:
                 emissions_payload["inventory_folder"] = derived
         result = cls(
-            local_output_folder=_required_string(payload.get("local_output_folder"), "impacts.local_output_folder"),
-            local_input_folder=_required_string(payload.get("local_input_folder"), "impacts.local_input_folder"),
-            seed=int(payload.get("seed") or 0),
+            local_output_folder=_required_string(impacts_settings.get("local_output_folder"), "impacts.local_output_folder"),
+            local_input_folder=_required_string(impacts_settings.get("local_input_folder"), "impacts.local_input_folder"),
+            seed=int(impacts_settings.get("seed") or 0),
             scenario=scenario,
-            pipeline=Pipeline.from_dict(dict(payload.get("pipeline", {}) or {})),
+            pipeline=Pipeline.from_dict(dict(impacts_settings.get("pipeline", {}) or {})),
             activities=activities,
             fleet=fleet,
             emissions=Emissions.from_dict(emissions_payload),
-            dispersions=Dispersions.from_dict(dict(payload.get("dispersions", {}) or {})),
+            dispersions=Dispersions.from_dict(dict(impacts_settings.get("dispersions", {}) or {})),
             population=population,
-            analysis=Analysis.from_dict(dict(payload.get("analysis", {}) or {})),
+            analysis=Analysis.from_dict(dict(impacts_settings.get("analysis", {}) or {})),
         )
         if result.pipeline.inmap:
             if not result.dispersions.inmap.isrm_zarr:
@@ -827,8 +831,6 @@ class Population:
     passenger_folder: Optional[str] = None
     freight_folder: Optional[str] = None
     vehicle_folder: Optional[str] = None
-    rates_folder: Optional[str] = None
-    dispersions_folder: Optional[str] = None
     atlas_year: Optional[int] = None
     frism_year: Optional[int] = None
     population_sample: float = 1.0
@@ -842,8 +844,6 @@ class Population:
                 "passenger_folder",
                 "freight_folder",
                 "vehicle_folder",
-                "rates_folder",
-                "dispersions_folder",
                 "atlas_year",
                 "frism_year",
                 "population_sample",
@@ -855,8 +855,6 @@ class Population:
             passenger_folder=_optional_string(payload.get("passenger_folder")),
             freight_folder=_optional_string(payload.get("freight_folder")),
             vehicle_folder=_optional_string(payload.get("vehicle_folder")),
-            rates_folder=_optional_string(payload.get("rates_folder")),
-            dispersions_folder=_optional_string(payload.get("dispersions_folder")),
             atlas_year=_optional_int(payload.get("atlas_year")),
             frism_year=_optional_int(payload.get("frism_year")),
             population_sample=(
@@ -937,8 +935,6 @@ class ImpactsSettings:
                     "passenger_folder": self.impacts.population.passenger_folder,
                     "freight_folder": self.impacts.population.freight_folder,
                     "vehicle_folder": self.impacts.population.vehicle_folder,
-                    "rates_folder": self.impacts.population.rates_folder,
-                    "dispersions_folder": self.impacts.population.dispersions_folder,
                     "atlas_year": self.impacts.population.atlas_year,
                     "frism_year": self.impacts.population.frism_year,
                     "population_sample": self.impacts.population.population_sample,
@@ -1281,16 +1277,16 @@ def _default_vehicle_category_metadata_file(rates_root: str | None) -> str | Non
     return str(Path(rates_root) / "emissions_vehicle_categories.csv")
 
 
-def _default_emissions_rates_folder(rates_root: str | None, scenario: str | None) -> str | None:
-    if not rates_root or not scenario:
+def _default_emissions_rates_folder(emissions_root: str | None, scenario: str | None) -> str | None:
+    if not emissions_root or not scenario:
         return None
-    return str(Path(rates_root) / scenario / "rates")
+    return str(Path(emissions_root) / "activities" / scenario / "rates")
 
 
-def _default_emissions_inventory_folder(rates_root: str | None, scenario: str | None) -> str | None:
-    if not rates_root or not scenario:
+def _default_emissions_inventory_folder(emissions_root: str | None, scenario: str | None) -> str | None:
+    if not emissions_root or not scenario:
         return None
-    return str(Path(rates_root) / scenario / "inventory")
+    return str(Path(emissions_root) / "activities" / scenario / "inventory")
 
 
 def _default_fuel_consumption_catalog(vehicle_folder: str | None) -> str | None:
@@ -1567,15 +1563,15 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
     year = int(raw["calendar_year"])
     region = str(raw["region_label"])
     scenario_id = str(raw["scenario"])
+    emissions_store_name = scenario_id
     outputs_root = Path(str(raw["outputs"])).expanduser()
-    activities_output_root = outputs_root / "activities"
-    tmp_root = outputs_root / "_tmp"
+    activities_output_root = outputs_root / "activities" / emissions_store_name / "inventory"
+    tmp_root = outputs_root / "activities" / "_tmp"
     trace_dir = tmp_root / "traces"
     region_slug = region.lower()
     base_name = f"{region_slug}-emfac-{year}"
     final_name = f"{base_name}-project-analysis-final"
     inventory_final_name = f"{base_name}-inventory-final"
-    emissions_store_name = f"{year}-{scenario_id}"
 
     return {
         "run": {
@@ -1629,18 +1625,18 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
             "matching_activity_output_passenger": str(tmp_root / f"{base_name}-inventory-matching-passenger-activity.parquet"),
             "matching_activity_output_freight": str(tmp_root / f"{base_name}-inventory-matching-freight-activity.parquet"),
             "final_output_passenger": str(activities_output_root / f"{final_name}-passenger-rates.parquet"),
-            "final_activity_output_passenger": str(activities_output_root / f"{inventory_final_name}-passenger-activity.parquet"),
-            "final_activity_emfacid_output_passenger": str(
+            "final_activity_by_model_year_output_passenger": str(activities_output_root / f"{inventory_final_name}-passenger-activity-by-model-year.parquet"),
+            "final_activity_by_emfacid_output_passenger": str(
                 activities_output_root / f"{inventory_final_name}-passenger-activity-by-emfacid.parquet"
             ),
             "final_fleet_output_passenger": str(activities_output_root / f"{inventory_final_name}-passenger-fleet.parquet"),
             "final_output_freight": str(activities_output_root / f"{final_name}-freight-rates.parquet"),
-            "final_activity_output_freight": str(activities_output_root / f"{inventory_final_name}-freight-activity.parquet"),
-            "final_activity_emfacid_output_freight": str(
+            "final_activity_by_model_year_output_freight": str(activities_output_root / f"{inventory_final_name}-freight-activity-by-model-year.parquet"),
+            "final_activity_by_emfacid_output_freight": str(
                 activities_output_root / f"{inventory_final_name}-freight-activity-by-emfacid.parquet"
             ),
             "final_fleet_output_freight": str(activities_output_root / f"{inventory_final_name}-freight-fleet.parquet"),
-            "emissions_store_root": str(outputs_root / "emissions" / emissions_store_name),
+            "emissions_store_root": str(outputs_root / "activities" / emissions_store_name / "rates"),
         },
     }
 
@@ -2130,21 +2126,23 @@ def _derive_emfac_output_paths(emfac: dict[str, object]) -> dict[str, object]:
     outputs = emfac.get("outputs")
     region_label = emfac.get("region_label")
     calendar_year = emfac.get("calendar_year")
-    if outputs in (None, "") or region_label in (None, "") or calendar_year in (None, ""):
+    scenario = emfac.get("scenario")
+    if outputs in (None, "") or region_label in (None, "") or calendar_year in (None, "") or scenario in (None, ""):
         return emfac
     region_slug = str(region_label).strip().lower()
     project_analysis_name = f"{region_slug}-emfac-{int(calendar_year)}-project-analysis-final"
     inventory_final_name = f"{region_slug}-emfac-{int(calendar_year)}-inventory-final"
     inventory_matching_name = f"{region_slug}-emfac-{int(calendar_year)}-inventory-matching"
     outputs_root = Path(str(outputs))
-    activities_output_root = outputs_root / "activities"
-    tmp_root = outputs_root / "_tmp"
+    activities_output_root = outputs_root / "activities" / str(scenario) / "inventory"
+    tmp_root = outputs_root / "activities" / "_tmp"
     emfac["passenger_rates_file"] = str((activities_output_root / f"{project_analysis_name}-passenger-rates.parquet").resolve())
     emfac["passenger_activity_file"] = str((tmp_root / f"{inventory_matching_name}-passenger-activity.parquet").resolve())
     emfac["passenger_fleet_file"] = str((activities_output_root / f"{inventory_final_name}-passenger-fleet.parquet").resolve())
     emfac["freight_rates_file"] = str((activities_output_root / f"{project_analysis_name}-freight-rates.parquet").resolve())
     emfac["freight_activity_file"] = str((tmp_root / f"{inventory_matching_name}-freight-activity.parquet").resolve())
     emfac["freight_fleet_file"] = str((activities_output_root / f"{inventory_final_name}-freight-fleet.parquet").resolve())
+    emfac["emissions_store_root"] = str((outputs_root / "activities" / str(scenario) / "rates").resolve())
     return emfac
 
 

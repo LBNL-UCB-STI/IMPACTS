@@ -49,10 +49,7 @@ def _run_step(workflow: dict[str, object], *, step_name: str, runner) -> dict[st
 
 def _missing_activities_outputs(workflow: dict[str, object]) -> dict[str, Path]:
     activities = workflow["config"]["activities"]
-    activities_output_root = Path(str(activities["outputs"])).expanduser().resolve()
-    frism_year = workflow["config"]["frism"]["year"]
-    scenario_id = str(workflow["scenario"])
-    rates_store_root = activities_output_root / "emissions" / f"{frism_year}-{scenario_id}"
+    rates_store_root = Path(str(activities["emissions_store_root"])).expanduser().resolve()
     rates_store_dataset = rates_store_root / "dataset"
     rates_store_duckdb = rates_store_root / "dataset.duckdb"
     required_outputs = {

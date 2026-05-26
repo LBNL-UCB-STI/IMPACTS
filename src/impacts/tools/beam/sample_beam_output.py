@@ -181,17 +181,18 @@ def _iter_csv_chunks(
     lower = str(path).lower()
 
     if lower.endswith(".parquet"):
-        frame = pd.read_parquet(source, columns=usecols)
-        total_rows = len(frame)
+        parquet_file = pq.ParquetFile(source)
+        total_rows = parquet_file.metadata.num_rows
         if total_rows == 0:
             local_reporter.report(progress_offset + total_bytes, extra="chunk_rows 0")
             if reporter is None:
                 local_reporter.close()
             return
-        for start in range(0, total_rows, chunksize):
-            stop = min(start + chunksize, total_rows)
-            chunk = frame.iloc[start:stop].copy()
-            processed = int(total_bytes * (stop / total_rows))
+        processed_rows = 0
+        for batch in parquet_file.iter_batches(batch_size=chunksize, columns=usecols):
+            chunk = batch.to_pandas()
+            processed_rows += len(chunk)
+            processed = int(total_bytes * (processed_rows / total_rows))
             local_reporter.report(progress_offset + processed, extra=f"chunk_rows {len(chunk)}")
             yield chunk
         if reporter is None:
@@ -235,7 +236,8 @@ def _compression_for_path(path: str | Path) -> Optional[str]:
 def _read_empty_like(path: str | Path) -> pd.DataFrame:
     lower = str(path).lower()
     if lower.endswith(".parquet"):
-        return pd.read_parquet(path).iloc[0:0].copy()
+        parquet_file = pq.ParquetFile(path)
+        return pd.DataFrame(columns=list(parquet_file.schema_arrow.names))
     return pd.read_csv(path, compression=_compression_for_path(path), nrows=0)
 
 

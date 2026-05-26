@@ -18,6 +18,7 @@ from impacts.manifest.schema import PostprocessManifest
 from impacts.manifest.schema import RunManifest
 from impacts.manifest.schema import ActivitiesManifest
 from impacts.postprocessor import postprocess_from_settings
+from impacts.pipeline.preprocessing.step1_collect_inputs import _resolve_region_input_root
 from impacts.runner import run_emissions_from_run_manifest
 
 
@@ -100,19 +101,14 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.shared.geography.fips.counties[0] == "001"
     assert config.beam.local_input_folder == "~/Workspace/Models/beam/beam-data/beam-data-sfbay"
     assert config.beam.local_output_folder == "beam/beam_output/"
+    assert config.beam.router_directory == "r5/sfbay-cbg5500-weakConn-network"
     assert config.impacts.pipeline.inmap is True
     assert config.impacts.dispersions.inmap.grid_path.endswith("isrm_polygon_wgs84.gpkg")
     assert config.impacts.pipeline.aermod is True
     assert config.impacts.pipeline.exposure is True
-    assert config.impacts.population.passenger_folder == "beam/beam_output/urbansim/atlas-2019"
+    assert config.impacts.population.passenger_folder == "urbansim/atlas-2019"
     assert config.impacts.emissions.beam.include_passenger is True
     assert config.impacts.emissions.beam.include_freight is True
-    assert config.impacts.emissions.beam.passenger_vehicle_types_file.endswith(
-        "vehicle-tech/vehicleTypes--atlas--2019-Baseline--EM.csv"
-    )
-    assert config.impacts.emissions.beam.freight_vehicle_types_file.endswith(
-        "vehicle-tech/vehicleTypes--frism--2018-Baseline--EM.csv"
-    )
     assert len(config.impacts.analysis.sector_targets) == 6
     assert config.impacts.emissions.vehicle_category_metadata_file.endswith(
         "vehicle-tech/emissions/emissions_vehicle_categories.csv"
@@ -127,6 +123,16 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.analysis.sector_targets[-1].annual_pm25_short_tons == 1499.25
     assert config.impacts.analysis.sector_targets[-1].annual_nox_short_tons is None
     assert config.impacts.analysis.inventory_targets == []
+
+
+def test_resolve_region_input_root_accepts_direct_region_root_layout(tmp_path: Path) -> None:
+    beam_input_root = tmp_path / "beam-data-sfbay"
+    (beam_input_root / "freight").mkdir(parents=True)
+    (beam_input_root / "vehicle-tech").mkdir()
+
+    resolved = _resolve_region_input_root(beam_input_root=beam_input_root, region="sfbay")
+
+    assert resolved == beam_input_root
 
 
 def test_pipeline_example_is_source_of_truth_for_builtin_pipeline_impacts_settings() -> None:
@@ -217,8 +223,6 @@ def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_d
                 "      exposure: false",
                 "  population:",
                 "    vehicle_folder: vehicle-tech",
-                "    rates_folder: vehicle-tech/emissions",
-                "    dispersions_folder: vehicle-tech/dispersions",
                 "    atlas_year: 2019",
                 "    frism_year: 2018",
                 "    population_sample: 0.1",
@@ -243,8 +247,8 @@ def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_d
     assert config.impacts.emissions.defaults.default_annualization_days.light_duty == 327.0
     assert config.impacts.emissions.defaults.default_annualization_days.medium_heavy_duty == 312.0
     assert config.impacts.emissions.vehicle_category_metadata_file == "vehicle-tech/emissions/emissions_vehicle_categories.csv"
-    assert config.impacts.emissions.rates_folder == "vehicle-tech/emissions/2018-Baseline/rates"
-    assert config.impacts.emissions.inventory.inventory_folder == "vehicle-tech/emissions/2018-Baseline/inventory"
+    assert config.impacts.emissions.rates_folder == "vehicle-tech/emissions/activities/2018-Baseline/rates"
+    assert config.impacts.emissions.inventory.inventory_folder == "impacts/impacts_inputs/activities/2018-Baseline/inventory"
     assert config.impacts.emissions.inventory.passenger_file is None
     assert config.impacts.emissions.inventory.freight_file is None
     assert config.impacts.emissions.inventory.enable_passenger_activity_correction is True
@@ -344,15 +348,15 @@ def test_manifest_models_round_trip_current_shape(tmp_path: Path):
                 "freight_rates_file": str(tmp_path / "emfac" / "activities" / "freight-rates.parquet"),
                 "freight_activity_file": str(tmp_path / "emfac" / "_tmp" / "freight-activity.parquet"),
                 "freight_fleet_file": str(tmp_path / "emfac" / "activities" / "freight-fleet.parquet"),
-                "final_activity_emfacid_output_passenger": str(
+                "final_activity_by_emfacid_output_passenger": str(
                     tmp_path / "emfac" / "activities" / "passenger-activity-by-emfacid.parquet"
                 ),
-                "final_activity_emfacid_output_freight": str(
+                "final_activity_by_emfacid_output_freight": str(
                     tmp_path / "emfac" / "activities" / "freight-activity-by-emfacid.parquet"
                 ),
             },
             "notes": [],
-            "activities_manifest_path": str(tmp_path / "emfac" / "activities_manifest.yaml"),
+            "activities_manifest_path": str(tmp_path / "emfac" / "activities" / "activities_manifest.yaml"),
         }
     ).to_dict()
     run_manifest = RunManifest.from_dict(

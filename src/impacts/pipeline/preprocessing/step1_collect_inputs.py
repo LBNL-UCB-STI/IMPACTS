@@ -104,8 +104,8 @@ def _use_existing_reference(manifest_inputs: Dict[str, Any], key: str, entry: Di
 def _resolve_emfacid_path(inventory_path: str, *, label: str) -> str:
     source = Path(inventory_path).resolve()
     name = source.name
-    if name.endswith("-activity.parquet"):
-        derived = source.with_name(name.replace("-activity.parquet", "-activity-by-emfacid.parquet"))
+    if name.endswith("-activity-by-model-year.parquet"):
+        derived = source.with_name(name.replace("-activity-by-model-year.parquet", "-activity-by-emfacid.parquet"))
     else:
         derived = source.with_name(f"{source.stem}-by-emfacid{source.suffix}")
     if not derived.exists():
@@ -128,7 +128,29 @@ def _resolve_region_or_absolute_path(raw_path: str, *, region_input_root: Path, 
         return resolve_path(raw, config_path) or raw
     if raw.startswith("./") or raw.startswith("../"):
         return str((config_path.parent / raw).resolve())
+    config_relative = (config_path.parent / raw).resolve()
+    if config_relative.exists():
+        return str(config_relative)
     return str((region_input_root / raw).resolve())
+
+
+def _resolve_region_input_root(*, beam_input_root: Path, region: str) -> Path:
+    candidate = beam_input_root / region
+    if candidate.exists():
+        return candidate
+
+    # Some local BEAM datasets already point directly at the region root
+    # (for example a beam-data-sfbay checkout with freight/ and vehicle-tech/ at top level).
+    direct_layout_markers = ("freight", "vehicle-tech", "urbansim", "shape", "r5")
+    if any((beam_input_root / marker).exists() for marker in direct_layout_markers):
+        logger.info(
+            "Preprocess Step 1: using beam.local_input_folder as the region root because %s was not found under %s",
+            region,
+            beam_input_root,
+        )
+        return beam_input_root
+
+    raise FileNotFoundError(f"Region input root not found: {candidate}")
 
 
 def run(
@@ -156,9 +178,10 @@ def run(
         resolve_path(beam.local_input_folder, config_path),
         "beam.local_input_folder",
     )
-    region_input_root = Path(beam_input_root) / settings.run.region
-    if not region_input_root.exists():
-        raise FileNotFoundError(f"Region input root not found: {region_input_root}")
+    region_input_root = _resolve_region_input_root(
+        beam_input_root=Path(beam_input_root),
+        region=settings.run.region,
+    )
     input_root.mkdir(parents=True, exist_ok=True)
     staged_events = None
     staged_inmap_grid = None

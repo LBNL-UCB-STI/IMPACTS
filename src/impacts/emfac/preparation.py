@@ -12,29 +12,29 @@ from ..manifest.schema import ActivitiesManifest
 
 logger = logging.getLogger(__name__)
 
-_ARCHIVE_NAME = "emfac.tar.zst"
+_ARCHIVE_NAME = "emissions-raw.tar.zst"
 
 
 def _emfac_raw_root(local_input_folder: Path) -> Path:
-    return local_input_folder / "emfac"
+    return local_input_folder
 
 
-def _archive_path(beam_input_folder: Path, region: str) -> Path:
-    return beam_input_folder / region / "vehicle-tech" / "emissions" / _ARCHIVE_NAME
+def _archive_path(beam_input_folder: Path, vehicle_folder: str) -> Path:
+    return beam_input_folder / vehicle_folder / "emissions" / _ARCHIVE_NAME
 
 
 def _outputs_exist(workflow: dict[str, Any]) -> bool:
-    return Path(str(workflow["paths"]["final_activity_emfacid_output_passenger"])).exists()
+    return Path(str(workflow["paths"]["final_activity_by_emfacid_output_passenger"])).exists()
 
 
 def _activities_manifest_path(output_root: Path) -> Path:
-    return output_root / "activities_manifest.yaml"
+    return output_root / "activities" / "activities_manifest.yaml"
 
 
 def _expected_output_path(cfg: dict[str, Any], start_year: int) -> Path:
     region_slug = str(cfg["region_label"]).lower()
     base_name = f"{region_slug}-emfac-{int(start_year)}-inventory-final"
-    return Path(str(cfg["output_root"])) / "activities" / f"{base_name}-passenger-activity-by-emfacid.parquet"
+    return Path(str(cfg["output_root"])) / "activities" / str(cfg["scenario"]) / "inventory" / f"{base_name}-passenger-activity-by-emfacid.parquet"
 
 
 def _build_activities_manifest_payload(
@@ -65,11 +65,11 @@ def _build_activities_manifest_payload(
             "freight_rates_file": str(Path(str(paths["final_output_freight"])).resolve()),
             "freight_activity_file": str(Path(str(paths["matching_activity_output_freight"])).resolve()),
             "freight_fleet_file": str(Path(str(paths["final_fleet_output_freight"])).resolve()),
-            "final_activity_emfacid_output_passenger": str(
-                Path(str(paths["final_activity_emfacid_output_passenger"])).resolve()
+            "final_activity_by_emfacid_output_passenger": str(
+                Path(str(paths["final_activity_by_emfacid_output_passenger"])).resolve()
             ),
-            "final_activity_emfacid_output_freight": str(
-                Path(str(paths["final_activity_emfacid_output_freight"])).resolve()
+            "final_activity_by_emfacid_output_freight": str(
+                Path(str(paths["final_activity_by_emfacid_output_freight"])).resolve()
             ),
         },
         "notes": [
@@ -89,8 +89,8 @@ def _write_activities_manifest_from_cfg(
 ) -> dict[str, Any]:
     region_slug = str(cfg["region_label"]).lower()
     outputs_root = Path(str(cfg["output_root"])).resolve()
-    activities_output_root = outputs_root / "activities"
-    tmp_root = outputs_root / "_tmp"
+    activities_output_root = outputs_root / "activities" / str(cfg["scenario"]) / "inventory"
+    tmp_root = outputs_root / "activities" / "_tmp"
     project_analysis_name = f"{region_slug}-emfac-{int(calendar_year)}-project-analysis-final"
     inventory_final_name = f"{region_slug}-emfac-{int(calendar_year)}-inventory-final"
     inventory_matching_name = f"{region_slug}-emfac-{int(calendar_year)}-inventory-matching"
@@ -108,17 +108,17 @@ def _write_activities_manifest_from_cfg(
                 "outputs_root": str(outputs_root),
                 "activities_output_root": str(activities_output_root.resolve()),
                 "tmp_root": str(tmp_root.resolve()),
-                "emissions_store_root": str((outputs_root / "emissions" / f"{int(calendar_year)}-{cfg['scenario']}").resolve()),
+                "emissions_store_root": str((outputs_root / "activities" / str(cfg["scenario"]) / "rates").resolve()),
                 "passenger_rates_file": str((activities_output_root / f"{project_analysis_name}-passenger-rates.parquet").resolve()),
                 "passenger_activity_file": str((tmp_root / f"{inventory_matching_name}-passenger-activity.parquet").resolve()),
                 "passenger_fleet_file": str((activities_output_root / f"{inventory_final_name}-passenger-fleet.parquet").resolve()),
                 "freight_rates_file": str((activities_output_root / f"{project_analysis_name}-freight-rates.parquet").resolve()),
                 "freight_activity_file": str((tmp_root / f"{inventory_matching_name}-freight-activity.parquet").resolve()),
                 "freight_fleet_file": str((activities_output_root / f"{inventory_final_name}-freight-fleet.parquet").resolve()),
-                "final_activity_emfacid_output_passenger": str(
+                "final_activity_by_emfacid_output_passenger": str(
                     (activities_output_root / f"{inventory_final_name}-passenger-activity-by-emfacid.parquet").resolve()
                 ),
-                "final_activity_emfacid_output_freight": str(
+                "final_activity_by_emfacid_output_freight": str(
                     (activities_output_root / f"{inventory_final_name}-freight-activity-by-emfacid.parquet").resolve()
                 ),
             },
@@ -202,9 +202,12 @@ def _extract_archive(archive: Path, destination: Path) -> None:
 
 def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
     from ..manifest.file_ops import resolve_path
+    from ..config.path_registry import build_registry
 
     local_input_folder = Path(resolve_path(settings.impacts.local_input_folder, config_path)).resolve()
     beam_input_folder = Path(resolve_path(settings.beam.local_input_folder, config_path)).resolve()
+    registry = build_registry(settings, config_path)
+
     cfg_activities = settings.impacts.activities if isinstance(settings.impacts.activities, dict) else {}
     project_analysis = _mapping(cfg_activities.get("project_analysis"))
     emissions_inventory = _mapping(cfg_activities.get("emissions_inventory"))
@@ -215,41 +218,45 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
     configured_black_carbon = _mapping(project_analysis.get("black_carbon"))
     configured_road_dust = _mapping(project_analysis.get("paved_road_dust"))
 
-    project_analysis_folder = Path(
-        resolve_path(_entry_folder(project_analysis.get("main")), config_path)
-        if _entry_folder(project_analysis.get("main"))
-        else str(emfac_root / f"{region_name}-emfac-project-analysis")
-    ).resolve()
-    black_carbon_folder = Path(
-        resolve_path(_entry_folder(project_analysis.get("black_carbon")), config_path)
-        if _entry_folder(project_analysis.get("black_carbon"))
-        else str(emfac_root / f"{region_name}-emfac-moves-bc")
-    ).resolve()
-    road_dust_folder = Path(
-        resolve_path(_entry_folder(project_analysis.get("paved_road_dust")), config_path)
-        if _entry_folder(project_analysis.get("paved_road_dust"))
-        else str(emfac_root / "statewide-carb-road-dust")
-    ).resolve()
-    inventory_folder = Path(
-        resolve_path(str(emissions_inventory.get("inventory_folder")), config_path)
-        if emissions_inventory.get("inventory_folder")
-        else str(emfac_root / f"{region_name}-emfac-emissions-inventory")
-    ).resolve()
-    fallback_folder = Path(
-        resolve_path(str(emissions_inventory.get("fallback_folder")), config_path)
-        if emissions_inventory.get("fallback_folder")
-        else str(emfac_root / "statewide-emfac-emissions-inventory")
-    ).resolve()
+    def _locate_folder(name: str | None, default_name: str) -> Path:
+        if name:
+            found = registry.locate(name)
+            if found:
+                return found
+            raw = Path(name).expanduser()
+            if raw.is_absolute():
+                return raw.resolve()
+            return (emfac_root / raw).resolve()
+        return (emfac_root / default_name).resolve()
+
+    project_analysis_folder = _locate_folder(
+        _entry_folder(project_analysis.get("main")),
+        f"{region_name}-emfac-project-analysis",
+    )
+    black_carbon_folder = _locate_folder(
+        _entry_folder(project_analysis.get("black_carbon")),
+        f"{region_name}-emfac-moves-bc",
+    )
+    road_dust_folder = _locate_folder(
+        _entry_folder(project_analysis.get("paved_road_dust")),
+        "statewide-carb-road-dust",
+    )
+    inventory_folder = _locate_folder(
+        str(emissions_inventory.get("inventory_folder") or "") or None,
+        f"{region_name}-emfac-emissions-inventory",
+    )
+    fallback_folder = _locate_folder(
+        str(emissions_inventory.get("fallback_folder") or "") or None,
+        "statewide-emfac-emissions-inventory",
+    )
+
     metadata_path = settings.impacts.emissions.vehicle_category_metadata_file
     if not metadata_path:
         raise ValueError("Missing required value: impacts.emissions.vehicle_category_metadata_file")
     vehicle_category_metadata_file = Path(resolve_path(str(metadata_path), config_path)).resolve()
-    configured_archive = cfg_activities.get("raw_inputs_archive")
-    archive = Path(
-        resolve_path(str(configured_archive), config_path)
-        if configured_archive
-        else _archive_path(beam_input_folder, region_name)
-    ).resolve()
+
+    vehicle_folder = settings.impacts.population.vehicle_folder or "vehicle-tech"
+    archive = _archive_path(beam_input_folder, vehicle_folder).resolve()
 
     return {
         "region_name": region_name,
@@ -283,7 +290,33 @@ def _find_matching_file(path: Path, patterns: tuple[str, ...]) -> bool:
     )
 
 
+def _resolve_extracted_raw_folder(path: Path, *, extract_root: Path) -> Path:
+    if path.exists():
+        return path
+    raw_candidate = extract_root / "emissions_raw" / path.name
+    if raw_candidate.exists():
+        return raw_candidate
+    return path
+
+
+def _normalize_raw_input_paths(cfg: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(cfg)
+    extract_root = Path(str(cfg["extract_root"])).resolve()
+    for key in (
+        "project_analysis_folder",
+        "black_carbon_folder",
+        "road_dust_folder",
+        "inventory_folder",
+        "fallback_folder",
+    ):
+        normalized[key] = str(
+            _resolve_extracted_raw_folder(Path(str(cfg[key])).resolve(), extract_root=extract_root)
+        )
+    return normalized
+
+
 def _missing_raw_inputs(cfg: dict[str, Any]) -> list[str]:
+    cfg = _normalize_raw_input_paths(cfg)
     missing: list[str] = []
     if not Path(cfg["project_analysis_folder"]).exists():
         missing.append(str(cfg["project_analysis_folder"]))
@@ -302,6 +335,7 @@ def _missing_raw_inputs(cfg: dict[str, Any]) -> list[str]:
 
 
 def _ensure_raw_data(cfg: dict[str, Any]) -> None:
+    cfg = _normalize_raw_input_paths(cfg)
     missing_before = _missing_raw_inputs(cfg)
     if not missing_before:
         logger.info("Raw activities inputs already present — skipping extraction.")
@@ -313,6 +347,7 @@ def _ensure_raw_data(cfg: dict[str, Any]) -> None:
             f"was not found at {archive}. Place {_ARCHIVE_NAME} there or pre-extract the raw inputs."
         )
     _extract_archive(archive, Path(cfg["extract_root"]))
+    cfg = _normalize_raw_input_paths(cfg)
     missing_after = _missing_raw_inputs(cfg)
     if missing_after:
         raise RuntimeError(
@@ -325,34 +360,36 @@ def _build_workflow(settings, config_path: Path) -> dict[str, Any]:
     from ..config.settings import _build_activities_config_from_root
     from ..config.settings import _build_activities_workflow
 
-    cfg = _resolve_activities_config(settings, config_path)
+    cfg = _normalize_raw_input_paths(_resolve_activities_config(settings, config_path))
+    from ..config.path_registry import build_registry
+    registry = build_registry(settings, config_path)
+    fleet = dict(settings.impacts.fleet if isinstance(settings.impacts.fleet, dict) else {})
+    assignment_model = fleet.get("assignment_model")
+    if assignment_model:
+        resolved_model = registry.locate(str(assignment_model))
+        if resolved_model:
+            fleet["assignment_model"] = str(resolved_model)
     activities_override: dict[str, Any] = {
-        "project_analysis": [
-            {
-                "main": [
-                    {"folder": str(cfg["project_analysis_folder"])},
-                    *([{"pto_as_process": cfg["pto_as_process"]}] if cfg["pto_as_process"] else []),
-                ],
+        "project_analysis": {
+            "main": {
+                "folder": str(cfg["project_analysis_folder"]),
+                **({"pto_as_process": cfg["pto_as_process"]} if cfg["pto_as_process"] else {}),
             },
-            {
-                "black_carbon": [
-                    {"folder": str(cfg["black_carbon_folder"])},
-                    {"pollutant": str(cfg["black_carbon_pollutant"])},
-                ],
+            "black_carbon": {
+                "folder": str(cfg["black_carbon_folder"]),
+                "pollutant": str(cfg["black_carbon_pollutant"]),
             },
-            {
-                "paved_road_dust": [
-                    {"folder": str(cfg["road_dust_folder"])},
-                    *([{"road_category_map": cfg["road_category_map"]}] if cfg["road_category_map"] else []),
-                ],
+            "paved_road_dust": {
+                "folder": str(cfg["road_dust_folder"]),
+                **({"road_category_map": cfg["road_category_map"]} if cfg["road_category_map"] else {}),
             },
-        ],
-        "emissions_inventory": [
-            {"inventory_folder": str(cfg["inventory_folder"])},
-            {"fallback_folder": str(cfg["fallback_folder"])},
-            {"vehicle_category_metadata_file": str(cfg["vehicle_category_metadata_file"])},
-            *([{"fuel_map": cfg["fuel_map"]}] if cfg["fuel_map"] else []),
-        ],
+        },
+        "emissions_inventory": {
+            "inventory_folder": {"folder": str(cfg["inventory_folder"])},
+            "fallback_folder": {"folder": str(cfg["fallback_folder"])},
+            "vehicle_category_metadata_file": str(cfg["vehicle_category_metadata_file"]),
+            **({"fuel_map": cfg["fuel_map"]} if cfg["fuel_map"] else {}),
+        },
     }
     if cfg["model_year_groups"]:
         activities_override["model_year_groups"] = cfg["model_year_groups"]
@@ -362,7 +399,7 @@ def _build_workflow(settings, config_path: Path) -> dict[str, Any]:
         "scenario": {"year": settings.run.start_year, "name": cfg["scenario"]},
         "seed": cfg["seed"],
         "output": str(cfg["output_root"]),
-        "fleet": settings.impacts.fleet if isinstance(settings.impacts.fleet, dict) else {},
+        "fleet": fleet,
         "activities": activities_override,
     }
     raw = _build_activities_config_from_root(merged_emfac)
@@ -399,7 +436,7 @@ def ensure_emfac_activities_outputs(settings, config_path: Path) -> dict[str, An
 
     log_substep_banner("5", "validate outputs", logger=logger)
     if not _outputs_exist(workflow):
-        output_dir = Path(str(workflow["paths"]["final_activity_emfacid_output_passenger"])).parent
+        output_dir = Path(str(workflow["paths"]["final_activity_by_emfacid_output_passenger"])).parent
         raise RuntimeError(
             f"EMFAC activities workflow completed but expected outputs not found in {output_dir}."
         )

@@ -11,7 +11,6 @@ import pandas as pd
 from impacts.emfac.common import frame_summary
 from impacts.emfac.common import write_trace
 from impacts.config.settings import _apply_table_schema
-from impacts.config.settings import _normalize_alias_mapping
 from impacts.config.settings import read_table
 
 GRAMS_PER_SHORT_TON = 907_184.74
@@ -213,22 +212,22 @@ def build_road_dust_rows(
     )
     result = pd.concat([result, emission_rates], axis=1)
 
+    result = result.rename(columns={"County": "county", "Annual Rainfall Days": "rainy_days"})
     cohort_keys = ["county", "vehicleCategory", "fuel", "modelYear"]
     cohorts = project_analysis[cohort_keys].drop_duplicates().reset_index(drop=True)
     merged = cohorts.merge(
         result[
             [
-                "County",
+                "county",
                 "roadCategory",
-                "Annual Rainfall Days",
+                "rainy_days",
                 "silt_loading",
                 "pm_rate",
                 "pm10_rate",
                 "pm2_5_rate",
             ]
         ],
-        left_on=["county"],
-        right_on=["County"],
+        on=["county"],
         how="inner",
     )
     merged["process"] = "PRDUST"
@@ -240,7 +239,7 @@ def build_road_dust_rows(
             "modelYear",
             "process",
             "roadCategory",
-            "Annual Rainfall Days",
+            "rainy_days",
             "silt_loading",
         ],
         value_vars=["pm_rate", "pm10_rate", "pm2_5_rate"],
@@ -249,7 +248,7 @@ def build_road_dust_rows(
     )
     long["pollutant"] = long["rate_column"].map({"pm_rate": "PM", "pm10_rate": "PM10", "pm2_5_rate": "PM2_5"})
     long["speedMph_timeMin"] = pd.NA
-    return long.drop(columns=["rate_column", "County", "Annual Rainfall Days", "silt_loading"]).reset_index(drop=True)
+    return long.drop(columns=["rate_column", "rainy_days", "silt_loading"]).reset_index(drop=True)
 
 
 def build_black_carbon_rows(
@@ -564,7 +563,7 @@ _ACTIVITIES_MAPPINGS: dict[str, dict[str, str] | list[dict[str, str]]] = {}
 def _set_activities_mappings(mappings: dict[str, object]) -> None:
     global _ACTIVITIES_MAPPINGS
     _ACTIVITIES_MAPPINGS = {
-        "fuel_map": _normalize_alias_mapping(mappings.get("fuel_map", {})),
+        "fuel_map": dict(mappings.get("fuel_map", {})),
         "road_category_map": dict(mappings.get("road_category_map", {}) or {}),
     }
 
@@ -580,30 +579,27 @@ def _normalize_emissions_inventory_fuel(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _normalize_source_frame(frame: pd.DataFrame, source_type: str) -> pd.DataFrame:
-    disallowed_aliases = {
-        "vehicle_category": "vehicleCategory",
-        "vehicle_class": "vehicleCategory",
-        "model_year": "modelYear",
-        "sub_area": "county",
-        "speed_time": "speedMph_timeMin",
-        "emission_rate": "rateGram",
-        "energy_cons": "energy_consumption",
-        "pm2_5_runex": "pm25_runex",
-        "pm2_5_pmbw": "pm25_pmbw",
-    }
-    present_aliases = {
-        source_column: target_column
-        for source_column, target_column in disallowed_aliases.items()
-        if source_column in frame.columns
-    }
-    if present_aliases:
-        source_list = ", ".join(sorted(present_aliases))
-        target_list = ", ".join(sorted(set(present_aliases.values())))
-        raise ValueError(
-            f"{source_type} input uses disallowed column aliases [{source_list}]. "
-            f"Provide the canonical columns directly: [{target_list}]."
-        )
-    return frame.copy()
+    if source_type == "emissions-inventory" and "vehicle_category" in frame.columns:
+        frame = frame.rename(columns={"vehicle_category": "vehicleCategory"})
+    if source_type != "emissions-inventory" and "vehicle_class" in frame.columns:
+        frame = frame.rename(columns={"vehicle_class": "vehicleCategory"})
+    if "model_year" in frame.columns:
+        frame = frame.rename(columns={"model_year": "modelYear"})
+    if "sub_area" in frame.columns:
+        frame = frame.rename(columns={"sub_area": "county"})
+    if "speed_time" in frame.columns:
+        frame = frame.rename(columns={"speed_time": "speedMph_timeMin"})
+    if "emission_rate" in frame.columns:
+        frame = frame.rename(columns={"emission_rate": "rateGram"})
+    if "energy_cons" in frame.columns:
+        frame = frame.rename(columns={"energy_cons": "energy_consumption"})
+    frame = frame.rename(
+        columns={
+            "pm2_5_runex": "pm25_runex",
+            "pm2_5_pmbw": "pm25_pmbw",
+        }
+    )
+    return frame
 
 
 def _normalize_project_analysis_activity(frame: pd.DataFrame) -> pd.DataFrame:
@@ -623,25 +619,15 @@ def _project_analysis_pollutant_column(pollutant: object) -> str:
 
 def _standardize_statewide_inventory_columns(frame: pd.DataFrame) -> pd.DataFrame:
     result = frame.copy()
-    disallowed_aliases = {
+    for source_column, target_column in {
         "total_vmt": "total_vmt_vehicle_miles_per_year",
         "cvmt": "cvmt_vehicle_miles_per_year",
         "evmt": "evmt_vehicle_miles_per_year",
         "fuel_consumption": "fuel_consumption_1000_gallons_per_year",
         "energy_consumption": "energy_consumption_kwh_per_year",
-    }
-    present_aliases = {
-        source_column: target_column
-        for source_column, target_column in disallowed_aliases.items()
-        if source_column in result.columns
-    }
-    if present_aliases:
-        source_list = ", ".join(sorted(present_aliases))
-        target_list = ", ".join(sorted(set(present_aliases.values())))
-        raise ValueError(
-            "Statewide inventory input uses disallowed column aliases "
-            f"[{source_list}]. Provide the canonical columns directly: [{target_list}]."
-        )
+    }.items():
+        if source_column in result.columns:
+            result = result.rename(columns={source_column: target_column})
 
     emission_suffix_map: dict[str, str] = {}
     for column in result.columns:
@@ -820,6 +806,7 @@ def _clean_file(path: Path, *, source_type: str, region_label: str | None) -> pd
         frame = pd.read_csv(path, skiprows=_detect_header_row(path, source_type))
     else:
         frame = pd.read_csv(path)
+    frame = frame.rename(columns={column: _normalize_column_name(column) for column in frame.columns})
 
     if source_type == "emissions-inventory":
         frame = _normalize_emissions_inventory_fuel(frame)

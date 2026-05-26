@@ -59,6 +59,31 @@ def test_sample_skims_by_fraction_returns_subset(tmp_path: Path):
     assert result["kept_rows"] == len(sampled)
 
 
+def test_sample_skims_by_fraction_streams_parquet_without_pandas_read_parquet(tmp_path: Path, monkeypatch):
+    source = tmp_path / "skims.parquet"
+    pd.DataFrame(
+        [
+            {"hour": 0, "linkId": idx, "vehicleTypeId": "car", "emissionsProcess": "RUNEX", "observations": 1}
+            for idx in range(20)
+        ]
+    ).to_parquet(source, index=False)
+
+    def _forbid_read_parquet(*args, **kwargs):
+        raise AssertionError("sample_skims_by_fraction should stream parquet instead of calling pandas.read_parquet")
+
+    monkeypatch.setattr(pd, "read_parquet", _forbid_read_parquet)
+
+    result = sample_skims_by_fraction(
+        input_path=source,
+        output_path=tmp_path / "skims_sample.parquet",
+        fraction=0.25,
+        seed=7,
+    )
+
+    assert result["total_rows"] == 20
+    assert (tmp_path / "skims_sample.parquet").exists()
+
+
 def test_sample_skims_compacts_explicit_pollutant_schema(tmp_path: Path):
     source = tmp_path / "skims_explicit.parquet"
     pd.DataFrame(

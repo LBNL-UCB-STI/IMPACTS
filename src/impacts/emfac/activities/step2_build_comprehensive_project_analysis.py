@@ -95,7 +95,7 @@ def _filter_to_supported_process_groups(
     dropped_group_count = int(len(dropped))
     if dropped_group_count > 0:
         print(
-            f"    2.2 Drop unsupported county/vehicle/fuel/modelYear/process combinations not present in EMFAC source: "
+            f"      Drop unsupported county/vehicle/fuel/modelYear/process combinations not present in EMFAC source: "
             f"{dropped_group_count:,} group(s)"
         )
     return kept
@@ -135,7 +135,7 @@ def build_comprehensive_project_analysis(
 
     speeds = pd.DataFrame(
         {
-            "speed_time": sorted(
+            ACTIVITY_COLUMN: sorted(
                 project_analysis.loc[
                     project_analysis["process"].isin(SPEED_PROCESSES),
                     ACTIVITY_COLUMN,
@@ -149,7 +149,7 @@ def build_comprehensive_project_analysis(
 
     times = pd.DataFrame(
         {
-            "speed_time": sorted(
+            ACTIVITY_COLUMN: sorted(
                 project_analysis.loc[
                     project_analysis["process"].isin(TIME_PROCESSES),
                     ACTIVITY_COLUMN,
@@ -179,7 +179,6 @@ def build_comprehensive_project_analysis(
     ].drop_duplicates().reset_index(drop=True)
 
     other_rates = base_rates.merge(other_processes, how="cross")
-    other_rates["speed_time"] = pd.NA
     other_rates[ACTIVITY_COLUMN] = pd.NA
     other_rates["roadCategory"] = pd.NA
 
@@ -190,9 +189,10 @@ def build_comprehensive_project_analysis(
     )
     rates = rates.merge(
         supported_emfac_combinations,
-        on=["vehicleCategory", "fuel"],
+        left_on=["vehicleCategory", "fuel"],
+        right_on=["emfac_vehicle_category", "emfac_fuel"],
         how="inner",
-    )
+    ).drop(columns=["emfac_vehicle_category", "emfac_fuel"])
     if "speed_time" in rates.columns:
         raise ValueError(
             "Rates input uses disallowed column alias 'speed_time'. "

@@ -629,12 +629,12 @@ def run_step4(workflow: dict[str, object]) -> dict[str, object]:
     )
     trace_payload["rates_store_source"] = frame_summary(rates_store_frame, name="rates_store_source")
     print("    4.5 Write final outputs and derived store")
-    print("    4.5 Passenger/Freight model year group stats")
+    print("    4.6 Passenger/Freight model year group stats")
     for group_name, (final_rates, matching_activity, aggregated_activity, activity_by_emfac_id, fleet) in outputs.items():
         _write_parquet(final_rates, workflow["paths"][f"final_output_{group_name}"])
         _write_parquet(matching_activity, workflow["paths"][f"matching_activity_output_{group_name}"])
-        _write_parquet(aggregated_activity, workflow["paths"][f"final_activity_output_{group_name}"])
-        _write_parquet(activity_by_emfac_id, workflow["paths"][f"final_activity_emfacid_output_{group_name}"])
+        _write_parquet(aggregated_activity, workflow["paths"][f"final_activity_by_model_year_output_{group_name}"])
+        _write_parquet(activity_by_emfac_id, workflow["paths"][f"final_activity_by_emfacid_output_{group_name}"])
         _write_parquet(fleet, workflow["paths"][f"final_fleet_output_{group_name}"])
         _print_model_year_group_stats(group_name, final_rates, aggregated_activity, fleet)
     rates_store = _write_rates_store_from_dataframe(
