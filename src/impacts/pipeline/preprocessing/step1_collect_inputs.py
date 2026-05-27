@@ -122,6 +122,24 @@ def _locate_exchange_file(folder: Path, stem: str) -> Optional[str]:
     return find_preferred_file(str(folder), [f"{stem}.csv.gz", f"{stem}.csv", f"{stem}.parquet"])
 
 
+def _find_emfacid_file(folder: Path, pattern: str) -> str | None:
+    if not folder.is_dir():
+        return None
+    key = f"inventory-final-{pattern}-activity-by-emfacid"
+    matches = [str(f) for f in folder.iterdir() if f.is_file() and key in f.name]
+    return matches[0] if matches else None
+
+
+def _glob_vehicle_types_file(folder: Path, source: str) -> str | None:
+    if not folder.is_dir():
+        return None
+    matches = sorted(
+        str(f) for f in folder.iterdir()
+        if f.is_file() and source in f.name.lower() and "--em" in f.name.lower()
+    )
+    return matches[0] if matches else None
+
+
 def _resolve_region_or_absolute_path(raw_path: str, *, region_input_root: Path, config_path: Path) -> str:
     raw = str(raw_path).strip()
     if raw.startswith("~") or Path(raw).is_absolute():
@@ -298,9 +316,14 @@ def run(
             _advance_progress(progress)
 
             _set_progress_task(progress, "passenger vehicle types", step_label="Preprocess Step 1.2")
+            passenger_vtypes_path = beam_processing.passenger_vehicle_types_file
+            if not passenger_vtypes_path and population.vehicle_folder:
+                passenger_vtypes_path = _glob_vehicle_types_file(
+                    region_input_root / population.vehicle_folder, "atlas"
+                )
             passenger_vehicle_types_source = required_local_path(
                 _resolve_region_or_absolute_path(
-                    beam_processing.passenger_vehicle_types_file,
+                    passenger_vtypes_path,
                     region_input_root=region_input_root,
                     config_path=config_path,
                 ),
@@ -311,15 +334,20 @@ def run(
                 input_root=input_root,
                 key="passenger_vehicle_types_input",
                 source_path=passenger_vehicle_types_source,
-                relative_target=str(beam_processing.passenger_vehicle_types_file),
+                relative_target=Path(passenger_vehicle_types_source).name,
                 metadata={"artifact_family": "passenger_vehicle_types_input"},
             )
             _advance_progress(progress)
 
             _set_progress_task(progress, "freight vehicle types", step_label="Preprocess Step 1.2")
+            freight_vtypes_path = beam_processing.freight_vehicle_types_file
+            if not freight_vtypes_path and population.vehicle_folder:
+                freight_vtypes_path = _glob_vehicle_types_file(
+                    region_input_root / population.vehicle_folder, "frism"
+                )
             freight_vehicle_types_source = required_local_path(
                 _resolve_region_or_absolute_path(
-                    beam_processing.freight_vehicle_types_file,
+                    freight_vtypes_path,
                     region_input_root=region_input_root,
                     config_path=config_path,
                 ),
@@ -330,7 +358,7 @@ def run(
                 input_root=input_root,
                 key="freight_vehicle_types_input",
                 source_path=freight_vehicle_types_source,
-                relative_target=str(beam_processing.freight_vehicle_types_file),
+                relative_target=Path(freight_vehicle_types_source).name,
                 metadata={"artifact_family": "freight_vehicle_types_input"},
             )
             _advance_progress(progress)
@@ -358,22 +386,44 @@ def run(
             _close_progress(progress)
 
     log_substep_banner("1.3", "register EMFAC inventory inputs", logger=logger)
-    passenger_emfacid_source = _resolve_emfacid_path(
-        _resolve_region_or_absolute_path(
-            emissions.inventory.passenger_file,
-            region_input_root=region_input_root,
-            config_path=config_path,
-        ),
-        label="passenger",
+    _inv_folder = (
+        Path(beam_input_root)
+        / (population.vehicle_folder or "")
+        / "emissions"
+        / "activities"
+        / (impacts.scenario or "")
+        / "inventory"
     )
-    freight_emfacid_source = _resolve_emfacid_path(
-        _resolve_region_or_absolute_path(
-            emissions.inventory.freight_file,
-            region_input_root=region_input_root,
-            config_path=config_path,
-        ),
-        label="freight",
-    )
+    passenger_inv_path = emissions.inventory.passenger_file
+    freight_inv_path = emissions.inventory.freight_file
+    if passenger_inv_path:
+        passenger_emfacid_source = _resolve_emfacid_path(
+            _resolve_region_or_absolute_path(
+                passenger_inv_path,
+                region_input_root=region_input_root,
+                config_path=config_path,
+            ),
+            label="passenger",
+        )
+    else:
+        passenger_emfacid_source = required_local_path(
+            _find_emfacid_file(_inv_folder, "passenger"),
+            "impacts.emissions.inventory.passenger_file (activity-by-emfacid)",
+        )
+    if freight_inv_path:
+        freight_emfacid_source = _resolve_emfacid_path(
+            _resolve_region_or_absolute_path(
+                freight_inv_path,
+                region_input_root=region_input_root,
+                config_path=config_path,
+            ),
+            label="freight",
+        )
+    else:
+        freight_emfacid_source = required_local_path(
+            _find_emfacid_file(_inv_folder, "freight"),
+            "impacts.emissions.inventory.freight_file (activity-by-emfacid)",
+        )
     staged_passenger_inventory_file = None
     staged_freight_inventory_file = None
     substep_13_total = 2  # passenger emfacid, freight emfacid
@@ -388,7 +438,7 @@ def run(
                 _set_progress_task(progress, "passenger inventory", step_label="Preprocess Step 1.3")
                 passenger_inventory_source = required_local_path(
                     _resolve_region_or_absolute_path(
-                        emissions.inventory.passenger_file,
+                        passenger_inv_path,
                         region_input_root=region_input_root,
                         config_path=config_path,
                     ),
@@ -399,7 +449,7 @@ def run(
                     input_root=input_root,
                     key="passenger_inventory_file",
                     source_path=passenger_inventory_source,
-                    relative_target=str(emissions.inventory.passenger_file),
+                    relative_target=Path(passenger_inventory_source).name,
                     metadata={"artifact_family": "passenger_inventory_file"},
                 )
                 _advance_progress(progress)
@@ -419,7 +469,7 @@ def run(
                 _set_progress_task(progress, "freight inventory", step_label="Preprocess Step 1.3")
                 freight_inventory_source = required_local_path(
                     _resolve_region_or_absolute_path(
-                        emissions.inventory.freight_file,
+                        freight_inv_path,
                         region_input_root=region_input_root,
                         config_path=config_path,
                     ),
@@ -430,7 +480,7 @@ def run(
                     input_root=input_root,
                     key="freight_inventory_file",
                     source_path=freight_inventory_source,
-                    relative_target=str(emissions.inventory.freight_file),
+                    relative_target=Path(freight_inventory_source).name,
                     metadata={"artifact_family": "freight_inventory_file"},
                 )
                 _advance_progress(progress)
@@ -450,6 +500,7 @@ def run(
 
     if pipeline.inmap or pipeline.aermod:
         log_substep_banner("1.4", "register dispersion inputs", logger=logger)
+        dispersions_root = Path(beam_input_root) / (population.vehicle_folder or "") / "dispersions"
         substep_14_total = 0
         if pipeline.inmap:
             substep_14_total += 3  # grid, nox-to-no2 ratios, isrm store
@@ -461,7 +512,7 @@ def run(
                 if pipeline.inmap:
                     _set_progress_task(progress, "inmap grid", step_label="Preprocess Step 1.4")
                     inmap_grid_source = required_local_path(
-                        str((region_input_root / inmap.grid_path).resolve()),
+                        str((dispersions_root / inmap.grid_path).resolve()),
                         "impacts.dispersions.inmap.grid_path",
                     )
                     staged_inmap_grid = _register_manifest_input(
@@ -476,7 +527,7 @@ def run(
 
                     _set_progress_task(progress, "nox-to-no2 ratios", step_label="Preprocess Step 1.4")
                     no2_matrix_source = required_local_path(
-                        str((region_input_root / inmap.isrm_nox_to_no2_ratios_file).resolve()),
+                        str((dispersions_root / inmap.isrm_nox_to_no2_ratios_file).resolve()),
                         "impacts.dispersions.inmap.isrm_nox_to_no2_ratios_file",
                     )
                     staged_isrm_nox_to_no2_ratios_file = _register_manifest_input(
@@ -507,7 +558,7 @@ def run(
                 if pipeline.aermod:
                     _set_progress_task(progress, "asrv patterns", step_label="Preprocess Step 1.4")
                     asrv_source = required_local_path(
-                        str((region_input_root / aermod.asrv_patterns_file).resolve()),
+                        str((dispersions_root / aermod.asrv_patterns_file).resolve()),
                         "impacts.dispersions.aermod.asrv_patterns_file",
                     )
                     staged_asrv_patterns_file = _register_manifest_input(
