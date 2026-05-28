@@ -25,7 +25,7 @@ def _outputs_exist(workflow: dict[str, Any]) -> bool:
 
 
 def _activities_manifest_path(output_root: Path) -> Path:
-    return output_root / "activities" / "activities_manifest.yaml"
+    return output_root / "activities_manifest.yaml"
 
 
 def _expected_output_path(cfg: dict[str, Any], start_year: int) -> Path:
