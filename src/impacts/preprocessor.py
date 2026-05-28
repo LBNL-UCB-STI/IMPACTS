@@ -157,7 +157,7 @@ def build_inputs_manifest(
     from .pipeline.preprocessing.step3_integrate_grids import run as preprocess_step3
     intersection_paths, _ = preprocess_step3(
         pipeline_config,
-        output_root,
+        input_root,
         input_root,
         manifest_inputs=manifest_inputs,
     )
@@ -177,7 +177,7 @@ def build_inputs_manifest(
     from .pipeline.preprocessing.step4_aggregate_population import run as preprocess_step4
     aermod_cell_population_path, staged_population_path = preprocess_step4(
         pipeline_config,
-        output_root,
+        input_root,
         population_inputs=step1_outputs.get("population_inputs"),
     )
     if aermod_cell_population_path:
