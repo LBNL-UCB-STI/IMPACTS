@@ -473,7 +473,7 @@ def _run_stages_from_input_manifest(
         emissions_outputs = run_emissions_processing(
             pipeline,
             output_root / "emissions",
-            input_root,
+            output_root / "emissions",
             grid_intersection_paths,
             manifest_inputs=manifest_inputs,
             scratch_root=output_root,
@@ -481,7 +481,7 @@ def _run_stages_from_input_manifest(
         _record_stage_timing(stage_timings, "step1_process_emissions", stage_started)
     else:
         logger.info("Emissions processing skipped")
-    prepared_skims_candidate = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
+    prepared_skims_candidate = prepared_table_target(output_root / "emissions", "prepared_skims_for_grid_allocation")
     prepared_skims_path = str(prepared_skims_candidate) if prepared_skims_candidate.exists() else None
 
     concentration_path = (

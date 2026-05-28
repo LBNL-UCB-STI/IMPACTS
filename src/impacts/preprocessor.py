@@ -253,7 +253,7 @@ def preprocess_workflow(
     inputs_payload = typed_manifest.to_dict()["inputs"]
     output_root = run_manifest_path.parent.resolve()
     input_root = Path(typed_manifest.to_dict()["input_dir"]).resolve()
-    prepared_skims_candidate = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
+    prepared_skims_candidate = prepared_table_target(output_root / "emissions", "prepared_skims_for_grid_allocation")
     initial_run_manifest = {
         "contract_version": typed_manifest.contract_version,
         "model": "impacts",
