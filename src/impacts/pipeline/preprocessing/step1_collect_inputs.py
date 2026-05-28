@@ -99,8 +99,6 @@ def _use_existing_reference(manifest_inputs: Dict[str, Any], key: str, entry: Di
 
 
 
-
-
 def _resolve_emfacid_path(inventory_path: str, *, label: str) -> str:
     source = Path(inventory_path).resolve()
     name = source.name

@@ -135,21 +135,13 @@ class PipelineConfig:
             start_year=_required_int(payload.get("start_year"), "pipeline.start_year"),
             county_state_fips=_required_string(payload.get("county_state_fips"), "pipeline.county_state_fips"),
             county_fips_codes=_coerce_string_list(payload.get("county_fips_codes")),
-            enable_passenger_inventory_activity_correction=(
-                _required_bool(
-                    payload.get("enable_passenger_inventory_activity_correction"),
-                    "pipeline.enable_passenger_inventory_activity_correction",
-                )
-                if payload.get("enable_passenger_inventory_activity_correction") is not None
-                else True
+            enable_passenger_inventory_activity_correction=_required_bool(
+                payload.get("enable_passenger_inventory_activity_correction", True),
+                "pipeline.enable_passenger_inventory_activity_correction",
             ),
-            enable_freight_inventory_activity_correction=(
-                _required_bool(
-                    payload.get("enable_freight_inventory_activity_correction"),
-                    "pipeline.enable_freight_inventory_activity_correction",
-                )
-                if payload.get("enable_freight_inventory_activity_correction") is not None
-                else True
+            enable_freight_inventory_activity_correction=_required_bool(
+                payload.get("enable_freight_inventory_activity_correction", True),
+                "pipeline.enable_freight_inventory_activity_correction",
             ),
             passenger_inventory_file=(
                 _required_string(
@@ -181,26 +173,12 @@ class PipelineConfig:
             source_pollutants=_coerce_string_list(payload.get("source_pollutants")),
             annualization_days=_required_dict(payload.get("annualization_days"), "pipeline.annualization_days"),
             population_sample=_required_float(payload.get("population_sample"), "pipeline.population_sample"),
-            transit_sample=(
-                _optional_float(payload.get("transit_sample"))
-                if payload.get("transit_sample") is not None
-                else 1.0
+            transit_sample=_optional_float(payload.get("transit_sample"), default=1.0),
+            include_non_osm_car_links=_required_bool(
+                payload.get("include_non_osm_car_links", False), "pipeline.include_non_osm_car_links"
             ),
-            include_non_osm_car_links=(
-                _required_bool(payload.get("include_non_osm_car_links"), "pipeline.include_non_osm_car_links")
-                if payload.get("include_non_osm_car_links") is not None
-                else False
-            ),
-            include_passenger=(
-                _required_bool(payload.get("include_passenger"), "pipeline.include_passenger")
-                if payload.get("include_passenger") is not None
-                else True
-            ),
-            include_freight=(
-                _required_bool(payload.get("include_freight"), "pipeline.include_freight")
-                if payload.get("include_freight") is not None
-                else True
-            ),
+            include_passenger=_required_bool(payload.get("include_passenger", True), "pipeline.include_passenger"),
+            include_freight=_required_bool(payload.get("include_freight", True), "pipeline.include_freight"),
         )
         for key in ("light_duty", "medium_heavy_duty"):
             if key not in result.annualization_days:
@@ -302,7 +280,6 @@ class RunManifest:
     model: str
     input_manifest_path: str
     output_dir: str
-    outputs_dir: str
     command: str
     image: str
     outputs: Dict[str, Any]
@@ -321,7 +298,6 @@ class RunManifest:
                 "model",
                 "input_manifest_path",
                 "output_dir",
-                "outputs_dir",
                 "command",
                 "image",
                 "outputs",
@@ -341,7 +317,6 @@ class RunManifest:
             model=_required_string(payload.get("model"), "model"),
             input_manifest_path=_required_string(payload.get("input_manifest_path"), "input_manifest_path"),
             output_dir=_required_string(payload.get("output_dir"), "output_dir"),
-            outputs_dir=_required_string(payload.get("outputs_dir"), "outputs_dir"),
             command=_required_string(payload.get("command"), "command"),
             image=_required_string(payload.get("image"), "image"),
             outputs=outputs,

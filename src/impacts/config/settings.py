@@ -16,17 +16,6 @@ from .defaults import pollutants as canonical_pollutants
 from ._coerce import _required_string, _optional_string, _required_int, _optional_int, _required_float, _optional_float, _required_bool, _coerce_string_list, _reject_unknown_keys
 
 
-def _coerce_string_map(value: Any) -> Dict[str, str]:
-    if not isinstance(value, dict):
-        return {}
-    resolved: Dict[str, str] = {}
-    for key, mapped in value.items():
-        key_text = str(key).strip()
-        mapped_text = str(mapped).strip()
-        if key_text and mapped_text:
-            resolved[key_text] = mapped_text
-    return resolved
-
 
 _POLLUTANT_SOURCE_ALIASES = {
     "NH3": "NH3",
@@ -312,21 +301,13 @@ class EmissionsInventory:
             inventory_folder=inventory_folder,
             passenger_file=passenger_file,
             freight_file=freight_file,
-            enable_passenger_activity_correction=(
-                _required_bool(
-                    payload.get("enable_passenger_activity_correction"),
-                    "impacts.emissions.inventory.enable_passenger_activity_correction",
-                )
-                if payload.get("enable_passenger_activity_correction") is not None
-                else True
+            enable_passenger_activity_correction=_required_bool(
+                payload.get("enable_passenger_activity_correction", True),
+                "impacts.emissions.inventory.enable_passenger_activity_correction",
             ),
-            enable_freight_activity_correction=(
-                _required_bool(
-                    payload.get("enable_freight_activity_correction"),
-                    "impacts.emissions.inventory.enable_freight_activity_correction",
-                )
-                if payload.get("enable_freight_activity_correction") is not None
-                else True
+            enable_freight_activity_correction=_required_bool(
+                payload.get("enable_freight_activity_correction", True),
+                "impacts.emissions.inventory.enable_freight_activity_correction",
             ),
         )
 
@@ -457,23 +438,14 @@ class ImpactsBeamProcessing:
         return cls(
             passenger_vehicle_types_file=_optional_string(payload.get("passenger_vehicle_types_file")),
             freight_vehicle_types_file=_optional_string(payload.get("freight_vehicle_types_file")),
-            include_non_osm_car_links=(
-                _required_bool(
-                    payload.get("include_non_osm_car_links"),
-                    "impacts.emissions.include_non_osm_car_links",
-                )
-                if payload.get("include_non_osm_car_links") is not None
-                else False
+            include_non_osm_car_links=_required_bool(
+                payload.get("include_non_osm_car_links", False), "impacts.emissions.include_non_osm_car_links"
             ),
-            include_passenger=(
-                _required_bool(payload.get("include_passenger"), "impacts.emissions.include_passenger")
-                if payload.get("include_passenger") is not None
-                else True
+            include_passenger=_required_bool(
+                payload.get("include_passenger", True), "impacts.emissions.include_passenger"
             ),
-            include_freight=(
-                _required_bool(payload.get("include_freight"), "impacts.emissions.include_freight")
-                if payload.get("include_freight") is not None
-                else True
+            include_freight=_required_bool(
+                payload.get("include_freight", True), "impacts.emissions.include_freight"
             ),
         )
 
@@ -802,10 +774,6 @@ class Pipeline:
         return self.presim.fleet
 
     @property
-    def preprocess(self) -> bool:
-        return True
-
-    @property
     def emissions(self) -> bool:
         return self.postsim.emissions
 
@@ -821,9 +789,6 @@ class Pipeline:
     def exposure(self) -> bool:
         return self.postsim.exposure
 
-    @property
-    def postprocess(self) -> bool:
-        return True
 
 
 @dataclass(frozen=True)
@@ -857,14 +822,8 @@ class Population:
             vehicle_folder=_optional_string(payload.get("vehicle_folder")),
             atlas_year=_optional_int(payload.get("atlas_year")),
             frism_year=_optional_int(payload.get("frism_year")),
-            population_sample=(
-                _required_float(payload.get("population_sample"), "impacts.population.population_sample")
-                if payload.get("population_sample") is not None else 1.0
-            ),
-            transit_sample=(
-                _optional_float(payload.get("transit_sample"))
-                if payload.get("transit_sample") is not None else 1.0
-            ),
+            population_sample=_required_float(payload.get("population_sample", 1.0), "impacts.population.population_sample"),
+            transit_sample=_optional_float(payload.get("transit_sample"), default=1.0),
         )
 
 

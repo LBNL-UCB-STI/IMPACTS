@@ -25,18 +25,6 @@ def _derive_impacts_tmp_root(output_root: Path) -> Path:
     return output_root / "inputs"
 
 
-def _validate_configured_local_path(
-    path: str | None,
-    label: str,
-    *,
-    allow_remote: bool = False,
-) -> str | None:
-    if not path:
-        return None
-    if allow_remote and "://" in str(path):
-        return path
-    return required_local_path(path, label)
-
 
 def build_inputs_manifest(
     settings_path: str | Path,
@@ -272,7 +260,6 @@ def preprocess_workflow(
         "model": "impacts",
         "input_manifest_path": str(Path(manifest["inputs_manifest_path"]).resolve()),
         "output_dir": str(output_root),
-        "outputs_dir": str(output_root),
         "command": "python -m impacts preprocess",
         "image": "not_recorded",
         "outputs": {

@@ -32,8 +32,6 @@ from shapely.geometry import LineString
 from tqdm import tqdm
 
 from .config.defaults import chunk_size as default_chunk_size
-from .config.defaults import grams_per_short_ton
-from .config.defaults import meters_per_mile as _METERS_PER_MILE
 from .config.defaults import pollutants as default_prepared_pollutants
 from .consist_artifacts import log_input_reference
 from .consist_artifacts import resolve_logged_path
@@ -281,29 +279,6 @@ def resolve_emissions_skims_local_path(root: str) -> str:
             return match
     raise FileNotFoundError(f"No BEAM skims emissions file found under configured BEAM output root: {resolved}")
 
-
-def resolve_beam_vehicle_types_local_path(root: str) -> Optional[str]:
-    resolved = required_local_path(root, "BEAM output root")
-    candidate_names = [
-        "vehicleTypes.csv.gz",
-        "vehicleTypes.csv",
-        "vehicleTypes.parquet",
-        "vehicleTypes--atlas--*.csv",
-        "vehicleTypes--frism--*.csv",
-        "vehicletypes--atlas--*.csv",
-        "vehicletypes--frism--*.csv",
-        "vehicleTypes_inventory.csv",
-    ]
-    candidates: list[Path] = []
-    resolved_path = Path(resolved)
-    for pattern in candidate_names:
-        candidates.extend(
-            candidate for candidate in resolved_path.rglob(pattern)
-            if candidate.is_file()
-        )
-    if not candidates:
-        return None
-    return str(max(candidates, key=lambda candidate: candidate.stat().st_mtime))
 
 
 def resolve_latest_events_local_path(root: str) -> Optional[str]:
@@ -742,33 +717,6 @@ def register_managed_input(
         optional=optional,
     )
 
-
-def register_optional_input(
-    *,
-    manifest_inputs: Dict[str, Any],
-    input_root: Path,
-    key: str,
-    source_path: Optional[str],
-    relative_target: str,
-) -> Optional[str]:
-    if not source_path:
-        return None
-    if is_remote_path(source_path):
-        manifest_inputs[key] = {
-            "kind": "remote",
-            "source_path": source_path,
-            "staged_path": None,
-            "optional": True,
-            "exists": True,
-        }
-        return source_path
-    return register_local_input(
-        manifest_inputs=manifest_inputs,
-        input_root=input_root,
-        key=key,
-        source_path=source_path,
-        optional=True,
-    )
 
 
 def resolve_manifest_input_path(entry: Dict[str, Any], *, label: str) -> str:

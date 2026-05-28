@@ -47,21 +47,6 @@ def _required_float(value: Any, label: str) -> float:
         raise ValueError(f"Invalid float for {label}: {value}") from exc
 
 
-def _required_float_or_string(value: Any, label: str) -> float | str:
-    if value is None:
-        raise ValueError(f"Missing required value: {label}")
-    if isinstance(value, bool):
-        raise ValueError(f"Invalid float-or-string for {label}: {value}")
-    if isinstance(value, (int, float)):
-        return float(value)
-    text = str(value).strip()
-    if not text:
-        raise ValueError(f"Missing required value: {label}")
-    try:
-        return float(text)
-    except (TypeError, ValueError):
-        return text
-
 
 def _optional_float(value: Any, default: Optional[float] = None) -> Optional[float]:
     if value is None or str(value).strip() == "":

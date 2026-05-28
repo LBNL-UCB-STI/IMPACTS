@@ -57,10 +57,6 @@ def _normalize_token(value: object) -> str:
     return str("" if pd.isna(value) else value).strip()
 
 
-def _slugify(value: str) -> str:
-    token = re.sub(r"[^A-Za-z0-9]+", "_", str(value).strip()).strip("_").lower()
-    return token or "target"
-
 
 def _model_year_sort_key(year_group: str) -> int:
     m = re.search(r"\d{4}", str(year_group))
@@ -352,50 +348,6 @@ def _write_tables(
     }
 
 
-def _plot_metric(
-    comparison: pd.DataFrame,
-    *,
-    assignment_group: str,
-    metric: str,
-    output_dir: Path,
-) -> Optional[str]:
-    subset = comparison.loc[comparison["assignment_group"].eq(assignment_group)].copy()
-    if subset.empty:
-        return None
-    beam_column = f"beam_{metric}"
-    emfac_column = f"emfac_{metric}"
-    if beam_column not in subset.columns or emfac_column not in subset.columns:
-        return None
-    subset = subset.sort_values(beam_column, ascending=False).reset_index(drop=True)
-    x = range(len(subset))
-    width = 0.38
-    fig, ax = plt.subplots(figsize=(max(8, len(subset) * 0.55), 5.5))
-    ax.bar(
-        [pos - width / 2 for pos in x],
-        subset[beam_column].to_numpy(dtype=float),
-        width=width,
-        label="BEAM",
-        color="#1f77b4",
-    )
-    ax.bar(
-        [pos + width / 2 for pos in x],
-        subset[emfac_column].to_numpy(dtype=float),
-        width=width,
-        label="EMFAC",
-        color="#ff7f0e",
-    )
-    ax.set_xticks(list(x))
-    ax.set_xticklabels(subset["emfacId"].tolist(), rotation=70, ha="right")
-    ax.set_ylabel("Total")
-    ax.set_title(f"{assignment_group.title()} {metric.upper()} by EMFAC ID")
-    ax.legend()
-    ax.grid(axis="y", alpha=0.2)
-    fig.tight_layout()
-    output_path = output_dir / f"step1_{_slugify(assignment_group)}_{_slugify(metric)}_by_emfacid.png"
-    fig.savefig(output_path, dpi=150)
-    plt.close(fig)
-    return str(output_path)
-
 
 def _draw_stacked_bars(
     ax: plt.Axes,
@@ -452,8 +404,6 @@ def _build_class_model_year_panel_data(
     *,
     metadata: pd.DataFrame,
     assignment_group: str,
-    beam_col: str,
-    emfac_col: str,
 ) -> Optional[pd.DataFrame]:
     subset = (
         comparison.loc[comparison["assignment_group"].eq(assignment_group)]
@@ -462,15 +412,10 @@ def _build_class_model_year_panel_data(
     )
     if subset.empty:
         return None
-    grouped = (
-        subset.groupby(["class_group", "model_year_group"], dropna=False)[[beam_col, emfac_col]]
+    return (
+        subset.groupby(["class_group", "model_year_group"], dropna=False)[["beam_vmt", "emfac_vmt"]]
         .sum().reset_index()
     )
-    beam_total = grouped[beam_col].sum()
-    emfac_total = grouped[emfac_col].sum()
-    grouped["beam_share"] = grouped[beam_col] / beam_total if beam_total > 0 else 0.0
-    grouped["emfac_share"] = grouped[emfac_col] / emfac_total if emfac_total > 0 else 0.0
-    return grouped
 
 
 def _build_model_year_fuel_panel_data(
@@ -478,8 +423,6 @@ def _build_model_year_fuel_panel_data(
     *,
     metadata: pd.DataFrame,
     assignment_group: str,
-    beam_col: str,
-    emfac_col: str,
 ) -> Optional[pd.DataFrame]:
     subset = (
         comparison.loc[comparison["assignment_group"].eq(assignment_group)]
@@ -488,31 +431,22 @@ def _build_model_year_fuel_panel_data(
     )
     if subset.empty:
         return None
-    grouped = (
-        subset.groupby(["model_year_group", "fuel"], dropna=False)[[beam_col, emfac_col]]
+    return (
+        subset.groupby(["model_year_group", "fuel"], dropna=False)[["beam_vmt", "emfac_vmt"]]
         .sum().reset_index()
     )
-    beam_total = grouped[beam_col].sum()
-    emfac_total = grouped[emfac_col].sum()
-    grouped["beam_share"] = grouped[beam_col] / beam_total if beam_total > 0 else 0.0
-    grouped["emfac_share"] = grouped[emfac_col] / emfac_total if emfac_total > 0 else 0.0
-    return grouped
 
 
 def _plot_class_model_year_combined(
     comparison: pd.DataFrame,
     *,
     metadata: pd.DataFrame,
-    metric: str,
     output_dir: Path,
 ) -> Optional[str]:
-    beam_col = "beam_population_weight" if metric == "population" else "beam_vmt"
-    emfac_col = "emfac_population" if metric == "population" else "emfac_vmt"
     panel_data: dict[str, pd.DataFrame] = {}
     for assignment_group in ("passenger", "freight"):
         grouped = _build_class_model_year_panel_data(
             comparison, metadata=metadata, assignment_group=assignment_group,
-            beam_col=beam_col, emfac_col=emfac_col,
         )
         if grouped is not None:
             panel_data[assignment_group] = grouped
@@ -523,7 +457,8 @@ def _plot_class_model_year_combined(
         key=_model_year_sort_key,
     )
     n_years = len(all_years)
-    year_colors = {my: plt.cm.Blues(0.3 + 0.7 * i / max(n_years - 1, 1)) for i, my in enumerate(all_years)}
+    _cmap = plt.cm.tab10 if n_years <= 10 else plt.cm.tab20
+    year_colors = {my: _cmap(i % _cmap.N) for i, my in enumerate(all_years)}
     groups_in_order = [g for g in ("passenger", "freight") if g in panel_data]
     n_panels = len(groups_in_order)
     fig, axes = plt.subplots(n_panels, 1, figsize=(max(7, 3 * 1.5), 6 * n_panels), constrained_layout=True)
@@ -535,11 +470,11 @@ def _plot_class_model_year_combined(
         local_years = sorted(grouped["model_year_group"].unique().tolist(), key=_model_year_sort_key)
         display_labels = [_CLASS_GROUP_LABELS.get(c, c) for c in class_groups]
         beam_pivot = (
-            grouped.pivot_table(index="class_group", columns="model_year_group", values="beam_share", aggfunc="sum")
+            grouped.pivot_table(index="class_group", columns="model_year_group", values="beam_vmt", aggfunc="sum")
             .reindex(index=class_groups, columns=local_years).fillna(0.0)
         )
         emfac_pivot = (
-            grouped.pivot_table(index="class_group", columns="model_year_group", values="emfac_share", aggfunc="sum")
+            grouped.pivot_table(index="class_group", columns="model_year_group", values="emfac_vmt", aggfunc="sum")
             .reindex(index=class_groups, columns=local_years).fillna(0.0)
         )
         beam_pivot.index = display_labels
@@ -552,10 +487,10 @@ def _plot_class_model_year_combined(
             segment_labels=local_years,
             segment_colors=[year_colors[y] for y in local_years],
             x_axis_label="Vehicle class group",
-            y_label=f"Share of total {metric}",
-            title=f"{assignment_group.title()} — {metric} by class group and model year",
+            y_label="VMT (vehicle-miles)",
+            title=f"{assignment_group.title()} — VMT by class group and model year",
         )
-    output_path = output_dir / f"step1_{_slugify(metric)}_by_class_and_model_year.png"
+    output_path = output_dir / "step1_vmt_by_class_and_model_year.png"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
@@ -566,16 +501,12 @@ def _plot_model_year_fuel_combined(
     comparison: pd.DataFrame,
     *,
     metadata: pd.DataFrame,
-    metric: str,
     output_dir: Path,
 ) -> Optional[str]:
-    beam_col = "beam_population_weight" if metric == "population" else "beam_vmt"
-    emfac_col = "emfac_population" if metric == "population" else "emfac_vmt"
     panel_data: dict[str, pd.DataFrame] = {}
     for assignment_group in ("passenger", "freight"):
         grouped = _build_model_year_fuel_panel_data(
             comparison, metadata=metadata, assignment_group=assignment_group,
-            beam_col=beam_col, emfac_col=emfac_col,
         )
         if grouped is not None:
             panel_data[assignment_group] = grouped
@@ -597,11 +528,11 @@ def _plot_model_year_fuel_combined(
         if not model_years or not fuels:
             continue
         beam_pivot = (
-            grouped.pivot_table(index="model_year_group", columns="fuel", values="beam_share", aggfunc="sum")
+            grouped.pivot_table(index="model_year_group", columns="fuel", values="beam_vmt", aggfunc="sum")
             .reindex(index=model_years, columns=fuels).fillna(0.0)
         )
         emfac_pivot = (
-            grouped.pivot_table(index="model_year_group", columns="fuel", values="emfac_share", aggfunc="sum")
+            grouped.pivot_table(index="model_year_group", columns="fuel", values="emfac_vmt", aggfunc="sum")
             .reindex(index=model_years, columns=fuels).fillna(0.0)
         )
         _draw_stacked_bars(
@@ -612,10 +543,10 @@ def _plot_model_year_fuel_combined(
             segment_labels=fuels,
             segment_colors=[_FUEL_COLORS[f] for f in fuels],
             x_axis_label="Model year group",
-            y_label=f"Share of total {metric}",
-            title=f"{assignment_group.title()} — {metric} by model year and fuel",
+            y_label="VMT (vehicle-miles)",
+            title=f"{assignment_group.title()} — VMT by model year and fuel",
         )
-    output_path = output_dir / f"step1_{_slugify(metric)}_by_model_year_and_fuel.png"
+    output_path = output_dir / "step1_vmt_by_model_year_and_fuel.png"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
@@ -659,16 +590,11 @@ def run(
         passenger_vehicle_types_path=passenger_vehicle_types_path,
         freight_vehicle_types_path=freight_vehicle_types_path,
     )
-    for metric in ("population", "vmt"):
-        plot_path = _plot_class_model_year_combined(
-            comparison, metadata=metadata, metric=metric, output_dir=output_dir,
-        )
-        if plot_path:
-            outputs[f"{metric}_class_model_year_plot"] = plot_path
-        plot_path = _plot_model_year_fuel_combined(
-            comparison, metadata=metadata, metric=metric, output_dir=output_dir,
-        )
-        if plot_path:
-            outputs[f"{metric}_model_year_fuel_plot"] = plot_path
+    plot_path = _plot_class_model_year_combined(comparison, metadata=metadata, output_dir=output_dir)
+    if plot_path:
+        outputs["vmt_class_model_year_plot"] = plot_path
+    plot_path = _plot_model_year_fuel_combined(comparison, metadata=metadata, output_dir=output_dir)
+    if plot_path:
+        outputs["vmt_model_year_fuel_plot"] = plot_path
     logger.info("Analysis Step 1 complete")
     return outputs

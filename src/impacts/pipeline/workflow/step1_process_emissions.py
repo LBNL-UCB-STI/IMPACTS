@@ -855,8 +855,7 @@ def run(
         _log_aermod_urban_class_trace("before source_urban_class init", aermod_allocated_df)
         aermod_allocated_df["source_urban_class"] = 0
         _log_aermod_urban_class_trace("after source_urban_class init", aermod_allocated_df)
-        cell_population_path = (manifest_inputs or {}).get("aermod_cell_population")
-        if cell_population_path:
+        if (manifest_inputs or {}).get("aermod_cell_population"):
             cell_population_path = resolve_required_manifest_input(manifest_inputs, key="aermod_cell_population")
             cell_pop = read_table(cell_population_path)[["aermod_cell_id", "source_urban_class"]].rename(
                 columns={"source_urban_class": "cell_source_urban_class"}

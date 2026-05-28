@@ -94,7 +94,7 @@ def _load_run_manifest_context(
     input_manifest_path = manifest.get("input_manifest_path")
     if not input_manifest_path:
         raise ValueError("Run manifest is missing input_manifest_path.")
-    output_dir = manifest.get("output_dir") or manifest.get("outputs_dir")
+    output_dir = manifest.get("output_dir")
     if not output_dir:
         raise ValueError("Run manifest is missing output_dir.")
     return manifest, Path(str(output_dir)).resolve(), str(input_manifest_path)
@@ -424,6 +424,9 @@ def _run_stages_from_input_manifest(
         input_manifest=manifest,
     )
     output_root.mkdir(parents=True, exist_ok=True)
+    (output_root / "emissions").mkdir(parents=True, exist_ok=True)
+    (output_root / "concentrations").mkdir(parents=True, exist_ok=True)
+    (output_root / "exposure").mkdir(parents=True, exist_ok=True)
     logger.info("Loaded input manifest: %s", Path(input_manifest_path).resolve())
     logger.info("Output directory: %s", output_root)
 
@@ -578,7 +581,6 @@ def _run_stages_from_input_manifest(
         "model": "impacts",
         "input_manifest_path": str(Path(input_manifest_path).resolve()),
         "output_dir": str(output_root),
-        "outputs_dir": str(output_root),
         "command": " ".join(sys.argv),
         "image": "not_recorded",
         "outputs": {

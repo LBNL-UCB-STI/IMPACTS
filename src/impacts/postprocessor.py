@@ -22,7 +22,7 @@ def postprocess_from_run_manifest(
     from .runner import run_analysis_from_run_manifest
 
     run_manifest = RunManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
-    output_root = Path(str(run_manifest.get("output_dir") or run_manifest.get("outputs_dir"))).resolve()
+    output_root = Path(str(run_manifest.get("output_dir"))).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
 
     log_step_banner("Postprocess", "Impacts Complete", logger=logger)
