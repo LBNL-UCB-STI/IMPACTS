@@ -52,9 +52,6 @@ _OSM_TO_AERMOD_TEMPORAL = {
 }
 
 
-def _step1_scratch_dir(raw_dir: Path) -> Path:
-    return raw_dir / "tmp" / "step1_process_emissions"
-
 
 def _log_step1_elapsed(step_id: str, label: str, started: float, **details: object) -> None:
     detail_parts = [f"{key}={value}" for key, value in details.items()]
@@ -695,7 +692,7 @@ def _build_county_corrected_table(
             county_allocated_df,
             county_correction_factors,
             county_col="county_COUNTYFP",
-            scratch_dir=scratch_dir,
+            scratch_dir=raw_dir,
             passenger_vehicle_types_path=passenger_vehicle_types_path,
             freight_vehicle_types_path=freight_vehicle_types_path,
         )
@@ -711,14 +708,12 @@ def run(
     input_root: Path,
     intersection_paths: Dict[str, Optional[str]],
     manifest_inputs: Optional[Dict[str, Any]] = None,
-    scratch_root: Optional[Path] = None,
 ) -> Dict[str, Optional[str]]:
     log_step_banner("Step 1", "Process Emissions", logger=logger)
     step_started = time.perf_counter()
     reused = _reuse_existing_outputs(raw_dir)
     if reused is not None:
         return reused
-    scratch_dir = _step1_scratch_dir(scratch_root if scratch_root is not None else raw_dir)
 
     log_substep_banner("1.0", "prepare skims inputs", logger=logger)
     skims_started = time.perf_counter()
@@ -746,19 +741,19 @@ def run(
         intersection_path=intersection_paths.get("county"),
         intersection_df=None,
         zone_label="county",
-        scratch_dir=scratch_dir,
+        scratch_dir=raw_dir,
     )
     inmap_grouped_df = _build_zone_grouped_table(
         intersection_path=intersection_paths.get("inmap"),
         intersection_df=None,
         zone_label="inmap",
-        scratch_dir=scratch_dir,
+        scratch_dir=raw_dir,
     )
     aermod_grouped_df = _build_zone_grouped_table(
         intersection_path=intersection_paths.get("aermod"),
         intersection_df=None,
         zone_label="aermod",
-        scratch_dir=scratch_dir,
+        scratch_dir=raw_dir,
     )
     _log_step1_elapsed(
         "1.1",
@@ -775,7 +770,7 @@ def run(
         grouped_df=county_grouped_df,
         skims_df=skims_df,
         zone_label="county",
-        scratch_dir=scratch_dir,
+        scratch_dir=raw_dir,
         step_id="1.2",
     )
     _log_step1_elapsed(
@@ -792,7 +787,7 @@ def run(
         skims_df=skims_df,
         pipeline=pipeline,
         manifest_inputs=manifest_inputs or {},
-        scratch_dir=scratch_dir,
+        scratch_dir=raw_dir,
     )
     _log_step1_elapsed(
         "1.3",
@@ -805,7 +800,7 @@ def run(
     corrected_totals_started = time.perf_counter()
     corrected_source_df = _build_corrected_source_totals(
         county_corrected_df,
-        scratch_dir=scratch_dir,
+        scratch_dir=raw_dir,
     )
     _log_step1_elapsed(
         "1.3",
@@ -820,14 +815,14 @@ def run(
         grouped_df=inmap_grouped_df,
         skims_df=corrected_source_df if corrected_source_df is not None else skims_df,
         zone_label="inmap",
-        scratch_dir=scratch_dir,
+        scratch_dir=raw_dir,
         step_id="1.4",
     )
     aermod_allocated_df = _build_zone_allocated_table(
         grouped_df=aermod_grouped_df,
         skims_df=corrected_source_df if corrected_source_df is not None else skims_df,
         zone_label="aermod",
-        scratch_dir=scratch_dir,
+        scratch_dir=raw_dir,
         step_id="1.4",
     )
     _log_step1_elapsed(
@@ -929,7 +924,7 @@ def run(
         aermod_write_started = time.perf_counter()
         aermod_export_df = _aggregate_aermod_emissions_for_export(
             aermod_allocated_df,
-            scratch_dir=scratch_dir,
+            scratch_dir=raw_dir,
         )
         beam_emissions_for_aermod_stem = raw_dir / "beam_emissions_for_aermod"
         _save_grid_emissions(

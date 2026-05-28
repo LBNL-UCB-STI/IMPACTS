@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -476,7 +477,6 @@ def _run_stages_from_input_manifest(
             output_root / "emissions",
             grid_intersection_paths,
             manifest_inputs=manifest_inputs,
-            scratch_root=output_root,
         )
         _record_stage_timing(stage_timings, "step1_process_emissions", stage_started)
     else:
@@ -637,6 +637,7 @@ def _run_stages_from_input_manifest(
             ),
         },
     }
+    shutil.rmtree(output_root / "_tmp", ignore_errors=True)
     output_manifest = Path(run_manifest_path) if run_manifest_path else output_root / "run_manifest.yaml"
     run_manifest["run_manifest_path"] = str(output_manifest)
     typed_manifest = RunManifest.from_dict(run_manifest)
