@@ -469,10 +469,11 @@ def _run_stages_from_input_manifest(
         stage_started = time.perf_counter()
         emissions_outputs = run_emissions_processing(
             pipeline,
-            output_root,
+            output_root / "emissions",
             input_root,
             grid_intersection_paths,
             manifest_inputs=manifest_inputs,
+            scratch_root=output_root,
         )
         _record_stage_timing(stage_timings, "step1_process_emissions", stage_started)
     else:
@@ -515,7 +516,7 @@ def _run_stages_from_input_manifest(
             stage_started = time.perf_counter()
             _, _, concentration_path = run_inmap_dispersion(
                 pipeline=pipeline,
-                raw_dir=output_root,
+                raw_dir=output_root / "concentrations",
                 emissions_input_path=emissions_outputs["beam_emissions_for_inmap"],
                 inmap_study_area_grid_path=emissions_outputs.get("beam_inmap_study_area_grid"),
             )
@@ -533,7 +534,7 @@ def _run_stages_from_input_manifest(
             stage_started = time.perf_counter()
             _, _, aermod_concentration_path = run_aermod_dispersion(
                 pipeline=pipeline,
-                raw_dir=output_root,
+                raw_dir=output_root / "concentrations",
                 emissions_input_path=emissions_outputs["beam_emissions_for_aermod"],
             )
             _record_stage_timing(stage_timings, "step3_compute_aermod_concentrations", stage_started)
@@ -551,7 +552,7 @@ def _run_stages_from_input_manifest(
             stage_started = time.perf_counter()
             _, exposure_grid_path, population_distribution_path, population_counts_path = run_prepare_exposure(
                 pipeline=pipeline,
-                raw_dir=output_root,
+                raw_dir=output_root / "exposure",
                 inmap_concentrations_path=str(concentration_path),
                 aermod_concentrations_path=str(aermod_concentration_path) if aermod_concentration_path else None,
                 manifest_inputs=manifest_inputs,

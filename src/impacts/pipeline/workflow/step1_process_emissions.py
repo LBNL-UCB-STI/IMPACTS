@@ -711,13 +711,14 @@ def run(
     input_root: Path,
     intersection_paths: Dict[str, Optional[str]],
     manifest_inputs: Optional[Dict[str, Any]] = None,
+    scratch_root: Optional[Path] = None,
 ) -> Dict[str, Optional[str]]:
     log_step_banner("Step 1", "Process Emissions", logger=logger)
     step_started = time.perf_counter()
     reused = _reuse_existing_outputs(raw_dir)
     if reused is not None:
         return reused
-    scratch_dir = _step1_scratch_dir(raw_dir)
+    scratch_dir = _step1_scratch_dir(scratch_root if scratch_root is not None else raw_dir)
 
     log_substep_banner("1.0", "prepare skims inputs", logger=logger)
     skims_started = time.perf_counter()
