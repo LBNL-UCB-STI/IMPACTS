@@ -511,7 +511,7 @@ def test_build_inputs_manifest_runs_step3_and_registers_intersections(monkeypatc
     config_path = tmp_path / "settings.yaml"
     config_path.write_text("impacts: {}\n", encoding="utf-8")
     output_root = tmp_path / "impacts_output"
-    input_root = output_root / "inputs"
+    input_root = output_root / "preprocess"
     calls = {}
 
     settings = SimpleNamespace(

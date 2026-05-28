@@ -225,8 +225,7 @@ def _resolve_source_row_col(df: pd.DataFrame) -> str:
 
 
 def _resolve_mapped_network_path(input_root: Path) -> str:
-    network_dir = input_root / "network"
-    direct = network_dir / "beam_osm_mapped.parquet"
+    direct = input_root / "beam_osm_mapped.parquet"
     if direct.exists():
         return str(direct)
     raise FileNotFoundError(
@@ -476,7 +475,7 @@ def run(
             existing_paths["aermod"],
         )
         return existing_paths, {"county": None, "inmap": None, "aermod": None}
-    mapped_network_path = str((input_root / "network" / "beam_osm_mapped.parquet").resolve())
+    mapped_network_path = str((input_root / "beam_osm_mapped.parquet").resolve())
     log_substep_banner("3.1", "map BEAM network to OSM", logger=logger)
     if Path(mapped_network_path).exists():
         logger.info("Step 3.1: reusing BEAM/OSM mapping %s", mapped_network_path)
