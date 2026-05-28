@@ -70,16 +70,6 @@ def _apply_atlas_fuel_aliases(vehicles: pd.DataFrame, config: dict[str, Any]) ->
     return prepared
 
 
-def _extract_model_year_from_vehicle_type_id(series: pd.Series) -> pd.Series:
-    extracted = (
-        series.astype(str)
-        .str.extract(r"^(?P<leading_year>\d{4})|(?P<trailing_year>\d{4})$")
-        .bfill(axis=1)
-        .iloc[:, 0]
-    )
-    return pd.to_numeric(extracted, errors="coerce")
-
-
 def _normalize_bodytype(value: object) -> str:
     return str(value).strip().lower()
 

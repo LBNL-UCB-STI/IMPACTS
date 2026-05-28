@@ -1071,17 +1071,6 @@ def _apply_table_schema(frame: pd.DataFrame, schema: dict[str, str] | None, *, f
     return result
 
 
-def _load_yaml_path(path: Path, *sections: str) -> dict:
-    with path.open() as handle:
-        data = yaml.safe_load(handle) or {}
-    current = data
-    for section in sections:
-        if not isinstance(current, dict):
-            return {}
-        current = current.get(section, {})
-    return current if isinstance(current, dict) else {}
-
-
 def _merge_dicts(base: dict[str, object], override: dict[str, object]) -> dict[str, object]:
     merged = deepcopy(base)
     for key, value in override.items():

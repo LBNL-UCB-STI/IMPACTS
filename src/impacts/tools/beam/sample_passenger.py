@@ -277,26 +277,6 @@ def _filter_blocks(
     return len(filtered)
 
 
-def _iter_filtered_plan_tables(
-    plans_path: Path,
-    sampled_person_ids: set[str],
-    *,
-    chunksize: int,
-) -> Iterable[pa.Table]:
-    parquet_file = pq.ParquetFile(plans_path)
-    for batch in parquet_file.iter_batches(batch_size=chunksize):
-        table = pa.Table.from_batches([batch])
-        frame = table.to_pandas()
-        if "person_id" not in frame.columns:
-            raise ValueError("Plans file is missing required column 'person_id'")
-        normalized_person_ids = _normalize_identifier_series(frame["person_id"])
-        filtered = frame.loc[normalized_person_ids.isin(sampled_person_ids)].copy()
-        if filtered.empty:
-            continue
-        filtered["person_id"] = _normalize_identifier_series(filtered["person_id"])
-        yield pa.Table.from_pandas(filtered, preserve_index=False)
-
-
 def _filter_plans(
     plans_path: Path,
     output_path: Path,

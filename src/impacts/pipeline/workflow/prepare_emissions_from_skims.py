@@ -525,24 +525,6 @@ def _build_zone_allocated_table(
     return allocated
 
 
-def _build_source_activity_totals(skims_df: pd.DataFrame) -> Optional[pd.DataFrame]:
-    if not {"countyfp", "totVMT", "totTrips"}.issubset(skims_df.columns):
-        return None
-    activity = skims_df[["countyfp", "totVMT", "totTrips"]].copy()
-
-    activity["countyfp"] = normalize_county_fips(activity["countyfp"])
-    activity["totVMT"] = pd.to_numeric(activity["totVMT"], errors="coerce").fillna(0.0)
-    activity["totTrips"] = pd.to_numeric(activity["totTrips"], errors="coerce").fillna(0.0)
-    grouped = activity.groupby("countyfp", dropna=False).agg(
-        totVMT=("totVMT", "sum"),
-        totTrips=("totTrips", "sum"),
-    ).reset_index()
-    zero_null_mask = grouped["countyfp"].isna() & grouped["totVMT"].eq(0.0) & grouped["totTrips"].eq(0.0)
-    if zero_null_mask.any():
-        grouped = grouped.loc[~zero_null_mask].reset_index(drop=True)
-    return grouped
-
-
 def resolve_prepared_skims_path(input_root: Path) -> Optional[str]:
     candidate = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
     return _existing_valid_skims_parquet(candidate)

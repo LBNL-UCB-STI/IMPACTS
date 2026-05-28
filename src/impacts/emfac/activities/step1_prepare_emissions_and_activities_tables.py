@@ -893,10 +893,6 @@ def _normalize_metric_label(value: object) -> str:
     return label
 
 
-def _annualize_daily_series(series: pd.Series) -> pd.Series:
-    return pd.to_numeric(series, errors="coerce") * EMFAC_DAYS_PER_YEAR
-
-
 @lru_cache(maxsize=None)
 def _load_operation_days_lookup(operation_days_path: str) -> dict[str, float]:
     frame = read_table(operation_days_path, schema=_OPERATION_DAYS_METADATA_SCHEMA)
