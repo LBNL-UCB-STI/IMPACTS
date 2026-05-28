@@ -260,6 +260,82 @@ def _plot_source_pollutant_comparison(
     return str(output_path)
 
 
+def _plot_combined_pollutant_comparison(
+    comparison: pd.DataFrame,
+    *,
+    primary_source: str,
+    secondary_source: str,
+    pollutant: str,
+    output_dir: Path,
+) -> Optional[str]:
+    primary = comparison.loc[
+        comparison["source"].eq(primary_source) & comparison["pollutant"].eq(pollutant)
+    ].copy().sort_values("sector").reset_index(drop=True)
+    secondary = comparison.loc[
+        comparison["source"].eq(secondary_source) & comparison["pollutant"].eq(pollutant)
+    ].copy().sort_values("sector").reset_index(drop=True)
+    if primary.empty or secondary.empty:
+        return None
+
+    fig, (ax_top, ax_bot) = plt.subplots(
+        2, 1,
+        figsize=(max(7, len(primary) * 1.2), 8),
+        gridspec_kw={"height_ratios": [3, 1]},
+    )
+
+    width = 0.38
+    x = range(len(primary))
+    ax_top.bar(
+        [pos - width / 2 for pos in x],
+        primary["simulation_tons"].to_numpy(dtype=float),
+        width=width,
+        label="Simulation",
+        color="#1f77b4",
+    )
+    ax_top.bar(
+        [pos + width / 2 for pos in x],
+        primary["target_tons"].to_numpy(dtype=float),
+        width=width,
+        label="Target",
+        color="#ff7f0e",
+    )
+    ax_top.set_xticks(list(x))
+    ax_top.set_xticklabels(primary["sector"].tolist(), rotation=30, ha="right")
+    ax_top.set_ylabel("Annual tons")
+    ax_top.set_title(f"{primary_source} {pollutant}: Simulation vs Target")
+    ax_top.legend()
+    ax_top.grid(axis="y", alpha=0.2)
+
+    height = 0.38
+    y = range(len(secondary))
+    ax_bot.barh(
+        [pos + height / 2 for pos in y],
+        secondary["simulation_tons"].to_numpy(dtype=float),
+        height=height,
+        label="Simulation",
+        color="#1f77b4",
+    )
+    ax_bot.barh(
+        [pos - height / 2 for pos in y],
+        secondary["target_tons"].to_numpy(dtype=float),
+        height=height,
+        label="Target",
+        color="#ff7f0e",
+    )
+    ax_bot.set_yticks(list(y))
+    ax_bot.set_yticklabels(secondary["sector"].tolist())
+    ax_bot.set_xlabel("Annual tons")
+    ax_bot.set_title(f"{secondary_source} {pollutant}: Simulation vs Target")
+    ax_bot.legend()
+    ax_bot.grid(axis="x", alpha=0.2)
+
+    fig.tight_layout()
+    output_path = output_dir / f"step2_{_slugify(primary_source)}_{_slugify(pollutant)}_simulation_vs_target.png"
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    return str(output_path)
+
+
 def run(
     *,
     modeled_emissions_path: str,
@@ -283,14 +359,30 @@ def run(
         targets_df=targets_df,
     )
     outputs = _write_comparison_table(comparison, output_dir=output_dir)
-    for (source, pollutant), _ in comparison.groupby(["source", "pollutant"], dropna=False):
-        plot_path = _plot_source_pollutant_comparison(
-            comparison,
-            source=str(source),
-            pollutant=str(pollutant),
-            output_dir=output_dir,
-        )
-        if plot_path:
-            outputs[f"{source}_{pollutant}_plot"] = plot_path
+    plotted: set[tuple[str, str]] = set()
+    for pollutant in comparison["pollutant"].unique():
+        sources = set(comparison.loc[comparison["pollutant"].eq(pollutant), "source"].tolist())
+        if "mobile_onroad" in sources and "road_dust" in sources:
+            plot_path = _plot_combined_pollutant_comparison(
+                comparison,
+                primary_source="mobile_onroad",
+                secondary_source="road_dust",
+                pollutant=str(pollutant),
+                output_dir=output_dir,
+            )
+            if plot_path:
+                outputs[f"mobile_onroad_{pollutant}_plot"] = plot_path
+            plotted.update({("mobile_onroad", pollutant), ("road_dust", pollutant)})
+        for source in sorted(sources):
+            if (source, pollutant) in plotted:
+                continue
+            plot_path = _plot_source_pollutant_comparison(
+                comparison,
+                source=str(source),
+                pollutant=str(pollutant),
+                output_dir=output_dir,
+            )
+            if plot_path:
+                outputs[f"{source}_{pollutant}_plot"] = plot_path
     logger.info("Analysis Step 2 complete")
     return outputs
