@@ -764,16 +764,6 @@ def normalize_county_fips(series: pd.Series) -> pd.Series:
     return normalized.astype("string")
 
 
-def resolve_column_config(
-    config: Optional[Dict[str, str]],
-    defaults: Dict[str, str],
-) -> Dict[str, str]:
-    resolved = defaults.copy()
-    if config:
-        resolved.update({k: v for k, v in config.items() if v})
-    return resolved
-
-
 def _table_available_columns(path: str | Path) -> list[str]:
     target = Path(path)
     if target.suffix.lower() != ".parquet":

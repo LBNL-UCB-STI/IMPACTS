@@ -66,10 +66,7 @@ def _load_isrm_store(isrm_url: str):
     import zarr
 
     if isrm_url.startswith("s3://"):
-        try:
-            import s3fs  # noqa: F401
-        except ImportError as exc:
-            raise ImportError("s3fs is required to read ISRM zarr from s3:// URLs") from exc
+        import s3fs  # noqa: F401
         return zarr.open(
             isrm_url,
             mode="r",

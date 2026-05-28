@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Sequence, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
+from typing import Sequence
 
 
 class PathRegistry:
