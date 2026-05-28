@@ -46,7 +46,7 @@ impacts:
     vehicle_folder: vehicle-tech
     atlas_year: 2019
     frism_year: 2018
-    population_sample: 0.1
+    population_sample: 0.005
     transit_sample: 1.0
 
   activities:

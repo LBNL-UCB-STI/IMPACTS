@@ -15,9 +15,6 @@ logger = logging.getLogger(__name__)
 _ARCHIVE_NAME = "emissions-raw.tar.zst"
 
 
-def _emfac_raw_root(local_input_folder: Path) -> Path:
-    return local_input_folder
-
 
 def _archive_path(beam_input_folder: Path, vehicle_folder: str) -> Path:
     return beam_input_folder / vehicle_folder / "emissions" / _ARCHIVE_NAME
@@ -205,6 +202,7 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
     from ..config.path_registry import build_registry
 
     local_input_folder = Path(resolve_path(settings.impacts.local_input_folder, config_path)).resolve()
+    local_output_folder = Path(resolve_path(settings.impacts.local_output_folder, config_path)).resolve()
     beam_input_folder = Path(resolve_path(settings.beam.local_input_folder, config_path)).resolve()
     registry = build_registry(settings, config_path)
 
@@ -212,7 +210,7 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
     project_analysis = _mapping(cfg_activities.get("project_analysis"))
     emissions_inventory = _mapping(cfg_activities.get("emissions_inventory"))
     region_name = settings.run.region
-    emfac_root = _emfac_raw_root(local_input_folder)
+    emfac_root = local_input_folder
 
     configured_project_main = _mapping(project_analysis.get("main"))
     configured_black_carbon = _mapping(project_analysis.get("black_carbon"))
@@ -263,7 +261,7 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
         "region_label": cfg_activities.get("region_label", region_name.upper()),
         "scenario": settings.impacts.scenario,
         "seed": settings.impacts.seed,
-        "output_root": emfac_root,
+        "output_root": local_output_folder,
         "archive": archive,
         "extract_root": inventory_folder.parent,
         "project_analysis_folder": project_analysis_folder,
