@@ -414,7 +414,6 @@ class PostprocessManifest:
     model: str
     run_manifest_path: str
     output_dir: str
-    canonical_artifact: Dict[str, Any]
     analysis_outputs: Dict[str, Any]
     validation: Dict[str, Any]
     notes: List[str]
@@ -429,7 +428,6 @@ class PostprocessManifest:
                 "model",
                 "run_manifest_path",
                 "output_dir",
-                "canonical_artifact",
                 "analysis_outputs",
                 "validation",
                 "notes",
@@ -437,15 +435,11 @@ class PostprocessManifest:
             },
             "postprocess manifest",
         )
-        canonical_artifact = _required_dict(payload.get("canonical_artifact"), "canonical_artifact")
-        if "path" not in canonical_artifact:
-            raise ValueError("Postprocess manifest missing canonical_artifact.path")
         return cls(
             contract_version=_required_string(payload.get("contract_version"), "contract_version"),
             model=_required_string(payload.get("model"), "model"),
             run_manifest_path=_required_string(payload.get("run_manifest_path"), "run_manifest_path"),
             output_dir=_required_string(payload.get("output_dir"), "output_dir"),
-            canonical_artifact=canonical_artifact,
             analysis_outputs=_required_dict(payload.get("analysis_outputs"), "analysis_outputs"),
             validation=_required_dict(payload.get("validation"), "validation"),
             notes=_coerce_string_list(payload.get("notes")),

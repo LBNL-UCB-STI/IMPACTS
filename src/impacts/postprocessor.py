@@ -28,8 +28,6 @@ def postprocess_from_run_manifest(
     log_step_banner("Postprocess", "Impacts Complete", logger=logger)
     logger.info("End of impacts concluded.")
 
-    completion_path = output_root / "impacts_complete.txt"
-    completion_path.write_text("End of impacts concluded.\n", encoding="utf-8")
     analysis_outputs = run_analysis_from_run_manifest(
         run_manifest_path=run_manifest_path,
     )
@@ -39,10 +37,6 @@ def postprocess_from_run_manifest(
         "model": "impacts",
         "run_manifest_path": str(Path(run_manifest_path).resolve()),
         "output_dir": str(output_root),
-        "canonical_artifact": {
-            "name": "impacts_complete",
-            "path": str(completion_path),
-        },
         "analysis_outputs": analysis_outputs,
         "validation": {
             "completed": True,

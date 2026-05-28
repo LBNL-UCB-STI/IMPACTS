@@ -381,7 +381,6 @@ def test_manifest_models_round_trip_current_shape(tmp_path: Path):
             "model": "impacts",
             "run_manifest_path": run_manifest["run_manifest_path"],
             "output_dir": str(tmp_path / "impacts"),
-                "canonical_artifact": {"path": str(tmp_path / "impacts" / "impacts_complete.txt")},
             "analysis_outputs": {},
             "validation": {},
             "notes": [],
@@ -392,7 +391,7 @@ def test_manifest_models_round_trip_current_shape(tmp_path: Path):
     assert activities_manifest["outputs"]["outputs_root"].endswith("emfac")
     assert inputs_manifest["pipeline"]["region"] == "sfbay"
     assert run_manifest["execution"]["stopped_after"] == "step1_process_emissions"
-    assert postprocess_manifest["canonical_artifact"]["path"].endswith(".txt")
+    assert postprocess_manifest["analysis_outputs"] == {}
 
 
 def test_pipeline_manifest_allows_disabled_inmap_without_inmap_inputs(tmp_path: Path):

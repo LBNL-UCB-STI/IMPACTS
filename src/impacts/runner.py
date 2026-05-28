@@ -306,7 +306,7 @@ def run_analysis_from_settings(
         force=False,
     )
     settings = load_settings_from_yaml(settings_path)
-    output_dir = Path(resolve_path(settings.impacts.local_output_folder, settings_path)).resolve() / "analysis"
+    output_dir = Path(resolve_path(settings.impacts.local_output_folder, settings_path)).resolve() / "postprocess" / "analysis"
     modeled_emissions_path = _resolve_analysis_modeled_emissions_path(settings_path)
     skims_emissions_path = _resolve_analysis_skims_emissions_path(settings_path)
     outputs: Dict[str, str] = {}
