@@ -450,7 +450,6 @@ def _ensure_county_mass_conservation(
 
 def run(
     pipeline: PipelineConfig,
-    raw_dir: Path,
     input_root: Path,
     manifest_inputs: Optional[dict[str, object]] = None,
 ) -> Tuple[dict[str, Optional[str]], dict[str, Optional[gpd.GeoDataFrame]]]:
@@ -458,9 +457,9 @@ def run(
     from osm_chordify.osm.intersect import intersect_road_network_with_zones
 
     log_step_banner("Preprocess Step 3", "Integrate Grids", logger=logger)
-    county_intersection_path = raw_dir / "beam_osm_county_intersection.parquet"
-    inmap_intersection_path = raw_dir / "beam_osm_inmap_intersection.parquet"
-    aermod_intersection_path = raw_dir / "beam_osm_aermod_intersection.parquet"
+    county_intersection_path = input_root / "beam_osm_county_intersection.parquet"
+    inmap_intersection_path = input_root / "beam_osm_inmap_intersection.parquet"
+    aermod_intersection_path = input_root / "beam_osm_aermod_intersection.parquet"
     existing_paths = {
         "county": str(county_intersection_path) if county_intersection_path.exists() else None,
         "inmap": str(inmap_intersection_path) if pipeline.inmap_enabled and inmap_intersection_path.exists() else None,

@@ -596,9 +596,8 @@ def test_build_inputs_manifest_runs_step3_and_registers_intersections(monkeypatc
             "resolved_aermod_grid_id": "aermod_id",
         }
 
-    def _fake_step3(pipeline, raw_dir, staged_input_root, manifest_inputs=None):
+    def _fake_step3(pipeline, staged_input_root, manifest_inputs=None):
         calls["step3"] = {
-            "raw_dir": raw_dir,
             "input_root": staged_input_root,
             "manifest_inputs": manifest_inputs,
             "pipeline": pipeline,
@@ -620,7 +619,6 @@ def test_build_inputs_manifest_runs_step3_and_registers_intersections(monkeypatc
 
     manifest = preprocessor_module.build_inputs_manifest(config_path)
 
-    assert calls["step3"]["raw_dir"] == output_root
     assert calls["step3"]["input_root"] == input_root
     assert manifest["maintained_execution_path"] == [
         "impacts.pipeline.workflow.step1_process_emissions",

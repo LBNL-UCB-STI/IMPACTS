@@ -158,7 +158,6 @@ def build_inputs_manifest(
     intersection_paths, _ = preprocess_step3(
         pipeline_config,
         input_root,
-        input_root,
         manifest_inputs=manifest_inputs,
     )
     for manifest_key, path in (
