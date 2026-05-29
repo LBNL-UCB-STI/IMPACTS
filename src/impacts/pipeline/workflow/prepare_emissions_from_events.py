@@ -532,9 +532,8 @@ def find_staged_events_path(manifest_inputs: Optional[Dict[str, Any]] = None) ->
 
 
 def _write_staged_skims(skims_df: pd.DataFrame, *, input_root: Path) -> Path:
-    skims_dir = input_root / "skims"
-    skims_dir.mkdir(parents=True, exist_ok=True)
-    skims_path = skims_dir / "skims_from_events.parquet"
+    input_root.mkdir(parents=True, exist_ok=True)
+    skims_path = input_root / "skims_from_events.parquet"
     skims_df.to_parquet(skims_path, index=False)
     return skims_path
 
@@ -606,9 +605,8 @@ def prepare_events_inputs(
     )
 
     activity_df = build_activity_table(skims_df)
-    skims_dir = input_root / "skims"
-    skims_dir.mkdir(parents=True, exist_ok=True)
-    activity_path = skims_dir / "activity_from_events.parquet"
+    input_root.mkdir(parents=True, exist_ok=True)
+    activity_path = input_root / "activity_from_events.parquet"
     activity_df.to_parquet(activity_path, index=False)
     manifest_inputs["activity_from_events"] = file_entry(
         kind="local",

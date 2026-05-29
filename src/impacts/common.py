@@ -738,7 +738,7 @@ def resolve_required_manifest_input(
 
 
 def prepared_table_target(input_root: Path, stem: str) -> Path:
-    return input_root / "skims" / f"{stem}.parquet"
+    return input_root / f"{stem}.parquet"
 
 
 # ---------------------------------------------------------------------------
@@ -1066,10 +1066,10 @@ def stage_county_boundaries(
         year=int(year),
         area_name=str(area_name),
         geo_level="county",
-        work_dir=str(input_root / "county"),
+        work_dir=str(input_root),
         target_epsg=int(target_epsg),
     )
-    destination = input_root / "county" / "county_boundaries.gpkg"
+    destination = input_root / "county_boundaries.gpkg"
     write_vector(county_gdf, str(destination))
     manifest_inputs["county_boundaries"] = file_entry(
         kind="local",
