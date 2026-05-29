@@ -44,11 +44,14 @@ def build_inputs_manifest(
     output_root.mkdir(parents=True, exist_ok=True)
 
     manifest_inputs: Dict[str, Any] = {}
+    import shutil as _shutil
+    settings_copy = output_root / "settings.yaml"
+    _shutil.copy2(str(config_path), str(settings_copy))
     settings_entry_path = register_local_input(
         manifest_inputs=manifest_inputs,
         input_root=input_root,
         key="settings",
-        source_path=str(config_path),
+        source_path=str(settings_copy),
     )
     from .pipeline.preprocessing.step1_collect_inputs import run as preprocess_step1
     from .pipeline.preprocessing.step2_prepare_grids import run as preprocess_step2

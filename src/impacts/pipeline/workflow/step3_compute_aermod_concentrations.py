@@ -813,6 +813,7 @@ def run(
     *,
     pipeline: PipelineConfig,
     raw_dir: Path,
+    cache_dir: Optional[Path] = None,
     emissions_input_path: str,
     emissions_input_gdf: Optional[gpd.GeoDataFrame] = None,
     target_grid_gdf: Optional[gpd.GeoDataFrame] = None,
@@ -897,8 +898,10 @@ def run(
         available_pattern_keys=available_pattern_keys,
     )
     requested_pattern_keys = sorted(set(source_df["pattern_key"].dropna().astype(str).tolist()))
+    effective_cache_dir = cache_dir if cache_dir is not None else raw_dir
+    effective_cache_dir.mkdir(parents=True, exist_ok=True)
     kernel_library, patterns_df = _load_or_build_kernel_library(
-        raw_dir=raw_dir,
+        raw_dir=effective_cache_dir,
         asrv_patterns_file=pipeline.asrv_patterns_file,
         asrv_patterns_epsg=pipeline.asrv_patterns_epsg,
         target_epsg=int(pipeline.output_epsg),

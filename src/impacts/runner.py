@@ -538,6 +538,7 @@ def _run_stages_from_input_manifest(
             _, _, aermod_concentration_path = run_aermod_dispersion(
                 pipeline=pipeline,
                 raw_dir=output_root / "concentrations",
+                cache_dir=output_root / "_tmp",
                 emissions_input_path=emissions_outputs["beam_emissions_for_aermod"],
             )
             _record_stage_timing(stage_timings, "step3_compute_aermod_concentrations", stage_started)

@@ -41,7 +41,7 @@ def run(
             staged_inmap_grid,
             "inmap_cell_id",
             source_col=inmap.grid_id,
-            output_path=str((input_root / "inmap_grid" / "inmap_grid.parquet").resolve()),
+            output_path=str((input_root / "inmap_grid.parquet").resolve()),
         )
         log_substep_banner("2.2", "constrain InMAP grid to network", logger=logger)
         staged_inmap_grid = constrain_grid_to_network(
@@ -49,7 +49,7 @@ def run(
             network_path=resolve_required_manifest_input(manifest_inputs, key="network"),
             grid_id_col="inmap_cell_id",
             target_epsg=int(local_output_epsg),
-            output_path=str((input_root / "inmap_grid" / "inmap_network_subset.parquet").resolve()),
+            output_path=str((input_root / "inmap_network_subset.parquet").resolve()),
         )
         manifest_inputs["inmap_grid"]["staged_path"] = staged_inmap_grid
 
@@ -66,7 +66,7 @@ def run(
             bounds=tuple(float(v) for v in staged_inmap.total_bounds),
             mask_gdf=staged_inmap,
             cell_size=grid_size_meters,
-            target_path=str((input_root / "aermod_grid" / f"aermod_{grid_size_meters:g}m_fishnet.parquet").resolve()),
+            target_path=str((input_root / f"aermod_{grid_size_meters:g}m_fishnet.parquet").resolve()),
             target_epsg=int(local_output_epsg),
             cell_id_col="aermod_cell_id",
         )
