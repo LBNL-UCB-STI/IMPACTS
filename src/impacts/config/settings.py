@@ -503,19 +503,24 @@ class AnalysisSectorTarget:
     sector: str
     annual_pm25_short_tons: Optional[float] = None
     annual_nox_short_tons: Optional[float] = None
+    annual_pm10_short_tons: Optional[float] = None
+    annual_tog_short_tons: Optional[float] = None
+    annual_rog_short_tons: Optional[float] = None
+    annual_co_short_tons: Optional[float] = None
+    annual_sox_short_tons: Optional[float] = None
+
+
+_SECTOR_TARGET_POLLUTANTS = ["pm25", "nox", "pm10", "tog", "rog", "co", "sox"]
 
 
 def _parse_analysis_sector_targets(
     *,
-    raw_pm25_targets: Any,
-    raw_nox_targets: Any,
+    raw_pollutant_targets: Dict[str, Any],
     path_prefix: str,
 ) -> List[AnalysisSectorTarget]:
-    sector_targets_by_key: Dict[tuple[str, str], AnalysisSectorTarget] = {}
-    for pollutant_name, raw_sector_targets in (
-        ("pm25", raw_pm25_targets),
-        ("nox", raw_nox_targets),
-    ):
+    accumulated: Dict[tuple, Dict[str, float]] = {}
+    for pollutant_name in _SECTOR_TARGET_POLLUTANTS:
+        raw_sector_targets = raw_pollutant_targets.get(pollutant_name)
         if raw_sector_targets is None:
             continue
         if not isinstance(raw_sector_targets, dict):
@@ -529,26 +534,16 @@ def _parse_analysis_sector_targets(
                 raise ValueError(f"{source_path} must be a mapping of sector -> annual target")
             for sector, value in sectors.items():
                 sector_name = str(sector).strip()
+                float_val = _optional_float(value)
+                if float_val is None:
+                    continue
                 key = (source_name, sector_name)
-                existing = sector_targets_by_key.get(key)
-                if existing is None:
-                    existing = AnalysisSectorTarget(source=source_name, sector=sector_name)
-                if pollutant_name == "pm25":
-                    existing = AnalysisSectorTarget(
-                        source=existing.source,
-                        sector=existing.sector,
-                        annual_pm25_short_tons=_required_float(value, f"{source_path}.{sector_name}"),
-                        annual_nox_short_tons=existing.annual_nox_short_tons,
-                    )
-                else:
-                    existing = AnalysisSectorTarget(
-                        source=existing.source,
-                        sector=existing.sector,
-                        annual_pm25_short_tons=existing.annual_pm25_short_tons,
-                        annual_nox_short_tons=_required_float(value, f"{source_path}.{sector_name}"),
-                    )
-                sector_targets_by_key[key] = existing
-    return list(sector_targets_by_key.values())
+                accumulated.setdefault(key, {})
+                accumulated[key][f"annual_{pollutant_name}_short_tons"] = float_val
+    return [
+        AnalysisSectorTarget(source=source, sector=sector, **pollutant_vals)
+        for (source, sector), pollutant_vals in accumulated.items()
+    ]
 
 
 @dataclass(frozen=True)
@@ -574,22 +569,23 @@ class Analysis:
         raw_inventory_targets = payload.get("inventory_targets")
         if raw_targets is not None and not isinstance(raw_targets, dict):
             raise ValueError(
-                "impacts.analysis.targets must be a mapping containing pm25_annual_short_tons and/or "
-                "nox_annual_short_tons"
+                "impacts.analysis.targets must be a mapping of pollutant_annual_short_tons keys "
+                "(e.g. pm25_annual_short_tons, nox_annual_short_tons, pm10_annual_short_tons, ...)"
             )
         raw_targets_dict = dict(raw_targets or {})
         _reject_unknown_keys(
             raw_targets_dict,
-            {"pm25_annual_short_tons", "nox_annual_short_tons"},
+            {f"{p}_annual_short_tons" for p in _SECTOR_TARGET_POLLUTANTS},
             "impacts.analysis.targets",
         )
-        raw_pm25_targets = raw_targets_dict.get("pm25_annual_short_tons")
-        raw_nox_targets = raw_targets_dict.get("nox_annual_short_tons")
+        raw_pollutant_targets = {
+            p: raw_targets_dict.get(f"{p}_annual_short_tons")
+            for p in _SECTOR_TARGET_POLLUTANTS
+        }
         if (
             raw_targets is None
             and raw_inventory_targets is None
-            and raw_pm25_targets is None
-            and raw_nox_targets is None
+            and all(v is None for v in raw_pollutant_targets.values())
             and payload.get("inventory_file") is None
             and payload.get("inventory_label") is None
         ):
@@ -608,8 +604,7 @@ class Analysis:
                 for name, target in raw_inventory_targets.items()
             ]
         sector_targets = _parse_analysis_sector_targets(
-            raw_pm25_targets=raw_pm25_targets,
-            raw_nox_targets=raw_nox_targets,
+            raw_pollutant_targets=raw_pollutant_targets,
             path_prefix="impacts.analysis.targets",
         )
         inventory_file = _optional_string(payload.get("inventory_file"))
@@ -931,11 +926,11 @@ class ImpactsSettings:
                         **(
                             {
                                 "targets": {
-                                    "pm25_annual_short_tons": {
+                                    f"{p}_annual_short_tons": {
                                         source: {
-                                            sector: target.annual_pm25_short_tons
+                                            sector: getattr(target, f"annual_{p}_short_tons")
                                             for sector, target in sectors.items()
-                                            if target.annual_pm25_short_tons is not None
+                                            if getattr(target, f"annual_{p}_short_tons") is not None
                                         }
                                         for source, sectors in {
                                             source: {
@@ -945,24 +940,10 @@ class ImpactsSettings:
                                             }
                                             for source in dict.fromkeys(target.source for target in self.impacts.analysis.sector_targets)
                                         }.items()
-                                        if any(target.annual_pm25_short_tons is not None for target in sectors.values())
-                                    },
-                                    "nox_annual_short_tons": {
-                                        source: {
-                                            sector: target.annual_nox_short_tons
-                                            for sector, target in sectors.items()
-                                            if target.annual_nox_short_tons is not None
-                                        }
-                                        for source, sectors in {
-                                            source: {
-                                                target.sector: target
-                                                for target in self.impacts.analysis.sector_targets
-                                                if target.source == source
-                                            }
-                                            for source in dict.fromkeys(target.source for target in self.impacts.analysis.sector_targets)
-                                        }.items()
-                                        if any(target.annual_nox_short_tons is not None for target in sectors.values())
-                                    },
+                                        if any(getattr(target, f"annual_{p}_short_tons") is not None for target in sectors.values())
+                                    }
+                                    for p in _SECTOR_TARGET_POLLUTANTS
+                                    if any(getattr(t, f"annual_{p}_short_tons") is not None for t in self.impacts.analysis.sector_targets)
                                 },
                             }
                             if self.impacts.analysis.sector_targets

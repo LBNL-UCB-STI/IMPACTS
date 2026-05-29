@@ -346,6 +346,11 @@ def run_analysis_from_settings(
                     "sector": target.sector,
                     "annual_pm25_short_tons": target.annual_pm25_short_tons,
                     "annual_nox_short_tons": target.annual_nox_short_tons,
+                    "annual_pm10_short_tons": target.annual_pm10_short_tons,
+                    "annual_tog_short_tons": target.annual_tog_short_tons,
+                    "annual_rog_short_tons": target.annual_rog_short_tons,
+                    "annual_co_short_tons": target.annual_co_short_tons,
+                    "annual_sox_short_tons": target.annual_sox_short_tons,
                 }
                 for target in settings.impacts.analysis.sector_targets
             ],

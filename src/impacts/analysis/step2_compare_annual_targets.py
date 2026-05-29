@@ -24,6 +24,21 @@ logger = logging.getLogger(__name__)
 _MODELED_POLLUTANT_COLUMNS = {
     "PM2.5": "tons_per_year_PM2_5_county_allocated",
     "NOx": "tons_per_year_NOx_county_allocated",
+    "PM10": "tons_per_year_PM10_county_allocated",
+    "TOG": "tons_per_year_TOG_county_allocated",
+    "ROG": "tons_per_year_ROG_county_allocated",
+    "CO": "tons_per_year_CO_county_allocated",
+    "SOx": "tons_per_year_SOx_county_allocated",
+}
+
+_SECTOR_TARGET_FIELDS = {
+    "annual_pm25_short_tons": "PM2.5",
+    "annual_nox_short_tons": "NOx",
+    "annual_pm10_short_tons": "PM10",
+    "annual_tog_short_tons": "TOG",
+    "annual_rog_short_tons": "ROG",
+    "annual_co_short_tons": "CO",
+    "annual_sox_short_tons": "SOx",
 }
 
 
@@ -93,24 +108,17 @@ def _build_targets_table(sector_targets: list[dict[str, object]]) -> pd.DataFram
     for target in sector_targets:
         source = str(target["source"])
         sector = str(target["sector"])
-        if target.get("annual_pm25_short_tons") is not None:
-            rows.append(
-                {
-                    "source": source,
-                    "sector": sector,
-                    "pollutant": "PM2.5",
-                    "target_tons": float(target["annual_pm25_short_tons"]),
-                }
-            )
-        if target.get("annual_nox_short_tons") is not None:
-            rows.append(
-                {
-                    "source": source,
-                    "sector": sector,
-                    "pollutant": "NOx",
-                    "target_tons": float(target["annual_nox_short_tons"]),
-                }
-            )
+        for field, pollutant_label in _SECTOR_TARGET_FIELDS.items():
+            value = target.get(field)
+            if value is not None:
+                rows.append(
+                    {
+                        "source": source,
+                        "sector": sector,
+                        "pollutant": pollutant_label,
+                        "target_tons": float(value),
+                    }
+                )
     if not rows:
         raise ValueError("Analysis Step 2 requires configured annual sector targets.")
     return pd.DataFrame(rows)
