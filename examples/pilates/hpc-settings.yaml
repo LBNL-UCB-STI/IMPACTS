@@ -105,7 +105,7 @@ impacts:
         Phe: [Plug-in Hybrid]
 
   fleet:
-    assignment_model: examples/pilates/fleet_assignment.yaml
+    assignment_model: fleet_assignment.yaml
     atlas:
       fuel_map:
         gasoline: [conv, hybrid, cng]

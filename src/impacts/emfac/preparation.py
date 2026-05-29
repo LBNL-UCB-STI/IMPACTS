@@ -176,12 +176,12 @@ def _extract_archive(archive: Path, destination: Path) -> None:
             stderr=subprocess.PIPE,
             check=True,
         )
-        subprocess.run(["tar", "-xf", "-", "-C", str(destination)], input=zstd.stdout, check=True)
+        subprocess.run(["tar", "--warning=no-unknown-keyword", "-xf", "-", "-C", str(destination)], input=zstd.stdout, check=True)
         return
     except (FileNotFoundError, subprocess.CalledProcessError):
         pass
     try:
-        subprocess.run(["tar", "--zstd", "-xf", str(archive), "-C", str(destination)], check=True)
+        subprocess.run(["tar", "--warning=no-unknown-keyword", "--zstd", "-xf", str(archive), "-C", str(destination)], check=True)
         return
     except (FileNotFoundError, subprocess.CalledProcessError):
         pass
