@@ -517,7 +517,7 @@ def _iter_input_csvs(path: str | Path) -> list[Path]:
         if target.suffix.lower() != ".csv":
             raise ValueError(f"Expected a CSV file: {target}")
         return [target]
-    files = sorted(p for p in target.iterdir() if p.is_file() and p.suffix.lower() == ".csv")
+    files = sorted(p for p in target.iterdir() if p.is_file() and p.suffix.lower() == ".csv" and not p.name.startswith("."))
     if not files:
         raise FileNotFoundError(f"No CSV files found under: {target}")
     return files
