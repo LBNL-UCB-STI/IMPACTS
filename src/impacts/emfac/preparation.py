@@ -12,7 +12,7 @@ from ..manifest.schema import ActivitiesManifest
 
 logger = logging.getLogger(__name__)
 
-_ARCHIVE_NAME = "emissions-raw.tar.zst"
+_ARCHIVE_NAME = "emissions_raw.tar.zst"
 
 
 
