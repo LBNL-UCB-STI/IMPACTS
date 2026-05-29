@@ -20,7 +20,7 @@ shared:
     local_crs: EPSG:26910
 
 beam:
-  local_input_folder: ~/Workspace/Models/beam/beam-data/beam-data-sfbay
+  local_input_folder: ~/Workspace/Models/beam/beam-data
   local_output_folder: beam/beam_output/
   router_directory: r5/sfbay-cbg5500-weakConn-network
 

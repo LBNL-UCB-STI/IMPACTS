@@ -254,7 +254,7 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
     vehicle_category_metadata_file = Path(resolve_path(str(metadata_path), config_path)).resolve()
 
     vehicle_folder = settings.impacts.population.vehicle_folder or "vehicle-tech"
-    archive = _archive_path(beam_input_folder, vehicle_folder).resolve()
+    archive = _archive_path(beam_input_folder / region_name, vehicle_folder).resolve()
 
     return {
         "region_name": region_name,
