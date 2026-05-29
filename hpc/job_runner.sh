@@ -23,6 +23,7 @@ JOB_NAME="$RANDOM_PART.$DATETIME"
 IMPACTS_DIR="${IMPACTS_DIR:-/global/scratch/users/$USER/sources/impacts}"
 
 config_file=""
+stage_arg="pipeline"
 partition_arg="lr7"
 account_arg=""
 high_mem=false
@@ -32,6 +33,10 @@ while [ $# -gt 0 ]; do
     case "$1" in
     -c)
         config_file="${2:-}"
+        shift 2
+        ;;
+    -s|--stage)
+        stage_arg="${2:-}"
         shift 2
         ;;
     -p)
@@ -51,16 +56,18 @@ while [ $# -gt 0 ]; do
         shift 2
         ;;
     -h|--help)
-        echo "Usage: $0 -c <config> -a <account> [-p partition] [--high-mem|-H] [-t hours]"
-        echo "  -c             Path to impacts settings.yaml (required)"
+        echo "Usage: $0 -c <config> -a <account> [-s stage] [-p partition] [--high-mem|-H] [-t hours]"
+        echo "  -c             Path to impacts config file (required)"
         echo "  -a, --account  Slurm account name (required)"
+        echo "  -s, --stage    Stage to run: pipeline (default), preprocess, presim, activities,"
+        echo "                 fleet, postsim, emissions, inmap, aermod, exposure, postprocess, analysis"
         echo "  -p             Partition: lr4, lr5, lr6, lr7 (default), lr8, lr_bigmem, cm1, cm2"
         echo "  --high-mem     Request high-memory config (lr6: 180G, lr7: 480G)"
         echo "  -t, --hours    Job time limit in hours (default: 24)"
         exit 0
         ;;
     *)
-        echo "Usage: $0 -c <config> -a <account> [-p partition] [--high-mem|-H] [-t hours]"
+        echo "Usage: $0 -c <config> -a <account> [-s stage] [-p partition] [--high-mem|-H] [-t hours]"
         exit 2
         ;;
     esac
@@ -178,6 +185,7 @@ sbatch \
     --time="$TIME_LIMIT" \
     --export="ALL,JOB_LOG_FILE_PATH=$JOB_LOG_FILE_PATH" \
     "$IMPACTS_DIR/hpc/job.sh" \
-    "$CONFIG_PATH"
+    "$CONFIG_PATH" \
+    "$stage_arg"
 
 echo "Job submitted. Log: $JOB_LOG_FILE_PATH"

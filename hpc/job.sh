@@ -46,11 +46,13 @@ install_python_deps() {
 }
 
 if [ "${1:-}" = "" ]; then
-    echo "Usage: $0 <settings.yaml>"
+    echo "Usage: $0 <config> [stage]"
     exit 2
 fi
 
 CONFIG_FILE="$1"
+STAGE="${2:-pipeline}"
+
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "ERROR: config file not found: $CONFIG_FILE"
     exit 1
@@ -98,4 +100,23 @@ export BLIS_NUM_THREADS="$THREADS"
 export VECLIB_MAXIMUM_THREADS="$THREADS"
 echo "Thread caps: $THREADS (OMP/MKL/OPENBLAS/NUMEXPR/BLIS/VECLIB)"
 
-python3 -m impacts pipeline --config "$CONFIG_FILE" --profile time
+echo "Stage: $STAGE"
+case "$STAGE" in
+    pipeline)
+        python3 -m impacts pipeline --config "$CONFIG_FILE" --profile time
+        ;;
+    preprocess|presim|activities|postsim|analysis)
+        python3 -m impacts "$STAGE" --config "$CONFIG_FILE"
+        ;;
+    fleet)
+        python3 -m impacts fleet --activities-manifest "$CONFIG_FILE"
+        ;;
+    emissions|inmap|aermod|exposure|postprocess)
+        python3 -m impacts "$STAGE" --run-manifest "$CONFIG_FILE"
+        ;;
+    *)
+        echo "ERROR: unsupported stage '$STAGE'"
+        echo "Supported: pipeline, preprocess, presim, activities, postsim, fleet, emissions, inmap, aermod, exposure, postprocess, analysis"
+        exit 2
+        ;;
+esac
