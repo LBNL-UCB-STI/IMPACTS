@@ -29,6 +29,7 @@ impacts:
   local_output_folder: /global/scratch/users/hmlaarabi/sources/impacts/examples/pilates/impacts/impacts_output/
   seed: 0
   scenario: "2018-Baseline"
+
   pipeline:
     presim:
       activities: true
@@ -38,6 +39,7 @@ impacts:
       inmap: true
       aermod: true
       exposure: true
+
   population:
     passenger_folder: urbansim/atlas-2019
     freight_folder: <set-local-or-absolute-path>
@@ -46,6 +48,7 @@ impacts:
     frism_year: 2018
     population_sample: 0.1
     transit_sample: 1.0
+
   activities:
     region_label: SF
     model_year_groups:
@@ -100,6 +103,7 @@ impacts:
         Gas: [Gasoline]
         NG: [Natural Gas]
         Phe: [Plug-in Hybrid]
+
   fleet:
     assignment_model: examples/pilates/fleet_assignment.yaml
     atlas:
@@ -109,6 +113,7 @@ impacts:
         hydrogen: [fuelcell]
         electricity+gasoline: [phev]
       income_bins: [0, 30, 60, 100, 200, 9999]
+
   emissions:
     pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
     include_non_osm_car_links: true
@@ -119,6 +124,7 @@ impacts:
     default_annualization_days:
       light_duty: 327.0
       medium_heavy_duty: 312.0
+
   dispersions:
     inmap:
       isrm_zarr: /global/home/users/hmlaarabi/scratch/isrm_v1.2.1.zarr
@@ -130,8 +136,9 @@ impacts:
       grid_size_meters: 100.0
       asrv_patterns_file: aermod/aermod_patterns_wgs84.parquet
       asrv_patterns_epsg: 4326
+
   analysis:
-    targets:
+    targets: # 2018 year: https://www.baaqmd.gov/en/about-air-quality/emission-inventory/emissions-lookup-tool
       pm25_annual_short_tons:
         mobile_onroad:
           passenger_cars: 714.26
@@ -148,3 +155,48 @@ impacts:
           medium_duty_trucks: 1880.14
           heavy_duty_trucks: 16524.57
           other: 1429.61
+      rog_annual_short_tons:
+        mobile_onroad:
+          passenger_cars: 4877.02
+          light_duty_trucks: 3384.74
+          medium_duty_trucks: 1809.77
+          heavy_duty_trucks: 1663.68
+          other: 1665.45
+        road_dust:
+          all:
+      sox_annual_short_tons:
+        mobile_onroad:
+          passenger_cars: 105.34
+          light_duty_trucks: 58.88
+          medium_duty_trucks: 35.14
+          heavy_duty_trucks: 49.98
+          other: 5.31
+        road_dust:
+          all:
+      pm10_annual_short_tons:
+        mobile_onroad:
+          passenger_cars: 1705.24
+          light_duty_trucks: 746.55
+          medium_duty_trucks: 360.45
+          heavy_duty_trucks: 769.24
+          other: 88.17
+        road_dust:
+          all: 10465.56
+      tog_annual_short_tons:
+        mobile_onroad:
+          passenger_cars: 5356.65
+          light_duty_trucks: 3685.32
+          medium_duty_trucks: 1983.48
+          heavy_duty_trucks: 1913.94
+          other: 2009.93
+        road_dust:
+          all:
+      co_annual_short_tons:
+        mobile_onroad:
+          passenger_cars: 46346.58
+          light_duty_trucks: 27664.06
+          medium_duty_trucks: 15307.58
+          heavy_duty_trucks: 7027.98
+          other: 10767.99
+        road_dust:
+          all:
