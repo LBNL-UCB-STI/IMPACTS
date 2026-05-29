@@ -46,6 +46,9 @@ def build_registry(settings, config_path: Path) -> PathRegistry:
     beam_input = resolve_path(settings.beam.local_input_folder, config_path)
     if beam_input:
         roots.append(Path(beam_input))
+        region = settings.run.region
+        if region:
+            roots.append(Path(beam_input) / region / "vehicle-tech" / "emissions")
         vehicle_folder = settings.impacts.population.vehicle_folder
         if vehicle_folder:
             roots.append(Path(beam_input) / vehicle_folder / "emissions")

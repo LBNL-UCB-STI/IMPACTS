@@ -1105,7 +1105,10 @@ def _build_emfac_root_from_settings_file(path: Path) -> dict[str, object]:
         fleet.setdefault("fuel_consumption_catalog", _default_fuel_consumption_catalog(vehicle_folder))
     assignment_model = fleet_settings.get("assignment_model")
     if assignment_model not in (None, ""):
-        fleet["assignment_model"] = assignment_model
+        from .path_registry import build_registry
+        registry = build_registry(settings, path)
+        resolved = registry.locate(str(assignment_model))
+        fleet["assignment_model"] = str(resolved) if resolved else assignment_model
     return {
         "region": {
             "name": settings.run.region,
@@ -2077,10 +2080,6 @@ def _derive_emfac_output_paths(emfac: dict[str, object]) -> dict[str, object]:
 
 def _ingest_fleet_sources(config: dict) -> dict:
     config = deepcopy(config)
-    model_spec: dict | None = None
-    model_file = config.get("assignment_model")
-    if model_file not in (None, ""):
-        model_spec = _load_model_spec(str(model_file))
     config["output"] = _normalize_configured_path(config.get("output"), path_label="output", must_exist=False)
     activities = config.get("activities", {})
     if isinstance(activities, dict):
