@@ -139,6 +139,7 @@ impacts:
 
   analysis:
     targets:
+
       pm25_annual_short_tons:
         mobile_onroad:
           passenger_cars: 714.26
@@ -148,6 +149,7 @@ impacts:
           other: 43.62
         road_dust:
           all: 1499.25
+
       nox_annual_short_tons:
         mobile_onroad:
           passenger_cars: 3964.37
@@ -155,3 +157,53 @@ impacts:
           medium_duty_trucks: 1880.14
           heavy_duty_trucks: 16524.57
           other: 1429.61
+
+      pm10_annual_short_tons:
+        mobile_onroad:
+          passenger_cars: 1705.24
+          light_duty_trucks: 746.13
+          medium_duty_trucks: 360.23
+          heavy_duty_trucks: 768.87
+          other:
+        road_dust:
+          all: 10466
+
+      tog_annual_short_tons:
+        mobile_onroad:
+          passenger_cars: 5358.2
+          light_duty_trucks: 3686.28
+          medium_duty_trucks: 1984.46
+          heavy_duty_trucks: 1914.18
+          other:
+        road_dust:
+          all:
+
+      rog_annual_short_tons:
+        mobile_onroad:
+          passenger_cars: 4878.17
+          light_duty_trucks: 3386.16
+          medium_duty_trucks: 1811.05
+          heavy_duty_trucks: 1663.59
+          other:
+        road_dust:
+          all:
+
+      co_annual_short_tons:
+        mobile_onroad:
+          passenger_cars: 46352.02
+          light_duty_trucks: 27669.81
+          medium_duty_trucks: 15307.84
+          heavy_duty_trucks: 7027.25
+          other:
+        road_dust:
+          all:
+
+      so2_annual_short_tons:
+        mobile_onroad:
+          passenger_cars: 105.28
+          light_duty_trucks: 58.84
+          medium_duty_trucks: 35.12
+          heavy_duty_trucks: 49.96
+          other:
+        road_dust:
+          all:
