@@ -20,7 +20,6 @@ from pathlib import Path
 import re
 import time
 from multiprocessing import Pool
-from typing import Any
 from typing import Iterable
 from typing import List
 from typing import Optional
@@ -49,25 +48,6 @@ DY = 1000
 def _sanitize_name(name: str) -> str:
     cleaned = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in str(name).strip())
     return cleaned or "object"
-
-
-def _read_rdata_frame(path: str | Path, object_name: str | None = None) -> pd.DataFrame:
-    try:
-        import pyreadr
-    except ImportError as exc:
-        raise ImportError("pyreadr is required to read .RData files") from exc
-
-    result = pyreadr.read_r(str(path))
-    if object_name is not None:
-        if object_name not in result:
-            raise KeyError(f"Expected '{object_name}' in {path}; found {list(result.keys())}")
-        value = result[object_name]
-    else:
-        value = next(iter(result.values()))
-
-    if not isinstance(value, pd.DataFrame):
-        raise TypeError(f"Expected a data frame in {path}, got {type(value)}")
-    return value.copy()
 
 
 def _normalize_square_matrix(df: pd.DataFrame) -> pd.DataFrame:

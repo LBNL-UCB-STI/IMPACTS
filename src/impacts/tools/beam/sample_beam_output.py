@@ -328,10 +328,6 @@ def _is_explicit_skims_schema(df: pd.DataFrame) -> bool:
     return "emissionsProcess" in df.columns and any(col in df.columns for col in EXPLICIT_SKIMS_POLLUTANTS)
 
 
-def _pollutant_columns(df: pd.DataFrame) -> list[str]:
-    return [col for col in EXPLICIT_SKIMS_POLLUTANTS if col in df.columns]
-
-
 def _compact_explicit_skims_partition(df: pd.DataFrame) -> pd.DataFrame:
     compact = pd.DataFrame(index=df.index)
     compact["hour"] = df["hour"] if "hour" in df.columns else 0

@@ -7,9 +7,9 @@ from typing import Dict
 from .config.settings_builder import load_settings_from_yaml
 from .manifest.file_ops import resolve_path
 from .manifest.file_ops import write_structured_file
-from .manifest.schema import InputsManifest
+from .manifest.schema import PreprocessManifest
 from .manifest.schema import PipelineConfig
-from .manifest.schema import RunManifest
+from .manifest.schema import PipelineManifest
 from .common import infer_vector_epsg
 from .common import parse_epsg
 from .common import prepared_table_target
@@ -26,7 +26,7 @@ def _derive_impacts_tmp_root(output_root: Path) -> Path:
 
 
 
-def build_inputs_manifest(
+def build_preprocess_manifest(
     settings_path: str | Path,
 ) -> Dict[str, Any]:
     config_path = Path(settings_path).resolve()
@@ -209,7 +209,7 @@ def build_inputs_manifest(
         "settings_source": str(config_path),
         "staging_dir": str(input_root),
         "input_dir": str(input_root),
-        "inputs_manifest_path": str(output_root / "inputs_manifest.yaml"),
+        "preprocess_manifest_path": str(output_root / "preprocess_manifest.yaml"),
         "maintained_execution_path": maintained_execution_path,
         "inputs": manifest_inputs,
         "pipeline": pipeline_config.to_dict(),
@@ -225,7 +225,7 @@ def build_inputs_manifest(
             "entrypoint": "python -m impacts emissions",
             "command_template": "python -m impacts emissions --run-manifest {run_manifest}",
             "canonical_output_filenames": ["impacts_exposure_table.parquet"],
-            "manifest_filenames": ["inputs_manifest.yaml", "run_manifest.yaml", "postprocess_manifest.yaml"],
+            "manifest_filenames": ["preprocess_manifest.yaml", "pipeline_manifest.yaml", "postprocess_manifest.yaml"],
         },
         "population_inputs": dict(step1_outputs["population_inputs"]),
         "notes": [
@@ -246,21 +246,21 @@ def preprocess_workflow(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         force=False,
     )
-    manifest = build_inputs_manifest(settings_path=settings_path)
-    output_manifest = Path(manifest_path) if manifest_path else Path(manifest["inputs_manifest_path"])
-    manifest["inputs_manifest_path"] = str(output_manifest)
-    typed_manifest = InputsManifest.from_dict(manifest)
+    manifest = build_preprocess_manifest(settings_path=settings_path)
+    output_manifest = Path(manifest_path) if manifest_path else Path(manifest["preprocess_manifest_path"])
+    manifest["preprocess_manifest_path"] = str(output_manifest)
+    typed_manifest = PreprocessManifest.from_dict(manifest)
     write_structured_file(output_manifest, typed_manifest.to_dict())
-    run_manifest_path = Path(manifest["inputs_manifest_path"]).resolve().parent / "run_manifest.yaml"
+    pipeline_manifest_path = Path(manifest["preprocess_manifest_path"]).resolve().parent / "pipeline_manifest.yaml"
     pipeline = PipelineConfig.from_dict(typed_manifest.to_dict()["pipeline"])
     inputs_payload = typed_manifest.to_dict()["inputs"]
-    output_root = run_manifest_path.parent.resolve()
+    output_root = pipeline_manifest_path.parent.resolve()
     input_root = Path(typed_manifest.to_dict()["input_dir"]).resolve()
     prepared_skims_candidate = prepared_table_target(output_root / "emissions", "prepared_skims_for_grid_allocation")
-    initial_run_manifest = {
+    initial_pipeline_manifest = {
         "contract_version": typed_manifest.contract_version,
         "model": "impacts",
-        "input_manifest_path": str(Path(manifest["inputs_manifest_path"]).resolve()),
+        "preprocess_manifest_path": str(Path(manifest["preprocess_manifest_path"]).resolve()),
         "output_dir": str(output_root),
         "command": "python -m impacts preprocess",
         "image": "not_recorded",
@@ -295,12 +295,12 @@ def preprocess_workflow(
             "stage_timings_seconds": {},
             "stopped_after": "preprocess",
         },
-        "run_manifest_path": str(run_manifest_path),
+        "pipeline_manifest_path": str(pipeline_manifest_path),
     }
-    typed_run_manifest = RunManifest.from_dict(initial_run_manifest)
-    write_structured_file(run_manifest_path, typed_run_manifest.to_dict())
-    logger.info("Preprocess complete: wrote inputs manifest %s", output_manifest)
-    logger.info("Preprocess seeded run manifest %s", run_manifest_path)
+    typed_pipeline_manifest = PipelineManifest.from_dict(initial_pipeline_manifest)
+    write_structured_file(pipeline_manifest_path, typed_pipeline_manifest.to_dict())
+    logger.info("Preprocess complete: wrote preprocess manifest %s", output_manifest)
+    logger.info("Preprocess seeded pipeline manifest %s", pipeline_manifest_path)
     result = typed_manifest.to_dict()
-    result["run_manifest_path"] = str(run_manifest_path)
+    result["pipeline_manifest_path"] = str(pipeline_manifest_path)
     return result

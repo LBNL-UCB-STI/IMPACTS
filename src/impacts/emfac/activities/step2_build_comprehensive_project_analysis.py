@@ -7,7 +7,6 @@ import pandas as pd
 from impacts.emfac.common import frame_summary
 from impacts.config.settings import _apply_table_schema
 from impacts.config.settings import build_model_category_fuel_mapping
-from impacts.config.settings import read_table
 from impacts.emfac.common import write_trace
 
 ACTIVITY_COLUMN = "speedMph_timeMin"
@@ -48,19 +47,6 @@ _INVENTORY_SCHEMA = {
 
 def _format_numeric_series(values: pd.Series) -> pd.Series:
     return values.map(lambda value: f"{float(value):g}" if pd.notna(value) else pd.NA)
-
-
-def _summarize_category_fuel_pairs(frame: pd.DataFrame) -> dict[str, object]:
-    if not {"vehicleCategory", "fuel"}.issubset(frame.columns):
-        return {"pair_count": 0, "category_count": 0, "fuel_count": 0, "sample_pairs": []}
-    pairs = frame[["vehicleCategory", "fuel"]].drop_duplicates().copy()
-    pairs = pairs.sort_values(["vehicleCategory", "fuel"], kind="mergesort")
-    return {
-        "pair_count": int(len(pairs)),
-        "category_count": int(pairs["vehicleCategory"].nunique()),
-        "fuel_count": int(pairs["fuel"].nunique()),
-        "sample_pairs": pairs.head(10).to_dict(orient="records"),
-    }
 
 
 def _enforce_project_analysis_schema(frame: pd.DataFrame) -> pd.DataFrame:

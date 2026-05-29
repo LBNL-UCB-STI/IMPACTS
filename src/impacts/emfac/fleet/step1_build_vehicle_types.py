@@ -14,7 +14,6 @@ from pathlib import Path
 import re
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from impacts.config.settings import ATLAS_HOUSEHOLDS_SCHEMA

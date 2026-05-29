@@ -18,7 +18,6 @@ from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import read_vector
 from ...common import resolve_required_manifest_input
-from ...common import write_vector
 from ...manifest.schema import PipelineConfig
 
 logger = logging.getLogger(__name__)
@@ -222,15 +221,6 @@ def _resolve_source_row_col(df: pd.DataFrame) -> str:
     if _SOURCE_ROW_ID in df.columns:
         return _SOURCE_ROW_ID
     raise ValueError(f"Expected source row id column '{_SOURCE_ROW_ID}' in columns: {list(df.columns)}")
-
-
-def _resolve_mapped_network_path(input_root: Path) -> str:
-    direct = input_root / "beam_osm_mapped.parquet"
-    if direct.exists():
-        return str(direct)
-    raise FileNotFoundError(
-        f"Step 3 expected the managed mapped network cache at {direct}"
-    )
 
 
 def _ensure_mapped_network_covers_car_beam_links(

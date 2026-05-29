@@ -10,32 +10,32 @@ from .config.settings_builder import load_settings_from_yaml
 from .manifest.file_ops import load_structured_file
 from .manifest.file_ops import write_structured_file
 from .manifest.schema import PostprocessManifest
-from .manifest.schema import RunManifest
+from .manifest.schema import PipelineManifest
 
 logger = logging.getLogger(__name__)
 
 
-def postprocess_from_run_manifest(
+def postprocess_from_pipeline_manifest(
     run_manifest_path: str | Path,
     manifest_path: str | Path | None = None,
 ) -> Dict[str, Any]:
-    from .runner import run_analysis_from_run_manifest
+    from .runner import run_analysis_from_pipeline_manifest
 
-    run_manifest = RunManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
-    output_root = Path(str(run_manifest.get("output_dir"))).resolve()
+    pipeline_manifest = PipelineManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
+    output_root = Path(str(pipeline_manifest.get("output_dir"))).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
 
     log_step_banner("Postprocess", "Impacts Complete", logger=logger)
     logger.info("End of impacts concluded.")
 
-    analysis_outputs = run_analysis_from_run_manifest(
+    analysis_outputs = run_analysis_from_pipeline_manifest(
         run_manifest_path=run_manifest_path,
     )
 
     postprocess_manifest = {
-        "contract_version": run_manifest.get("contract_version", "1"),
+        "contract_version": pipeline_manifest.get("contract_version", "1"),
         "model": "impacts",
-        "run_manifest_path": str(Path(run_manifest_path).resolve()),
+        "pipeline_manifest_path": str(Path(run_manifest_path).resolve()),
         "output_dir": str(output_root),
         "analysis_outputs": analysis_outputs,
         "validation": {
@@ -59,37 +59,37 @@ def postprocess_from_settings(
     manifest_path: str | Path | None = None,
 ) -> Dict[str, Any]:
     from impacts.preprocessor import preprocess_workflow
-    from impacts.runner import run_aermod_from_run_manifest
-    from impacts.runner import run_emissions_from_run_manifest
-    from impacts.runner import run_exposure_from_run_manifest
-    from impacts.runner import run_inmap_from_run_manifest
+    from impacts.runner import run_aermod_from_pipeline_manifest
+    from impacts.runner import run_emissions_from_pipeline_manifest
+    from impacts.runner import run_exposure_from_pipeline_manifest
+    from impacts.runner import run_inmap_from_pipeline_manifest
 
     settings = load_settings_from_yaml(settings_path)
     preprocess_manifest = preprocess_workflow(
         settings_path=settings_path,
     )
-    run_manifest_path = preprocess_manifest["run_manifest_path"]
+    run_manifest_path = preprocess_manifest["pipeline_manifest_path"]
     if settings.impacts.pipeline.postsim.emissions:
-        run_manifest = run_emissions_from_run_manifest(
+        run_manifest = run_emissions_from_pipeline_manifest(
             run_manifest_path=run_manifest_path,
         )
-        run_manifest_path = run_manifest["run_manifest_path"]
+        run_manifest_path = run_manifest["pipeline_manifest_path"]
     if settings.impacts.pipeline.postsim.inmap:
-        run_manifest = run_inmap_from_run_manifest(
+        run_manifest = run_inmap_from_pipeline_manifest(
             run_manifest_path=run_manifest_path,
         )
-        run_manifest_path = run_manifest["run_manifest_path"]
+        run_manifest_path = run_manifest["pipeline_manifest_path"]
     if settings.impacts.pipeline.postsim.aermod:
-        run_manifest = run_aermod_from_run_manifest(
+        run_manifest = run_aermod_from_pipeline_manifest(
             run_manifest_path=run_manifest_path,
         )
-        run_manifest_path = run_manifest["run_manifest_path"]
+        run_manifest_path = run_manifest["pipeline_manifest_path"]
     if settings.impacts.pipeline.postsim.exposure:
-        run_manifest = run_exposure_from_run_manifest(
+        run_manifest = run_exposure_from_pipeline_manifest(
             run_manifest_path=run_manifest_path,
         )
-        run_manifest_path = run_manifest["run_manifest_path"]
-    return postprocess_from_run_manifest(
+        run_manifest_path = run_manifest["pipeline_manifest_path"]
+    return postprocess_from_pipeline_manifest(
         run_manifest_path=run_manifest_path,
         manifest_path=manifest_path,
     )

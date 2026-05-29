@@ -215,13 +215,13 @@ class PipelineConfig:
 
 
 @dataclass(frozen=True)
-class InputsManifest:
+class PreprocessManifest:
     contract_version: str
     model: str
     settings_source: str
     staging_dir: str
     input_dir: str
-    inputs_manifest_path: str
+    preprocess_manifest_path: str
     maintained_execution_path: List[str]
     inputs: Dict[str, Any]
     pipeline: Dict[str, Any]
@@ -230,7 +230,7 @@ class InputsManifest:
     notes: List[str]
 
     @classmethod
-    def from_dict(cls, payload: Dict[str, Any]) -> "InputsManifest":
+    def from_dict(cls, payload: Dict[str, Any]) -> "PreprocessManifest":
         _reject_unknown_keys(
             payload,
             {
@@ -239,7 +239,7 @@ class InputsManifest:
                 "settings_source",
                 "staging_dir",
                 "input_dir",
-                "inputs_manifest_path",
+                "preprocess_manifest_path",
                 "maintained_execution_path",
                 "inputs",
                 "pipeline",
@@ -247,7 +247,7 @@ class InputsManifest:
                 "population_inputs",
                 "notes",
             },
-            "inputs manifest",
+            "preprocess manifest",
         )
         pipeline = _required_dict(payload.get("pipeline"), "pipeline")
         # Validate the embedded pipeline payload against the maintained schema.
@@ -258,7 +258,7 @@ class InputsManifest:
             settings_source=_required_string(payload.get("settings_source"), "settings_source"),
             staging_dir=_required_string(payload.get("staging_dir"), "staging_dir"),
             input_dir=_required_string(payload.get("input_dir"), "input_dir"),
-            inputs_manifest_path=_required_string(payload.get("inputs_manifest_path"), "inputs_manifest_path"),
+            preprocess_manifest_path=_required_string(payload.get("preprocess_manifest_path"), "preprocess_manifest_path"),
             maintained_execution_path=_coerce_string_list(payload.get("maintained_execution_path")),
             inputs=_required_dict(payload.get("inputs"), "inputs"),
             pipeline=pipeline,
@@ -271,14 +271,14 @@ class InputsManifest:
         return asdict(self)
 
     def path(self) -> Path:
-        return Path(self.inputs_manifest_path)
+        return Path(self.preprocess_manifest_path)
 
 
 @dataclass(frozen=True)
-class RunManifest:
+class PipelineManifest:
     contract_version: str
     model: str
-    input_manifest_path: str
+    preprocess_manifest_path: str
     output_dir: str
     command: str
     image: str
@@ -287,16 +287,16 @@ class RunManifest:
     population_inputs: Dict[str, Any]
     deterministic_contract: Dict[str, Any]
     execution: Dict[str, Any]
-    run_manifest_path: str
+    pipeline_manifest_path: str
 
     @classmethod
-    def from_dict(cls, payload: Dict[str, Any]) -> "RunManifest":
+    def from_dict(cls, payload: Dict[str, Any]) -> "PipelineManifest":
         _reject_unknown_keys(
             payload,
             {
                 "contract_version",
                 "model",
-                "input_manifest_path",
+                "preprocess_manifest_path",
                 "output_dir",
                 "command",
                 "image",
@@ -305,17 +305,17 @@ class RunManifest:
                 "population_inputs",
                 "deterministic_contract",
                 "execution",
-                "run_manifest_path",
+                "pipeline_manifest_path",
             },
-            "run manifest",
+            "pipeline manifest",
         )
         outputs = _required_dict(payload.get("outputs"), "outputs")
         if "skims_emissions" not in outputs:
-            raise ValueError("Run manifest missing outputs.skims_emissions")
+            raise ValueError("Pipeline manifest missing outputs.skims_emissions")
         return cls(
             contract_version=_required_string(payload.get("contract_version"), "contract_version"),
             model=_required_string(payload.get("model"), "model"),
-            input_manifest_path=_required_string(payload.get("input_manifest_path"), "input_manifest_path"),
+            preprocess_manifest_path=_required_string(payload.get("preprocess_manifest_path"), "preprocess_manifest_path"),
             output_dir=_required_string(payload.get("output_dir"), "output_dir"),
             command=_required_string(payload.get("command"), "command"),
             image=_required_string(payload.get("image"), "image"),
@@ -324,14 +324,14 @@ class RunManifest:
             population_inputs=_required_dict(payload.get("population_inputs"), "population_inputs"),
             deterministic_contract=_required_dict(payload.get("deterministic_contract"), "deterministic_contract"),
             execution=_required_dict(payload.get("execution"), "execution"),
-            run_manifest_path=_required_string(payload.get("run_manifest_path"), "run_manifest_path"),
+            pipeline_manifest_path=_required_string(payload.get("pipeline_manifest_path"), "pipeline_manifest_path"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
     def path(self) -> Path:
-        return Path(self.run_manifest_path)
+        return Path(self.pipeline_manifest_path)
 
 
 @dataclass(frozen=True)
@@ -412,7 +412,7 @@ class ActivitiesManifest:
 class PostprocessManifest:
     contract_version: str
     model: str
-    run_manifest_path: str
+    pipeline_manifest_path: str
     output_dir: str
     analysis_outputs: Dict[str, Any]
     validation: Dict[str, Any]
@@ -426,7 +426,7 @@ class PostprocessManifest:
             {
                 "contract_version",
                 "model",
-                "run_manifest_path",
+                "pipeline_manifest_path",
                 "output_dir",
                 "analysis_outputs",
                 "validation",
@@ -438,7 +438,7 @@ class PostprocessManifest:
         return cls(
             contract_version=_required_string(payload.get("contract_version"), "contract_version"),
             model=_required_string(payload.get("model"), "model"),
-            run_manifest_path=_required_string(payload.get("run_manifest_path"), "run_manifest_path"),
+            pipeline_manifest_path=_required_string(payload.get("pipeline_manifest_path"), "pipeline_manifest_path"),
             output_dir=_required_string(payload.get("output_dir"), "output_dir"),
             analysis_outputs=_required_dict(payload.get("analysis_outputs"), "analysis_outputs"),
             validation=_required_dict(payload.get("validation"), "validation"),

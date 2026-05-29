@@ -15,9 +15,9 @@ from .config.settings_builder import load_settings_from_yaml
 from .manifest.file_ops import load_structured_file
 from .manifest.file_ops import resolve_path
 from .manifest.file_ops import write_structured_file
-from .manifest.schema import InputsManifest
+from .manifest.schema import PreprocessManifest
 from .manifest.schema import PipelineConfig
-from .manifest.schema import RunManifest
+from .manifest.schema import PipelineManifest
 from .common import resolve_required_manifest_input
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ def _resolve_existing_run_manifest_path(
     if run_manifest_path:
         candidate = Path(run_manifest_path).resolve()
         return candidate if candidate.exists() else None
-    candidate = output_root / "run_manifest.yaml"
+    candidate = output_root / "pipeline_manifest.yaml"
     return candidate if candidate.exists() else None
 
 
@@ -85,20 +85,20 @@ def _load_existing_run_manifest(
     candidate = _resolve_existing_run_manifest_path(output_root=output_root, run_manifest_path=run_manifest_path)
     if candidate is None:
         return {}
-    return RunManifest.from_dict(load_structured_file(candidate)).to_dict()
+    return PipelineManifest.from_dict(load_structured_file(candidate)).to_dict()
 
 
 def _load_run_manifest_context(
     run_manifest_path: str | Path,
 ) -> tuple[dict[str, Any], Path, str]:
-    manifest = RunManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
-    input_manifest_path = manifest.get("input_manifest_path")
-    if not input_manifest_path:
-        raise ValueError("Run manifest is missing input_manifest_path.")
+    manifest = PipelineManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
+    preprocess_manifest_path = manifest.get("preprocess_manifest_path")
+    if not preprocess_manifest_path:
+        raise ValueError("Pipeline manifest is missing preprocess_manifest_path.")
     output_dir = manifest.get("output_dir")
     if not output_dir:
-        raise ValueError("Run manifest is missing output_dir.")
-    return manifest, Path(str(output_dir)).resolve(), str(input_manifest_path)
+        raise ValueError("Pipeline manifest is missing output_dir.")
+    return manifest, Path(str(output_dir)).resolve(), str(preprocess_manifest_path)
 
 
 def _resolve_staged_intersection_paths(
@@ -134,22 +134,22 @@ def _humanize_target_name(name: str) -> str:
 
 
 def _resolve_run_manifest_settings_path(run_manifest_path: str | Path) -> Path:
-    run_manifest = RunManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
-    input_manifest_path = run_manifest.get("input_manifest_path")
-    if not input_manifest_path:
-        raise ValueError("Analysis requires input_manifest_path in run_manifest.")
-    input_manifest = InputsManifest.from_dict(load_structured_file(input_manifest_path)).to_dict()
-    settings_source = input_manifest.get("settings_source")
+    run_manifest = PipelineManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
+    preprocess_manifest_path = run_manifest.get("preprocess_manifest_path")
+    if not preprocess_manifest_path:
+        raise ValueError("Analysis requires preprocess_manifest_path in pipeline manifest.")
+    preprocess_manifest = PreprocessManifest.from_dict(load_structured_file(preprocess_manifest_path)).to_dict()
+    settings_source = preprocess_manifest.get("settings_source")
     if not settings_source:
-        raise ValueError("Analysis requires settings_source in input manifest.")
+        raise ValueError("Analysis requires settings_source in preprocess manifest.")
     return Path(settings_source).resolve()
 
 
 def _resolve_analysis_run_manifest_path(settings_path: str | Path) -> Path:
-    candidate = Path(resolve_path(load_settings_from_yaml(settings_path).impacts.local_output_folder, settings_path)).resolve() / "run_manifest.yaml"
+    candidate = Path(resolve_path(load_settings_from_yaml(settings_path).impacts.local_output_folder, settings_path)).resolve() / "pipeline_manifest.yaml"
     if not candidate.exists():
         raise FileNotFoundError(
-            "Analysis requires workflow run_manifest.yaml in the configured impacts.local_output_folder. "
+            "Analysis requires workflow pipeline_manifest.yaml in the configured impacts.local_output_folder. "
             f"Expected {candidate}."
         )
     return candidate
@@ -157,18 +157,18 @@ def _resolve_analysis_run_manifest_path(settings_path: str | Path) -> Path:
 
 def _load_analysis_run_manifest(settings_path: str | Path) -> tuple[Path, dict[str, Any]]:
     run_manifest_path = _resolve_analysis_run_manifest_path(settings_path)
-    run_manifest = RunManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
+    run_manifest = PipelineManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
     return run_manifest_path, run_manifest
 
 
 def _load_analysis_context(settings_path: str | Path) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
     run_manifest_path, run_manifest = _load_analysis_run_manifest(settings_path)
-    input_manifest_path = run_manifest.get("input_manifest_path")
-    if not input_manifest_path:
-        raise ValueError("Analysis requires input_manifest_path in run_manifest.")
-    input_manifest = InputsManifest.from_dict(load_structured_file(input_manifest_path)).to_dict()
-    inputs = input_manifest.get("inputs", {}) or {}
-    return run_manifest_path, run_manifest, input_manifest, inputs
+    preprocess_manifest_path = run_manifest.get("preprocess_manifest_path")
+    if not preprocess_manifest_path:
+        raise ValueError("Analysis requires preprocess_manifest_path in pipeline manifest.")
+    preprocess_manifest = PreprocessManifest.from_dict(load_structured_file(preprocess_manifest_path)).to_dict()
+    inputs = preprocess_manifest.get("inputs", {}) or {}
+    return run_manifest_path, run_manifest, preprocess_manifest, inputs
 
 
 def _resolve_analysis_modeled_emissions_path(settings_path: str | Path) -> Path:
@@ -394,15 +394,15 @@ def run_analysis_from_settings(
     return outputs
 
 
-def run_analysis_from_run_manifest(
+def run_analysis_from_pipeline_manifest(
     *,
     run_manifest_path: str | Path,
 ) -> Dict[str, str]:
     return run_analysis_from_settings(settings_path=_resolve_run_manifest_settings_path(run_manifest_path))
 
 
-def _run_stages_from_input_manifest(
-    input_manifest_path: str | Path,
+def _run_stages_from_preprocess_manifest(
+    preprocess_manifest_path: str | Path,
     run_manifest_path: str | Path | None = None,
     run_dispersion: bool = False,
     run_emissions: bool | None = None,
@@ -415,7 +415,7 @@ def _run_stages_from_input_manifest(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         force=False,
     )
-    manifest = InputsManifest.from_dict(load_structured_file(input_manifest_path)).to_dict()
+    manifest = PreprocessManifest.from_dict(load_structured_file(preprocess_manifest_path)).to_dict()
     pipeline = PipelineConfig.from_dict(manifest.get("pipeline", {}) or {})
     population_inputs = manifest.get("population_inputs", {}) or {}
     manifest_inputs = manifest.get("inputs", {}) or {}
@@ -428,7 +428,7 @@ def _run_stages_from_input_manifest(
     (output_root / "emissions").mkdir(parents=True, exist_ok=True)
     (output_root / "concentrations").mkdir(parents=True, exist_ok=True)
     (output_root / "exposure").mkdir(parents=True, exist_ok=True)
-    logger.info("Loaded input manifest: %s", Path(input_manifest_path).resolve())
+    logger.info("Loaded preprocess manifest: %s", Path(preprocess_manifest_path).resolve())
     logger.info("Output directory: %s", output_root)
 
     from .common import prepared_table_target
@@ -580,7 +580,7 @@ def _run_stages_from_input_manifest(
     run_manifest = {
         "contract_version": manifest.get("contract_version", "1"),
         "model": "impacts",
-        "input_manifest_path": str(Path(input_manifest_path).resolve()),
+        "preprocess_manifest_path": str(Path(preprocess_manifest_path).resolve()),
         "output_dir": str(output_root),
         "command": " ".join(sys.argv),
         "image": "not_recorded",
@@ -639,21 +639,21 @@ def _run_stages_from_input_manifest(
         },
     }
     shutil.rmtree(output_root / "_tmp", ignore_errors=True)
-    output_manifest = Path(run_manifest_path) if run_manifest_path else output_root / "run_manifest.yaml"
-    run_manifest["run_manifest_path"] = str(output_manifest)
-    typed_manifest = RunManifest.from_dict(run_manifest)
+    output_manifest = Path(run_manifest_path) if run_manifest_path else output_root / "pipeline_manifest.yaml"
+    run_manifest["pipeline_manifest_path"] = str(output_manifest)
+    typed_manifest = PipelineManifest.from_dict(run_manifest)
     write_structured_file(output_manifest, typed_manifest.to_dict())
-    logger.info("Run manifest written: %s", output_manifest)
+    logger.info("Pipeline manifest written: %s", output_manifest)
     return typed_manifest.to_dict()
 
 
-def run_emissions_from_run_manifest(
+def run_emissions_from_pipeline_manifest(
     *,
     run_manifest_path: str | Path,
 ) -> Dict[str, Any]:
-    _, _, input_manifest_path = _load_run_manifest_context(run_manifest_path)
-    return _run_stages_from_input_manifest(
-        input_manifest_path=input_manifest_path,
+    _, _, preprocess_manifest_path = _load_run_manifest_context(run_manifest_path)
+    return _run_stages_from_preprocess_manifest(
+        preprocess_manifest_path=preprocess_manifest_path,
         run_manifest_path=run_manifest_path,
         run_emissions=True,
         run_inmap=False,
@@ -662,13 +662,13 @@ def run_emissions_from_run_manifest(
     )
 
 
-def run_inmap_from_run_manifest(
+def run_inmap_from_pipeline_manifest(
     *,
     run_manifest_path: str | Path,
 ) -> Dict[str, Any]:
-    _, _, input_manifest_path = _load_run_manifest_context(run_manifest_path)
-    return _run_stages_from_input_manifest(
-        input_manifest_path=input_manifest_path,
+    _, _, preprocess_manifest_path = _load_run_manifest_context(run_manifest_path)
+    return _run_stages_from_preprocess_manifest(
+        preprocess_manifest_path=preprocess_manifest_path,
         run_manifest_path=run_manifest_path,
         run_emissions=False,
         run_inmap=True,
@@ -677,13 +677,13 @@ def run_inmap_from_run_manifest(
     )
 
 
-def run_aermod_from_run_manifest(
+def run_aermod_from_pipeline_manifest(
     *,
     run_manifest_path: str | Path,
 ) -> Dict[str, Any]:
-    _, _, input_manifest_path = _load_run_manifest_context(run_manifest_path)
-    return _run_stages_from_input_manifest(
-        input_manifest_path=input_manifest_path,
+    _, _, preprocess_manifest_path = _load_run_manifest_context(run_manifest_path)
+    return _run_stages_from_preprocess_manifest(
+        preprocess_manifest_path=preprocess_manifest_path,
         run_manifest_path=run_manifest_path,
         run_emissions=False,
         run_inmap=False,
@@ -692,13 +692,13 @@ def run_aermod_from_run_manifest(
     )
 
 
-def run_exposure_from_run_manifest(
+def run_exposure_from_pipeline_manifest(
     *,
     run_manifest_path: str | Path,
 ) -> Dict[str, Any]:
-    _, _, input_manifest_path = _load_run_manifest_context(run_manifest_path)
-    return _run_stages_from_input_manifest(
-        input_manifest_path=input_manifest_path,
+    _, _, preprocess_manifest_path = _load_run_manifest_context(run_manifest_path)
+    return _run_stages_from_preprocess_manifest(
+        preprocess_manifest_path=preprocess_manifest_path,
         run_manifest_path=run_manifest_path,
         run_emissions=False,
         run_inmap=False,

@@ -8,7 +8,6 @@ import time
 from decimal import Decimal
 from decimal import InvalidOperation
 from pathlib import Path
-from typing import Iterable
 
 import pandas as pd
 import pyarrow as pa
