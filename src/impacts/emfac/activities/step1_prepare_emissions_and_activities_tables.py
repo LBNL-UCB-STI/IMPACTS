@@ -532,7 +532,7 @@ def _normalize_column_name(name: str) -> str:
 
 def _detect_header_row(path: Path, source_type: str) -> int:
     required_columns = HEADER_DETECTION_COLUMNS[source_type]
-    with path.open(newline="") as handle:
+    with path.open(newline="", encoding="latin-1") as handle:
         reader = csv.reader(handle)
         for index, row in enumerate(reader):
             normalized_row = {_normalize_column_name(value) for value in row if str(value).strip()}
@@ -803,9 +803,9 @@ def _complete_sparse_inventory_counties(frame: pd.DataFrame, source_type: str) -
 
 def _clean_file(path: Path, *, source_type: str, region_label: str | None) -> pd.DataFrame:
     if source_type in HEADER_DETECTION_COLUMNS:
-        frame = pd.read_csv(path, skiprows=_detect_header_row(path, source_type))
+        frame = pd.read_csv(path, skiprows=_detect_header_row(path, source_type), encoding="latin-1")
     else:
-        frame = pd.read_csv(path)
+        frame = pd.read_csv(path, encoding="latin-1")
     frame = frame.rename(columns={column: _normalize_column_name(column) for column in frame.columns})
 
     if source_type == "emissions-inventory":
