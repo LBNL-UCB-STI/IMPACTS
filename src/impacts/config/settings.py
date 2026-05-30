@@ -654,15 +654,6 @@ class Impacts:
         emissions_folder = (
             str(Path(population.vehicle_folder) / "emissions") if population.vehicle_folder else None
         )
-        if population.vehicle_folder:
-            if not emissions_payload.get("passenger_vehicle_types_file"):
-                derived = _find_em_vehicle_types_file(population.vehicle_folder, "atlas")
-                if derived:
-                    emissions_payload["passenger_vehicle_types_file"] = derived
-            if not emissions_payload.get("freight_vehicle_types_file"):
-                derived = _find_em_vehicle_types_file(population.vehicle_folder, "frism")
-                if derived:
-                    emissions_payload["freight_vehicle_types_file"] = derived
         if not emissions_payload.get("vehicle_category_metadata_file"):
             derived = _default_vehicle_category_metadata_file(emissions_folder)
             if derived:
@@ -1065,6 +1056,7 @@ def _merge_dicts(base: dict[str, object], override: dict[str, object]) -> dict[s
 def _build_emfac_root_from_settings_file(path: Path) -> dict[str, object]:
     from .settings_builder import load_settings_from_yaml
     from ..manifest.file_ops import resolve_path
+    from .path_registry import build_registry
 
     settings = load_settings_from_yaml(path)
     activities = settings.impacts.activities if isinstance(settings.impacts.activities, dict) else {}
@@ -1073,40 +1065,63 @@ def _build_emfac_root_from_settings_file(path: Path) -> dict[str, object]:
     local_input_folder = Path(resolve_path(settings.impacts.local_input_folder, path)).resolve()
     scenario_id = str(settings.impacts.scenario)
     region_label = str(activities.get("region_label") or settings.run.region.upper())
+
+    beam_input = Path(resolve_path(settings.beam.local_input_folder, path)).resolve()
+    region = settings.run.region
+    registry = build_registry(settings, path)
+
+    def _locate_beam_path(relative: str | None) -> Path | None:
+        if not relative:
+            return None
+        p = Path(relative)
+        if p.is_absolute():
+            return p if p.exists() else None
+        for base in ([beam_input / region] if region else []) + [beam_input]:
+            candidate = (base / p).resolve()
+            if candidate.exists():
+                return candidate
+        return None
+
     population_folder = settings.impacts.population.passenger_folder
     atlas = dict(fleet_settings.get("atlas", {}) or {})
     atlas_year = settings.impacts.population.atlas_year
     if atlas_year is not None:
         atlas["year"] = atlas_year
     if population_folder:
-        atlas.setdefault("population_folder", population_folder)
+        resolved_pop = _locate_beam_path(population_folder)
+        atlas.setdefault("population_folder", str(resolved_pop) if resolved_pop else population_folder)
     if atlas:
         fleet["atlas"] = atlas
+
     carriers_folder = settings.impacts.population.freight_folder
     frism = dict(fleet_settings.get("frism", {}) or {})
     frism_year = settings.impacts.population.frism_year
     if frism_year is not None:
         frism["year"] = frism_year
     if carriers_folder:
-        frism.setdefault("carriers_folder", carriers_folder)
+        resolved_carriers = _locate_beam_path(carriers_folder)
+        frism.setdefault("carriers_folder", str(resolved_carriers) if resolved_carriers else carriers_folder)
     if frism:
         fleet["frism"] = frism
+
     vehicle_folder = settings.impacts.population.vehicle_folder
     scenario = settings.impacts.scenario
     if vehicle_folder and scenario:
-        passenger_vehicle_types_file = _find_em_vehicle_types_file(vehicle_folder, "atlas")
-        if passenger_vehicle_types_file:
-            fleet.setdefault("passenger_vehicle_types_file", passenger_vehicle_types_file)
-        freight_vehicle_types_file = _find_em_vehicle_types_file(vehicle_folder, "frism")
-        if freight_vehicle_types_file:
-            fleet.setdefault("freight_vehicle_types_file", freight_vehicle_types_file)
-        else:
-            fleet.setdefault("freight_vehicle_types_file", f"{vehicle_folder}/vehicletypes--frism--{scenario}.csv")
-        fleet.setdefault("fuel_consumption_catalog", _default_fuel_consumption_catalog(vehicle_folder))
+        resolved_vf = _locate_beam_path(vehicle_folder)
+        if resolved_vf:
+            emissions_dir = resolved_vf / "emissions"
+            pax_vt = _find_em_vehicle_types_file(emissions_dir, "atlas")
+            if pax_vt:
+                fleet.setdefault("passenger_vehicle_types_file", pax_vt)
+            frt_vt = _find_em_vehicle_types_file(emissions_dir, "frism")
+            if frt_vt:
+                fleet.setdefault("freight_vehicle_types_file", frt_vt)
+            else:
+                fleet.setdefault("freight_vehicle_types_file", str(emissions_dir / f"vehicletypes--frism--{scenario}.csv"))
+            fleet.setdefault("fuel_consumption_catalog", str(resolved_vf / "fuel" / "fuel_vehicle_categories.csv"))
+
     assignment_model = fleet_settings.get("assignment_model")
     if assignment_model not in (None, ""):
-        from .path_registry import build_registry
-        registry = build_registry(settings, path)
         resolved = registry.locate(str(assignment_model))
         fleet["assignment_model"] = str(resolved) if resolved else assignment_model
     return {
@@ -1187,14 +1202,8 @@ def _expand_optional_path(value: str | None) -> str | None:
     return resolve_workflow_path(value)
 
 
-def _find_em_vehicle_types_file(vehicle_folder: str | None, source: str) -> str | None:
-    if not vehicle_folder:
-        return None
-    try:
-        folder = Path(resolve_workflow_path(vehicle_folder))
-    except ValueError:
-        return None
-    if not folder.is_dir():
+def _find_em_vehicle_types_file(folder: Path | None, source: str) -> str | None:
+    if not folder or not folder.is_dir():
         return None
     matches = sorted(
         str(f) for f in folder.iterdir()
@@ -1219,12 +1228,6 @@ def _default_emissions_inventory_folder(emissions_root: str | None, scenario: st
     if not emissions_root or not scenario:
         return None
     return str(Path(emissions_root) / "activities" / scenario / "inventory")
-
-
-def _default_fuel_consumption_catalog(vehicle_folder: str | None) -> str | None:
-    if not vehicle_folder:
-        return None
-    return str(Path(vehicle_folder) / "fuel" / "fuel_vehicle_categories.csv")
 
 
 def _normalize_configured_path(

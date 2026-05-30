@@ -251,7 +251,15 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
     metadata_path = settings.impacts.emissions.vehicle_category_metadata_file
     if not metadata_path:
         raise ValueError("Missing required value: impacts.emissions.vehicle_category_metadata_file")
-    vehicle_category_metadata_file = Path(resolve_path(str(metadata_path), config_path)).resolve()
+    vehicle_category_metadata_file = (
+        registry.locate(str(metadata_path))
+        or registry.locate(Path(str(metadata_path)).name)
+    )
+    if not vehicle_category_metadata_file:
+        raise FileNotFoundError(
+            f"Could not find vehicle_category_metadata_file '{metadata_path}'. "
+            f"Searched beam data roots: {registry.roots}"
+        )
 
     vehicle_folder = settings.impacts.population.vehicle_folder or "vehicle-tech"
     archive = _archive_path(beam_input_folder / region_name, vehicle_folder).resolve()
