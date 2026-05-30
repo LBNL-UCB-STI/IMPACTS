@@ -124,13 +124,13 @@ def _read_county_air_basin_table(
 ) -> pd.DataFrame:
     required_normalized = {_normalize_column_name(c) for c in required_columns}
     skip = 0
-    with Path(path).open(newline="", encoding="latin-1") as handle:
+    with Path(path).open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.reader(handle)
         for index, row in enumerate(reader):
             if required_normalized.issubset({_normalize_column_name(v) for v in row if str(v).strip()}):
                 skip = index
                 break
-    frame = pd.read_csv(path, skiprows=skip, encoding="latin-1")
+    frame = pd.read_csv(path, skiprows=skip, encoding="utf-8-sig")
     _require_columns(frame, required_columns, label)
     frame["County"] = frame["County"].astype(str).str.strip().str.title()
     frame["Air Basin"] = frame["Air Basin"].astype(str).str.strip()
