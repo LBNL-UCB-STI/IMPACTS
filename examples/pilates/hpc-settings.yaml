@@ -21,7 +21,7 @@ shared:
 
 beam:
   local_input_folder: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/production/
-  local_output_folder: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/beam_output/
+  local_output_folder: beam/beam_output/
   router_directory: r5/sfbay-cbg5500-weakConn-network
 
 impacts:

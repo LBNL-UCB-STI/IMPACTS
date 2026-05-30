@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from functools import lru_cache
 
 import pandas as pd
+from tqdm import tqdm
 
 from impacts.emfac.common import frame_summary
 from impacts.emfac.common import write_trace
@@ -378,6 +379,7 @@ def _prepare_project_analysis_source(workflow: dict[str, object]) -> tuple[str, 
         source_type="project-analysis",
         region_label=workflow["run"]["region_label"],
         year=workflow["run"]["calendar_year"],
+        desc="1.1 project-analysis",
     )
     project_analysis = _normalize_project_analysis_activity(_read_project_analysis_surface(project_analysis_path))
     project_analysis = expand_pto_vehicle_category(
@@ -511,6 +513,7 @@ def run_step1(workflow: dict[str, object]) -> dict[str, object]:
         output_path=workflow["paths"]["statewide_inventory"],
         source_type="emissions-inventory",
         year=workflow["run"]["calendar_year"],
+        desc="1.2 statewide",
     )
     write_trace(
         workflow,
@@ -738,15 +741,10 @@ def _select_output_columns(frame: pd.DataFrame, source_type: str) -> pd.DataFram
         ],
     }
     requested = columns_by_source[source_type]
-    selected = [column for column in requested if column in frame.columns]
-    missing_required = [
-        column
-        for column in requested
-        if column not in frame.columns
-    ]
+    missing_required = [column for column in requested if column not in frame.columns]
     if missing_required:
         raise ValueError(f"{source_type} is missing expected columns after normalization: {missing_required}")
-    result = frame[selected].copy()
+    result = frame[requested].copy()
     if source_type == "emissions-inventory":
         result = _standardize_statewide_inventory_columns(result)
     return result
@@ -840,6 +838,7 @@ def clean_emfac_to_parquet(
     source_type: str,
     region_label: str | None = None,
     year: int | None = None,
+    desc: str | None = None,
 ) -> Path:
     supported_source_types = {
         "project-analysis",
@@ -853,9 +852,11 @@ def clean_emfac_to_parquet(
     if source_type not in supported_source_types:
         raise ValueError(f"Unsupported source type: {source_type}")
 
+    files = _iter_input_csvs(input_path)
+    _iter = tqdm(files, desc=desc, unit="file", dynamic_ncols=True, leave=False, disable=None) if desc else files
     cleaned_frames = [
         _clean_file(path, source_type=source_type, region_label=region_label)
-        for path in _iter_input_csvs(input_path)
+        for path in _iter
     ]
     combined = pd.concat(cleaned_frames, ignore_index=True)
     if year is not None:
@@ -1069,6 +1070,7 @@ def process_emissions_inventory(
             source_type="vmt-inventory",
             region_label=region_label,
             year=year,
+            desc="1.2 vmt",
         )
         clean_emfac_to_parquet(
             input_path=population_input,
@@ -1076,6 +1078,7 @@ def process_emissions_inventory(
             source_type="population-inventory",
             region_label=region_label,
             year=year,
+            desc="1.2 population",
         )
         clean_emfac_to_parquet(
             input_path=trips_input,
@@ -1083,6 +1086,7 @@ def process_emissions_inventory(
             source_type="trips-inventory",
             region_label=region_label,
             year=year,
+            desc="1.2 trips",
         )
         clean_emfac_to_parquet(
             input_path=emission_input,
@@ -1090,6 +1094,7 @@ def process_emissions_inventory(
             source_type="emission-inventory",
             region_label=region_label,
             year=year,
+            desc="1.2 emission",
         )
         if ghg_input:
             clean_emfac_to_parquet(
@@ -1098,6 +1103,7 @@ def process_emissions_inventory(
                 source_type="ghg-inventory",
                 region_label=region_label,
                 year=year,
+                desc="1.2 ghg",
             )
         emissions = _read_parquet(vmt_clean_path)[
             ["county", "vehicleCategory", "fuel", "modelYear", "speed", "total_vmt", "cvmt", "evmt"]
