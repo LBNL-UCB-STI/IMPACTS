@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import re
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from functools import lru_cache
@@ -853,7 +854,11 @@ def clean_emfac_to_parquet(
         raise ValueError(f"Unsupported source type: {source_type}")
 
     files = _iter_input_csvs(input_path)
-    _iter = tqdm(files, desc=desc, unit="file", dynamic_ncols=True, leave=False, disable=None) if desc else files
+    _iter = (
+        tqdm(files, desc=desc, unit="file", dynamic_ncols=True, leave=True, file=sys.stdout, disable=False)
+        if desc
+        else files
+    )
     cleaned_frames = [
         _clean_file(path, source_type=source_type, region_label=region_label)
         for path in _iter
