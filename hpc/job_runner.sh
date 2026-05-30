@@ -169,7 +169,43 @@ if [ ! -f "$CONFIG_PATH" ]; then
     exit 1
 fi
 
-JOB_LOG_DIR="/global/scratch/users/$USER/impacts_logs"
+IMPACTS_OUTPUT_FOLDER="$(awk '
+    /^[^[:space:]#][^:]*:/ {
+        section=$1
+        sub(":", "", section)
+    }
+    section == "impacts" && /^[[:space:]]+local_output_folder:[[:space:]]*/ {
+        sub(/^[[:space:]]*local_output_folder:[[:space:]]*/, "", $0)
+        gsub(/^[[:space:]'\''"]+|[[:space:]'\''"]+$/, "", $0)
+        print
+        exit
+    }
+' "$CONFIG_PATH")"
+
+if [ -z "$IMPACTS_OUTPUT_FOLDER" ]; then
+    echo "ERROR: impacts.local_output_folder not found in config: $CONFIG_PATH" >&2
+    exit 1
+fi
+
+CONFIG_DIR="$(cd "$(dirname "$CONFIG_PATH")" && pwd)"
+case "$IMPACTS_OUTPUT_FOLDER" in
+    /*)
+        JOB_LOG_DIR="$IMPACTS_OUTPUT_FOLDER"
+        ;;
+    ~/*)
+        JOB_LOG_DIR="$HOME/${IMPACTS_OUTPUT_FOLDER#~/}"
+        ;;
+    *)
+        CONFIG_RELATIVE_LOG_DIR="$CONFIG_DIR/$IMPACTS_OUTPUT_FOLDER"
+        CWD_RELATIVE_LOG_DIR="$IMPACTS_DIR/$IMPACTS_OUTPUT_FOLDER"
+        if [ -e "$CONFIG_RELATIVE_LOG_DIR" ] || [ ! -e "$CWD_RELATIVE_LOG_DIR" ]; then
+            JOB_LOG_DIR="$CONFIG_RELATIVE_LOG_DIR"
+        else
+            JOB_LOG_DIR="$CWD_RELATIVE_LOG_DIR"
+        fi
+        ;;
+esac
+
 mkdir -p "$JOB_LOG_DIR"
 JOB_LOG_FILE_PATH="$JOB_LOG_DIR/log_${DATETIME}_${RANDOM_PART}.log"
 
