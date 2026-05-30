@@ -154,12 +154,12 @@ def find_first_matching(root: str, pattern: str) -> Optional[str]:
         return None
     if path.is_file():
         return str(path)
-    matches = sorted(candidate for candidate in path.glob(pattern) if candidate.is_file())
+    matches = sorted(candidate for candidate in path.glob(pattern) if candidate.is_file() and not candidate.name.startswith("."))
     if matches:
         return str(matches[0])
     recursive_matches: list[Path] = []
     for dirpath, _, _ in _scan_paths_with_progress(path, f"Scanning {path.name} for {pattern}"):
-        recursive_matches.extend(candidate for candidate in dirpath.glob(pattern) if candidate.is_file())
+        recursive_matches.extend(candidate for candidate in dirpath.glob(pattern) if candidate.is_file() and not candidate.name.startswith("."))
     if recursive_matches:
         return str(sorted(recursive_matches)[0])
     return None

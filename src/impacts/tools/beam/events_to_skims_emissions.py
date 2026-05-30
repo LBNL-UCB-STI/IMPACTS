@@ -86,6 +86,7 @@ def read_rates_directory(
             p
             for p in root.iterdir()
             if p.is_file()
+            and not p.name.startswith(".")
             and (str(p).lower().endswith(".csv") or str(p).lower().endswith(".csv.gz") or str(p).lower().endswith(".parquet"))
         ]
     )

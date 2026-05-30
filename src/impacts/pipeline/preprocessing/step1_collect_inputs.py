@@ -124,7 +124,7 @@ def _find_emfacid_file(folder: Path, pattern: str) -> str | None:
     if not folder.is_dir():
         return None
     key = f"inventory-final-{pattern}-activity-by-emfacid"
-    matches = [str(f) for f in folder.iterdir() if f.is_file() and key in f.name]
+    matches = [str(f) for f in folder.iterdir() if f.is_file() and not f.name.startswith(".") and key in f.name]
     return matches[0] if matches else None
 
 
@@ -133,7 +133,7 @@ def _glob_vehicle_types_file(folder: Path, source: str) -> str | None:
         return None
     matches = sorted(
         str(f) for f in folder.iterdir()
-        if f.is_file() and source in f.name.lower() and "--em" in f.name.lower()
+        if f.is_file() and not f.name.startswith(".") and source in f.name.lower() and "--em" in f.name.lower()
     )
     return matches[0] if matches else None
 

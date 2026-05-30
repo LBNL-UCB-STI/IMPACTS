@@ -1198,7 +1198,7 @@ def _find_em_vehicle_types_file(vehicle_folder: str | None, source: str) -> str 
         return None
     matches = sorted(
         str(f) for f in folder.iterdir()
-        if f.is_file() and source in f.name.lower() and "--em" in f.name.lower()
+        if f.is_file() and not f.name.startswith(".") and source in f.name.lower() and "--em" in f.name.lower()
     )
     return matches[0] if matches else None
 
