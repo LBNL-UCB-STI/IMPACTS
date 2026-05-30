@@ -5,8 +5,8 @@ import sys
 from pathlib import Path
 
 
-EXAMPLE_DIR = Path(__file__).resolve().parent
-REPO_ROOT = EXAMPLE_DIR.parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[3]
+EXAMPLE_DIR = REPO_ROOT / "examples" / "pilates"
 SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))

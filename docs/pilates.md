@@ -120,13 +120,13 @@ If your BEAM artifacts are too large, create smaller samples first.
 Events are sampled by vehicle id, so each selected vehicle keeps its full trace. Skims are sampled by row fraction.
 
 ```bash
-python examples/pilates/prepare_sample_data.py events \
+python -m impacts.tools.prepare_sample_data events \
   --input /path/to/0.events.parquet \
   --fraction 0.05
 ```
 
 ```bash
-python examples/pilates/prepare_sample_data.py skims \
+python -m impacts.tools.prepare_sample_data skims \
   --input /path/to/0.skimsEmissions.parquet \
   --fraction 0.05
 ```
