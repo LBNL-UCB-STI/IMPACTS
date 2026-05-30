@@ -163,10 +163,13 @@ def resolve_path(path: Optional[str], config_path: str | Path | None = None) -> 
         return str(resolved)
     if config_path is None:
         return str(resolved.resolve())
-    candidate = (Path(config_path).resolve().parent / resolved).resolve()
-    if candidate.exists():
-        return str(candidate)
-    return str((Path.cwd() / resolved).resolve())
+    config_relative = (Path(config_path).resolve().parent / resolved).resolve()
+    if config_relative.exists():
+        return str(config_relative)
+    cwd_candidate = (Path.cwd() / resolved).resolve()
+    if cwd_candidate.exists():
+        return str(cwd_candidate)
+    return str(config_relative)
 
 
 def resolve_required_path(path: str, config_path: str | Path | None, label: str) -> str:
