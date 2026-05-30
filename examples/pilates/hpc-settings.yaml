@@ -25,8 +25,8 @@ beam:
   router_directory: r5/sfbay-cbg5500-weakConn-network
 
 impacts:
-  local_input_folder: examples/pilates/impacts/impacts_inputs/
-  local_output_folder: examples/pilates/impacts/impacts_output/
+  local_input_folder: impacts/impacts_inputs/
+  local_output_folder: impacts/impacts_output/
   seed: 0
   scenario: 2018-Baseline
 
