@@ -81,6 +81,7 @@ def _register_manifest_input(
     artifact_key: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
     optional: bool = False,
+    prefer_reference: bool = True,
 ) -> str:
     return register_managed_input(
         manifest_inputs=manifest_inputs,
@@ -90,7 +91,7 @@ def _register_manifest_input(
         relative_target=relative_target,
         artifact_key=artifact_key,
         optional=optional,
-        prefer_reference=True,
+        prefer_reference=prefer_reference,
         metadata=metadata,
     )
 
@@ -492,6 +493,7 @@ def run(
                         source_path=isrm_source,
                         relative_target=Path(isrm_source).name,
                         metadata={"artifact_family": "isrm"},
+                        prefer_reference=False,
                     )
                     _advance_progress(progress)
 

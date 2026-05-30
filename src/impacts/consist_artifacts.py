@@ -170,8 +170,11 @@ def _call_consist_outputs_reader(query_fn: Any, *, metadata: Dict[str, Any]) -> 
 def _consist_module() -> Any:
     try:
         import consist
-    except Exception:
-        return None
+    except ImportError as exc:
+        raise ImportError(
+            "The 'consist' package is required but is not installed. "
+            "Install it with: pip install consist"
+        ) from exc
     return consist
 
 
@@ -182,9 +185,6 @@ def find_input_reference(
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     consist = _consist_module()
-    if consist is None:
-        return None
-
     artifact_metadata = {"artifact_key": key, **(metadata or {})}
     for attr_name in ("find_artifact", "get_artifact", "find_input"):
         query_fn = getattr(consist, attr_name, None)
@@ -233,9 +233,6 @@ def find_latest_dynamic_input_reference(
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     consist = _consist_module()
-    if consist is None:
-        return None
-
     outputs: Any = None
     for attr_name in ("get_run_outputs",):
         query_fn = getattr(consist, attr_name, None)
@@ -317,14 +314,13 @@ def log_input_reference(
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     consist = _consist_module()
-    if consist is None:
-        return None
-
     publish_key = artifact_key or key
     logger_fn = getattr(consist, "log_input", None)
     if logger_fn is None:
-        logger.warning("Consist log_input is unavailable; using direct local path registration")
-        return None
+        raise AttributeError(
+            f"Consist is installed but does not expose 'log_input'. "
+            f"Check your consist version."
+        )
 
     normalized_path = str(Path(source_path).resolve())
     artifact_metadata = {
@@ -333,16 +329,12 @@ def log_input_reference(
         "manifest_key": key,
         **(metadata or {}),
     }
-    try:
-        artifact = _call_consist_logger(
-            logger_fn,
-            path=normalized_path,
-            key=publish_key,
-            metadata=artifact_metadata,
-        )
-    except Exception as exc:
-        logger.warning("Consist log_input failed for %s; using direct local path registration: %s", key, exc)
-        return None
+    artifact = _call_consist_logger(
+        logger_fn,
+        path=normalized_path,
+        key=publish_key,
+        metadata=artifact_metadata,
+    )
 
     return _entry_from_artifact(
         key=publish_key,
@@ -362,14 +354,13 @@ def log_output_reference(
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     consist = _consist_module()
-    if consist is None:
-        return None
-
     publish_key = artifact_key or key
     logger_fn = getattr(consist, "log_output", None)
     if logger_fn is None:
-        logger.warning("Consist log_output is unavailable; skipping output registration")
-        return None
+        raise AttributeError(
+            f"Consist is installed but does not expose 'log_output'. "
+            f"Check your consist version."
+        )
 
     normalized_path = str(Path(path).resolve())
     artifact_metadata = {
@@ -378,16 +369,12 @@ def log_output_reference(
         "manifest_key": key,
         **(metadata or {}),
     }
-    try:
-        artifact = _call_consist_logger(
-            logger_fn,
-            path=normalized_path,
-            key=publish_key,
-            metadata=artifact_metadata,
-        )
-    except Exception as exc:
-        logger.warning("Consist log_output failed for %s: %s", key, exc)
-        return None
+    artifact = _call_consist_logger(
+        logger_fn,
+        path=normalized_path,
+        key=publish_key,
+        metadata=artifact_metadata,
+    )
 
     return _entry_from_artifact(
         key=publish_key,
