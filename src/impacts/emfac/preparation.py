@@ -192,10 +192,11 @@ def _extract_archive(archive: Path, destination: Path) -> None:
 
 
 def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
-    from ..manifest.file_ops import resolve_path, resolve_required_path
+    from ..manifest.file_ops import resolve_path
     from ..config.path_registry import build_registry
 
-    local_input_folder = Path(resolve_required_path(settings.impacts.local_input_folder, config_path, "impacts.local_input_folder")).resolve()
+    local_input_folder = Path(resolve_path(settings.impacts.local_input_folder, config_path)).resolve()
+    local_input_folder.mkdir(parents=True, exist_ok=True)
     local_output_folder = Path(resolve_path(settings.impacts.local_output_folder, config_path)).resolve()
     registry = build_registry(settings, config_path)
 
