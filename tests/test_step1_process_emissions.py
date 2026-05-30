@@ -164,14 +164,33 @@ def test_inventory_targets_per_assignment_grouped_by_model_year_and_process(tmp_
 def test_apply_county_corrections_leaves_transit_rows_neutral(tmp_path: Path) -> None:
     passenger_vehicle_types = pd.DataFrame(
         [
-            {"vehicleTypeId": "pax-car", "vehicleCategory": "Car", "emfacId": "post2014LDAGas"},
-            {"vehicleTypeId": "BUS-DEFAULT", "vehicleCategory": "MediumDutyPassenger", "emfacVehicleCategory": "UBUS", "emfacId": "2013to2015UBUSDsl"},
-            {"vehicleTypeId": "RAIL-DEFAULT", "vehicleCategory": "Rail-Default", "emfacId": ""},
+            {
+                "vehicleTypeId": "pax-car",
+                "vehicleCategory": "Car",
+                "emfacResolvedModelYear": "post2014",
+            },
+            {
+                "vehicleTypeId": "BUS-DEFAULT",
+                "vehicleCategory": "MediumDutyPassenger",
+                "emfacVehicleCategory": "UBUS",
+                "emfacResolvedModelYear": pd.NA,
+            },
+            {
+                "vehicleTypeId": "RAIL-DEFAULT",
+                "vehicleCategory": "Rail-Default",
+                "emfacResolvedModelYear": pd.NA,
+            },
         ]
     )
     freight_vehicle_types = pd.DataFrame(
         [
-            {"vehicleTypeId": "ft-md", "vehicleCategory": "Class456Vocational", "vehicleClass": "truck", "vehicleUse": "freight", "emfacId": "2007to2009Class4Dsl"},
+            {
+                "vehicleTypeId": "ft-md",
+                "vehicleCategory": "Class456Vocational",
+                "vehicleClass": "truck",
+                "vehicleUse": "freight",
+                "emfacResolvedModelYear": "2007-2009",
+            },
         ]
     )
     passenger_vehicle_types_path = tmp_path / "vehicleTypes--atlas.csv"

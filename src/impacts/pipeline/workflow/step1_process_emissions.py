@@ -13,6 +13,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 from ...common import configure_duckdb_connection
 from ...common import log_step_banner
@@ -628,76 +629,77 @@ def _build_county_corrected_table(
         logger.info("%s inventory activity corrections disabled; skipping county correction stage", _step_label("1.3"))
         return county_allocated_df.copy(), None, None
 
-    progress = tqdm(
-        total=4,
-        desc="Step 1.3 activity corrections",
-        leave=True,
-        dynamic_ncols=True,
-        disable=not logger.isEnabledFor(logging.INFO),
-    )
-    passenger_vehicle_types_path = resolve_required_manifest_input(manifest_inputs, key="passenger_vehicle_types_input")
-    freight_vehicle_types_path = resolve_required_manifest_input(manifest_inputs, key="freight_vehicle_types_input")
-    county_boundaries_path = resolve_required_manifest_input(manifest_inputs, key="county_boundaries")
-    try:
-        _, beam_activity_totals = _build_beam_activity_details(
-            skims_df=skims_df,
-            grouped_df=county_grouped_df,
-            passenger_vehicle_types_path=passenger_vehicle_types_path,
-            freight_vehicle_types_path=freight_vehicle_types_path,
+    with logging_redirect_tqdm():
+        progress = tqdm(
+            total=4,
+            desc="Step 1.3 activity corrections",
+            leave=True,
+            dynamic_ncols=True,
+            disable=not logger.isEnabledFor(logging.INFO),
         )
-        progress.update(1)
-        county_name_lookup = _build_county_name_lookup(county_boundaries_path)
-        inventory_targets_frames: list[pd.DataFrame] = []
-        if pipeline.enable_passenger_inventory_activity_correction:
-            passenger_inventory_path = pipeline.passenger_inventory_file
-            logger.info(
-                "%s deriving passenger county activity correction factors from inventory %s",
-                _step_label("1.3"),
-                passenger_inventory_path,
+        passenger_vehicle_types_path = resolve_required_manifest_input(manifest_inputs, key="passenger_vehicle_types_input")
+        freight_vehicle_types_path = resolve_required_manifest_input(manifest_inputs, key="freight_vehicle_types_input")
+        county_boundaries_path = resolve_required_manifest_input(manifest_inputs, key="county_boundaries")
+        try:
+            _, beam_activity_totals = _build_beam_activity_details(
+                skims_df=skims_df,
+                grouped_df=county_grouped_df,
+                passenger_vehicle_types_path=passenger_vehicle_types_path,
+                freight_vehicle_types_path=freight_vehicle_types_path,
             )
-            inventory_targets_frames.append(
-                _derive_inventory_activity_targets_for_assignment(
-                    inventory_path=passenger_inventory_path,
-                    county_name_lookup=county_name_lookup,
-                    assignment_group="passenger",
+            progress.update(1)
+            county_name_lookup = _build_county_name_lookup(county_boundaries_path)
+            inventory_targets_frames: list[pd.DataFrame] = []
+            if pipeline.enable_passenger_inventory_activity_correction:
+                passenger_inventory_path = pipeline.passenger_inventory_file
+                logger.info(
+                    "%s deriving passenger county activity correction factors from inventory %s",
+                    _step_label("1.3"),
+                    passenger_inventory_path,
                 )
-            )
-        if pipeline.enable_freight_inventory_activity_correction:
-            freight_inventory_path = pipeline.freight_inventory_file
-            logger.info(
-                "%s deriving freight county activity correction factors from inventory %s",
-                _step_label("1.3"),
-                freight_inventory_path,
-            )
-            inventory_targets_frames.append(
-                _derive_inventory_activity_targets_for_assignment(
-                    inventory_path=freight_inventory_path,
-                    county_name_lookup=county_name_lookup,
-                    assignment_group="freight",
+                inventory_targets_frames.append(
+                    _derive_inventory_activity_targets_for_assignment(
+                        inventory_path=passenger_inventory_path,
+                        county_name_lookup=county_name_lookup,
+                        assignment_group="passenger",
+                    )
                 )
+            if pipeline.enable_freight_inventory_activity_correction:
+                freight_inventory_path = pipeline.freight_inventory_file
+                logger.info(
+                    "%s deriving freight county activity correction factors from inventory %s",
+                    _step_label("1.3"),
+                    freight_inventory_path,
+                )
+                inventory_targets_frames.append(
+                    _derive_inventory_activity_targets_for_assignment(
+                        inventory_path=freight_inventory_path,
+                        county_name_lookup=county_name_lookup,
+                        assignment_group="freight",
+                    )
+                )
+            inventory_targets = pd.concat(inventory_targets_frames, ignore_index=True)
+            progress.update(1)
+            county_correction_factors = _derive_county_correction_factors(
+                beam_activity_totals,
+                inventory_targets,
             )
-        inventory_targets = pd.concat(inventory_targets_frames, ignore_index=True)
-        progress.update(1)
-        county_correction_factors = _derive_county_correction_factors(
-            beam_activity_totals,
-            inventory_targets,
-        )
-        progress.update(1)
-        logger.info(
-            "%s correcting allocated emissions by county/modelYear/process/assignment factors",
-            _step_label("1.3"),
-        )
-        corrected = apply_county_corrections(
-            county_allocated_df,
-            county_correction_factors,
-            county_col="county_COUNTYFP",
-            scratch_dir=raw_dir,
-            passenger_vehicle_types_path=passenger_vehicle_types_path,
-            freight_vehicle_types_path=freight_vehicle_types_path,
-        )
-        progress.update(1)
-    finally:
-        progress.close()
+            progress.update(1)
+            logger.info(
+                "%s correcting allocated emissions by county/modelYear/process/assignment factors",
+                _step_label("1.3"),
+            )
+            corrected = apply_county_corrections(
+                county_allocated_df,
+                county_correction_factors,
+                county_col="county_COUNTYFP",
+                scratch_dir=scratch_dir,
+                passenger_vehicle_types_path=passenger_vehicle_types_path,
+                freight_vehicle_types_path=freight_vehicle_types_path,
+            )
+            progress.update(1)
+        finally:
+            progress.close()
     return corrected, beam_activity_totals, county_correction_factors
 
 

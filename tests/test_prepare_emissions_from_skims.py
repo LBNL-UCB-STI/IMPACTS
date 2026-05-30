@@ -62,7 +62,7 @@ def test_resolve_duckdb_temp_directory_stays_under_impacts_output_tmp_root(tmp_p
 
     resolved = common.resolve_duckdb_temp_directory(output_path)
 
-    assert resolved == tmp_path / "impacts_output" / "tmp" / "duckdb"
+    assert resolved == tmp_path / "impacts_output" / "_tmp" / "duckdb"
     assert resolved.exists()
 
 
@@ -308,13 +308,13 @@ def test_build_zone_allocated_table_uses_duckdb_and_preserves_allocated_values(t
         [
             {
                 "linkId": 101,
-                "countyfp": "001",
+                "county_COUNTYFP": "001",
                 "county_proportion": 0.25,
                 "county_link_length_m": 25.0,
             },
             {
                 "linkId": 101,
-                "countyfp": "013",
+                "county_COUNTYFP": "013",
                 "county_proportion": 0.75,
                 "county_link_length_m": 75.0,
             },
@@ -340,7 +340,7 @@ def test_build_zone_allocated_table_uses_duckdb_and_preserves_allocated_values(t
             zone_label="county",
             scratch_dir=tmp_path,
         )
-        .sort_values("countyfp")
+        .sort_values("county_COUNTYFP")
         .reset_index(drop=True)
     )
 
@@ -349,7 +349,7 @@ def test_build_zone_allocated_table_uses_duckdb_and_preserves_allocated_values(t
             "linkId": 101,
             "vehicleTypeId": "pax-car",
             "process": "RUNEX",
-            "countyfp": "001",
+            "county_COUNTYFP": "001",
             "county_proportion": 0.25,
             "county_link_length_m": 25.0,
             "totVMT_county_allocated": 5.0,
@@ -360,7 +360,7 @@ def test_build_zone_allocated_table_uses_duckdb_and_preserves_allocated_values(t
             "linkId": 101,
             "vehicleTypeId": "pax-car",
             "process": "RUNEX",
-            "countyfp": "013",
+            "county_COUNTYFP": "013",
             "county_proportion": 0.75,
             "county_link_length_m": 75.0,
             "totVMT_county_allocated": 15.0,
@@ -410,7 +410,7 @@ def test_build_zone_allocated_table_uses_supplied_step_label(caplog, tmp_path: P
 
 def test_prepare_staged_skims_for_processing_reuses_grouped_intermediate(tmp_path: Path, monkeypatch) -> None:
     input_root = tmp_path / "inputs"
-    grouped_path = input_root / "skims" / "prepared_skims_grouped_for_grid_allocation.parquet"
+    grouped_path = common.prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
     grouped_path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
         [
@@ -457,7 +457,7 @@ def test_prepare_staged_skims_for_processing_reuses_grouped_intermediate(tmp_pat
 
 def test_load_or_prepare_skims_df_rejects_stale_prepared_cache_for_aermod(tmp_path: Path) -> None:
     input_root = tmp_path / "inputs"
-    prepared_path = input_root / "skims" / "prepared_skims_for_grid_allocation.parquet"
+    prepared_path = common.prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
     prepared_path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
         [
@@ -486,7 +486,7 @@ def test_load_or_prepare_skims_df_rejects_stale_prepared_cache_for_aermod(tmp_pa
 
 def test_prepare_staged_skims_for_processing_rebuilds_invalid_grouped_intermediate(tmp_path: Path, monkeypatch) -> None:
     input_root = tmp_path / "inputs"
-    grouped_path = input_root / "skims" / "prepared_skims_grouped_for_grid_allocation.parquet"
+    grouped_path = common.prepared_table_target(input_root, "prepared_skims_grouped_for_grid_allocation")
     grouped_path.parent.mkdir(parents=True, exist_ok=True)
     grouped_path.write_bytes(b"")
     called = {"prepare": 0}
@@ -567,8 +567,8 @@ def test_annualize_prepared_skims_uses_grouped_input_without_eager_read(tmp_path
 
     metadata = pd.DataFrame(
         [
-            {"vehicleCategory": "LDA", "operation_days_per_year": 327.0},
-            {"vehicleCategory": "Class 4-6 Vocational", "operation_days_per_year": 312.0},
+            {"emfac_vehicle_category": "LDA", "operation_days_per_year": 327.0},
+            {"emfac_vehicle_category": "Class 4-6 Vocational", "operation_days_per_year": 312.0},
         ]
     )
     metadata_path = tmp_path / "vehicle_categories.csv"

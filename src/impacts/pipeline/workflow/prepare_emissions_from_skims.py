@@ -272,10 +272,6 @@ def _load_vehicle_type_activity_lookup(
     vehicle_types = _load_vehicle_types_table(passenger_vehicle_types_path, freight_vehicle_types_path)
     if "vehicleTypeId" not in vehicle_types.columns:
         raise ValueError("Vehicle types input must include vehicleTypeId for activity correction lookup.")
-    if "emfacId" not in vehicle_types.columns:
-        raise ValueError(
-            "Vehicle types input must include emfacId for inventory-based activity correction."
-        )
     if "emfacResolvedModelYear" not in vehicle_types.columns:
         raise ValueError(
             "Vehicle types input must include emfacResolvedModelYear for inventory-based activity correction."
@@ -288,7 +284,6 @@ def _load_vehicle_type_activity_lookup(
         lambda row: _classify_vehicle_type_assignment(row, source_name="combined_vehicle_types"),
         axis=1,
     )
-    prepared["emfacId"] = prepared["emfacId"].map(_normalize_vehicle_type_token)
     prepared["modelYear"] = prepared["emfacResolvedModelYear"].astype(str).str.strip()
     prepared["modelYear"] = prepared["modelYear"].where(
         prepared["modelYear"].ne("") & ~prepared["modelYear"].str.lower().eq("nan"),
