@@ -4,10 +4,10 @@ import os
 import pandas as pd
 import pytest
 
-from impacts.emfac.common import attach_idle_time_fraction
-from impacts.emfac.fleet.step2_map_emfac_bus_bike import _matched_emfac_fuels
-from impacts.emfac.fleet.step2_map_emfac_bus_bike import _read_step2_vehicle_types
-from impacts.emfac.fleet.step2_map_emfac_bus_bike import run_step2
+from impacts.pipeline.emfac.common import attach_idle_time_fraction
+from impacts.pipeline.emfac.fleet.step2_map_emfac_bus_bike import _matched_emfac_fuels
+from impacts.pipeline.emfac.fleet.step2_map_emfac_bus_bike import _read_step2_vehicle_types
+from impacts.pipeline.emfac.fleet.step2_map_emfac_bus_bike import run_step2
 
 
 def _write_model_file(path) -> None:

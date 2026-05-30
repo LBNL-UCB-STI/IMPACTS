@@ -44,7 +44,7 @@ def build_registry(settings, config_path: Path) -> PathRegistry:
       1. beam_input, beam_input/region, beam_input/region/vehicle-tech/emissions
       2. beam_input/vehicle_folder/emissions, beam_input/vehicle_folder/dispersions
       3. beam_output
-      4. impacts_input
+      4. impacts_inputs
       5. config_parent, cwd
     """
     from ..manifest.file_ops import resolve_path
@@ -68,9 +68,9 @@ def build_registry(settings, config_path: Path) -> PathRegistry:
     if beam_output:
         roots.append(Path(beam_output))
 
-    impacts_input = resolve_path(settings.impacts.local_input_folder, config_path)
-    if impacts_input:
-        roots.append(Path(impacts_input))
+    impacts_inputs = resolve_path(settings.impacts.local_input_folder, config_path)
+    if impacts_inputs:
+        roots.append(Path(impacts_inputs))
 
     config_parent = Path(config_path).resolve().parent
     roots.append(config_parent)

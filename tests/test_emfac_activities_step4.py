@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from impacts.emfac.activities.step4_finalize_output import _build_activity_by_emfac_id_table
+from impacts.pipeline.emfac.activities.step4_finalize_output import _build_activity_by_emfac_id_table
 
 
 def test_build_activity_by_emfac_id_table_aggregates_to_county_emfac_id_and_process() -> None:

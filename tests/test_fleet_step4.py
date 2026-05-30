@@ -6,21 +6,21 @@ from pathlib import Path
 
 import pandas as pd
 
-from impacts.emfac.common import read_frism_carriers_input
-from impacts.emfac.fleet.step4_map_emfac_frism import _build_freight_bayesian_log_score
-from impacts.emfac.fleet.step4_map_emfac_frism import _build_freight_naics_sector_weight_lookup
-from impacts.emfac.fleet.step4_map_emfac_frism import _build_payload_mass_thresholds
-from impacts.emfac.fleet.step4_map_emfac_frism import _filter_required_port_classes
-from impacts.emfac.fleet.step4_map_emfac_frism import _build_tour_port_weight_lookup
-from impacts.emfac.fleet.step4_map_emfac_frism import _attach_freight_fuel_consumption_templates
-from impacts.emfac.fleet.step4_map_emfac_frism import _finalize_freight_vehicle_type_probabilities
-from impacts.emfac.fleet.step4_map_emfac_frism import _payload_mass_gvwr_likelihood
-from impacts.emfac.fleet.step4_map_emfac_frism import _load_configured_port_classes
-from impacts.emfac.fleet.step4_map_emfac_frism import _load_vehicle_type_assignment_table
-from impacts.emfac.fleet.step4_map_emfac_frism import _load_port_zone_mapping
-from impacts.emfac.fleet.step4_map_emfac_frism import _port_category_weight
-from impacts.emfac.fleet.step4_map_emfac_frism import _read_step4_freight_vehicle_types
-from impacts.emfac.fleet.step4_map_emfac_frism import _normalize_zone_id
+from impacts.pipeline.emfac.common import read_frism_carriers_input
+from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _build_freight_bayesian_log_score
+from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _build_freight_naics_sector_weight_lookup
+from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _build_payload_mass_thresholds
+from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _filter_required_port_classes
+from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _build_tour_port_weight_lookup
+from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _attach_freight_fuel_consumption_templates
+from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _finalize_freight_vehicle_type_probabilities
+from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _payload_mass_gvwr_likelihood
+from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _load_configured_port_classes
+from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _load_vehicle_type_assignment_table
+from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _load_port_zone_mapping
+from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _port_category_weight
+from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _read_step4_freight_vehicle_types
+from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _normalize_zone_id
 
 
 def _write_model_file(tmp_path: Path, *, port_rows: list[str] | None = None) -> dict[str, dict[str, str]]:
@@ -500,7 +500,7 @@ def test_attach_freight_fuel_consumption_templates_keeps_baseline_values_when_ma
     monkeypatch, capsys
 ) -> None:
     monkeypatch.setattr(
-        "impacts.emfac.fleet.step4_map_emfac_frism.build_fuel_consumption_emfac_assignment_catalog",
+        "impacts.pipeline.emfac.fleet.step4_map_emfac_frism.build_fuel_consumption_emfac_assignment_catalog",
         lambda model_file, breakdown_path: pd.DataFrame(
             [{"fastsim_id": "unused-template", "emfac_vehicle_category": "T7 Tractor Class 8", "emfac_fuel": "Dsl", "fastsim_relative_path": "foo.csv"}]
         ),
@@ -599,7 +599,7 @@ def test_attach_freight_fuel_consumption_templates_still_errors_without_baseline
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        "impacts.emfac.fleet.step4_map_emfac_frism.build_fuel_consumption_emfac_assignment_catalog",
+        "impacts.pipeline.emfac.fleet.step4_map_emfac_frism.build_fuel_consumption_emfac_assignment_catalog",
         lambda model_file, breakdown_path: pd.DataFrame(columns=["fastsim_id", "emfac_vehicle_category", "emfac_fuel", "fastsim_relative_path"]),
     )
     mapped = pd.DataFrame(

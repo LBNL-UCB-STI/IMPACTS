@@ -25,7 +25,7 @@ python -m impacts pipeline --config /path/settings.yaml
 
 - The default ISRM location is `s3://inmap-model/isrm_v1.2.1.zarr/`.
 - Exploratory code under `src/impacts/scratch/` is not part of the maintained execution path.
-- The maintained Pilates overlay template lives at [pilates_overlay.yaml](src/impacts/pipeline/adapters/pilates_overlay.yaml).
+- The canonical settings template lives at [settings.yaml](src/impacts/config/settings.yaml).
 
 ## PILATES
 

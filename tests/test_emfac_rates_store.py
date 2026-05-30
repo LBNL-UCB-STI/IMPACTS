@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from impacts.emfac.activities.step4_finalize_output import _complete_sparse_counties_for_rates_store
+from impacts.pipeline.emfac.activities.step4_finalize_output import _complete_sparse_counties_for_rates_store
 
 
 def test_complete_sparse_counties_imputes_missing_counties_for_rate_rows() -> None:

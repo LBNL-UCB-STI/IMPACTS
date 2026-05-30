@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from impacts.emfac.activities.step2_build_comprehensive_project_analysis import build_comprehensive_project_analysis
+from impacts.pipeline.emfac.activities.step2_build_comprehensive_project_analysis import build_comprehensive_project_analysis
 
 
 def test_build_comprehensive_project_analysis_uses_configured_pto_vehicle_categories() -> None:

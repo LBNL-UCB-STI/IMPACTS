@@ -38,8 +38,8 @@ def _resolve_pipeline_manifest_path(settings_path: str, manifest_name: str) -> P
 
 
 def _run_presim_from_settings(settings_path: str) -> None:
-    from impacts.emfac.fleet.main import main as run_fleet_main
-    from impacts.emfac.preparation import ensure_emfac_activities_outputs
+    from impacts.pipeline.emfac.fleet.main import main as run_fleet_main
+    from impacts.pipeline.emfac.preparation import ensure_emfac_activities_outputs
 
     settings = load_settings_from_yaml(settings_path)
     activities_manifest_path: str | None = None
@@ -206,10 +206,9 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--profile", choices=("none", "memray", "time"), default="none")
     derive_settings = subparsers.add_parser(
         "derive_settings_from_pilates",
-        help="Generate an impacts settings file from main PILATES settings and a thin impacts overlay.",
+        help="Generate an impacts settings file from main PILATES settings and the built-in impacts template.",
     )
     derive_settings.add_argument("--pilates-settings", required=True)
-    derive_settings.add_argument("--model-config", required=True)
     derive_settings.add_argument("--output", required=True)
 
     sample_events = subparsers.add_parser(
@@ -308,14 +307,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "activities":
-        from impacts.emfac.preparation import ensure_emfac_activities_outputs
+        from impacts.pipeline.emfac.preparation import ensure_emfac_activities_outputs
 
         settings = load_settings_from_yaml(args.config)
         ensure_emfac_activities_outputs(settings, Path(args.config))
         return 0
 
     if args.command == "fleet":
-        from impacts.emfac.fleet.main import main as run_fleet_main
+        from impacts.pipeline.emfac.fleet.main import main as run_fleet_main
 
         run_fleet_main(activities_manifest_path=args.activities_manifest)
         return 0
@@ -389,11 +388,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "derive_settings_from_pilates":
-        from impacts.pipeline.adapters.pilates import derive_settings_from_pilates
+        from impacts.config.settings_builder import derive_settings_from_pilates
 
         derive_settings_from_pilates(
             pilates_settings_path=args.pilates_settings,
-            impacts_model_config_path=args.model_config,
             output_path=args.output,
         )
         return 0
@@ -423,7 +421,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "rdata_to_parquet":
-        from impacts.inmap.rdata_conversion import rdata_to_parquet
+        from impacts.pipeline.inmap.rdata_conversion import rdata_to_parquet
 
         written = rdata_to_parquet(
             input_path=args.input,
@@ -435,7 +433,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "build_nox_to_no2":
-        from impacts.inmap.build_complete_nox_to_no2_matrix import main as build_nox_to_no2_main
+        from impacts.pipeline.inmap.build_complete_nox_to_no2_matrix import main as build_nox_to_no2_main
 
         build_nox_to_no2_main(
             [

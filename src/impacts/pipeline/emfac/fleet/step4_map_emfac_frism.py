@@ -15,16 +15,16 @@ from impacts.config.settings import EMFAC_ACTIVITY_SCHEMA
 from impacts.config.settings import EMFAC_KEY_SCHEMA
 from impacts.config.settings import read_table
 from impacts.config.settings import resolve_workflow_path
-from impacts.emfac.common import attach_emissions_rates_filepaths_from_config
-from impacts.emfac.common import attach_idle_time_fraction_from_config
-from impacts.emfac.common import build_hashed_vehicle_type_ids
-from impacts.emfac.common import model_year_group_id_component
-from impacts.emfac.common import normalize_probabilities_to_fixed_precision
-from impacts.emfac.common import read_frism_carriers_input
-from impacts.emfac.fleet.step1_build_vehicle_types import _freight_vehicle_types_output_file
-from impacts.emfac.fleet.step1_build_vehicle_types import _normalize_energy_file_columns
-from impacts.emfac.fleet.step1_build_vehicle_types import _normalize_energy_file_path
-from impacts.emfac.fleet.step3_map_emfac_atlas import _coerce_random_generator
+from impacts.pipeline.emfac.common import attach_emissions_rates_filepaths_from_config
+from impacts.pipeline.emfac.common import attach_idle_time_fraction_from_config
+from impacts.pipeline.emfac.common import build_hashed_vehicle_type_ids
+from impacts.pipeline.emfac.common import model_year_group_id_component
+from impacts.pipeline.emfac.common import normalize_probabilities_to_fixed_precision
+from impacts.pipeline.emfac.common import read_frism_carriers_input
+from impacts.pipeline.emfac.fleet.step1_build_vehicle_types import _freight_vehicle_types_output_file
+from impacts.pipeline.emfac.fleet.step1_build_vehicle_types import _normalize_energy_file_columns
+from impacts.pipeline.emfac.fleet.step1_build_vehicle_types import _normalize_energy_file_path
+from impacts.pipeline.emfac.fleet.step3_map_emfac_atlas import _coerce_random_generator
 
 
 _EMFAC_KEY_COLUMNS = ["vehicleCategory", "fuel", "modelYear"]

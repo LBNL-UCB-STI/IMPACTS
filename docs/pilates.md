@@ -14,18 +14,16 @@ examples/pilates/
 
 Meaning:
 
-- `beam/beam_output/`: BEAM run outputs consumed by `impacts`
-- `beam/production/`: production inputs referenced by the example settings
-- `impacts/`: downstream-facing published artifacts
+- `beam/beam_output`: BEAM run outputs consumed by `impacts`
+- `beam/production`: production inputs referenced by the example settings
+- `impacts`: downstream-facing published artifacts
 
 ## Settings model
 
 The example uses one user-managed settings file:
 
 - `examples/pilates/settings.yaml`
-- `src/impacts/config/settings.yaml` is the maintained starting template for the impacts overlay inside PILATES settings.
-
-That file is a thin impacts overlay kept with the example tree.
+- `src/impacts/config/settings.yaml` is the canonical native IMPACTS settings template.
 
 During preprocess, `impacts` registers the user-provided settings file in the inputs manifest and writes managed artifacts under the configured `impacts.local_input_folder` and `impacts.local_output_folder`.
 
@@ -54,12 +52,12 @@ shared:
     local_crs: EPSG:26910
 
 beam:
-  local_input_folder: beam/production/
-  local_output_folder: beam/beam_output/
+  local_input_folder: beam/production
+  local_output_folder: beam/beam_output
 
 impacts:
-  local_input_folder: impacts/impacts_input/
-  local_output_folder: impacts/impacts_output/
+  local_input_folder: impacts/impacts_inputs
+  local_output_folder: impacts/impacts_output
   scenario: 2018-Baseline
   pipeline:
     presim:
@@ -72,9 +70,8 @@ impacts:
       exposure: true
   population:
     passenger_folder: urbansim/atlas-2019
+    freight_folder: freight/20250730/2018-Baseline
     vehicle_folder: vehicle-tech
-    rates_folder: vehicle-tech/emissions
-    dispersions_folder: vehicle-tech/dispersions
     atlas_year: 2019
     frism_year: 2018
     population_sample: 0.1

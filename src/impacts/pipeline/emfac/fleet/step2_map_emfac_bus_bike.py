@@ -20,9 +20,9 @@ from impacts.config.settings import EMFAC_ACTIVITY_SCHEMA
 from impacts.config.settings import EMFAC_KEY_SCHEMA
 from impacts.config.settings import read_table
 from impacts.config.settings import resolve_workflow_path
-from impacts.emfac.common import attach_emissions_rates_filepaths_from_config
-from impacts.emfac.common import attach_idle_time_fraction_from_config
-from impacts.emfac.common import model_year_group_id_component
+from impacts.pipeline.emfac.common import attach_emissions_rates_filepaths_from_config
+from impacts.pipeline.emfac.common import attach_idle_time_fraction_from_config
+from impacts.pipeline.emfac.common import model_year_group_id_component
 
 
 _EMFAC_KEY_COLUMNS = ["vehicleCategory", "fuel", "modelYear"]

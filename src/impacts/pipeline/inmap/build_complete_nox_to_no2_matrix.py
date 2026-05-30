@@ -471,7 +471,7 @@ def build_complete_matrix(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m impacts.inmap.build_complete_nox_to_no2_matrix",
+        prog="python -m impacts.pipeline.inmap.build_complete_nox_to_no2_matrix",
         description="Build a full-domain workflow-ready NOx-to-NO2 ISRM matrix.",
     )
     parser.add_argument("--output-file", required=True, help="Full output .npz file path to write")

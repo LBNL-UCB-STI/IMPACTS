@@ -3,11 +3,11 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-import impacts.emfac.activities.step1_prepare_emissions_and_activities_tables as step1
-from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import _complete_sparse_inventory_counties
-from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import build_road_dust_rows
-from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import _normalize_emissions_inventory_fuel
-from impacts.emfac.activities.step1_prepare_emissions_and_activities_tables import _set_activities_mappings
+import impacts.pipeline.emfac.activities.step1_prepare_emissions_and_activities_tables as step1
+from impacts.pipeline.emfac.activities.step1_prepare_emissions_and_activities_tables import _complete_sparse_inventory_counties
+from impacts.pipeline.emfac.activities.step1_prepare_emissions_and_activities_tables import build_road_dust_rows
+from impacts.pipeline.emfac.activities.step1_prepare_emissions_and_activities_tables import _normalize_emissions_inventory_fuel
+from impacts.pipeline.emfac.activities.step1_prepare_emissions_and_activities_tables import _set_activities_mappings
 
 
 def _base_complete_county_frame() -> list[dict[str, object]]:

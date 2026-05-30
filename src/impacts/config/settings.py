@@ -44,6 +44,20 @@ def _canonical_pollutant_from_source(value: str) -> str:
     return canonical
 
 
+def normalize_epsg(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.upper().startswith("EPSG:"):
+        return text.upper()
+    try:
+        return f"EPSG:{int(text)}"
+    except ValueError:
+        return text
+
+
 def _build_source_pollutants(value: Any) -> List[str]:
     pollutants = _coerce_string_list(value)
     if not pollutants:
@@ -161,9 +175,12 @@ class Geography:
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Geography":
         _reject_unknown_keys(payload, {"FIPS", "local_crs"}, "shared.geography")
+        local_crs = normalize_epsg(payload.get("local_crs"))
+        if local_crs is None:
+            raise ValueError("Missing required value: shared.geography.local_crs")
         return cls(
             fips=GeographyFips.from_dict(dict(payload.get("FIPS", {}) or {})),
-            local_crs=_required_string(payload.get("local_crs"), "shared.geography.local_crs"),
+            local_crs=local_crs,
         )
 
 
@@ -373,19 +390,20 @@ class Emissions:
         )
         source_pollutants = _build_source_pollutants(payload.get("pollutants"))
         build_pollutants_map_from_sources(source_pollutants)
+        inventory_payload = {"inventory_folder": payload.get("inventory_folder")}
+        for correction_key in (
+            "enable_passenger_activity_correction",
+            "enable_freight_activity_correction",
+        ):
+            if correction_key in payload:
+                inventory_payload[correction_key] = payload.get(correction_key)
         return cls(
             osm_network_folder=_optional_string(payload.get("osm_network_folder")),
             rates_folder=_required_string(
                 payload.get("rates_folder"),
                 "impacts.emissions.rates_folder",
             ),
-            inventory=EmissionsInventory.from_dict(
-                {
-                    "inventory_folder": payload.get("inventory_folder"),
-                    "enable_passenger_activity_correction": payload.get("enable_passenger_activity_correction"),
-                    "enable_freight_activity_correction": payload.get("enable_freight_activity_correction"),
-                }
-            ),
+            inventory=EmissionsInventory.from_dict(inventory_payload),
             vehicle_category_metadata_file=_optional_string(payload.get("vehicle_category_metadata_file")),
             defaults=Emissions.Defaults(
                 default_annualization_days=Emissions.Defaults.AnnualizationDays.from_dict(

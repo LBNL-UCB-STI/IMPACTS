@@ -5,10 +5,10 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from ..common import log_step_banner
-from ..common import log_substep_banner
-from ..manifest.file_ops import write_structured_file
-from ..manifest.schema import ActivitiesManifest
+from ...common import log_step_banner
+from ...common import log_substep_banner
+from ...manifest.file_ops import write_structured_file
+from ...manifest.schema import ActivitiesManifest
 
 logger = logging.getLogger(__name__)
 
@@ -192,8 +192,8 @@ def _extract_archive(archive: Path, destination: Path) -> None:
 
 
 def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
-    from ..manifest.file_ops import resolve_path
-    from ..config.path_registry import build_registry
+    from ...manifest.file_ops import resolve_path
+    from ...config.path_registry import build_registry
 
     local_input_folder = Path(resolve_path(settings.impacts.local_input_folder, config_path)).resolve()
     local_input_folder.mkdir(parents=True, exist_ok=True)
@@ -353,9 +353,9 @@ def _ensure_raw_data(cfg: dict[str, Any]) -> None:
 
 
 def _build_workflow(settings, config_path: Path) -> dict[str, Any]:
-    from ..config.path_registry import build_registry
-    from ..config.settings import _build_activities_config_from_root
-    from ..config.settings import _build_activities_workflow
+    from ...config.path_registry import build_registry
+    from ...config.settings import _build_activities_config_from_root
+    from ...config.settings import _build_activities_workflow
 
     cfg = _normalize_raw_input_paths(_resolve_activities_config(settings, config_path))
     registry = build_registry(settings, config_path)

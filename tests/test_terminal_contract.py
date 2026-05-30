@@ -100,7 +100,7 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.shared.geography.fips.state == "06"
     assert config.shared.geography.fips.counties[0] == "001"
     assert config.beam.local_input_folder == "~/Workspace/Models/beam/beam-data"
-    assert config.beam.local_output_folder == "beam/beam_output/"
+    assert config.beam.local_output_folder == "beam/beam_output"
     assert config.beam.router_directory == "r5/sfbay-cbg5500-weakConn-network"
     assert config.impacts.pipeline.inmap is True
     assert config.impacts.dispersions.inmap.grid_path.endswith("isrm_polygon_wgs84.gpkg")
@@ -135,16 +135,69 @@ def test_resolve_region_input_root_accepts_direct_region_root_layout(tmp_path: P
     assert resolved == beam_input_root
 
 
-def test_pipeline_example_is_source_of_truth_for_builtin_pipeline_impacts_settings() -> None:
+def test_builtin_settings_source_of_truth_is_current() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     example_payload = yaml.safe_load((repo_root / "examples" / "pilates" / "settings.yaml").read_text())
-    default_payload = yaml.safe_load((repo_root / "src" / "impacts" / "config" / "settings.yaml").read_text())
-    overlay_payload = yaml.safe_load((repo_root / "src" / "impacts" / "pipeline" / "adapters" / "pilates_overlay.yaml").read_text())
+    default_settings_path = repo_root / "src" / "impacts" / "config" / "settings.yaml"
+    default_payload = yaml.safe_load(default_settings_path.read_text())
+    default_config = load_settings_from_yaml(default_settings_path)
 
     shared_keys = {"emissions", "dispersions", "analysis"}
     assert shared_keys <= set(default_payload["impacts"])
     assert shared_keys <= set(example_payload["impacts"])
-    assert shared_keys <= set(overlay_payload["impacts"])
+    assert default_config.impacts.activities["project_analysis"]["main"]["folder_in_archive"] == "sfbay-emfac-project-analysis"
+    assert default_config.impacts.population.vehicle_folder == "vehicle-tech"
+
+
+def test_native_settings_loader_normalizes_directly(tmp_path: Path) -> None:
+    settings_yaml = tmp_path / "settings.yaml"
+    settings_yaml.write_text(
+        "\n".join(
+            [
+                "run:",
+                "  region: sfbay",
+                "  scenario: base",
+                "  start_year: 2018",
+                "shared:",
+                "  geography:",
+                "    FIPS:",
+                '      state: "06"',
+                "      counties:",
+                '        - "001"',
+                "    local_crs: 26910",
+                "beam:",
+                "  local_input_folder: pilates/beam/production",
+                "  local_output_folder: beam/beam_output",
+                "impacts:",
+                "  local_input_folder: impacts/impacts_inputs",
+                "  local_output_folder: impacts/impacts_output",
+                "  scenario: 2018-Baseline",
+                "  pipeline:",
+                "    postsim:",
+                "      inmap: false",
+                "      aermod: false",
+                "  population:",
+                "    vehicle_folder: vehicle-tech",
+                "  emissions:",
+                "    pollutants: [NOx]",
+                "    default_annualization_days:",
+                "      light_duty: 327.0",
+                "      medium_heavy_duty: 312.0",
+                "  dispersions:",
+                "    inmap: {}",
+                "    aermod: {}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_settings_from_yaml(settings_yaml)
+
+    assert config.shared.geography.local_crs == "EPSG:26910"
+    assert config.impacts.emissions.inventory.enable_passenger_activity_correction is True
+    assert config.impacts.emissions.inventory.enable_freight_activity_correction is True
+
+
 def test_pipeline_profile_memray_is_rejected(tmp_path: Path) -> None:
     config_path = tmp_path / "settings.yaml"
     config_path.write_text("impacts:\n  local_output_folder: impacts_output\n", encoding="utf-8")
@@ -208,12 +261,12 @@ def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_d
                 '        - "001"',
                 "    local_crs: EPSG:26910",
                 "beam:",
-                "  local_input_folder: pilates/beam/production/",
-                "  local_output_folder: beam/beam_output/",
+                "  local_input_folder: pilates/beam/production",
+                "  local_output_folder: beam/beam_output",
                 "  router_directory: r5/network",
                 "impacts:",
-                "  local_input_folder: impacts/impacts_inputs/",
-                "  local_output_folder: impacts/impacts_output/",
+                "  local_input_folder: impacts/impacts_inputs",
+                "  local_output_folder: impacts/impacts_output",
                 "  scenario: 2018-Baseline",
                 "  pipeline:",
                 "    postsim:",
@@ -268,7 +321,7 @@ def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_d
     assert pipeline.include_freight is True
 
 
-def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_path: Path):
+def test_build_settings_from_pilates_template_uses_builtin_impacts_settings(tmp_path: Path):
     pilates_settings = tmp_path / "pilates_settings.yaml"
     pilates_settings.write_text(
         "\n".join(
@@ -286,23 +339,22 @@ def test_build_settings_from_pilates_template_uses_current_overlay_shape(tmp_pat
                 '        - "013"',
                 "    local_crs: EPSG:26910",
                 "beam:",
-                "  local_input_folder: pilates/beam/production/",
-                "  local_output_folder: beam/beam_output/",
+                "  local_input_folder: pilates/beam/production",
+                "  local_output_folder: beam/beam_output",
                 "  router_directory: beam/beam_output/r5/sfbay-cbg5500-weakConn-network",
             ]
         ),
         encoding="utf-8",
     )
 
-    overlay = Path(__file__).resolve().parents[1] / "src" / "impacts" / "pipeline" / "adapters" / "pilates_overlay.yaml"
-    config = build_settings_from_pilates(pilates_settings=pilates_settings, impacts_overlay=overlay)
+    config = build_settings_from_pilates(pilates_settings=pilates_settings)
 
     assert config.run.region == "sfbay"
     assert config.run.scenario == "base"
     assert config.run.start_year == 2017
     assert config.shared.geography.local_crs == "EPSG:26910"
-    assert config.beam.local_input_folder == "pilates/beam/production/"
-    assert config.beam.local_output_folder == "beam/beam_output/"
+    assert config.beam.local_input_folder == "pilates/beam/production"
+    assert config.beam.local_output_folder == "beam/beam_output"
     assert config.beam.router_directory == "beam/beam_output/r5/sfbay-cbg5500-weakConn-network"
     assert config.impacts.emissions.osm_network_folder.endswith("r5/sfbay-cbg5500-weakConn-network")
     assert config.impacts.scenario == "2017-Baseline"
@@ -639,7 +691,7 @@ def test_cli_fleet_uses_activities_manifest(monkeypatch, tmp_path: Path) -> None
     def _fake_run_fleet_main(*, activities_manifest_path):
         captured["activities_manifest_path"] = str(activities_manifest_path)
 
-    monkeypatch.setattr("impacts.emfac.fleet.main.main", _fake_run_fleet_main)
+    monkeypatch.setattr("impacts.pipeline.emfac.fleet.main.main", _fake_run_fleet_main)
 
     assert main(["fleet", "--activities-manifest", str(tmp_path / "activities_manifest.yaml")]) == 0
     assert captured["activities_manifest_path"].endswith("activities_manifest.yaml")
@@ -859,5 +911,5 @@ def test_settings_loader_rejects_invalid_shape(tmp_path: Path):
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="Unsupported keys under shared"):
+    with pytest.raises(ValueError, match="Unsupported keys under root"):
         load_settings_from_yaml(invalid_settings_yaml)

@@ -5,16 +5,16 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from impacts.emfac.common import read_atlas_vehicles_input
-from impacts.emfac.fleet.step1_build_vehicle_types import _build_atlas_vehicle_type_targets
-from impacts.emfac.fleet.step1_build_vehicle_types import _build_passenger_vehicle_types_from_atlas_targets
-from impacts.emfac.fleet.step3_map_emfac_atlas import _assign_passenger_fuel_consumption_fields
-from impacts.emfac.fleet.step3_map_emfac_atlas import _build_passenger_emfac_candidates
-from impacts.emfac.fleet.step3_map_emfac_atlas import _combine_passenger_vehicle_types_for_output
-from impacts.emfac.fleet.step3_map_emfac_atlas import _finalize_passenger_vehicle_type_probabilities
-from impacts.emfac.fleet.step3_map_emfac_atlas import _prepare_mapped_passenger_vehicles_output
-from impacts.emfac.fleet.step3_map_emfac_atlas import _read_step3_passenger_vehicle_types
-from impacts.emfac.fleet.step3_map_emfac_atlas import _sample_passenger_vehicle_type_ids_for_vehicles
+from impacts.pipeline.emfac.common import read_atlas_vehicles_input
+from impacts.pipeline.emfac.fleet.step1_build_vehicle_types import _build_atlas_vehicle_type_targets
+from impacts.pipeline.emfac.fleet.step1_build_vehicle_types import _build_passenger_vehicle_types_from_atlas_targets
+from impacts.pipeline.emfac.fleet.step3_map_emfac_atlas import _assign_passenger_fuel_consumption_fields
+from impacts.pipeline.emfac.fleet.step3_map_emfac_atlas import _build_passenger_emfac_candidates
+from impacts.pipeline.emfac.fleet.step3_map_emfac_atlas import _combine_passenger_vehicle_types_for_output
+from impacts.pipeline.emfac.fleet.step3_map_emfac_atlas import _finalize_passenger_vehicle_type_probabilities
+from impacts.pipeline.emfac.fleet.step3_map_emfac_atlas import _prepare_mapped_passenger_vehicles_output
+from impacts.pipeline.emfac.fleet.step3_map_emfac_atlas import _read_step3_passenger_vehicle_types
+from impacts.pipeline.emfac.fleet.step3_map_emfac_atlas import _sample_passenger_vehicle_type_ids_for_vehicles
 
 
 def test_build_atlas_vehicle_type_targets_preserves_exact_model_year_combinations() -> None:
@@ -704,7 +704,7 @@ def _write_step3_test_source_vehicle_types(source_file: Path) -> None:
         [
             {
                 "vehicleTypeId": "2015_gasoline_Chrysler_200",
-                "primaryVehicleEnergyFile": "legacy/2015_gasoline_Chrysler_200_lookup_table.csv.gz",
+                "primaryVehicleEnergyFile": "source/2015_gasoline_Chrysler_200_lookup_table.csv.gz",
                 "secondaryVehicleEnergyFile": "",
                 "primaryFuelType": "gasoline",
                 "secondaryFuelType": "",

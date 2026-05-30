@@ -11,6 +11,7 @@ from .settings import InmapDispersion
 from .settings import Run
 from .settings import Shared
 from .settings_builder import build_settings_from_pilates
+from .settings_builder import derive_settings_from_pilates
 from .settings_builder import load_settings_from_yaml
 from .settings_builder import write_settings
 
@@ -26,6 +27,7 @@ __all__ = [
     "Run",
     "Shared",
     "build_settings_from_pilates",
+    "derive_settings_from_pilates",
     "load_settings_from_yaml",
     "write_settings",
 ]

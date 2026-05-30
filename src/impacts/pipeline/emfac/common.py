@@ -18,6 +18,10 @@ from impacts.config.settings import VEHICLE_CATEGORY_METADATA_SCHEMA
 
 LIGHT_DUTY_VEHICLE_CATEGORIES = {"LDA", "LDT1", "LDT2"}
 VEHICLE_TYPE_ID_HASH_HEX_LENGTH = 6
+ATLAS_VEHICLE_COLUMN_ALIASES = {
+    "household_id": "householdId",
+    "vehicle_id": "sourceVehicleId",
+}
 
 
 def _read_full_input_table(path_like: str) -> pd.DataFrame:
@@ -30,6 +34,10 @@ def _read_full_input_table(path_like: str) -> pd.DataFrame:
 def read_atlas_vehicles_input(path_like: str) -> pd.DataFrame:
     vehicles = _read_full_input_table(path_like)
     prepared = vehicles.copy()
+
+    for canonical_column, processed_column in ATLAS_VEHICLE_COLUMN_ALIASES.items():
+        if canonical_column not in prepared.columns and processed_column in prepared.columns:
+            prepared[canonical_column] = prepared[processed_column]
 
     for column_name, dtype_name in ATLAS_VEHICLES_SCHEMA.items():
         if column_name not in prepared.columns:
