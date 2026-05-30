@@ -1,4 +1,5 @@
 numpy<2.0
+pandas
 geopandas>=0.11.1
 pyproj>=3.6.1
 shapely>=1.8.5
@@ -11,3 +12,7 @@ tqdm
 pyogrio
 s3fs
 osm-chordify==0.2.4
+matplotlib>=3.9.0
+memray
+pyreadr
+consist
