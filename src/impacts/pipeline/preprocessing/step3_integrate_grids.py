@@ -13,6 +13,7 @@ import osm_chordify
 import pandas as pd
 import shapely.wkb
 from shapely.geometry import LineString
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 from ...common import log_step_banner
 from ...common import log_substep_banner
@@ -472,13 +473,14 @@ def run(
     else:
         staged_osm = resolve_required_manifest_input(manifest_inputs, key="osm_network")
         logger.info("Step 3.1: mapping BEAM network to OSM using %s", staged_osm)
-        mapped_network = _map_beam_network_to_osm(
-            osm_path=staged_osm,
-            network_path=staged_network,
-            output_path=mapped_network_path,
-            network_osm_id_col=pipeline.beam_osm_id_col,
-            output_epsg=int(pipeline.output_epsg),
-        )
+        with logging_redirect_tqdm():
+            mapped_network = _map_beam_network_to_osm(
+                osm_path=staged_osm,
+                network_path=staged_network,
+                output_path=mapped_network_path,
+                network_osm_id_col=pipeline.beam_osm_id_col,
+                output_epsg=int(pipeline.output_epsg),
+            )
         mapped_network.to_file(str(Path(mapped_network_path).with_suffix(".gpkg")), driver="GPKG")
         logger.info("Step 3.1 complete: wrote %s", mapped_network_path)
     mapped_network = _ensure_mapped_network_covers_car_beam_links(
@@ -493,14 +495,15 @@ def run(
     if pipeline.inmap_enabled:
         log_substep_banner("3.2", "intersect with InMAP grid", logger=logger)
         logger.info("Step 3.2: intersecting with inMAP grid %s", pipeline.inmap_grid_path)
-        inmap_intersection = intersect_road_network_with_zones(
-            mapped_network,
-            epsg,
-            pipeline.inmap_grid_path,
-            output_epsg=epsg,
-            prefilter_zones_to_network_bbox=True,
-            zone_label="inmap",
-        )
+        with logging_redirect_tqdm():
+            inmap_intersection = intersect_road_network_with_zones(
+                mapped_network,
+                epsg,
+                pipeline.inmap_grid_path,
+                output_epsg=epsg,
+                prefilter_zones_to_network_bbox=True,
+                zone_label="inmap",
+            )
         inmap_intersection = trace_and_filter_void_zone_rows(
             inmap_intersection,
             zone_id_col="inmap_cell_id",
@@ -516,14 +519,15 @@ def run(
     if pipeline.aermod_enabled:
         log_substep_banner("3.3", "intersect with AERMOD grid", logger=logger)
         logger.info("Step 3.3: intersecting line network with AERMOD grid %s", pipeline.aermod_grid_path)
-        aermod_intersection = intersect_road_network_with_zones(
-            mapped_network,
-            epsg,
-            pipeline.aermod_grid_path,
-            output_epsg=epsg,
-            prefilter_zones_to_network_bbox=True,
-            zone_label="aermod",
-        )
+        with logging_redirect_tqdm():
+            aermod_intersection = intersect_road_network_with_zones(
+                mapped_network,
+                epsg,
+                pipeline.aermod_grid_path,
+                output_epsg=epsg,
+                prefilter_zones_to_network_bbox=True,
+                zone_label="aermod",
+            )
         aermod_intersection = _normalize_zone_intersection_schema(aermod_intersection, zone_label="aermod")
         aermod_intersection.to_parquet(aermod_intersection_path, index=False)
         aermod_intersection.to_file(aermod_intersection_path.with_suffix(".gpkg"), driver="GPKG")
@@ -547,9 +551,10 @@ def run(
         time.perf_counter() - county_setup_started,
     )
     county_match_started = time.perf_counter()
-    C_matched = intersect_road_network_with_zones(
-        B, epsg, county_gdf, output_epsg=epsg, zone_label="county",
-    )
+    with logging_redirect_tqdm():
+        C_matched = intersect_road_network_with_zones(
+            B, epsg, county_gdf, output_epsg=epsg, zone_label="county",
+        )
     logger.info(
         "Step 3.4 complete: %d matched rows in %.2fs",
         len(C_matched),
