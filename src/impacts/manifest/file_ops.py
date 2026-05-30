@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -208,20 +207,6 @@ def is_remote_path(path: str) -> bool:
     return path.startswith(("s3://", "gs://", "http://", "https://"))
 
 
-def sha256_path(path: str | Path) -> str:
-    target = Path(path)
-    digest = hashlib.sha256()
-    if target.is_dir():
-        for child in sorted(p for p in target.rglob("*") if p.is_file()):
-            digest.update(str(child.relative_to(target)).encode("utf-8"))
-            digest.update(sha256_path(child).encode("utf-8"))
-        return digest.hexdigest()
-
-    with target.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
 
 def _copy_directory_with_progress(src: Path, dst: Path) -> None:
     files = [path for path in src.rglob("*") if path.is_file()]
@@ -282,6 +267,4 @@ def file_entry(
         "optional": optional,
         "exists": src.exists(),
     }
-    if src.exists():
-        entry["sha256"] = sha256_path(src)
     return entry
