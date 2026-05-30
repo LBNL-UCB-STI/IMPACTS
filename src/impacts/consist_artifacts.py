@@ -170,13 +170,21 @@ def _consist_module() -> Any:
     return consist
 
 
+def _is_missing_active_run(error: RuntimeError) -> bool:
+    message = str(error)
+    return "No active Consist run found" in message
+
+
 def find_input_reference(
     *,
     key: str,
     optional: bool = False,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
-    consist = _consist_module()
+    try:
+        consist = _consist_module()
+    except ImportError:
+        return None
     artifact_metadata = {"artifact_key": key, **(metadata or {})}
     for attr_name in ("find_artifact", "get_artifact", "find_input"):
         query_fn = getattr(consist, attr_name, None)
@@ -224,7 +232,10 @@ def find_latest_dynamic_input_reference(
     optional: bool = False,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
-    consist = _consist_module()
+    try:
+        consist = _consist_module()
+    except ImportError:
+        return None
     outputs: Any = None
     for attr_name in ("get_run_outputs",):
         query_fn = getattr(consist, attr_name, None)
@@ -305,7 +316,10 @@ def log_input_reference(
     optional: bool = False,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
-    consist = _consist_module()
+    try:
+        consist = _consist_module()
+    except ImportError:
+        return None
     publish_key = artifact_key or key
     logger_fn = getattr(consist, "log_input", None)
     if logger_fn is None:
@@ -321,12 +335,21 @@ def log_input_reference(
         "manifest_key": key,
         **(metadata or {}),
     }
-    artifact = _call_consist_logger(
-        logger_fn,
-        path=normalized_path,
-        key=publish_key,
-        metadata=artifact_metadata,
-    )
+    try:
+        artifact = _call_consist_logger(
+            logger_fn,
+            path=normalized_path,
+            key=publish_key,
+            metadata=artifact_metadata,
+        )
+    except RuntimeError as exc:
+        if _is_missing_active_run(exc):
+            logger.info(
+                "Consist has no active run; recording %s as a local input reference.",
+                publish_key,
+            )
+            return None
+        raise
 
     return _entry_from_artifact(
         key=publish_key,
