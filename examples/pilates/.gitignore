@@ -7,7 +7,5 @@ beam/**
 !beam/production/.gitkeep
 
 impacts/*
-!impacts/.gitkeep
-!impacts/impacts_input
 .DS_Store
 __pycache__/

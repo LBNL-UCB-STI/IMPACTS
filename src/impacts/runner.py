@@ -301,11 +301,6 @@ def run_analysis_from_settings(
     from .analysis.step3_compare_emissions_inventory import run as run_step3
     from .common import normalize_county_fips
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        force=False,
-    )
     settings = load_settings_from_yaml(settings_path)
     output_dir = Path(resolve_path(settings.impacts.local_output_folder, settings_path)).resolve() / "postprocess" / "analysis"
     modeled_emissions_path = _resolve_analysis_modeled_emissions_path(settings_path)
@@ -415,11 +410,6 @@ def _run_stages_from_preprocess_manifest(
     run_aermod: bool | None = None,
     run_exposure: bool | None = None,
 ) -> Dict[str, Any]:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        force=False,
-    )
     manifest = PreprocessManifest.from_dict(load_structured_file(preprocess_manifest_path)).to_dict()
     pipeline = PipelineConfig.from_dict(manifest.get("pipeline", {}) or {})
     population_inputs = manifest.get("population_inputs", {}) or {}

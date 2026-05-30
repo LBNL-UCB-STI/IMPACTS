@@ -241,11 +241,6 @@ def preprocess_workflow(
     settings_path: str | Path,
     manifest_path: str | Path | None = None,
 ) -> Dict[str, Any]:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        force=False,
-    )
     manifest = build_preprocess_manifest(settings_path=settings_path)
     output_manifest = Path(manifest_path) if manifest_path else Path(manifest["preprocess_manifest_path"])
     manifest["preprocess_manifest_path"] = str(output_manifest)

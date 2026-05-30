@@ -25,8 +25,8 @@ beam:
   router_directory: r5/sfbay-cbg5500-weakConn-network
 
 impacts:
-  local_input_folder: impacts/impacts_input/
-  local_output_folder: impacts/impacts_output/
+  local_input_folder: examples/pilates/impacts/impacts_inputs/
+  local_output_folder: examples/pilates/impacts/impacts_output/
   seed: 0
   scenario: 2018-Baseline
 
@@ -50,6 +50,7 @@ impacts:
     transit_sample: 1.0
 
   activities:
+    emissions_raw_archive: vehicle-tech/emissions/emissions_raw.tar.zst
     region_label: SF
     model_year_groups:
       light_duty:
@@ -65,7 +66,7 @@ impacts:
         - ">=2016"
     project_analysis:
       main:
-        folder: sfbay-emfac-project-analysis
+        folder_in_archive: sfbay-emfac-project-analysis
         pto_as_process:
           enabled: true
           vehicle_category:
@@ -76,10 +77,10 @@ impacts:
             - T7 Single Other Class 8
             - T7 SWCV Class 8
       black_carbon:
-        folder: sfbay-emfac-moves-bc
+        folder_in_archive: sfbay-emfac-moves-bc
         pollutant: BCh
       paved_road_dust:
-        folder: statewide-carb-road-dust
+        folder_in_archive: statewide-carb-road-dust
         road_category_map:
           motorway: Freeway
           motorway_link: Freeway
@@ -95,8 +96,8 @@ impacts:
           residential: Local Urban
           residential_link: Local Urban
     emissions_inventory:
-      inventory_folder: sfbay-emfac-emissions-inventory
-      fallback_folder: statewide-emfac-emissions-inventory
+      folder_in_archive: sfbay-emfac-emissions-inventory
+      fallback_folder_in_archive: statewide-emfac-emissions-inventory
       fuel_map:
         Dsl: [Diesel]
         Elec: [Electricity]
@@ -105,7 +106,7 @@ impacts:
         Phe: [Plug-in Hybrid]
 
   fleet:
-    assignment_model: fleet_assignment.yaml
+    assignment_model: vehicle-tech/emissions/fleet_assignment.yaml
     atlas:
       fuel_map:
         gasoline: [conv, hybrid, cng]
@@ -128,13 +129,13 @@ impacts:
   dispersions:
     inmap:
       isrm_zarr: ~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr
-      isrm_nox_to_no2_ratios_file: inmap/nox_to_no2_full_isrm_matrix.npz
-      grid_path: inmap/isrm_polygon_wgs84.gpkg
+      isrm_nox_to_no2_ratios_file: vehicle-tech/dispersions/inmap/nox_to_no2_full_isrm_matrix.npz
+      grid_path: vehicle-tech/dispersions/inmap/isrm_polygon_wgs84.gpkg
       grid_id: isrm
       grid_epsg: 4326
     aermod:
       grid_size_meters: 100.0
-      asrv_patterns_file: aermod/aermod_patterns_wgs84.parquet
+      asrv_patterns_file: vehicle-tech/dispersions/aermod/aermod_patterns_wgs84.parquet
       asrv_patterns_epsg: 4326
 
   analysis:

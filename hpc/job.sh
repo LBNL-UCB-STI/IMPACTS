@@ -103,16 +103,16 @@ echo "Thread caps: $THREADS (OMP/MKL/OPENBLAS/NUMEXPR/BLIS/VECLIB)"
 echo "Stage: $STAGE"
 case "$STAGE" in
     pipeline)
-        python3 -m impacts pipeline --config "$CONFIG_FILE" --profile time
+        python3 -u -m impacts pipeline --config "$CONFIG_FILE" --profile time
         ;;
     preprocess|presim|activities|postsim|analysis)
-        python3 -m impacts "$STAGE" --config "$CONFIG_FILE"
+        python3 -u -m impacts "$STAGE" --config "$CONFIG_FILE"
         ;;
     fleet)
-        python3 -m impacts fleet --activities-manifest "$CONFIG_FILE"
+        python3 -u -m impacts fleet --activities-manifest "$CONFIG_FILE"
         ;;
     emissions|inmap|aermod|exposure|postprocess)
-        python3 -m impacts "$STAGE" --run-manifest "$CONFIG_FILE"
+        python3 -u -m impacts "$STAGE" --run-manifest "$CONFIG_FILE"
         ;;
     *)
         echo "ERROR: unsupported stage '$STAGE'"

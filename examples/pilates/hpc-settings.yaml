@@ -28,7 +28,7 @@ impacts:
   local_input_folder: examples/pilates/impacts/impacts_inputs/
   local_output_folder: examples/pilates/impacts/impacts_output/
   seed: 0
-  scenario: "2018-Baseline"
+  scenario: 2018-Baseline
 
   pipeline:
     presim:
@@ -50,6 +50,7 @@ impacts:
     transit_sample: 1.0
 
   activities:
+    emissions_raw_archive: vehicle-tech/emissions/emissions_raw.tar.zst
     region_label: SF
     model_year_groups:
       light_duty:
@@ -65,7 +66,7 @@ impacts:
         - ">=2016"
     project_analysis:
       main:
-        folder: examples/pilates/impacts/impacts_inputs/sfbay-emfac-project-analysis
+        folder_in_archive: sfbay-emfac-project-analysis
         pto_as_process:
           enabled: true
           vehicle_category:
@@ -76,10 +77,10 @@ impacts:
             - T7 Single Other Class 8
             - T7 SWCV Class 8
       black_carbon:
-        folder: examples/pilates/impacts/impacts_inputs/sfbay-emfac-moves-bc
+        folder_in_archive: sfbay-emfac-moves-bc
         pollutant: BCh
       paved_road_dust:
-        folder: examples/pilates/impacts/impacts_inputs/statewide-carb-road-dust
+        folder_in_archive: statewide-carb-road-dust
         road_category_map:
           motorway: Freeway
           motorway_link: Freeway
@@ -95,8 +96,8 @@ impacts:
           residential: Local Urban
           residential_link: Local Urban
     emissions_inventory:
-      inventory_folder: examples/pilates/impacts/impacts_inputs/sfbay-emfac-emissions-inventory
-      fallback_folder: examples/pilates/impacts/impacts_inputs/statewide-emfac-emissions-inventory
+      folder_in_archive: sfbay-emfac-emissions-inventory
+      fallback_folder_in_archive: statewide-emfac-emissions-inventory
       fuel_map:
         Dsl: [Diesel]
         Elec: [Electricity]

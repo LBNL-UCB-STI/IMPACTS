@@ -88,7 +88,7 @@ def _validate_activities_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
     activities = _mapping_payload(payload, path="impacts.activities")
     _reject_unknown_keys(
         activities,
-        {"region_label", "model_year_groups", "project_analysis", "emissions_inventory"},
+        {"region_label", "model_year_groups", "project_analysis", "emissions_inventory", "emissions_raw_archive"},
         "impacts.activities",
     )
     project_analysis = _mapping_payload(activities.get("project_analysis"), path="impacts.activities.project_analysis")
@@ -98,14 +98,14 @@ def _validate_activities_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
         "impacts.activities.project_analysis",
     )
     main = _mapping_payload(project_analysis.get("main"), path="impacts.activities.project_analysis.main")
-    _reject_unknown_keys(main, {"folder", "pto_as_process"}, "impacts.activities.project_analysis.main")
+    _reject_unknown_keys(main, {"folder_in_archive", "pto_as_process"}, "impacts.activities.project_analysis.main")
     black_carbon = _mapping_payload(
         project_analysis.get("black_carbon"),
         path="impacts.activities.project_analysis.black_carbon",
     )
     _reject_unknown_keys(
         black_carbon,
-        {"folder", "pollutant"},
+        {"folder_in_archive", "pollutant"},
         "impacts.activities.project_analysis.black_carbon",
     )
     paved_road_dust = _mapping_payload(
@@ -114,7 +114,7 @@ def _validate_activities_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
     _reject_unknown_keys(
         paved_road_dust,
-        {"folder", "road_category_map"},
+        {"folder_in_archive", "road_category_map"},
         "impacts.activities.project_analysis.paved_road_dust",
     )
     emissions_inventory = _mapping_payload(
@@ -123,7 +123,7 @@ def _validate_activities_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
     _reject_unknown_keys(
         emissions_inventory,
-        {"inventory_folder", "fallback_folder", "fuel_map"},
+        {"folder_in_archive", "fallback_folder_in_archive", "fuel_map"},
         "impacts.activities.emissions_inventory",
     )
     return activities

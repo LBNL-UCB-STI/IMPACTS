@@ -12,12 +12,6 @@ from ..manifest.schema import ActivitiesManifest
 
 logger = logging.getLogger(__name__)
 
-_ARCHIVE_NAME = "emissions_raw.tar.zst"
-
-
-
-def _archive_path(beam_input_folder: Path, vehicle_folder: str) -> Path:
-    return beam_input_folder / vehicle_folder / "emissions" / _ARCHIVE_NAME
 
 
 def _outputs_exist(workflow: dict[str, Any]) -> bool:
@@ -155,8 +149,8 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 def _entry_folder(value: Any) -> str | None:
     mapping = _mapping(value)
-    if "folder" in mapping and mapping["folder"] not in (None, ""):
-        return str(mapping["folder"])
+    if "folder_in_archive" in mapping and mapping["folder_in_archive"] not in (None, ""):
+        return str(mapping["folder_in_archive"])
     return None
 
 
@@ -203,18 +197,14 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
 
     local_input_folder = Path(resolve_required_path(settings.impacts.local_input_folder, config_path, "impacts.local_input_folder")).resolve()
     local_output_folder = Path(resolve_path(settings.impacts.local_output_folder, config_path)).resolve()
-    beam_input_folder = Path(resolve_required_path(settings.beam.local_input_folder, config_path, "beam.local_input_folder")).resolve()
     registry = build_registry(settings, config_path)
 
     cfg_activities = settings.impacts.activities if isinstance(settings.impacts.activities, dict) else {}
     project_analysis = _mapping(cfg_activities.get("project_analysis"))
     emissions_inventory = _mapping(cfg_activities.get("emissions_inventory"))
     region_name = settings.run.region
-    emfac_root = local_input_folder
 
     configured_project_main = _mapping(project_analysis.get("main"))
-    configured_black_carbon = _mapping(project_analysis.get("black_carbon"))
-    configured_road_dust = _mapping(project_analysis.get("paved_road_dust"))
 
     def _locate_folder(name: str | None, default_name: str) -> Path:
         target = name or default_name
@@ -222,7 +212,7 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
         if found:
             return found
         raw = Path(target).expanduser()
-        return raw.resolve() if raw.is_absolute() else (emfac_root / raw).resolve()
+        return raw.resolve() if raw.is_absolute() else (local_input_folder / raw).resolve()
 
     project_analysis_folder = _locate_folder(
         _entry_folder(project_analysis.get("main")),
@@ -237,11 +227,11 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
         "statewide-carb-road-dust",
     )
     inventory_folder = _locate_folder(
-        str(emissions_inventory.get("inventory_folder") or "") or None,
+        str(emissions_inventory.get("folder_in_archive") or "") or None,
         f"{region_name}-emfac-emissions-inventory",
     )
     fallback_folder = _locate_folder(
-        str(emissions_inventory.get("fallback_folder") or "") or None,
+        str(emissions_inventory.get("fallback_folder_in_archive") or "") or None,
         "statewide-emfac-emissions-inventory",
     )
 
@@ -258,8 +248,10 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
             f"Searched beam data roots: {registry.roots}"
         )
 
-    vehicle_folder = settings.impacts.population.vehicle_folder or "vehicle-tech"
-    archive = _archive_path(beam_input_folder / region_name, vehicle_folder).resolve()
+    archive_setting = str(cfg_activities.get("emissions_raw_archive") or "").strip()
+    if not archive_setting:
+        raise ValueError("Missing required setting: impacts.activities.emissions_raw_archive")
+    archive = registry.locate_required(archive_setting, label="activities.emissions_raw_archive")
 
     return {
         "region_name": region_name,
@@ -268,7 +260,7 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
         "seed": settings.impacts.seed,
         "output_root": local_output_folder,
         "archive": archive,
-        "extract_root": inventory_folder.parent,
+        "extract_root": local_input_folder,
         "project_analysis_folder": project_analysis_folder,
         "black_carbon_folder": black_carbon_folder,
         "road_dust_folder": road_dust_folder,
@@ -347,7 +339,7 @@ def _ensure_raw_data(cfg: dict[str, Any]) -> None:
     if not archive.exists():
         raise FileNotFoundError(
             f"EMFAC activities raw inputs are missing ({', '.join(missing_before)}) and the archive "
-            f"was not found at {archive}. Place {_ARCHIVE_NAME} there or pre-extract the raw inputs."
+            f"was not found at {archive}. Check activities.emissions_raw_archive in your settings."
         )
     _extract_archive(archive, Path(cfg["extract_root"]))
     cfg = _normalize_raw_input_paths(cfg)
@@ -360,11 +352,11 @@ def _ensure_raw_data(cfg: dict[str, Any]) -> None:
 
 
 def _build_workflow(settings, config_path: Path) -> dict[str, Any]:
+    from ..config.path_registry import build_registry
     from ..config.settings import _build_activities_config_from_root
     from ..config.settings import _build_activities_workflow
 
     cfg = _normalize_raw_input_paths(_resolve_activities_config(settings, config_path))
-    from ..config.path_registry import build_registry
     registry = build_registry(settings, config_path)
     fleet = dict(settings.impacts.fleet if isinstance(settings.impacts.fleet, dict) else {})
     assignment_model = fleet.get("assignment_model")
