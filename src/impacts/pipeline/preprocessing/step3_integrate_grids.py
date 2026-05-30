@@ -1,9 +1,13 @@
 """Step 3 (preprocess) — Network mapping and grid intersection helpers."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import logging
+import os
 from pathlib import Path
+import sys
 import time
+from typing import Iterator
 from typing import Optional
 from typing import Tuple
 
@@ -22,6 +26,7 @@ from ...common import resolve_required_manifest_input
 from ...manifest.schema import PipelineConfig
 
 logger = logging.getLogger(__name__)
+_DEFAULT_OSM_CHORDIFY_TQDM_NCOLS = 79
 _SOURCE_ROW_ID = "source_row_id"
 _COUNTY_INTERSECTION_COLUMNS = [
     "linkId",
@@ -44,6 +49,43 @@ _AERMOD_INTERSECTION_COLUMNS = [
     "aermod_link_length_m",
     "geometry",
 ]
+
+
+def _running_with_real_terminal() -> bool:
+    return sys.stdout.isatty() or sys.stderr.isatty()
+
+
+def _osm_chordify_tqdm_ncols() -> int:
+    raw_value = os.environ.get("IMPACTS_OSM_CHORDIFY_TQDM_NCOLS", "").strip()
+    if raw_value:
+        ncols = int(raw_value)
+        if ncols < 40:
+            raise ValueError("IMPACTS_OSM_CHORDIFY_TQDM_NCOLS must be at least 40.")
+        return ncols
+    return _DEFAULT_OSM_CHORDIFY_TQDM_NCOLS
+
+
+@contextmanager
+def _log_safe_osm_chordify_progress() -> Iterator[None]:
+    if _running_with_real_terminal():
+        yield
+        return
+
+    import osm_chordify.osm.intersect as osm_intersect
+
+    original_tqdm = osm_intersect.tqdm
+
+    def _fixed_width_tqdm(*args, **kwargs):
+        kwargs["dynamic_ncols"] = False
+        kwargs.setdefault("ncols", _osm_chordify_tqdm_ncols())
+        return original_tqdm(*args, **kwargs)
+
+    osm_intersect.tqdm = _fixed_width_tqdm
+    try:
+        yield
+    finally:
+        osm_intersect.tqdm = original_tqdm
+
 
 def _load_geodataframe(path_or_gdf):
     if isinstance(path_or_gdf, gpd.GeoDataFrame):
@@ -495,7 +537,7 @@ def run(
     if pipeline.inmap_enabled:
         log_substep_banner("3.2", "intersect with InMAP grid", logger=logger)
         logger.info("Step 3.2: intersecting with inMAP grid %s", pipeline.inmap_grid_path)
-        with logging_redirect_tqdm():
+        with logging_redirect_tqdm(), _log_safe_osm_chordify_progress():
             inmap_intersection = intersect_road_network_with_zones(
                 mapped_network,
                 epsg,
@@ -519,7 +561,7 @@ def run(
     if pipeline.aermod_enabled:
         log_substep_banner("3.3", "intersect with AERMOD grid", logger=logger)
         logger.info("Step 3.3: intersecting line network with AERMOD grid %s", pipeline.aermod_grid_path)
-        with logging_redirect_tqdm():
+        with logging_redirect_tqdm(), _log_safe_osm_chordify_progress():
             aermod_intersection = intersect_road_network_with_zones(
                 mapped_network,
                 epsg,
@@ -551,7 +593,7 @@ def run(
         time.perf_counter() - county_setup_started,
     )
     county_match_started = time.perf_counter()
-    with logging_redirect_tqdm():
+    with logging_redirect_tqdm(), _log_safe_osm_chordify_progress():
         C_matched = intersect_road_network_with_zones(
             B, epsg, county_gdf, output_epsg=epsg, zone_label="county",
         )

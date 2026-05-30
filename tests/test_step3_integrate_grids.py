@@ -5,6 +5,7 @@ import pandas as pd
 from shapely.geometry import LineString
 from shapely.geometry import Polygon
 
+from impacts.pipeline.preprocessing import step3_integrate_grids
 from impacts.pipeline.preprocessing.step3_integrate_grids import _build_synthetic_beam_links
 from impacts.pipeline.preprocessing.step3_integrate_grids import _ensure_county_mass_conservation
 
@@ -12,7 +13,7 @@ from impacts.pipeline.preprocessing.step3_integrate_grids import _ensure_county_
 def _county_frame() -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(
         {
-            "countyfp": ["001", "013"],
+            "COUNTYFP": ["001", "013"],
             "NAME": ["Alpha", "Bravo"],
             "geometry": [
                 Polygon([(0, 0), (10, 0), (10, 10), (0, 10)]),
@@ -22,6 +23,27 @@ def _county_frame() -> gpd.GeoDataFrame:
         geometry="geometry",
         crs="EPSG:26910",
     )
+
+
+def test_log_safe_osm_chordify_progress_forces_fixed_width_for_logs(monkeypatch) -> None:
+    import osm_chordify.osm.intersect as osm_intersect
+
+    calls = []
+
+    def _fake_tqdm(*args, **kwargs):
+        calls.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(step3_integrate_grids, "_running_with_real_terminal", lambda: False)
+    monkeypatch.setenv("IMPACTS_OSM_CHORDIFY_TQDM_NCOLS", "77")
+    monkeypatch.setattr(osm_intersect, "tqdm", _fake_tqdm)
+
+    with step3_integrate_grids._log_safe_osm_chordify_progress():
+        osm_intersect.tqdm(total=1, dynamic_ncols=True)
+
+    assert calls[0]["dynamic_ncols"] is False
+    assert calls[0]["ncols"] == 77
+    assert osm_intersect.tqdm is _fake_tqdm
 
 
 def test_ensure_county_mass_conservation_fills_zero_match_links() -> None:
@@ -36,7 +58,7 @@ def test_ensure_county_mass_conservation_fills_zero_match_links() -> None:
     county = gpd.GeoDataFrame(
         {
             "linkId": [1],
-            "countyfp": [pd.NA],
+            "county_COUNTYFP": [pd.NA],
             "county_proportion": [0.0],
             "county_link_length_m": [0.0],
             "geometry": [LineString([(1, 1), (2, 2)])],
@@ -53,7 +75,7 @@ def test_ensure_county_mass_conservation_fills_zero_match_links() -> None:
 
     assert len(result) == 1
     row = result.iloc[0]
-    assert row["countyfp"] == "001"
+    assert row["county_COUNTYFP"] == "001"
     assert row["county_proportion"] == 1.0
     assert row["county_link_length_m"] > 0.0
 
@@ -71,7 +93,7 @@ def test_ensure_county_mass_conservation_adds_partial_remainder_row() -> None:
     county = gpd.GeoDataFrame(
         {
             "linkId": [2],
-            "countyfp": ["001"],
+            "county_COUNTYFP": ["001"],
             "county_proportion": [0.4],
             "county_link_length_m": [full_length * 0.4],
             "geometry": [LineString([(1, 1), (5, 1)])],
@@ -87,7 +109,7 @@ def test_ensure_county_mass_conservation_adds_partial_remainder_row() -> None:
     )
 
     assert len(result) == 2
-    assert result["countyfp"].tolist() == ["001", "001"]
+    assert result["county_COUNTYFP"].tolist() == ["001", "001"]
     assert result["county_proportion"].sum() == 1.0
     remainder = result.loc[result["county_proportion"] < 1.0].sort_values(
         "county_proportion"
