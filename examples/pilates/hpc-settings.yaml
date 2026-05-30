@@ -22,7 +22,7 @@ shared:
 beam:
   local_input_folder: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/production/
   local_output_folder: /global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/beam_output/
-  router_directory: <set-local-or-absolute-path>
+  router_directory: r5/sfbay-cbg5500-weakConn-network
 
 impacts:
   local_input_folder: /global/scratch/users/hmlaarabi/sources/impacts/examples/pilates/impacts/impacts_inputs/
@@ -42,8 +42,8 @@ impacts:
 
   population:
     passenger_folder: urbansim/atlas-2019
-    freight_folder: <set-local-or-absolute-path>
-    vehicle_folder: <set-local-or-absolute-path>
+    freight_folder: freight/20250730/2018-Baseline
+    vehicle_folder: vehicle-tech
     atlas_year: 2019
     frism_year: 2018
     population_sample: 0.1
@@ -65,7 +65,7 @@ impacts:
         - ">=2016"
     project_analysis:
       main:
-        folder: /global/scratch/users/hmlaarabi/sources/impacts/examples/pilates/impacts/impacts_inputs/emfac/sfbay-emfac-project-analysis
+        folder: sfbay-emfac-project-analysis
         pto_as_process:
           enabled: true
           vehicle_category:
@@ -76,10 +76,10 @@ impacts:
             - T7 Single Other Class 8
             - T7 SWCV Class 8
       black_carbon:
-        folder: /global/scratch/users/hmlaarabi/sources/impacts/examples/pilates/impacts/impacts_inputs/emfac/sfbay-emfac-moves-bc
+        folder: sfbay-emfac-moves-bc
         pollutant: BCh
       paved_road_dust:
-        folder: /global/scratch/users/hmlaarabi/sources/impacts/examples/pilates/impacts/impacts_inputs/emfac/statewide-carb-road-dust
+        folder: statewide-carb-road-dust
         road_category_map:
           motorway: Freeway
           motorway_link: Freeway
@@ -95,8 +95,8 @@ impacts:
           residential: Local Urban
           residential_link: Local Urban
     emissions_inventory:
-      inventory_folder: /global/scratch/users/hmlaarabi/sources/impacts/examples/pilates/impacts/impacts_inputs/emfac/sfbay-emfac-emissions-inventory
-      fallback_folder: /global/scratch/users/hmlaarabi/sources/impacts/examples/pilates/impacts/impacts_inputs/emfac/statewide-emfac-emissions-inventory
+      inventory_folder: sfbay-emfac-emissions-inventory
+      fallback_folder: statewide-emfac-emissions-inventory
       fuel_map:
         Dsl: [Diesel]
         Elec: [Electricity]
