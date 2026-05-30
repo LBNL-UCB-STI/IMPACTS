@@ -34,7 +34,7 @@ impacts:
         - ">=2016"
     project_analysis:
       main:
-        folder: sfbay-emfac-project-analysis
+        folder_in_archive: sfbay-emfac-project-analysis
         pto_as_process:
           enabled: true
           vehicle_category:
@@ -45,10 +45,10 @@ impacts:
             - T7 Single Other Class 8
             - T7 SWCV Class 8
       black_carbon:
-        folder: sfbay-emfac-moves-bc
+        folder_in_archive: sfbay-emfac-moves-bc
         pollutant: BCh
       paved_road_dust:
-        folder: statewide-carb-road-dust
+        folder_in_archive: statewide-carb-road-dust
         road_category_map:
           motorway: Freeway
           motorway_link: Freeway
@@ -64,8 +64,8 @@ impacts:
           residential: Local Urban
           residential_link: Local Urban
     emissions_inventory:
-      inventory_folder: sfbay-emfac-emissions-inventory
-      fallback_folder: statewide-emfac-emissions-inventory
+      folder_in_archive: sfbay-emfac-emissions-inventory
+      fallback_folder_in_archive: statewide-emfac-emissions-inventory
       fuel_map:
         Dsl: [Diesel]
         Elec: [Electricity]
@@ -73,7 +73,7 @@ impacts:
         NG: [Natural Gas]
         Phe: [Plug-in Hybrid]
   fleet:
-    assignment_model: examples/pilates/fleet_assignment.yaml
+    assignment_model: vehicle-tech/emissions/fleet_assignment.yaml
     atlas:
       fuel_map:
         gasoline: [conv, hybrid, cng]

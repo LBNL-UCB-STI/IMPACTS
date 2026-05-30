@@ -99,7 +99,7 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.run.scenario == "base"
     assert config.shared.geography.fips.state == "06"
     assert config.shared.geography.fips.counties[0] == "001"
-    assert config.beam.local_input_folder == "~/Workspace/Models/beam/beam-data/beam-data-sfbay"
+    assert config.beam.local_input_folder == "~/Workspace/Models/beam/beam-data"
     assert config.beam.local_output_folder == "beam/beam_output/"
     assert config.beam.router_directory == "r5/sfbay-cbg5500-weakConn-network"
     assert config.impacts.pipeline.inmap is True
