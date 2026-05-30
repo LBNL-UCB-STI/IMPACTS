@@ -228,11 +228,11 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
         "statewide-carb-road-dust",
     )
     inventory_folder = _locate_folder(
-        str(emissions_inventory.get("folder_in_archive") or "") or None,
+        emissions_inventory.get("folder_in_archive") or None,
         f"{region_name}-emfac-emissions-inventory",
     )
     fallback_folder = _locate_folder(
-        str(emissions_inventory.get("fallback_folder_in_archive") or "") or None,
+        emissions_inventory.get("fallback_folder_in_archive") or None,
         "statewide-emfac-emissions-inventory",
     )
 

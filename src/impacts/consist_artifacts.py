@@ -18,14 +18,6 @@ BEAM_HOUSEHOLDS_PREFIX = "beam_households_final"
 BEAM_POPULATION_PREFIX = "beam_population_final"
 
 
-def consist_available() -> bool:
-    try:
-        import consist  # noqa: F401
-    except Exception:
-        return False
-    return True
-
-
 def _serialize_artifact(artifact: Any) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "repr": repr(artifact),
