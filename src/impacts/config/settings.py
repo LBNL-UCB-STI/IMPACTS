@@ -1055,32 +1055,19 @@ def _merge_dicts(base: dict[str, object], override: dict[str, object]) -> dict[s
 
 def _build_emfac_root_from_settings_file(path: Path) -> dict[str, object]:
     from .settings_builder import load_settings_from_yaml
-    from ..manifest.file_ops import resolve_path
+    from ..manifest.file_ops import resolve_required_path
     from .path_registry import build_registry
 
     settings = load_settings_from_yaml(path)
     activities = settings.impacts.activities if isinstance(settings.impacts.activities, dict) else {}
     fleet_settings = settings.impacts.fleet if isinstance(settings.impacts.fleet, dict) else {}
     fleet: dict[str, object] = {}
-    local_input_folder = Path(resolve_path(settings.impacts.local_input_folder, path)).resolve()
+    local_input_folder = Path(resolve_required_path(settings.impacts.local_input_folder, path, "impacts.local_input_folder")).resolve()
     scenario_id = str(settings.impacts.scenario)
     region_label = str(activities.get("region_label") or settings.run.region.upper())
 
-    beam_input = Path(resolve_path(settings.beam.local_input_folder, path)).resolve()
-    region = settings.run.region
+    beam_input = Path(resolve_required_path(settings.beam.local_input_folder, path, "beam.local_input_folder")).resolve()
     registry = build_registry(settings, path)
-
-    def _locate_beam_path(relative: str | None) -> Path | None:
-        if not relative:
-            return None
-        p = Path(relative)
-        if p.is_absolute():
-            return p if p.exists() else None
-        for base in ([beam_input / region] if region else []) + [beam_input]:
-            candidate = (base / p).resolve()
-            if candidate.exists():
-                return candidate
-        return None
 
     population_folder = settings.impacts.population.passenger_folder
     atlas = dict(fleet_settings.get("atlas", {}) or {})
@@ -1088,7 +1075,7 @@ def _build_emfac_root_from_settings_file(path: Path) -> dict[str, object]:
     if atlas_year is not None:
         atlas["year"] = atlas_year
     if population_folder:
-        resolved_pop = _locate_beam_path(population_folder)
+        resolved_pop = registry.locate(population_folder)
         atlas.setdefault("population_folder", str(resolved_pop) if resolved_pop else population_folder)
     if atlas:
         fleet["atlas"] = atlas
@@ -1099,7 +1086,7 @@ def _build_emfac_root_from_settings_file(path: Path) -> dict[str, object]:
     if frism_year is not None:
         frism["year"] = frism_year
     if carriers_folder:
-        resolved_carriers = _locate_beam_path(carriers_folder)
+        resolved_carriers = registry.locate(carriers_folder)
         frism.setdefault("carriers_folder", str(resolved_carriers) if resolved_carriers else carriers_folder)
     if frism:
         fleet["frism"] = frism
@@ -1107,7 +1094,7 @@ def _build_emfac_root_from_settings_file(path: Path) -> dict[str, object]:
     vehicle_folder = settings.impacts.population.vehicle_folder
     scenario = settings.impacts.scenario
     if vehicle_folder and scenario:
-        resolved_vf = _locate_beam_path(vehicle_folder)
+        resolved_vf = registry.locate(vehicle_folder)
         if resolved_vf:
             emissions_dir = resolved_vf / "emissions"
             pax_vt = _find_em_vehicle_types_file(emissions_dir, "atlas")
@@ -1122,8 +1109,7 @@ def _build_emfac_root_from_settings_file(path: Path) -> dict[str, object]:
 
     assignment_model = fleet_settings.get("assignment_model")
     if assignment_model not in (None, ""):
-        resolved = registry.locate(str(assignment_model))
-        fleet["assignment_model"] = str(resolved) if resolved else assignment_model
+        fleet["assignment_model"] = str(registry.locate_required(str(assignment_model), label="fleet.assignment_model"))
     return {
         "region": {
             "name": settings.run.region,

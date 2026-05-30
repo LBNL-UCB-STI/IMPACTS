@@ -30,7 +30,8 @@ from ...consist_artifacts import find_latest_beam_households_reference
 from ...consist_artifacts import find_latest_beam_network_reference
 from ...consist_artifacts import find_latest_beam_population_reference
 from ...consist_artifacts import resolve_logged_path
-from ...manifest.file_ops import resolve_path
+from ...config.path_registry import build_registry
+from ...manifest.file_ops import resolve_required_path
 
 logger = logging.getLogger(__name__)
 
@@ -138,18 +139,6 @@ def _glob_vehicle_types_file(folder: Path, source: str) -> str | None:
     return matches[0] if matches else None
 
 
-def _resolve_region_or_absolute_path(raw_path: str, *, region_input_root: Path, config_path: Path) -> str:
-    raw = str(raw_path).strip()
-    if raw.startswith("~") or Path(raw).is_absolute():
-        return resolve_path(raw, config_path) or raw
-    if raw.startswith("./") or raw.startswith("../"):
-        return str((config_path.parent / raw).resolve())
-    config_relative = (config_path.parent / raw).resolve()
-    if config_relative.exists():
-        return str(config_relative)
-    return str((region_input_root / raw).resolve())
-
-
 def _resolve_region_input_root(*, beam_input_root: Path, region: str) -> Path:
     candidate = beam_input_root / region
     if candidate.exists():
@@ -186,18 +175,13 @@ def run(
     population = impacts.population
     pipeline = impacts.pipeline
 
-    beam_output_root = required_local_path(
-        resolve_path(beam.local_output_folder, config_path),
-        "beam.local_output_folder",
-    )
-    beam_input_root = required_local_path(
-        resolve_path(beam.local_input_folder, config_path),
-        "beam.local_input_folder",
-    )
+    beam_output_root = resolve_required_path(beam.local_output_folder, config_path, "beam.local_output_folder")
+    beam_input_root = resolve_required_path(beam.local_input_folder, config_path, "beam.local_input_folder")
     region_input_root = _resolve_region_input_root(
         beam_input_root=Path(beam_input_root),
         region=settings.run.region,
     )
+    registry = build_registry(settings, config_path)
     input_root.mkdir(parents=True, exist_ok=True)
     staged_events = None
     staged_inmap_grid = None
@@ -272,16 +256,11 @@ def run(
             if osm_entry:
                 staged_osm = _use_existing_reference(manifest_inputs, "osm_network", osm_entry)
             else:
-                resolved_osm_root = _resolve_region_or_absolute_path(
-                    emissions.osm_network_folder,
-                    region_input_root=region_input_root,
-                    config_path=config_path,
-                )
-                osm_source = resolve_osm_pbf_local_path(
-                    resolved_osm_root,
-                ) or required_local_path(
-                    resolved_osm_root,
-                    "impacts.emissions.osm_network_folder",
+                osm_root = str(registry.locate_required(
+                    emissions.osm_network_folder, label="impacts.emissions.osm_network_folder"
+                ))
+                osm_source = resolve_osm_pbf_local_path(osm_root) or required_local_path(
+                    osm_root, "impacts.emissions.osm_network_folder"
                 )
                 staged_osm = _register_manifest_input(
                     manifest_inputs,
@@ -295,14 +274,9 @@ def run(
             _advance_progress(progress)
 
             _set_progress_task(progress, "emissions rates", step_label="Preprocess Step 1.2")
-            emissions_rates_source = required_local_path(
-                _resolve_region_or_absolute_path(
-                    emissions.rates_folder,
-                    region_input_root=region_input_root,
-                    config_path=config_path,
-                ),
-                "impacts.emissions.rates_folder",
-            )
+            emissions_rates_source = str(registry.locate_required(
+                emissions.rates_folder, label="impacts.emissions.rates_folder"
+            ))
             _register_manifest_input(
                 manifest_inputs,
                 input_root=input_root,
@@ -315,18 +289,17 @@ def run(
 
             _set_progress_task(progress, "passenger vehicle types", step_label="Preprocess Step 1.2")
             passenger_vtypes_path = beam_processing.passenger_vehicle_types_file
-            if not passenger_vtypes_path and population.vehicle_folder:
-                passenger_vtypes_path = _glob_vehicle_types_file(
-                    region_input_root / population.vehicle_folder, "atlas"
+            if passenger_vtypes_path:
+                passenger_vehicle_types_source = str(registry.locate_required(
+                    passenger_vtypes_path, label="impacts.emissions.passenger_vehicle_types_file"
+                ))
+            else:
+                found = _glob_vehicle_types_file(
+                    region_input_root / (population.vehicle_folder or ""), "atlas"
                 )
-            passenger_vehicle_types_source = required_local_path(
-                _resolve_region_or_absolute_path(
-                    passenger_vtypes_path,
-                    region_input_root=region_input_root,
-                    config_path=config_path,
-                ),
-                "impacts.emissions.passenger_vehicle_types_file",
-            )
+                passenger_vehicle_types_source = required_local_path(
+                    found, "impacts.emissions.passenger_vehicle_types_file"
+                )
             _register_manifest_input(
                 manifest_inputs,
                 input_root=input_root,
@@ -339,18 +312,17 @@ def run(
 
             _set_progress_task(progress, "freight vehicle types", step_label="Preprocess Step 1.2")
             freight_vtypes_path = beam_processing.freight_vehicle_types_file
-            if not freight_vtypes_path and population.vehicle_folder:
-                freight_vtypes_path = _glob_vehicle_types_file(
-                    region_input_root / population.vehicle_folder, "frism"
+            if freight_vtypes_path:
+                freight_vehicle_types_source = str(registry.locate_required(
+                    freight_vtypes_path, label="impacts.emissions.freight_vehicle_types_file"
+                ))
+            else:
+                found = _glob_vehicle_types_file(
+                    region_input_root / (population.vehicle_folder or ""), "frism"
                 )
-            freight_vehicle_types_source = required_local_path(
-                _resolve_region_or_absolute_path(
-                    freight_vtypes_path,
-                    region_input_root=region_input_root,
-                    config_path=config_path,
-                ),
-                "impacts.emissions.freight_vehicle_types_file",
-            )
+                freight_vehicle_types_source = required_local_path(
+                    found, "impacts.emissions.freight_vehicle_types_file"
+                )
             _register_manifest_input(
                 manifest_inputs,
                 input_root=input_root,
@@ -363,14 +335,10 @@ def run(
 
             if emissions.vehicle_category_metadata_file:
                 _set_progress_task(progress, "vehicle category metadata", step_label="Preprocess Step 1.2")
-                vehicle_category_metadata_source = required_local_path(
-                    _resolve_region_or_absolute_path(
-                        emissions.vehicle_category_metadata_file,
-                        region_input_root=region_input_root,
-                        config_path=config_path,
-                    ),
-                    "impacts.emissions.vehicle_category_metadata_file",
-                )
+                vehicle_category_metadata_source = str(registry.locate_required(
+                    emissions.vehicle_category_metadata_file,
+                    label="impacts.emissions.vehicle_category_metadata_file",
+                ))
                 _register_manifest_input(
                     manifest_inputs,
                     input_root=input_root,
@@ -396,11 +364,7 @@ def run(
     freight_inv_path = emissions.inventory.freight_file
     if passenger_inv_path:
         passenger_emfacid_source = _resolve_emfacid_path(
-            _resolve_region_or_absolute_path(
-                passenger_inv_path,
-                region_input_root=region_input_root,
-                config_path=config_path,
-            ),
+            str(registry.locate_required(passenger_inv_path, label="impacts.emissions.inventory.passenger_file")),
             label="passenger",
         )
     else:
@@ -410,11 +374,7 @@ def run(
         )
     if freight_inv_path:
         freight_emfacid_source = _resolve_emfacid_path(
-            _resolve_region_or_absolute_path(
-                freight_inv_path,
-                region_input_root=region_input_root,
-                config_path=config_path,
-            ),
+            str(registry.locate_required(freight_inv_path, label="impacts.emissions.inventory.freight_file")),
             label="freight",
         )
     else:
@@ -434,14 +394,9 @@ def run(
         try:
             if emissions.inventory.enable_passenger_activity_correction:
                 _set_progress_task(progress, "passenger inventory", step_label="Preprocess Step 1.3")
-                passenger_inventory_source = required_local_path(
-                    _resolve_region_or_absolute_path(
-                        passenger_inv_path,
-                        region_input_root=region_input_root,
-                        config_path=config_path,
-                    ),
-                    "impacts.emissions.inventory.passenger_file",
-                )
+                passenger_inventory_source = str(registry.locate_required(
+                    passenger_inv_path, label="impacts.emissions.inventory.passenger_file"
+                ))
                 staged_passenger_inventory_file = _register_manifest_input(
                     manifest_inputs,
                     input_root=input_root,
@@ -465,14 +420,9 @@ def run(
 
             if emissions.inventory.enable_freight_activity_correction:
                 _set_progress_task(progress, "freight inventory", step_label="Preprocess Step 1.3")
-                freight_inventory_source = required_local_path(
-                    _resolve_region_or_absolute_path(
-                        freight_inv_path,
-                        region_input_root=region_input_root,
-                        config_path=config_path,
-                    ),
-                    "impacts.emissions.inventory.freight_file",
-                )
+                freight_inventory_source = str(registry.locate_required(
+                    freight_inv_path, label="impacts.emissions.inventory.freight_file"
+                ))
                 staged_freight_inventory_file = _register_manifest_input(
                     manifest_inputs,
                     input_root=input_root,
@@ -498,7 +448,6 @@ def run(
 
     if pipeline.inmap or pipeline.aermod:
         log_substep_banner("1.4", "register dispersion inputs", logger=logger)
-        dispersions_root = Path(beam_input_root) / (population.vehicle_folder or "") / "dispersions"
         substep_14_total = 0
         if pipeline.inmap:
             substep_14_total += 3  # grid, nox-to-no2 ratios, isrm store
@@ -509,10 +458,9 @@ def run(
             try:
                 if pipeline.inmap:
                     _set_progress_task(progress, "inmap grid", step_label="Preprocess Step 1.4")
-                    inmap_grid_source = required_local_path(
-                        str((dispersions_root / inmap.grid_path).resolve()),
-                        "impacts.dispersions.inmap.grid_path",
-                    )
+                    inmap_grid_source = str(registry.locate_required(
+                        inmap.grid_path, label="impacts.dispersions.inmap.grid_path"
+                    ))
                     staged_inmap_grid = _register_manifest_input(
                         manifest_inputs,
                         input_root=input_root,
@@ -524,10 +472,10 @@ def run(
                     _advance_progress(progress)
 
                     _set_progress_task(progress, "nox-to-no2 ratios", step_label="Preprocess Step 1.4")
-                    no2_matrix_source = required_local_path(
-                        str((dispersions_root / inmap.isrm_nox_to_no2_ratios_file).resolve()),
-                        "impacts.dispersions.inmap.isrm_nox_to_no2_ratios_file",
-                    )
+                    no2_matrix_source = str(registry.locate_required(
+                        inmap.isrm_nox_to_no2_ratios_file,
+                        label="impacts.dispersions.inmap.isrm_nox_to_no2_ratios_file",
+                    ))
                     staged_isrm_nox_to_no2_ratios_file = _register_manifest_input(
                         manifest_inputs,
                         input_root=input_root,
@@ -539,10 +487,9 @@ def run(
                     _advance_progress(progress)
 
                     _set_progress_task(progress, "isrm store", step_label="Preprocess Step 1.4")
-                    isrm_source = required_local_path(
-                        resolve_path(inmap.isrm_zarr, config_path),
-                        "impacts.dispersions.inmap.isrm_zarr",
-                    )
+                    isrm_source = str(registry.locate_required(
+                        inmap.isrm_zarr, label="impacts.dispersions.inmap.isrm_zarr"
+                    ))
                     staged_isrm = _register_manifest_input(
                         manifest_inputs,
                         input_root=input_root,
@@ -555,10 +502,9 @@ def run(
 
                 if pipeline.aermod:
                     _set_progress_task(progress, "asrv patterns", step_label="Preprocess Step 1.4")
-                    asrv_source = required_local_path(
-                        str((dispersions_root / aermod.asrv_patterns_file).resolve()),
-                        "impacts.dispersions.aermod.asrv_patterns_file",
-                    )
+                    asrv_source = str(registry.locate_required(
+                        aermod.asrv_patterns_file, label="impacts.dispersions.aermod.asrv_patterns_file"
+                    ))
                     staged_asrv_patterns_file = _register_manifest_input(
                         manifest_inputs,
                         input_root=input_root,

@@ -198,12 +198,12 @@ def _extract_archive(archive: Path, destination: Path) -> None:
 
 
 def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
-    from ..manifest.file_ops import resolve_path
+    from ..manifest.file_ops import resolve_path, resolve_required_path
     from ..config.path_registry import build_registry
 
-    local_input_folder = Path(resolve_path(settings.impacts.local_input_folder, config_path)).resolve()
+    local_input_folder = Path(resolve_required_path(settings.impacts.local_input_folder, config_path, "impacts.local_input_folder")).resolve()
     local_output_folder = Path(resolve_path(settings.impacts.local_output_folder, config_path)).resolve()
-    beam_input_folder = Path(resolve_path(settings.beam.local_input_folder, config_path)).resolve()
+    beam_input_folder = Path(resolve_required_path(settings.beam.local_input_folder, config_path, "beam.local_input_folder")).resolve()
     registry = build_registry(settings, config_path)
 
     cfg_activities = settings.impacts.activities if isinstance(settings.impacts.activities, dict) else {}
@@ -217,15 +217,12 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
     configured_road_dust = _mapping(project_analysis.get("paved_road_dust"))
 
     def _locate_folder(name: str | None, default_name: str) -> Path:
-        if name:
-            found = registry.locate(name)
-            if found:
-                return found
-            raw = Path(name).expanduser()
-            if raw.is_absolute():
-                return raw.resolve()
-            return (emfac_root / raw).resolve()
-        return (emfac_root / default_name).resolve()
+        target = name or default_name
+        found = registry.locate(target)
+        if found:
+            return found
+        raw = Path(target).expanduser()
+        return raw.resolve() if raw.is_absolute() else (emfac_root / raw).resolve()
 
     project_analysis_folder = _locate_folder(
         _entry_folder(project_analysis.get("main")),
@@ -372,9 +369,7 @@ def _build_workflow(settings, config_path: Path) -> dict[str, Any]:
     fleet = dict(settings.impacts.fleet if isinstance(settings.impacts.fleet, dict) else {})
     assignment_model = fleet.get("assignment_model")
     if assignment_model:
-        resolved_model = registry.locate(str(assignment_model))
-        if resolved_model:
-            fleet["assignment_model"] = str(resolved_model)
+        fleet["assignment_model"] = str(registry.locate_required(str(assignment_model), label="fleet.assignment_model"))
     activities_override: dict[str, Any] = {
         "project_analysis": {
             "main": {

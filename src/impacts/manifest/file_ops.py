@@ -166,6 +166,38 @@ def resolve_path(path: Optional[str], config_path: str | Path | None = None) -> 
     return str((Path(config_path).resolve().parent / resolved).resolve())
 
 
+def resolve_required_path(path: str, config_path: str | Path | None, label: str) -> str:
+    """Resolve a required root settings path; raise FileNotFoundError with searched locations if not found.
+
+    Relative paths are tried against config-file parent first, then cwd.
+    Absolute paths are validated for existence immediately.
+    """
+    raw = str(path).strip()
+    if not raw:
+        raise ValueError(f"Missing required config path: {label}")
+    if is_remote_path(raw):
+        return raw
+    expanded = Path(raw).expanduser()
+    if expanded.is_absolute():
+        if not expanded.exists():
+            raise FileNotFoundError(f"{label} not found: {expanded}")
+        return str(expanded.resolve())
+    tried: list[Path] = []
+    if config_path is not None:
+        candidate = (Path(config_path).resolve().parent / expanded).resolve()
+        tried.append(candidate)
+        if candidate.exists():
+            return str(candidate)
+    cwd_candidate = (Path.cwd() / expanded).resolve()
+    tried.append(cwd_candidate)
+    if cwd_candidate.exists():
+        return str(cwd_candidate)
+    raise FileNotFoundError(
+        f"{label} not found: '{raw}'. Searched:\n"
+        + "\n".join(f"  - {p}" for p in tried)
+    )
+
+
 def is_remote_path(path: str) -> bool:
     return path.startswith(("s3://", "gs://", "http://", "https://"))
 

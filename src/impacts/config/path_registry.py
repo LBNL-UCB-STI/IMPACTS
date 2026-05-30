@@ -38,20 +38,31 @@ class PathRegistry:
 
 
 def build_registry(settings, config_path: Path) -> PathRegistry:
-    """Build a PathRegistry from an ImpactsSettings object."""
+    """Build a PathRegistry from an ImpactsSettings object.
+
+    Search order (beam-data roots first, project roots last as fallback):
+      1. beam_input, beam_input/region, beam_input/region/vehicle-tech/emissions
+      2. beam_input/vehicle_folder/emissions, beam_input/vehicle_folder/dispersions
+      3. beam_output
+      4. impacts_input
+      5. config_parent, cwd
+    """
     from ..manifest.file_ops import resolve_path
 
     roots: list[Path] = []
 
     beam_input = resolve_path(settings.beam.local_input_folder, config_path)
     if beam_input:
-        roots.append(Path(beam_input))
+        bi = Path(beam_input)
+        roots.append(bi)
         region = settings.run.region
         if region:
-            roots.append(Path(beam_input) / region / "vehicle-tech" / "emissions")
+            roots.append(bi / region)
+            roots.append(bi / region / "vehicle-tech" / "emissions")
         vehicle_folder = settings.impacts.population.vehicle_folder
         if vehicle_folder:
-            roots.append(Path(beam_input) / vehicle_folder / "emissions")
+            roots.append(bi / vehicle_folder / "emissions")
+            roots.append(bi / vehicle_folder / "dispersions")
 
     beam_output = resolve_path(settings.beam.local_output_folder, config_path)
     if beam_output:
@@ -60,5 +71,11 @@ def build_registry(settings, config_path: Path) -> PathRegistry:
     impacts_input = resolve_path(settings.impacts.local_input_folder, config_path)
     if impacts_input:
         roots.append(Path(impacts_input))
+
+    config_parent = Path(config_path).resolve().parent
+    roots.append(config_parent)
+    cwd = Path.cwd().resolve()
+    if cwd != config_parent:
+        roots.append(cwd)
 
     return PathRegistry(roots)
