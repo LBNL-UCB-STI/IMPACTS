@@ -31,6 +31,7 @@ from ...consist_artifacts import find_latest_beam_network_reference
 from ...consist_artifacts import find_latest_beam_population_reference
 from ...consist_artifacts import resolve_logged_path
 from ...config.path_registry import build_registry
+from ...manifest.file_ops import resolve_path
 from ...manifest.file_ops import resolve_required_path
 
 logger = logging.getLogger(__name__)
@@ -352,14 +353,8 @@ def run(
             _close_progress(progress)
 
     log_substep_banner("1.3", "register EMFAC inventory inputs", logger=logger)
-    _inv_folder = (
-        Path(beam_input_root)
-        / (population.vehicle_folder or "")
-        / "emissions"
-        / "activities"
-        / (impacts.scenario or "")
-        / "inventory"
-    )
+    local_output_folder = Path(resolve_path(impacts.local_output_folder, config_path)).resolve()
+    _inv_folder = local_output_folder / "activities" / (impacts.scenario or "") / "inventory"
     passenger_inv_path = emissions.inventory.passenger_file
     freight_inv_path = emissions.inventory.freight_file
     if passenger_inv_path:
