@@ -18,8 +18,14 @@ METRIC_TONS_PER_SHORT_TON = 0.90718474
 EMFAC_DAYS_PER_YEAR = 365.0
 PTO_PROCESS_NAME = "PTOEX"
 PROJECT_ANALYSIS_KEY_COLUMNS = ["county", "vehicleCategory", "fuel", "modelYear", "process", "speedMph_timeMin"]
+_STUDY_AREA_INVENTORY_COLUMNS = {"sub_area", "vehicle_class", "fuel", "model_year"}
 HEADER_DETECTION_COLUMNS = {
     "emissions-inventory": {"region", "calendar_year", "vehicle_category", "model_year", "speed", "fuel"},
+    "vmt-inventory": _STUDY_AREA_INVENTORY_COLUMNS,
+    "population-inventory": _STUDY_AREA_INVENTORY_COLUMNS,
+    "trips-inventory": _STUDY_AREA_INVENTORY_COLUMNS,
+    "emission-inventory": _STUDY_AREA_INVENTORY_COLUMNS,
+    "ghg-inventory": _STUDY_AREA_INVENTORY_COLUMNS,
 }
 ANNUAL_ACTIVITY_COLUMN_MAP = {
     "total_vmt": "total_vmt_vehicle_miles_per_year",
@@ -116,7 +122,7 @@ def _read_county_air_basin_table(
     air_basin_region: list[str] | None,
     label: str,
 ) -> pd.DataFrame:
-    frame = pd.read_csv(path)
+    frame = pd.read_csv(path, encoding="latin-1")
     _require_columns(frame, required_columns, label)
     frame["County"] = frame["County"].astype(str).str.strip().str.title()
     frame["Air Basin"] = frame["Air Basin"].astype(str).str.strip()
@@ -262,7 +268,7 @@ def build_black_carbon_rows(
     if target.suffix.lower() != ".csv":
         raise ValueError(f"Unsupported black-carbon format for {target}. Expected .csv")
 
-    frame = pd.read_csv(target)
+    frame = pd.read_csv(target, encoding="latin-1")
     missing = [
         column
         for column in ["sub_area", "vehicle_class", "fuel", "model_year", "process", "speed_time", "pollutant", "emission_rate"]

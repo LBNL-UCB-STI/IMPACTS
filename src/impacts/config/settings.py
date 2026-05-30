@@ -1304,7 +1304,9 @@ def _find_matching_file(path: str | None, patterns: tuple[str, ...], *, required
     matches = sorted(
         candidate
         for candidate in target.iterdir()
-        if candidate.is_file() and any(pattern in candidate.name.lower() for pattern in patterns)
+        if candidate.is_file()
+        and not candidate.name.startswith(".")
+        and any(pattern in candidate.name.lower() for pattern in patterns)
     )
     if matches:
         return str(matches[0])

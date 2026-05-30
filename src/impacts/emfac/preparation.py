@@ -283,7 +283,7 @@ def _find_matching_file(path: Path, patterns: tuple[str, ...]) -> bool:
         return False
     lowered = tuple(pattern.lower() for pattern in patterns)
     return any(
-        child.is_file() and any(pattern in child.name.lower() for pattern in lowered)
+        child.is_file() and not child.name.startswith(".") and any(pattern in child.name.lower() for pattern in lowered)
         for child in path.iterdir()
     )
 

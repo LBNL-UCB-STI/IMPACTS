@@ -24,7 +24,7 @@ def _read_full_input_table(path_like: str) -> pd.DataFrame:
     resolved = Path(resolve_workflow_path(path_like))
     if resolved.suffix.lower() == ".parquet":
         return pd.read_parquet(resolved)
-    return pd.read_csv(resolved, low_memory=False)
+    return pd.read_csv(resolved, low_memory=False, encoding="latin-1")
 
 
 def read_atlas_vehicles_input(path_like: str) -> pd.DataFrame:
