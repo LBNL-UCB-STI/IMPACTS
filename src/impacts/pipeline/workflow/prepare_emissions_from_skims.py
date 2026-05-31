@@ -453,7 +453,8 @@ def _build_zone_allocated_table(
     zone_label: str,
     scratch_dir: Path,
     step_id: str = "1.2",
-) -> Optional[pd.DataFrame]:
+    output_path: Optional[str] = None,
+) -> Optional[pd.DataFrame | str]:
     if grouped_df is None or grouped_df.empty:
         return None
 
@@ -495,8 +496,7 @@ def _build_zone_allocated_table(
             extra_selects += ',\n                trim(CAST(s."roadCategory" AS VARCHAR)) AS "roadCategory"'
         if has_release_height:
             extra_selects += ',\n                COALESCE(TRY_CAST(s."source_release_height" AS DOUBLE), 1.0) AS "source_release_height"'
-        allocated = con.execute(
-            f"""
+        query = f"""
             SELECT
                 g."linkId" AS "linkId",
                 trim(CAST(s."vehicleTypeId" AS VARCHAR)) AS "vehicleTypeId",
@@ -511,13 +511,70 @@ def _build_zone_allocated_table(
             WHERE trim(CAST(s."vehicleTypeId" AS VARCHAR)) <> ''
               AND trim(CAST(s."process" AS VARCHAR)) <> ''
             """
-        ).fetchdf()
+        if output_path is not None:
+            escaped = output_path.replace("'", "''")
+            con.execute(f"COPY ({query}) TO '{escaped}' (FORMAT PARQUET)")
+            row_count = con.execute(f"SELECT COUNT(*) FROM parquet_scan('{escaped}')").fetchone()[0]
+            allocated = None
+        else:
+            allocated = con.execute(query).fetchdf()
+            row_count = len(allocated)
     finally:
         con.close()
-    if allocated.empty:
+    if row_count == 0:
         return None
-    logger.info("%s BEAM emissions allocated across %s rows=%d", _step_label(step_id), zone_label, len(allocated))
+    logger.info("%s BEAM emissions allocated across %s rows=%d", _step_label(step_id), zone_label, row_count)
+    if output_path is not None:
+        return output_path
     return allocated
+
+
+def _compute_aermod_source_attributes_parquet(
+    input_path: str,
+    output_path: str,
+    *,
+    scratch_dir: Path,
+    freeway_road_categories: frozenset[str],
+    cell_population_df: Optional[pd.DataFrame] = None,
+) -> None:
+    freeway_list = ", ".join(f"'{c}'" for c in sorted(freeway_road_categories))
+    in_sql = input_path.replace("'", "''")
+    out_sql = output_path.replace("'", "''")
+
+    con = duckdb.connect(database=":memory:")
+    try:
+        configure_duckdb_connection(con, working_dir=scratch_dir, show_progress=True, profile="memory_heavy")
+        cols = [row[0] for row in con.execute(f"DESCRIBE SELECT * FROM parquet_scan('{in_sql}')").fetchall()]
+        passthrough = [f'a."{c}"' for c in cols if c != "source_release_height"]
+        if cell_population_df is not None:
+            con.register(
+                "_cell_pop",
+                cell_population_df[["aermod_cell_id", "source_urban_class"]].copy(),
+            )
+            urban_class_expr = 'COALESCE(TRY_CAST(p."source_urban_class" AS BIGINT), 0)'
+            join_clause = 'LEFT JOIN _cell_pop AS p ON TRY_CAST(a."aermod_cell_id" AS BIGINT) = TRY_CAST(p."aermod_cell_id" AS BIGINT)'
+        else:
+            urban_class_expr = "0"
+            join_clause = ""
+        con.execute(f"""
+            COPY (
+                SELECT
+                    {", ".join(passthrough)},
+                    CASE WHEN MAX(
+                            CASE WHEN trim(CAST(a."roadCategory" AS VARCHAR)) IN ({freeway_list})
+                                 THEN 1 ELSE 0 END
+                         ) OVER (PARTITION BY a."aermod_cell_id") = 1
+                         THEN 'FREEWAY' ELSE 'CITYSTREET'
+                    END AS "source_temporal_class",
+                    MAX(COALESCE(TRY_CAST(a."source_release_height" AS DOUBLE), 1.0))
+                        OVER (PARTITION BY a."aermod_cell_id") AS "source_release_height",
+                    {urban_class_expr} AS "source_urban_class"
+                FROM parquet_scan('{in_sql}') AS a
+                {join_clause}
+            ) TO '{out_sql}' (FORMAT PARQUET)
+        """)
+    finally:
+        con.close()
 
 
 def resolve_prepared_skims_path(input_root: Path) -> Optional[str]:

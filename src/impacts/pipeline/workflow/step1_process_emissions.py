@@ -25,6 +25,7 @@ from ...common import resolve_required_manifest_input
 from ...manifest.schema import PipelineConfig
 from .prepare_emissions_from_skims import _build_zone_allocated_table
 from .prepare_emissions_from_skims import _build_zone_grouped_table
+from .prepare_emissions_from_skims import _compute_aermod_source_attributes_parquet
 from .prepare_emissions_from_skims import _load_vehicle_type_activity_lookup
 from .prepare_emissions_from_skims import _reuse_existing_outputs
 from .prepare_emissions_from_skims import load_or_prepare_skims_df
@@ -50,6 +51,9 @@ _OSM_TO_AERMOD_TEMPORAL = {
     "residential": "CITYSTREET",
     "residential_link": "CITYSTREET",
 }
+_AERMOD_FREEWAY_CATEGORIES: frozenset[str] = frozenset(
+    k for k, v in _OSM_TO_AERMOD_TEMPORAL.items() if v == "FREEWAY"
+)
 
 
 
@@ -70,33 +74,6 @@ def _require_columns(df: pd.DataFrame, *, columns: list[str], label: str) -> Non
     if missing:
         raise ValueError(f"{label} is missing required columns: {missing}")
 
-
-def _log_aermod_urban_class_trace(label: str, df: pd.DataFrame) -> None:
-    tracked_cols = [
-        "aermod_cell_id",
-        "source_urban_class",
-        "source_urban_class_x",
-        "source_urban_class_y",
-        "cell_source_urban_class",
-    ]
-    present_cols = [col for col in tracked_cols if col in df.columns]
-    logger.info("%s trace %s columns=%s", _step_label("1.4"), label, list(df.columns))
-    logger.info(
-        "%s trace %s tracked_present=%s row_count=%d columns_unique=%s duplicate_columns=%s",
-        _step_label("1.4"),
-        label,
-        {col: (col in df.columns) for col in tracked_cols},
-        len(df),
-        bool(df.columns.is_unique),
-        df.columns[df.columns.duplicated()].tolist(),
-    )
-    if present_cols and not df.empty:
-        logger.info(
-            "%s trace %s sample=%s",
-            _step_label("1.4"),
-            label,
-            df[present_cols].head(5).to_dict(orient="records"),
-        )
 
 
 def _safe_ratio(
@@ -545,72 +522,48 @@ def _save_grid_emissions(
 
 
 def _aggregate_aermod_emissions_for_export(
-    aermod_allocated_df: pd.DataFrame,
+    aermod_allocated: pd.DataFrame | str,
     *,
     scratch_dir: Path,
 ) -> pd.DataFrame:
     started = time.perf_counter()
-    _require_columns(
-        aermod_allocated_df,
-        columns=[
-            "aermod_cell_id",
-            "source_temporal_class",
-            "source_release_height",
-            "source_urban_class",
-        ],
-        label="AERMOD allocated emissions table",
-    )
-    emission_cols = [
-        c for c in aermod_allocated_df.columns
-        if c.startswith("tons_per_year_") and c.endswith("_aermod_allocated")
-    ]
-    if not emission_cols:
-        raise ValueError("AERMOD allocated emissions table is missing tons_per_year_*_aermod_allocated columns.")
-
-    select_parts = [
-        '"aermod_cell_id" AS "aermod_cell_id"',
-        'ANY_VALUE("source_temporal_class") AS "source_temporal_class"',
-        'MAX(COALESCE(TRY_CAST("source_release_height" AS DOUBLE), 1.0)) AS "source_release_height"',
-        'MAX(COALESCE(TRY_CAST("source_urban_class" AS BIGINT), 0)) AS "source_urban_class"',
-        *[
-            f'SUM(COALESCE(TRY_CAST("{col}" AS DOUBLE), 0.0)) AS "{col}"'
-            for col in emission_cols
-        ],
-    ]
-
     con = duckdb.connect(database=":memory:")
     try:
-        configure_duckdb_connection(
-            con,
-            working_dir=scratch_dir,
-            show_progress=True,
-            profile="memory_heavy",
-        )
-        con.register("aermod_allocated_df", aermod_allocated_df)
+        configure_duckdb_connection(con, working_dir=scratch_dir, show_progress=True, profile="memory_heavy")
+        if isinstance(aermod_allocated, str):
+            escaped = aermod_allocated.replace("'", "''")
+            source = f"parquet_scan('{escaped}')"
+            all_cols = [row[0] for row in con.execute(f"DESCRIBE SELECT * FROM {source}").fetchall()]
+        else:
+            _require_columns(
+                aermod_allocated,
+                columns=["aermod_cell_id", "source_temporal_class", "source_release_height", "source_urban_class"],
+                label="AERMOD allocated emissions table",
+            )
+            con.register("_aermod_allocated", aermod_allocated)
+            source = "_aermod_allocated"
+            all_cols = list(aermod_allocated.columns)
+        emission_cols = [c for c in all_cols if c.startswith("tons_per_year_") and c.endswith("_aermod_allocated")]
+        if not emission_cols:
+            raise ValueError("AERMOD allocated emissions table is missing tons_per_year_*_aermod_allocated columns.")
+        select_parts = [
+            '"aermod_cell_id" AS "aermod_cell_id"',
+            'ANY_VALUE("source_temporal_class") AS "source_temporal_class"',
+            'MAX(COALESCE(TRY_CAST("source_release_height" AS DOUBLE), 1.0)) AS "source_release_height"',
+            'MAX(COALESCE(TRY_CAST("source_urban_class" AS BIGINT), 0)) AS "source_urban_class"',
+            *[f'SUM(COALESCE(TRY_CAST("{col}" AS DOUBLE), 0.0)) AS "{col}"' for col in emission_cols],
+        ]
         aggregated = con.execute(
-            f"""
-            SELECT
-                {", ".join(select_parts)}
-            FROM aermod_allocated_df
-            GROUP BY 1
-            """
+            f"SELECT {', '.join(select_parts)} FROM {source} GROUP BY 1"
         ).fetchdf()
     finally:
         con.close()
-
     logger.info(
-        "%s aggregated AERMOD export rows from %d detailed rows to %d source cells",
+        "%s aggregated AERMOD export to %d source cells",
         _step_label("1.6", "aermod"),
-        len(aermod_allocated_df),
         len(aggregated),
     )
-    _log_step1_elapsed(
-        "1.6",
-        "AERMOD export aggregation complete",
-        started,
-        detailed_rows=len(aermod_allocated_df),
-        source_cells=len(aggregated),
-    )
+    _log_step1_elapsed("1.6", "AERMOD export aggregation complete", started, source_cells=len(aggregated))
     return aggregated
 
 
@@ -819,70 +772,39 @@ def run(
         scratch_dir=raw_dir,
         step_id="1.4",
     )
-    aermod_allocated_df = _build_zone_allocated_table(
+    aermod_alloc_raw_path = str(raw_dir / "_aermod_allocated_raw.parquet")
+    aermod_allocated_result = _build_zone_allocated_table(
         grouped_df=aermod_grouped_df,
         skims_df=corrected_source_df if corrected_source_df is not None else skims_df,
         zone_label="aermod",
         scratch_dir=raw_dir,
         step_id="1.4",
+        output_path=aermod_alloc_raw_path,
     )
     _log_step1_elapsed(
         "1.4",
         "surface allocations complete",
         surface_alloc_started,
         inmap_rows=0 if inmap_allocated_df is None else len(inmap_allocated_df),
-        aermod_rows=0 if aermod_allocated_df is None else len(aermod_allocated_df),
+        aermod_rows="parquet" if aermod_allocated_result is not None else 0,
     )
-    if aermod_allocated_df is not None and not aermod_allocated_df.empty:
-        _log_aermod_urban_class_trace("post zone allocation output", aermod_allocated_df)
 
-    if aermod_allocated_df is not None and not aermod_allocated_df.empty:
+    if aermod_allocated_result is not None:
         aermod_attrs_started = time.perf_counter()
-        aermod_allocated_df = aermod_allocated_df.copy()
-        _require_columns(
-            aermod_allocated_df,
-            columns=["roadCategory", "source_release_height"],
-            label="AERMOD allocated emissions table",
-        )
-        aermod_allocated_df["source_temporal_class"] = aermod_allocated_df.groupby("aermod_cell_id")["roadCategory"].transform(
-            lambda cats: "FREEWAY" if cats.map(_OSM_TO_AERMOD_TEMPORAL).fillna("CITYSTREET").eq("FREEWAY").any() else "CITYSTREET"
-        )
-        aermod_allocated_df["source_release_height"] = aermod_allocated_df.groupby("aermod_cell_id")["source_release_height"].transform("max")
-        _log_aermod_urban_class_trace("before source_urban_class init", aermod_allocated_df)
-        aermod_allocated_df["source_urban_class"] = 0
-        _log_aermod_urban_class_trace("after source_urban_class init", aermod_allocated_df)
+        aermod_attrs_path = str(raw_dir / "_aermod_allocated_attrs.parquet")
+        cell_pop_df = None
         if (manifest_inputs or {}).get("aermod_cell_population"):
             cell_population_path = resolve_required_manifest_input(manifest_inputs, key="aermod_cell_population")
-            cell_pop = read_table(cell_population_path)[["aermod_cell_id", "source_urban_class"]].rename(
-                columns={"source_urban_class": "cell_source_urban_class"}
-            )
-            cell_pop["aermod_cell_id"] = pd.to_numeric(cell_pop["aermod_cell_id"], errors="coerce")
-            aermod_allocated_df["aermod_cell_id"] = pd.to_numeric(aermod_allocated_df["aermod_cell_id"], errors="coerce")
-            _log_aermod_urban_class_trace("before population merge", aermod_allocated_df)
-            logger.info(
-                "%s trace aermod cell population rows=%d duplicate_aermod_cell_id=%d null_aermod_cell_id=%d null_cell_source_urban_class=%d sample=%s",
-                _step_label("1.4"),
-                len(cell_pop),
-                int(cell_pop["aermod_cell_id"].duplicated().sum()),
-                int(cell_pop["aermod_cell_id"].isna().sum()),
-                int(cell_pop["cell_source_urban_class"].isna().sum()),
-                cell_pop[["aermod_cell_id", "cell_source_urban_class"]].head(5).to_dict(orient="records"),
-            )
-            aermod_allocated_df = aermod_allocated_df.merge(cell_pop, on="aermod_cell_id", how="left")
-            _log_aermod_urban_class_trace("after population merge", aermod_allocated_df)
-            aermod_allocated_df["source_urban_class"] = (
-                pd.to_numeric(aermod_allocated_df["cell_source_urban_class"], errors="coerce")
-                .fillna(aermod_allocated_df["source_urban_class"])
-                .fillna(0)
-                .astype(int)
-            )
-            aermod_allocated_df = aermod_allocated_df.drop(columns=["cell_source_urban_class"])
-        _log_step1_elapsed(
-            "1.4",
-            "AERMOD source attributes prepared",
-            aermod_attrs_started,
-            rows=len(aermod_allocated_df),
+            cell_pop_df = read_table(cell_population_path)[["aermod_cell_id", "source_urban_class"]]
+        _compute_aermod_source_attributes_parquet(
+            aermod_allocated_result,
+            aermod_attrs_path,
+            scratch_dir=raw_dir,
+            freeway_road_categories=_AERMOD_FREEWAY_CATEGORIES,
+            cell_population_df=cell_pop_df,
         )
+        aermod_allocated_result = aermod_attrs_path
+        _log_step1_elapsed("1.4", "AERMOD source attributes prepared", aermod_attrs_started)
 
     beam_activity_totals_path = None
     beam_activity_correction_factors_path = None
@@ -918,13 +840,13 @@ def run(
 
     beam_emissions_for_aermod_path = None
 
-    if pipeline.aermod_grid_path and aermod_allocated_df is not None and not aermod_allocated_df.empty:
+    if pipeline.aermod_grid_path and aermod_allocated_result is not None:
         if not pipeline.aermod_grid_id:
             raise ValueError("pipeline.aermod_grid_id must be configured before writing AERMOD emissions.")
         log_substep_banner("1.6[aermod]", "write AERMOD emissions table", logger=logger)
         aermod_write_started = time.perf_counter()
         aermod_export_df = _aggregate_aermod_emissions_for_export(
-            aermod_allocated_df,
+            aermod_allocated_result,
             scratch_dir=raw_dir,
         )
         beam_emissions_for_aermod_stem = raw_dir / "beam_emissions_for_aermod"
