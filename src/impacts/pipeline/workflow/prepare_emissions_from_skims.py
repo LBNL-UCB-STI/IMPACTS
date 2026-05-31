@@ -83,8 +83,8 @@ def _existing_valid_skims_parquet(path: Path) -> Optional[str]:
     logger.warning("Step 1: ignoring invalid cached skims parquet %s", path)
     try:
         path.unlink()
-    except Exception:
-        pass
+    except OSError as exc:
+        logger.debug("Could not remove invalid cached skims parquet %s: %s", path, exc)
     return None
 
 

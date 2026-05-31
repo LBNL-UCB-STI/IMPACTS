@@ -47,15 +47,14 @@ def _artifact_path_candidates(artifact: Any) -> list[str]:
 
 
 def _resolve_artifact_path(artifact: Any) -> Optional[str]:
-    for raw in _artifact_path_candidates(artifact):
-        path = Path(raw).expanduser()
-        if path.exists():
-            return str(path.resolve())
-    for raw in _artifact_path_candidates(artifact):
+    candidates = _artifact_path_candidates(artifact)
+    for raw in candidates:
+        if Path(raw).expanduser().exists():
+            return str(Path(raw).expanduser().resolve())
+    for raw in candidates:
         if "://" not in raw:
             return str(Path(raw).expanduser().resolve())
-        return raw
-    return None
+    return candidates[0] if candidates else None
 
 
 def _entry_from_artifact(
