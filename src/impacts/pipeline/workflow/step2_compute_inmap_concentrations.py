@@ -140,7 +140,7 @@ def _read_square_transfer_matrix(path: str) -> pd.DataFrame:
 
     df.index = pd.to_numeric(pd.Index(df.index), errors="coerce")
     df.columns = pd.to_numeric(pd.Index(df.columns), errors="coerce")
-    df = df.loc[df.index.notna(), df.columns.notna()].copy()
+    df = df.loc[df.index.notna(), df.columns.notna()]
     df.index = df.index.astype(int)
     df.columns = df.columns.astype(int)
     return df.apply(pd.to_numeric, errors="coerce").fillna(0.0)
@@ -315,7 +315,7 @@ def _prepare_grid_emissions(
 
     df = emissions_df.copy()
     df[source_id_col] = pd.to_numeric(df[source_id_col], errors="coerce")
-    df = df[df[source_id_col].notna()].copy()
+    df = df[df[source_id_col].notna()]
     df[source_id_col] = df[source_id_col].astype(int)
 
     for col in emission_cols:

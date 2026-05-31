@@ -111,7 +111,7 @@ def _load_intersection_subset(path: str, columns: List[str]) -> pd.DataFrame:
     if lower.endswith(".csv"):
         return pd.read_csv(target, usecols=columns)
     frame = read_table(target)
-    return frame[columns].copy()
+    return frame[columns]
 
 
 def _load_intersection_subset_or_df(
@@ -121,7 +121,7 @@ def _load_intersection_subset_or_df(
     intersection_df: Optional[pd.DataFrame],
 ) -> pd.DataFrame:
     if intersection_df is not None:
-        return intersection_df[columns].copy()
+        return intersection_df[columns]
     return _load_intersection_subset(path, columns)
 
 
@@ -134,13 +134,13 @@ def _register_frame_or_scan(
     frame: Optional[pd.DataFrame],
 ) -> str:
     if frame is not None:
-        con.register(relation_name, frame[columns].copy())
+        con.register(relation_name, frame[columns])
         return relation_name
     if not path:
         raise ValueError(f"Expected path or frame for DuckDB relation '{relation_name}'.")
     target = Path(path)
     if target.suffix.lower() != ".parquet":
-        subset = read_table(target)[columns].copy()
+        subset = read_table(target)[columns]
         con.register(relation_name, subset)
         return relation_name
     quoted_path = str(target).replace("'", "''")
@@ -483,7 +483,7 @@ def _build_zone_allocated_table(
             profile="memory_heavy",
         )
         con.register("grouped_df", grouped_df)
-        con.register("skims_df", skims_df[merge_cols].copy())
+        con.register("skims_df", skims_df[merge_cols])
         value_selects = [
             f"""
             COALESCE(TRY_CAST(s."{col}" AS DOUBLE), 0.0) * COALESCE(TRY_CAST(g."{proportion_col}" AS DOUBLE), 0.0)
@@ -549,7 +549,7 @@ def _compute_aermod_source_attributes_parquet(
         if cell_population_df is not None:
             con.register(
                 "_cell_pop",
-                cell_population_df[["aermod_cell_id", "source_urban_class"]].copy(),
+                cell_population_df[["aermod_cell_id", "source_urban_class"]],
             )
             urban_class_expr = 'COALESCE(TRY_CAST(p."source_urban_class" AS BIGINT), 0)'
             join_clause = 'LEFT JOIN _cell_pop AS p ON TRY_CAST(a."aermod_cell_id" AS BIGINT) = TRY_CAST(p."aermod_cell_id" AS BIGINT)'

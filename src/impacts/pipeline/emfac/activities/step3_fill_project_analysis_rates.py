@@ -384,7 +384,7 @@ def _build_inventory_fill_frame(inventory: pd.DataFrame, *, include_county: bool
 
     for process in sorted(SPEED_MPH_PROCESSES | TIME_PROCESSES | OTHER_PROCESSES):
         process_key = process.lower()
-        process_frame = frame[id_columns].drop_duplicates().copy()
+        process_frame = frame[id_columns].drop_duplicates()
         process_frame["process"] = process
         if process in SPEED_MPH_PROCESSES:
             process_frame[ACTIVITY_COLUMN] = _format_numeric_series(frame["speed"])

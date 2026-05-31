@@ -37,7 +37,7 @@ def _load_county_lookup(county_boundaries_path: str) -> pd.DataFrame:
         raise ValueError(
             "County boundaries must include COUNTYFP and NAME columns for analysis Step 3."
         )
-    lookup = county_gdf[["COUNTYFP", "NAME"]].drop_duplicates().copy()
+    lookup = county_gdf[["COUNTYFP", "NAME"]].drop_duplicates()
     lookup["COUNTYFP"] = normalize_county_fips(lookup["COUNTYFP"])
     lookup["NAME"] = lookup["NAME"].astype("string")
     return lookup

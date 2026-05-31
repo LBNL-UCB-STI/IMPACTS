@@ -440,7 +440,7 @@ def _load_vehicle_type_category_lookup(
         prepared["emfacVehicleCategory"] = prepared["emfacVehicleCategory"].astype(str).str.strip()
         category_rows = prepared.loc[
             prepared["emfacVehicleCategory"].ne("") & ~prepared["emfacVehicleCategory"].str.lower().eq("nan")
-        ].copy()
+        ]
         if not category_rows.empty:
             missing_categories = sorted(set(category_rows["emfacVehicleCategory"]) - set(category_lookup))
             if missing_categories:

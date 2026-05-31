@@ -127,7 +127,7 @@ def _prepare_source_emissions(
     origin_y: float,
     outputs_dir: Path,
 ) -> pd.DataFrame:
-    source = emissions_gdf.copy()
+    source = emissions_gdf
     if source.geometry.isna().any():
         raise ValueError("AERMOD emissions input contains missing geometry.")
     source_xm, source_ym = _geometry_midpoints(source.geometry)
@@ -209,13 +209,13 @@ def _prepare_target_grid(
             target["target_ix"].to_numpy(dtype=np.int64) * np.int64(int(target["target_iy"].max()) + 1)
             + target["target_iy"].to_numpy(dtype=np.int64)
         )
-        target_index = target[[target_id_col, "target_xm", "target_ym", "target_ix", "target_iy", "target_key"]].copy()
+        target_index = target[[target_id_col, "target_xm", "target_ym", "target_ix", "target_iy", "target_key"]]
         if cache_path:
             target_index.to_parquet(cache_path, index=False)
     x0 = float(target["target_xm"].min())
     y0 = float(target["target_ym"].min())
     if target_index is None:
-        target_index = target[[target_id_col, "target_xm", "target_ym", "target_ix", "target_iy"]].copy()
+        target_index = target[[target_id_col, "target_xm", "target_ym", "target_ix", "target_iy"]]
     if "target_key" not in target_index.columns:
         stride = int(target["target_iy"].max()) + 1
         target_index["target_key"] = (
@@ -276,7 +276,7 @@ def _load_vector_subset(path: str, *, columns: Optional[list[str]] = None) -> gp
     keep = [col for col in columns if col in gdf.columns]
     if "geometry" not in keep:
         keep.append("geometry")
-    return gdf[keep].copy()
+    return gdf[keep]
 
 
 
@@ -387,7 +387,7 @@ def _target_index_cache_path(*, outputs_dir: Path, grid_path: str, target_epsg: 
 
 
 def _project_asrv_patterns(patterns_gdf: gpd.GeoDataFrame, *, target_epsg: int) -> pd.DataFrame:
-    projected = patterns_gdf.to_crs(epsg=target_epsg).copy()
+    projected = patterns_gdf.to_crs(epsg=target_epsg)
     projected["Grid_X"] = projected.geometry.x.astype(float)
     projected["Grid_Y"] = projected.geometry.y.astype(float)
     projected["Concentration"] = pd.to_numeric(projected["Concentration"], errors="coerce")
@@ -398,7 +398,7 @@ def _project_asrv_patterns(patterns_gdf: gpd.GeoDataFrame, *, target_epsg: int) 
     projected["Emissions"] = projected["Emissions"].astype("string").str.strip()
     projected = projected.dropna(
         subset=["Grid_X", "Grid_Y", "Concentration", "Height", "Urban_Rural", "DataSet_ID", "Emissions"]
-    ).copy()
+    )
     projected["pattern_key"] = _pattern_keys_from_raw_frame(pd.DataFrame(projected.drop(columns="geometry")))
     return pd.DataFrame(projected.drop(columns="geometry"))
 
@@ -512,7 +512,7 @@ def _build_kernel_for_pattern(pattern_df: pd.DataFrame, *, grid_size_meters: flo
     kernel["dx"] = kernel["Grid_X"] - float(center["Grid_X"])
     kernel["dy"] = kernel["Grid_Y"] - float(center["Grid_Y"])
     kernel["dist"] = np.sqrt(kernel["dx"] ** 2 + kernel["dy"] ** 2)
-    kernel = kernel.loc[kernel["dist"] <= _KERNEL_RADIUS_METERS].copy()
+    kernel = kernel.loc[kernel["dist"] <= _KERNEL_RADIUS_METERS]
     kernel["dix"] = np.rint(kernel["dx"] / grid_size_meters).astype(int)
     kernel["diy"] = np.rint(kernel["dy"] / grid_size_meters).astype(int)
     kernel = (
@@ -591,7 +591,7 @@ def _load_or_build_kernel_library(
         patterns_df = pd.read_parquet(normalized_patterns_path) if normalized_patterns_path.exists() else None
         return _deserialize_kernel_library(kernel_df), patterns_df
 
-    filtered_patterns_df = projected_patterns_df.loc[projected_patterns_df["pattern_key"].isin(requested_pattern_keys)].copy()
+    filtered_patterns_df = projected_patterns_df.loc[projected_patterns_df["pattern_key"].isin(requested_pattern_keys)]
     patterns_df = _normalize_projected_asrv_patterns(filtered_patterns_df, grid_size_meters=grid_size_meters)
     kernel_library = _build_kernel_library(patterns_df, grid_size_meters=grid_size_meters)
     kernels_path.parent.mkdir(parents=True, exist_ok=True)
@@ -850,7 +850,7 @@ def run(
     emissions_cols = _emissions_columns(emissions_gdf, pipeline)
     if emissions_input_gdf is None:
         keep_cols = [source_id_col] + emissions_cols
-        emissions_gdf = emissions_gdf[keep_cols + ["geometry"]].copy()
+        emissions_gdf = emissions_gdf[keep_cols + ["geometry"]]
     _trace_frame("0", "aermod_source_emissions", pd.DataFrame(emissions_gdf.drop(columns="geometry")), key_cols=[source_id_col])
 
     log_substep_banner("3.1", "prepare local AERMOD grid indices", logger=logger)

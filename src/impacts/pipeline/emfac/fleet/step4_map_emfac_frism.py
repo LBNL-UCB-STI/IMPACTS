@@ -625,7 +625,7 @@ def _build_payload_mass_thresholds(payload_profiles: pd.DataFrame) -> dict[str, 
 
     tour_peaks: list[dict[str, float | str]] = []
     for (old_vehicle_type_id, tour_id), group in working.groupby(["frismVehicleTypeId", "tourId"], sort=False):
-        ordered = group.sort_values(by=["sequenceRank"], kind="mergesort").copy()
+        ordered = group.sort_values(by=["sequenceRank"], kind="mergesort")
         ordered["rawOnboardKg"] = ordered["signedChangeKg"].cumsum()
         min_onboard = float(ordered["rawOnboardKg"].min()) if not ordered.empty else 0.0
         initial_onboard = max(0.0, -min_onboard)
@@ -1165,7 +1165,7 @@ def _attach_freight_fuel_consumption_templates(
         candidates = assignment_catalog[
             assignment_catalog["emfac_vehicle_category"].astype(str).eq(emfac_vehicle_category)
             & assignment_catalog["emfac_fuel"].astype(str).eq(emfac_fuel)
-        ][["fastsim_id", "fastsim_relative_path"]].drop_duplicates().copy()
+        ][["fastsim_id", "fastsim_relative_path"]].drop_duplicates()
         if candidates.empty:
             if _has_baseline_fuel_consumption_values(row):
                 rewritten_rows.append(
@@ -1429,7 +1429,7 @@ def _finalize_freight_vehicle_type_probabilities(
     if prepared.empty:
         return prepared
 
-    category_lookup = prepared[["vehicleTypeId", "vehicleCategory"]].drop_duplicates().copy()
+    category_lookup = prepared[["vehicleTypeId", "vehicleCategory"]].drop_duplicates()
     assigned = mapped_carriers[["vehicleTypeId"]].copy()
     assigned["vehicleTypeId"] = assigned["vehicleTypeId"].astype(str)
     assigned = assigned.merge(category_lookup, on="vehicleTypeId", how="left")

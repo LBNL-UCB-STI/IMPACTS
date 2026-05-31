@@ -49,7 +49,7 @@ def _prepare_inmap_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     )
     prepared = prepared.rename(columns={"PrimaryPM25": "inmap_PrimaryPM25", "BC": "inmap_BC", "NO2": "inmap_NO2"})
     keep = [_INMAP_SOURCE_ID_COLUMN, "inmap_PrimaryPM25", "inmap_SecondaryPM25", "inmap_BC", "inmap_NO2"]
-    return prepared[keep + (["geometry"] if "geometry" in prepared.columns else [])].copy()
+    return prepared[keep + (["geometry"] if "geometry" in prepared.columns else [])]
 
 
 def _prepare_aermod_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -73,7 +73,7 @@ def _prepare_aermod_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         if source_col in prepared.columns:
             prepared = prepared.rename(columns={source_col: renamed_col})
             keep.append(renamed_col)
-    return prepared[keep + (["geometry"] if "geometry" in prepared.columns else [])].copy()
+    return prepared[keep + (["geometry"] if "geometry" in prepared.columns else [])]
 
 
 def _build_full_exposure_grid(
@@ -91,7 +91,7 @@ def _build_full_exposure_grid(
         raise ValueError(
             f"Full exposure grid is missing required columns {missing_grid_cols} in {pipeline.aermod_full_grid_path}."
         )
-    result = full_grid[required_grid_cols + ["geometry"]].copy()
+    result = full_grid[required_grid_cols + ["geometry"]]
 
     inmap_cols = [c for c in prepared_inmap.columns if c != "geometry"]
     inmap_lookup = prepared_inmap[inmap_cols].drop_duplicates(subset=[_INMAP_SOURCE_ID_COLUMN])
@@ -240,7 +240,7 @@ def run(
     cell_pop_path = resolve_required_manifest_input(manifest, key="aermod_cell_population")
     cell_counts = read_table(cell_pop_path)[[_AERMOD_SOURCE_ID_COLUMN, "person_count"]]
     cell_counts[_AERMOD_SOURCE_ID_COLUMN] = pd.to_numeric(cell_counts[_AERMOD_SOURCE_ID_COLUMN], errors="coerce").astype(int)
-    grid_lookup = full_exposure_grid[[_AERMOD_SOURCE_ID_COLUMN, "geometry"]].drop_duplicates(subset=[_AERMOD_SOURCE_ID_COLUMN]).copy()
+    grid_lookup = full_exposure_grid[[_AERMOD_SOURCE_ID_COLUMN, "geometry"]].drop_duplicates(subset=[_AERMOD_SOURCE_ID_COLUMN])
     population_counts = gpd.GeoDataFrame(
         grid_lookup.merge(cell_counts, how="inner", on=_AERMOD_SOURCE_ID_COLUMN),
         geometry="geometry",

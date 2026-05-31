@@ -574,7 +574,7 @@ def _assign_passenger_fuel_consumption_fields(
 
         assignment_matches = assignment_catalog[
             assignment_catalog["fastsim_id"].astype(str).eq(fuel_consumption_id)
-        ][["fastsim_id", "fastsim_relative_path"]].drop_duplicates().copy()
+        ][["fastsim_id", "fastsim_relative_path"]].drop_duplicates()
         if assignment_matches.empty:
             raise ValueError(
                 "No fuel-consumption catalog row matched passenger fuel-consumption id "
@@ -758,7 +758,7 @@ def _finalize_passenger_vehicle_type_probabilities(
     if prepared.empty:
         return prepared
 
-    category_lookup = prepared[["vehicleTypeId", "vehicleCategory"]].drop_duplicates().copy()
+    category_lookup = prepared[["vehicleTypeId", "vehicleCategory"]].drop_duplicates()
     assigned = sampled_vehicles[["vehicleTypeId"]].copy()
     assigned["vehicleTypeId"] = assigned["vehicleTypeId"].astype(str)
     assigned = assigned.merge(category_lookup, on="vehicleTypeId", how="left")

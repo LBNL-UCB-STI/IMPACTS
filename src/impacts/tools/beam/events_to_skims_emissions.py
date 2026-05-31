@@ -224,7 +224,7 @@ def _build_parking_rows(events: pd.DataFrame) -> pd.DataFrame:
     pt["tripEndSec"] = pt["departureTime"].astype(float) + pt["tripDurationSec"].astype(float)
     pt["firstLink"] = pt["links_list"].apply(lambda xs: int(xs[0]))
     pt["lastLink"] = pt["links_list"].apply(lambda xs: int(xs[-1]))
-    pt = pt.sort_values(["vehicle", "departureTime"]).copy()
+    pt = pt.sort_values(["vehicle", "departureTime"])
     pt["nextDepartureSec"] = pt.groupby("vehicle")["departureTime"].shift(-1).astype(float)
     pt["parkingDurationInSecond"] = (
         pt["nextDepartureSec"].fillna(pt["tripEndSec"]) - pt["tripEndSec"]

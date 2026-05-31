@@ -130,13 +130,13 @@ def _build_activity_weights(emissions_inventory_path: str) -> pd.DataFrame:
 
 
 def _filter_activity_weights_to_surface(activity_weights: pd.DataFrame, surface: pd.DataFrame) -> pd.DataFrame:
-    keys = surface[ACTIVITY_JOIN_COLUMNS].drop_duplicates().copy()
+    keys = surface[ACTIVITY_JOIN_COLUMNS].drop_duplicates()
     return activity_weights.merge(keys, on=ACTIVITY_JOIN_COLUMNS, how="inner")
 
 
 def _build_study_area_wide_fleet(activity_weights: pd.DataFrame, model_year_groups: dict[str, list[dict[str, object]]]) -> pd.DataFrame:
     fleet = _assign_model_year_groups(
-        activity_weights[["vehicleCategory", "fuel", "modelYear", "total_vmt_vehicle_miles_per_year"]].copy(),
+        activity_weights[["vehicleCategory", "fuel", "modelYear", "total_vmt_vehicle_miles_per_year"]],
         model_year_groups,
     )
     fleet = (
@@ -161,7 +161,7 @@ def _build_study_area_wide_fleet(activity_weights: pd.DataFrame, model_year_grou
 
 
 def _prepare_surface_keys(surface: pd.DataFrame, model_year_groups: dict[str, list[dict[str, object]]]) -> pd.DataFrame:
-    keys = surface[["county", "vehicleCategory", "fuel", "modelYear", "process"]].drop_duplicates().copy()
+    keys = surface[["county", "vehicleCategory", "fuel", "modelYear", "process"]].drop_duplicates()
     return _assign_model_year_groups(keys, model_year_groups).drop_duplicates()
 
 

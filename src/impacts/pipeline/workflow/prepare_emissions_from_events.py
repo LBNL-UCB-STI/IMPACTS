@@ -305,7 +305,7 @@ def _calculate_emissions(
 
     rates = _normalize_rate_dimensions(read_rates_directory(rates_folder))
     rate_to_canonical = {v: k for k, v in pollutants_map.items()}
-    rates = rates[rates["pollutant"].isin(set(pollutants_map.values()))].copy()
+    rates = rates[rates["pollutant"].isin(set(pollutants_map.values()))]
     if rates.empty:
         logger.warning("Step 1: no matching rates found in %s for configured pollutants", rates_folder)
         return skims
@@ -426,7 +426,7 @@ def _enrich_with_intersection(skims: pd.DataFrame, intersection_path: str) -> pd
     zone's edge proportion. speedMph is preserved unchanged (it is a rate, not a total).
     The raw proportion columns are dropped after application.
     """
-    available = read_table(intersection_path)[_INTERSECTION_ZONE_COLS].copy()
+    available = read_table(intersection_path)[_INTERSECTION_ZONE_COLS]
     available["linkId"] = pd.to_numeric(available["linkId"], errors="coerce")
     prop_cols = [p for p, _ in _PROPORTION_PAIRS]
     for col in prop_cols:

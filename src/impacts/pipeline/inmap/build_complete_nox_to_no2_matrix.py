@@ -57,7 +57,7 @@ def _normalize_square_matrix(df: pd.DataFrame) -> pd.DataFrame:
 
     matrix.index = pd.to_numeric(pd.Index(matrix.index), errors="coerce")
     matrix.columns = pd.to_numeric(pd.Index(matrix.columns), errors="coerce")
-    matrix = matrix.loc[matrix.index.notna(), matrix.columns.notna()].copy()
+    matrix = matrix.loc[matrix.index.notna(), matrix.columns.notna()]
     matrix.index = matrix.index.astype(int)
     matrix.columns = matrix.columns.astype(int)
     return matrix.apply(pd.to_numeric, errors="coerce").fillna(0.0)
@@ -348,7 +348,7 @@ def _read_transfer_matrix(path: str | Path) -> pd.DataFrame:
     matrix = pd.read_parquet(path)
     matrix.index = pd.to_numeric(pd.Index(matrix.index), errors="coerce")
     matrix.columns = pd.to_numeric(pd.Index(matrix.columns), errors="coerce")
-    matrix = matrix.loc[matrix.index.notna(), matrix.columns.notna()].copy()
+    matrix = matrix.loc[matrix.index.notna(), matrix.columns.notna()]
     matrix.index = matrix.index.astype(int)
     matrix.columns = matrix.columns.astype(int)
     return matrix.apply(pd.to_numeric, errors="coerce").fillna(0.0)

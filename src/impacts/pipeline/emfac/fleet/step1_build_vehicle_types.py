@@ -333,7 +333,7 @@ def _build_freight_vehicle_types_from_population(
     prepared_types = freight_vehicle_types.copy()
     prepared_types["vehicleTypeId"] = prepared_types["vehicleTypeId"].astype(str)
 
-    population = freight_vehicle_type_population[["vehicleTypeId", "fleetShare"]].drop_duplicates().copy()
+    population = freight_vehicle_type_population[["vehicleTypeId", "fleetShare"]].drop_duplicates()
     population["vehicleTypeId"] = population["vehicleTypeId"].astype(str)
     population["fleetShare"] = pd.to_numeric(population["fleetShare"], errors="coerce").fillna(0.0)
 
@@ -549,7 +549,7 @@ def _build_atlas_income_bin_targets(
     _require_column(vehicles, "household_id", "ATLAS vehicles file")
     _require_column(persons, "household_id", "ATLAS persons file")
 
-    prepared_households = households.reset_index().copy()
+    prepared_households = households.reset_index()
     _require_column(prepared_households, "household_id", "ATLAS households file")
     _require_column(prepared_households, "income_segment", "ATLAS households file")
     _require_column(prepared_households, "income_in_thousands", "ATLAS households file")
@@ -580,13 +580,13 @@ def _build_atlas_income_bin_targets(
         on="household_id",
         how="left",
     )
-    merged = merged.dropna(subset=["income_segment"]).copy()
+    merged = merged.dropna(subset=["income_segment"])
     if merged.empty:
         raise ValueError("No ATLAS vehicles could be matched to ATLAS households with income_segment")
 
     normalized_income_bins = _validate_income_bins(income_bins)
     if normalized_income_bins is not None:
-        merged = merged.dropna(subset=["income_in_thousands"]).copy()
+        merged = merged.dropna(subset=["income_in_thousands"])
         if merged.empty:
             raise ValueError("No ATLAS vehicles could be matched to ATLAS households with income_in_thousands")
         merged["incomeBin"] = pd.cut(
@@ -596,7 +596,7 @@ def _build_atlas_income_bin_targets(
             include_lowest=True,
             right=True,
         )
-        merged = merged.dropna(subset=["incomeBin"]).copy()
+        merged = merged.dropna(subset=["incomeBin"])
         income_counts = (
             merged.groupby(["atlasVehicleTypeId", "incomeBin"], dropna=False)
             .agg(

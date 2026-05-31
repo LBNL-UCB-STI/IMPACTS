@@ -102,10 +102,10 @@ def _build_county_name_lookup(county_boundaries_path: str) -> dict[str, str]:
     county_gdf = read_vector(county_boundaries_path)
     if "COUNTYFP" not in county_gdf.columns or "NAME" not in county_gdf.columns:
         raise ValueError("County boundaries must include COUNTYFP and NAME for inventory-based correction.")
-    lookup = county_gdf[["COUNTYFP", "NAME"]].drop_duplicates().copy()
+    lookup = county_gdf[["COUNTYFP", "NAME"]].drop_duplicates()
     lookup["countyfp"] = normalize_county_fips(lookup["COUNTYFP"])
     lookup["NAME"] = lookup["NAME"].astype(str).str.strip()
-    lookup = lookup.loc[lookup["countyfp"].notna() & lookup["NAME"].ne("")].copy()
+    lookup = lookup.loc[lookup["countyfp"].notna() & lookup["NAME"].ne("")]
     return dict(zip(lookup["NAME"], lookup["countyfp"]))
 
 
@@ -161,7 +161,7 @@ def _build_beam_activity_details(
     detailed["totVMT"] = detailed["totVMT"] * detailed["county_proportion"]
     detailed["totTrips"] = detailed["totTrips"] * detailed["county_proportion"]
     detailed = detailed.merge(vehicle_lookup, how="left", on="vehicleTypeId")
-    detailed = detailed.loc[detailed["assignment_group"].isin(_CORRECTION_ASSIGNMENT_GROUPS)].copy()
+    detailed = detailed.loc[detailed["assignment_group"].isin(_CORRECTION_ASSIGNMENT_GROUPS)]
     missing_vehicle_types = detailed.loc[
         detailed["assignment_group"].isna() | detailed["modelYear"].isna(),
         "vehicleTypeId",
@@ -176,7 +176,7 @@ def _build_beam_activity_details(
         .sum()
         .reset_index()
     )
-    return detailed.copy(), detailed
+    return detailed, detailed
 
 
 def _derive_inventory_activity_targets_for_assignment(
@@ -270,7 +270,7 @@ def apply_county_corrections(
     vehicle_lookup = _load_vehicle_type_activity_lookup(
         passenger_vehicle_types_path,
         freight_vehicle_types_path,
-    )[["vehicleTypeId", "assignment_group", "modelYear"]].copy()
+    )[["vehicleTypeId", "assignment_group", "modelYear"]]
     process_upper = allocated_df.get("process", pd.Series("", index=allocated_df.index)).astype(str).str.upper().str.strip()
     unique_processes = sorted(process_upper[process_upper.ne("")].dropna().unique().tolist())
     vmt_used = sorted([proc for proc in unique_processes if proc in _VMT_PROCESSES])
@@ -451,12 +451,11 @@ def _save_grid_emissions(
     if grid_gdf.crs is not None:
         grid_gdf = grid_gdf.to_crs(epsg=output_epsg)
     expected_grid_ids = set(pd.to_numeric(df[left_col], errors="coerce").dropna().astype(int).unique().tolist())
-    tabular = df.copy()
     join_started = time.perf_counter()
     con = duckdb.connect(database=":memory:")
     try:
         configure_duckdb_connection(con, working_dir=output_stem.parent, show_progress=False, profile="export")
-        con.register("emissions_df", tabular)
+        con.register("emissions_df", df)
         con.register("grid_ids", pd.DataFrame({right_col: grid_gdf[right_col]}))
         joined = con.execute(
             f"""
@@ -580,7 +579,7 @@ def _build_county_corrected_table(
         return None, None, None
     if not _should_apply_inventory_activity_corrections(pipeline):
         logger.info("%s inventory activity corrections disabled; skipping county correction stage", _step_label("1.3"))
-        return county_allocated_df.copy(), None, None
+        return county_allocated_df, None, None
 
     with logging_redirect_tqdm():
         progress = tqdm(

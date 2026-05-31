@@ -452,7 +452,7 @@ def generate_fishnet_from_bounds(
             progress.update(stop - start)
     finally:
         progress.close()
-    fishnet = fishnet.loc[keep_mask].copy()
+    fishnet = fishnet.loc[keep_mask]
     logger.info(
         "Preprocess: filtered fishnet candidates to the staged InMAP footprint in %.2fs → %d rows kept",
         time.perf_counter() - filter_started,
@@ -507,7 +507,7 @@ def constrain_grid_to_network(
         .astype(int)
         .unique()
     )
-    constrained = grid[pd.to_numeric(grid[grid_id_col], errors="coerce").isin(keep_ids)].copy()
+    constrained = grid[pd.to_numeric(grid[grid_id_col], errors="coerce").isin(keep_ids)]
     write_vector(constrained, str(target))
     logger.info(
         "Preprocess: constrained %s to %d network-intersecting cells in %.2fs → %s",
@@ -542,7 +542,7 @@ def assign_grid_cells_to_zones(
     zones = zones.to_crs(epsg=target_epsg)
 
     grid_index_col = grid.index.name or "grid_index"
-    zone_lookup = zones[[zone_id_col, "geometry"]].copy()
+    zone_lookup = zones[[zone_id_col, "geometry"]]
     zone_lookup = zone_lookup.rename(columns={"geometry": "_zone_geometry"})
 
     representative_points = gpd.GeoDataFrame(
@@ -557,7 +557,7 @@ def assign_grid_cells_to_zones(
         predicate="within",
     )
     duplicate_matches = joined.duplicated(subset=[grid_index_col], keep=False)
-    unique_point_matches = joined.loc[~duplicate_matches, [grid_index_col, zone_id_col]].copy()
+    unique_point_matches = joined.loc[~duplicate_matches, [grid_index_col, zone_id_col]]
     mapped = unique_point_matches.rename(columns={zone_id_col: output_col})
     mapped[output_col] = pd.to_numeric(mapped[output_col], errors="coerce")
     unresolved_ids = set()
@@ -611,7 +611,7 @@ def assign_grid_cells_to_zones(
             )
             if not best_overlap.empty:
                 best_overlap[output_col] = pd.to_numeric(best_overlap[output_col], errors="coerce")
-                mapped = mapped.loc[~mapped[grid_index_col].isin(best_overlap[grid_index_col])].copy()
+                mapped = mapped.loc[~mapped[grid_index_col].isin(best_overlap[grid_index_col])]
                 mapped = pd.concat([mapped, best_overlap], ignore_index=True)
     unresolved_duplicates = mapped.duplicated(subset=[grid_index_col], keep=False)
     if unresolved_duplicates.any():

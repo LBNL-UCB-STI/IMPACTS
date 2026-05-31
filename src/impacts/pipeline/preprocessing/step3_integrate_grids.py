@@ -251,7 +251,7 @@ def trace_and_filter_void_zone_rows(
     )
     if not void_mask.any():
         return df
-    filtered = df.loc[~void_mask].copy()
+    filtered = df.loc[~void_mask]
     logger.info(
         "%s removed %d bbox-only zone rows after exact-intersection screening",
         context,
@@ -340,7 +340,7 @@ def _union_county_matches_with_unmatched(
 
     matched_source_col = _resolve_source_row_col(matched)
     matched_ids = set(pd.to_numeric(matched[matched_source_col], errors="coerce").dropna().astype(int).tolist())
-    unmatched = source.loc[~source[_SOURCE_ROW_ID].isin(matched_ids)].copy()
+    unmatched = source.loc[~source[_SOURCE_ROW_ID].isin(matched_ids)]
 
     county_cols = [c for c in matched.columns if c.startswith("county_") and c != "geometry"]
     for col in county_cols:
@@ -395,7 +395,7 @@ def _assign_fallback_counties(
         nearest = nearest.rename(columns={"COUNTYFP": "county_COUNTYFP"})
         joined.loc[missing, "county_COUNTYFP"] = nearest["county_COUNTYFP"].to_numpy()
     joined["county_COUNTYFP"] = joined["county_COUNTYFP"].astype("string")
-    return pd.DataFrame(joined[["linkId", "county_COUNTYFP"]].copy())
+    return pd.DataFrame(joined[["linkId", "county_COUNTYFP"]])
 
 
 def _ensure_county_mass_conservation(
@@ -423,13 +423,13 @@ def _ensure_county_mass_conservation(
         )
         .reset_index()
     )
-    affected = link_metrics.loc[link_metrics["county_prop_sum"] < 0.999999].copy()
+    affected = link_metrics.loc[link_metrics["county_prop_sum"] < 0.999999]
     if affected.empty:
         return result
 
     source = source_links[["linkId", "geometry"]].copy()
     source["source_edge_length_m"] = source.geometry.length
-    fallback_links = source.loc[source["linkId"].isin(affected["linkId"])].copy()
+    fallback_links = source.loc[source["linkId"].isin(affected["linkId"])]
     fallback_counties = _assign_fallback_counties(source_links=fallback_links, county_gdf=county_gdf)
 
     affected = affected.merge(source[["linkId", "geometry", "source_edge_length_m"]], how="left", on="linkId")
@@ -455,14 +455,14 @@ def _ensure_county_mass_conservation(
         "missing_share",
         "missing_zone_length_m",
         "geometry",
-    ]].copy()
+    ]]
     synthetic = synthetic.rename(
         columns={
             "missing_share": "county_proportion",
             "missing_zone_length_m": "county_link_length_m",
         }
     )
-    synthetic = synthetic.loc[synthetic["county_COUNTYFP"].notna()].copy()
+    synthetic = synthetic.loc[synthetic["county_COUNTYFP"].notna()]
     if synthetic.empty:
         return result
 
@@ -575,7 +575,7 @@ def run(
         aermod_intersection.to_file(aermod_intersection_path.with_suffix(".gpkg"), driver="GPKG")
         logger.info("Step 3.3 complete: %d rows → %s", len(aermod_intersection), aermod_intersection_path)
 
-    B = mapped_network.reset_index(drop=True).copy()
+    B = mapped_network.reset_index(drop=True)
     B[_SOURCE_ROW_ID] = range(len(B))
 
     log_substep_banner("3.4", "intersect with county boundaries", logger=logger)
