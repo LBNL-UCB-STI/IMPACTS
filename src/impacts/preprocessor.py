@@ -296,6 +296,11 @@ def preprocess_workflow(
     write_structured_file(pipeline_manifest_path, typed_pipeline_manifest.to_dict())
     logger.info("Preprocess complete: wrote preprocess manifest %s", output_manifest)
     logger.info("Preprocess seeded pipeline manifest %s", pipeline_manifest_path)
+    logger.info(
+        "Preprocess stage complete: preprocess_manifest=%s pipeline_manifest=%s",
+        output_manifest,
+        pipeline_manifest_path,
+    )
     result = typed_manifest.to_dict()
     result["pipeline_manifest_path"] = str(pipeline_manifest_path)
     return result

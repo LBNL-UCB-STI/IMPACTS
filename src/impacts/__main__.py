@@ -10,6 +10,8 @@ import sys
 from impacts.config.settings_builder import load_settings_from_yaml
 from impacts.manifest.file_ops import resolve_path
 
+logger = logging.getLogger(__name__)
+
 
 def _print_pipeline_banner() -> None:
     print()
@@ -48,6 +50,10 @@ def _run_presim_from_settings(settings_path: str) -> None:
         activities_manifest_path = activities_manifest["activities_manifest_path"]
     if settings.impacts.pipeline.presim.fleet:
         run_fleet_main(activities_manifest_path=activities_manifest_path)
+    if activities_manifest_path:
+        logger.info("Presim stage complete: activities_manifest=%s", activities_manifest_path)
+    else:
+        logger.info("Presim stage complete: no presim stages enabled")
 
 
 def _run_postsim_from_settings(
@@ -98,6 +104,8 @@ def _run_postsim_from_settings(
     postprocess_from_pipeline_manifest(
         run_manifest_path=pipeline_manifest_path,
     )
+    logger.info("Postsim stage complete: pipeline_manifest=%s", pipeline_manifest_path)
+
 
 def _resolve_profile_output(*, output_root: Path, stem: str) -> Path:
     candidate = output_root / "profiling" / stem
@@ -377,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
         if settings.impacts.pipeline.presim.activities or settings.impacts.pipeline.presim.fleet:
             _run_presim_from_settings(args.config)
         _run_postsim_from_settings(args.config)
+        logger.info("Pipeline command complete")
         return 0
 
     if args.command == "analysis":

@@ -122,6 +122,7 @@ def _write_activities_manifest_from_cfg(
     )
     write_structured_file(manifest_path, typed_manifest.to_dict())
     logger.info("Activities manifest written: %s", manifest_path)
+    logger.info("EMFAC activities stage complete: activities_manifest=%s", manifest_path)
     return typed_manifest.to_dict()
 
 
@@ -140,6 +141,7 @@ def _write_activities_manifest(
     )
     write_structured_file(manifest_path, typed_manifest.to_dict())
     logger.info("Activities manifest written: %s", manifest_path)
+    logger.info("EMFAC activities stage complete: activities_manifest=%s", manifest_path)
     return typed_manifest.to_dict()
 
 

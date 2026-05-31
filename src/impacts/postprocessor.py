@@ -25,9 +25,7 @@ def postprocess_from_pipeline_manifest(
     output_root = Path(str(pipeline_manifest.get("output_dir"))).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
 
-    log_step_banner("Postprocess", "Impacts Complete", logger=logger)
-    logger.info("End of impacts concluded.")
-
+    log_step_banner("Postprocess", "Run Analysis", logger=logger)
     analysis_outputs = run_analysis_from_pipeline_manifest(
         run_manifest_path=run_manifest_path,
     )
@@ -43,7 +41,7 @@ def postprocess_from_pipeline_manifest(
         },
         "notes": [
             "Postprocess runs maintained analysis outputs after workflow completion.",
-            "End of impacts concluded.",
+            "Pipeline completion is logged after analysis and postprocess manifest writing.",
         ],
     }
     output_manifest = Path(manifest_path) if manifest_path else output_root / "postprocess_manifest.yaml"
@@ -51,6 +49,8 @@ def postprocess_from_pipeline_manifest(
     typed_manifest = PostprocessManifest.from_dict(postprocess_manifest)
     write_structured_file(output_manifest, typed_manifest.to_dict())
     logger.info("Postprocess manifest written: %s", output_manifest)
+    log_step_banner("Pipeline", "Impacts Complete", logger=logger)
+    logger.info("Pipeline complete: postprocess_manifest=%s", output_manifest)
     return typed_manifest.to_dict()
 
 

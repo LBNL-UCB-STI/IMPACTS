@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import sys
 import yaml
@@ -17,6 +18,7 @@ from impacts.manifest.schema import PipelineConfig
 from impacts.manifest.schema import PostprocessManifest
 from impacts.manifest.schema import PipelineManifest
 from impacts.manifest.schema import ActivitiesManifest
+from impacts.postprocessor import postprocess_from_pipeline_manifest
 from impacts.postprocessor import postprocess_from_settings
 from impacts.pipeline.preprocessing.step1_collect_inputs import _resolve_region_input_root
 from impacts.runner import run_emissions_from_pipeline_manifest
@@ -746,6 +748,56 @@ def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_pat
     assert calls["preprocess"]["settings_path"].endswith("settings.yaml")
     assert calls["emissions_run"]["run_manifest_path"].endswith("pipeline_manifest.yaml")
     assert calls["postprocess"]["run_manifest_path"].endswith("pipeline_manifest.yaml")
+
+
+def test_postprocess_logs_pipeline_complete_after_analysis_and_manifest(monkeypatch, caplog, tmp_path: Path):
+    output_root = tmp_path / "impacts_output"
+    run_manifest_path = output_root / "pipeline_manifest.yaml"
+    run_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    run_manifest_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "1",
+                "model": "impacts",
+                "preprocess_manifest_path": str(output_root / "preprocess_manifest.yaml"),
+                "output_dir": str(output_root),
+                "command": "python -m impacts postsim",
+                "image": "unknown",
+                "outputs": {"skims_emissions": str(tmp_path / "prepared.parquet")},
+                "pipeline": _pipeline_payload(tmp_path),
+                "population_inputs": {},
+                "deterministic_contract": {},
+                "execution": {"dispersion_completed": True, "stopped_after": "step4_prepare_exposure"},
+                "pipeline_manifest_path": str(run_manifest_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def _fake_analysis(run_manifest_path):
+        logging.getLogger("impacts.analysis.fake").info("analysis complete for %s", run_manifest_path)
+        return {"analysis_output": str(tmp_path / "analysis.parquet")}
+
+    monkeypatch.setattr("impacts.runner.run_analysis_from_pipeline_manifest", _fake_analysis)
+
+    with caplog.at_level(logging.INFO):
+        result = postprocess_from_pipeline_manifest(run_manifest_path=run_manifest_path)
+
+    messages = [record.getMessage() for record in caplog.records]
+    analysis_index = messages.index(f"analysis complete for {run_manifest_path}")
+    manifest_index = messages.index(f"Postprocess manifest written: {output_root / 'postprocess_manifest.yaml'}")
+    complete_index = messages.index(f"Pipeline complete: postprocess_manifest={output_root / 'postprocess_manifest.yaml'}")
+
+    assert result["postprocess_manifest_path"].endswith("postprocess_manifest.yaml")
+    assert analysis_index < manifest_index < complete_index
+    assert messages[-1] == f"Pipeline complete: postprocess_manifest={output_root / 'postprocess_manifest.yaml'}"
+
+
+def test_hpc_job_prints_successful_stage_completion():
+    job_script = Path("hpc/job.sh").read_text(encoding="utf-8")
+
+    assert "Pipeline job complete: stage=$STAGE" in job_script
+    assert "Stage job complete: stage=$STAGE" in job_script
 
 
 def test_analysis_runner_resolves_modeled_emissions_from_pipeline_manifest(monkeypatch, tmp_path: Path):

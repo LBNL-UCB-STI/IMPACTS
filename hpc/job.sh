@@ -120,3 +120,9 @@ case "$STAGE" in
         exit 2
         ;;
 esac
+
+if [ "$STAGE" = "pipeline" ]; then
+    echo "Pipeline job complete: stage=$STAGE log=${JOB_LOG_FILE_PATH:-<not set>}"
+else
+    echo "Stage job complete: stage=$STAGE log=${JOB_LOG_FILE_PATH:-<not set>}"
+fi

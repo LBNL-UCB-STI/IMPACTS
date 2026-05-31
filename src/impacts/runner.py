@@ -350,6 +350,7 @@ def run_analysis_from_settings(
         for key, value in target_outputs.items():
             outputs[f"annual_targets_{key}"] = value
     if not settings.impacts.analysis.inventory_targets:
+        logger.info("Analysis stage complete: output_dir=%s outputs=%d", output_dir, len(outputs))
         return outputs
     county_boundaries_path = _resolve_analysis_county_boundaries_path(settings_path)
     county_order: list[str] = []
@@ -388,6 +389,7 @@ def run_analysis_from_settings(
         )
         for key, value in target_outputs.items():
             outputs[f"{target.name}_{key}"] = value
+    logger.info("Analysis stage complete: output_dir=%s outputs=%d", output_dir, len(outputs))
     return outputs
 
 
@@ -636,6 +638,11 @@ def _run_stages_from_preprocess_manifest(
     typed_manifest = PipelineManifest.from_dict(run_manifest)
     write_structured_file(output_manifest, typed_manifest.to_dict())
     logger.info("Pipeline manifest written: %s", output_manifest)
+    logger.info(
+        "Workflow stage complete: stopped_after=%s pipeline_manifest=%s",
+        run_manifest["execution"]["stopped_after"],
+        output_manifest,
+    )
     return typed_manifest.to_dict()
 
 
