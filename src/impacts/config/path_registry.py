@@ -40,7 +40,7 @@ class PathRegistry:
 def build_registry(settings, config_path: Path) -> PathRegistry:
     """Build a PathRegistry from an ImpactsSettings object.
 
-    Search order (beam-data roots first, project roots last as fallback):
+    Search order:
       1. beam_input, beam_input/region, beam_input/region/vehicle-tech/emissions
       2. beam_input/vehicle_folder/emissions, beam_input/vehicle_folder/dispersions
       3. beam_output

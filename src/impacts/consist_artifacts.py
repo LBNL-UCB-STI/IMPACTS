@@ -64,9 +64,9 @@ def _entry_from_artifact(
     artifact: Any,
     optional: bool = False,
     source_key: Optional[str] = None,
-    fallback_path: Optional[str] = None,
+    local_path: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    resolved_path = _resolve_artifact_path(artifact) or (str(Path(fallback_path).resolve()) if fallback_path else None)
+    resolved_path = _resolve_artifact_path(artifact) or (str(Path(local_path).resolve()) if local_path else None)
     if not resolved_path:
         return None
     return {
@@ -356,7 +356,7 @@ def log_input_reference(
         artifact=artifact,
         optional=optional,
         source_key=publish_key,
-        fallback_path=normalized_path,
+        local_path=normalized_path,
     )
 
 
@@ -396,7 +396,7 @@ def log_output_reference(
         artifact=artifact,
         optional=optional,
         source_key=publish_key,
-        fallback_path=normalized_path,
+        local_path=normalized_path,
     )
 
 

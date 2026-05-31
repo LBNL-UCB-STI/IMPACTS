@@ -102,6 +102,8 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.beam.local_input_folder == "~/Workspace/Models/beam/beam-data"
     assert config.beam.local_output_folder == "beam/beam_output"
     assert config.beam.router_directory == "r5/sfbay-cbg5500-weakConn-network"
+    assert config.impacts.local_input_folder == "impacts/impacts_inputs"
+    assert config.impacts.local_output_folder == "impacts/impacts_output"
     assert config.impacts.pipeline.inmap is True
     assert config.impacts.dispersions.inmap.grid_path.endswith("isrm_polygon_wgs84.gpkg")
     assert config.impacts.pipeline.aermod is True

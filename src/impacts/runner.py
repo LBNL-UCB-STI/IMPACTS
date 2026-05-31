@@ -21,7 +21,7 @@ from .manifest.schema import PipelineManifest
 from .common import resolve_required_manifest_input
 
 logger = logging.getLogger(__name__)
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _normalized_stage_label(label: str) -> str:
     text = str(label).strip()
@@ -247,12 +247,9 @@ def _resolve_analysis_inventory_target_path(settings_path: str | Path, raw: str)
     candidate = Path(resolve_path(raw_text, settings_path) or raw_text).resolve()
     if candidate.exists():
         return candidate
-    fallback = (_REPO_ROOT / raw_text).resolve()
-    if fallback.exists():
-        return fallback
     raise FileNotFoundError(
         "Analysis inventory target file was configured but not found. "
-        f"Tried {candidate} and {fallback}."
+        f"Expected {candidate}."
     )
 
 

@@ -6,17 +6,20 @@ This document describes the `impacts` integration pattern for PILATES and the ex
 
 ```text
 examples/pilates/
-  beam/
-    beam_output/
-    production/
-  impacts/
+  settings.yaml
+  hpc-settings.yaml
+  impacts/        # created at runtime, ignored by git
 ```
 
 Meaning:
 
-- `beam/beam_output`: BEAM run outputs consumed by `impacts`
-- `beam/production`: production inputs referenced by the example settings
-- `impacts`: downstream-facing published artifacts
+- `settings.yaml`: local example settings
+- `hpc-settings.yaml`: HPC example settings
+- `impacts`: runtime-managed IMPACTS inputs, outputs, manifests, and logs
+
+BEAM inputs and outputs are user-managed runtime data and are ignored by git. The local
+example points `beam.local_input_folder` at an external BEAM data root and writes
+relative BEAM outputs under `beam/beam_output` when needed.
 
 ## Settings model
 
@@ -25,7 +28,8 @@ The example uses one user-managed settings file:
 - `examples/pilates/settings.yaml`
 - `src/impacts/config/settings.yaml` is the canonical native IMPACTS settings template.
 
-During preprocess, `impacts` registers the user-provided settings file in the inputs manifest and writes managed artifacts under the configured `impacts.local_input_folder` and `impacts.local_output_folder`.
+During preprocess, `impacts` registers the user-provided settings file and source inputs in `preprocess_manifest.yaml`, then writes managed artifacts under the configured `impacts.local_input_folder` and `impacts.local_output_folder`.
+Relative `impacts.*_folder` values are resolved against the settings file directory first. For `examples/pilates/settings.yaml`, `impacts/impacts_output` resolves to `examples/pilates/impacts/impacts_output`.
 
 ## Example settings shape
 
@@ -33,7 +37,7 @@ During preprocess, `impacts` registers the user-provided settings file in the in
 run:
   region: sfbay
   scenario: base
-  start_year: 2017
+  start_year: 2018
 
 shared:
   geography:
@@ -52,12 +56,14 @@ shared:
     local_crs: EPSG:26910
 
 beam:
-  local_input_folder: beam/production
+  local_input_folder: ~/Workspace/Models/beam/beam-data
   local_output_folder: beam/beam_output
+  router_directory: r5/sfbay-cbg5500-weakConn-network
 
 impacts:
   local_input_folder: impacts/impacts_inputs
   local_output_folder: impacts/impacts_output
+  seed: 0
   scenario: 2018-Baseline
   pipeline:
     presim:
@@ -107,11 +113,25 @@ python -m impacts pipeline --config examples/pilates/settings.yaml
 
 The full pipeline command produces:
 
-- `examples/pilates/impacts/impacts_output/inputs_manifest.yaml`
-- `examples/pilates/impacts/impacts_output/run_manifest.yaml`
+- `examples/pilates/impacts/impacts_output/log_*.log` for HPC runs launched through `hpc/job_runner.sh`
+- `examples/pilates/impacts/impacts_output/preprocess_manifest.yaml`
+- `examples/pilates/impacts/impacts_output/pipeline_manifest.yaml`
+- `examples/pilates/impacts/impacts_output/postprocess_manifest.yaml`
 - `examples/pilates/impacts/impacts_output/beam_emissions_for_inmap.parquet`
 - optionally `examples/pilates/impacts/impacts_output/beam_emissions_for_aermod.parquet`
 - `examples/pilates/impacts/impacts_output/beam_concentration_distribution.parquet`
+
+HPC stage runs use the same settings file and stage names:
+
+```bash
+./hpc/job_runner.sh \
+  -c examples/pilates/hpc-settings.yaml \
+  -a my_account \
+  -s postsim \
+  -p lr7
+```
+
+Supported stages are `pipeline`, `preprocess`, `presim`, `activities`, `fleet`, `postsim`, `emissions`, `inmap`, `aermod`, `exposure`, `postprocess`, and `analysis`.
 
 ## Preparing smaller sample inputs
 
@@ -135,3 +155,5 @@ Outputs land in:
 
 - `examples/pilates/beam/events_sample.parquet`
 - `examples/pilates/beam/skimsEmissions_sample.parquet`
+
+The `examples/pilates/beam/**` tree is ignored by git because it contains user-managed BEAM runtime data.

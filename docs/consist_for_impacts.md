@@ -8,7 +8,7 @@ Consist staging:
 
 - find an upstream file
 - log it as a Consist input artifact
-- or, if Consist is unavailable, store the original source path without copying
+- or, when Consist is unavailable or no active Consist run is present, store the original source path without copying
 - store the tracked entry under a stable key in `manifest_inputs`
 - resolve the artifact to a path only when a step needs to read it
 
@@ -29,7 +29,7 @@ The current manifest keys are already close to what Consist needs. These should 
 
 ## PILATES-aligned lookup order
 
-For upstream BEAM-origin files, `impacts` now tries PILATES-style artifact keys first and only falls back to local filesystem discovery when nothing is published yet.
+For upstream BEAM-origin files, `impacts` tries PILATES-style artifact keys first and uses local filesystem discovery when nothing is published yet.
 
 - `network`: query latest `beam_network_final_*`, otherwise discover the BEAM network locally and register it
 - `events_input`: query latest `events_parquet_*`, otherwise discover the latest local BEAM events file and register it
@@ -43,7 +43,7 @@ Other inputs that do not already have a known PILATES handoff key are still regi
 
 1. Preprocess or workflow code resolves upstream files as it does today.
 2. Source inputs are registered through `register_local_input(...)` or `register_managed_input(...)`, which do not physically copy the source file.
-3. `manifest_inputs[key]` stores a Consist-backed entry when Consist works, otherwise it stores a no-copy local entry that still points at the original source path.
+3. `manifest_inputs[key]` stores a Consist-backed entry when there is an active Consist run, otherwise it stores a no-copy local entry that still points at the original source path.
 4. Workflow steps resolve the manifest entry to a concrete path right before `read_table(...)`, `read_vector(...)`, or other file IO.
 5. Generated outputs can be logged with `log_output_reference(...)` and stored in the run manifest by stable key.
 
@@ -67,7 +67,7 @@ That wrapper should hide:
 - Consist import details
 - artifact metadata shape
 - path normalization
-- direct-path registration behavior when Consist is unavailable
+- direct-path registration behavior for standalone runs without an active Consist run
 
 ## Where to start
 
