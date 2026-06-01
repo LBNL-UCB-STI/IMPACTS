@@ -41,8 +41,8 @@ install_python_deps() {
 
     if [ ! -f "$marker" ] || [ "$current_hash" != "$(cat "$marker")" ]; then
         echo "Installing/updating Python dependencies from $req_file ..."
-        python3 -m pip install --upgrade pip setuptools wheel
-        python3 -m pip install -r "$req_file"
+        "$VENV_PATH/bin/python3" -m pip install --upgrade pip setuptools wheel
+        "$VENV_PATH/bin/python3" -m pip install -r "$req_file"
         printf "%s\n" "$current_hash" > "$marker"
     else
         echo "Python dependencies up to date; skipping pip install."
@@ -87,9 +87,9 @@ fi
 install_python_deps "$REQUIREMENTS_FILE"
 
 # Install impacts itself in editable mode
-python3 -m pip install -e "$IMPACTS_DIR" --no-deps --quiet
+"$VENV_PATH/bin/python3" -m pip install -e "$IMPACTS_DIR" --no-deps --quiet
 
-echo "Python: $(python3 --version) @ $(which python3)"
+echo "Python: $("$VENV_PATH/bin/python3" --version) @ $VENV_PATH/bin/python3"
 echo "Config: $CONFIG_FILE"
 
 show_system_info
@@ -107,16 +107,16 @@ echo "Thread caps: $THREADS (OMP/MKL/OPENBLAS/NUMEXPR/BLIS/VECLIB)"
 echo "Stage: $STAGE"
 case "$STAGE" in
     pipeline)
-        python3 -u -m impacts pipeline --config "$CONFIG_FILE" --profile time
+        "$VENV_PATH/bin/python3" -u -m impacts pipeline --config "$CONFIG_FILE" --profile time
         ;;
     preprocess|presim|activities|postsim|analysis)
-        python3 -u -m impacts "$STAGE" --config "$CONFIG_FILE"
+        "$VENV_PATH/bin/python3" -u -m impacts "$STAGE" --config "$CONFIG_FILE"
         ;;
     fleet)
-        python3 -u -m impacts fleet --activities-manifest "$CONFIG_FILE"
+        "$VENV_PATH/bin/python3" -u -m impacts fleet --activities-manifest "$CONFIG_FILE"
         ;;
     emissions|inmap|aermod|exposure|postprocess)
-        python3 -u -m impacts "$STAGE" --run-manifest "$CONFIG_FILE"
+        "$VENV_PATH/bin/python3" -u -m impacts "$STAGE" --run-manifest "$CONFIG_FILE"
         ;;
     *)
         echo "ERROR: unsupported stage '$STAGE'"
