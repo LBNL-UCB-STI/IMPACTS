@@ -37,6 +37,15 @@ def test_analysis_step1_compares_beam_fleet_to_emfac_by_emfac_id(tmp_path: Path)
     passenger_vehicle_types.to_csv(passenger_vehicle_types_path, index=False)
     freight_vehicle_types.to_csv(freight_vehicle_types_path, index=False)
 
+    passenger_vehicles = pd.DataFrame(
+        {"vehicleTypeId": ["pax-a", "pax-a", "pax-b", "pax-b", "pax-b"]}
+    )
+    freight_carriers = pd.DataFrame({"vehicleTypeId": ["ft-a"]})
+    passenger_vehicles_path = tmp_path / "vehicles--EM.parquet"
+    freight_carriers_path = tmp_path / "carriers--EM.parquet"
+    passenger_vehicles.to_parquet(passenger_vehicles_path, index=False)
+    freight_carriers.to_parquet(freight_carriers_path, index=False)
+
     passenger_activity = pd.DataFrame(
         {
             "county": ["A", "A", "B", "B"],
@@ -67,11 +76,13 @@ def test_analysis_step1_compares_beam_fleet_to_emfac_by_emfac_id(tmp_path: Path)
         emfac_passenger_activity_path=str(passenger_activity_path),
         emfac_freight_activity_path=str(freight_activity_path),
         output_dir=tmp_path / "analysis",
+        passenger_vehicles_path=str(passenger_vehicles_path),
+        freight_carriers_path=str(freight_carriers_path),
     )
 
     comparison = pd.read_parquet(outputs["comparison_parquet"]).set_index(["assignment_group", "emfacId"])
-    assert comparison.loc[("passenger", "pre2004LDAGas"), "beam_population_weight"] == 0.4
-    assert comparison.loc[("passenger", "post2014LDAGas"), "beam_population_weight"] == 0.6
+    assert comparison.loc[("passenger", "pre2004LDAGas"), "beam_population_weight"] == 2
+    assert comparison.loc[("passenger", "post2014LDAGas"), "beam_population_weight"] == 3
     assert comparison.loc[("passenger", "pre2004LDAGas"), "beam_vmt"] == 10.0
     assert comparison.loc[("passenger", "post2014LDAGas"), "beam_vmt"] == 20.0
     assert comparison.loc[("passenger", "pre2004LDAGas"), "emfac_population_share"] == 0.2

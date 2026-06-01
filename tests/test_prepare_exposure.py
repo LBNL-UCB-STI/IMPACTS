@@ -17,8 +17,10 @@ def _pipeline(tmp_path: Path, grid_path: Path) -> PipelineConfig:
             "beam_osm_id_col": "attributeOrigId",
             "beam_length_col": "linkLength",
             "output_epsg": 26910,
+            "emissions_enabled": True,
             "inmap_enabled": True,
             "aermod_enabled": True,
+            "exposure_enabled": True,
             "inmap_grid_path": str(tmp_path / "inmap_grid.parquet"),
             "inmap_grid_epsg": 26910,
             "mapping_columns": {"link_id": "linkId", "grid_id": "isrm"},
@@ -194,7 +196,7 @@ def test_build_full_exposure_grid_handles_missing_aermod_bc_and_no2_columns(tmp_
     assert bool(by_id.loc[11, "has_aermod_no2"]) is False
 
 
-def test_build_full_exposure_grid_uses_per_pollutant_aermod_fallback_masks(tmp_path: Path) -> None:
+def test_build_full_exposure_grid_uses_per_pollutant_aermod_increment_masks(tmp_path: Path) -> None:
     full_grid = gpd.GeoDataFrame(
         {
             "aermod_cell_id": [11, 22],
@@ -245,11 +247,11 @@ def test_build_full_exposure_grid_uses_per_pollutant_aermod_fallback_masks(tmp_p
     ).drop(columns="geometry")
 
     by_id = result.set_index("aermod_cell_id")
-    assert by_id.loc[11, "PrimaryPM25"] == 0.9
+    assert by_id.loc[11, "PrimaryPM25"] == 1.0
     assert by_id.loc[11, "SecondaryPM25"] == 1.0
-    assert by_id.loc[11, "TotalPM25"] == 1.9
+    assert by_id.loc[11, "TotalPM25"] == 2.0
     assert by_id.loc[11, "BC"] == 0.3
-    assert by_id.loc[11, "NO2"] == 7.0
+    assert by_id.loc[11, "NO2"] == 12.0
     assert by_id.loc[22, "PrimaryPM25"] == 0.2
     assert by_id.loc[22, "SecondaryPM25"] == 2.0
     assert by_id.loc[22, "TotalPM25"] == 2.2

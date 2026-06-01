@@ -672,16 +672,22 @@ def _apply_kernels(
                     1.0,
                 )
                 support_full = fftconvolve(source_support_grid, kernel_support_2d, mode="full")
-                support_arrays[out_col][in_bounds] |= support_full[ti[in_bounds], tj[in_bounds]] > 0.0
+                # Support is an integer-count convolution. FFT roundoff can leave tiny
+                # non-zero values far from any modeled source, so round back to the
+                # intended counts before thresholding.
+                support_arrays[out_col][in_bounds] |= np.rint(support_full[ti[in_bounds], tj[in_bounds]]) > 0
 
     if not result_arrays:
         return pd.DataFrame(columns=[target_id_col])
     concentrations = pd.DataFrame({target_id_col: target_ids})
     for name, values in result_arrays.items():
-        concentrations[name] = values
         support_col = _AERMOD_SUPPORT_COLUMNS.get(name)
         if support_col:
-            concentrations[support_col] = support_arrays[name]
+            supported = support_arrays[name]
+            concentrations[name] = np.where(supported, values, 0.0)
+            concentrations[support_col] = supported
+        else:
+            concentrations[name] = values
     # TotalPM25 is primary PM2.5 dispersion only. BC is a separate primary pollutant and
     # is NOT included here — secondary species come from InMAP and are merged in step 4.
     if "PrimaryPM25" in concentrations.columns:

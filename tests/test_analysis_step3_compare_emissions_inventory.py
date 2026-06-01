@@ -12,7 +12,7 @@ from impacts.analysis.step3_compare_emissions_inventory import run
 def test_analysis_step3_writes_comparison_table_and_plots(tmp_path: Path) -> None:
     modeled = pd.DataFrame(
         {
-            "countyfp": ["001", "001", "013"],
+            "county_COUNTYFP": ["001", "001", "013"],
             "vehicleTypeId": ["vt-1", "vt-2", "vt-3"],
             "process": ["RUNEX", "PMBW", "RUNEX"],
             "tons_per_year_PM2_5_county_allocated": [1.0, 2.0, 4.0],
@@ -99,7 +99,7 @@ def test_analysis_step3_writes_comparison_table_and_plots(tmp_path: Path) -> Non
 def test_analysis_step3_can_compare_road_dust_pm25_only(tmp_path: Path) -> None:
     modeled = pd.DataFrame(
         {
-            "countyfp": ["001"],
+            "county_COUNTYFP": ["001"],
             "vehicleTypeId": ["vt-1"],
             "process": ["PRDUST"],
             "tons_per_year_PM2_5_county_allocated": [1.0],
