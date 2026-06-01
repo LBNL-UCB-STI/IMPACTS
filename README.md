@@ -35,7 +35,7 @@ For `examples/pilates/settings.yaml`, `impacts.local_output_folder: impacts/impa
 
 - The default ISRM location is `s3://inmap-model/isrm_v1.2.1.zarr/`.
 - The canonical settings template lives at [settings.yaml](src/impacts/config/settings.yaml).
-- HPC runs use [hpc/job_runner.sh](hpc/job_runner.sh), which writes Slurm logs under the configured `impacts.local_output_folder`.
+- HPC runs use [hpc/job_runner.sh](hpc/job_runner.sh), which detects the repository root from the script location and writes Slurm logs under the configured `impacts.local_output_folder`. Set `IMPACTS_DIR` only when intentionally running against a different checkout.
 
 ## PILATES
 

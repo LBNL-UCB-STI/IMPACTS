@@ -17,7 +17,11 @@ error_exit() {
 
 trap 'error_exit ${LINENO} "$BASH_COMMAND" $?' ERR
 
-IMPACTS_DIR="${IMPACTS_DIR:-/global/scratch/users/$USER/sources/impacts}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+IMPACTS_DIR="${IMPACTS_DIR:-$REPO_ROOT}"
+IMPACTS_DIR="$(cd "$IMPACTS_DIR" && pwd)"
+export IMPACTS_DIR
 VENV_PATH="${IMPACTS_VENV_PATH:-$IMPACTS_DIR/venv_hpc}"
 REQUIREMENTS_FILE="${IMPACTS_REQUIREMENTS_FILE:-$IMPACTS_DIR/hpc/requirements-hpc.txt}"
 

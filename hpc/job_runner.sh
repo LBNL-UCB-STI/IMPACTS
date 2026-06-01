@@ -20,7 +20,11 @@ RANDOM_PART="$(head -c 32 /dev/urandom | base64 | tr -dc A-Z0-9 | head -c 8)"
 DATETIME="$(date "+%Y.%m.%d-%H.%M.%S")"
 JOB_NAME="$RANDOM_PART.$DATETIME"
 
-IMPACTS_DIR="${IMPACTS_DIR:-/global/scratch/users/$USER/sources/impacts}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+IMPACTS_DIR="${IMPACTS_DIR:-$REPO_ROOT}"
+IMPACTS_DIR="$(cd "$IMPACTS_DIR" && pwd)"
+export IMPACTS_DIR
 
 config_file=""
 stage_arg="pipeline"

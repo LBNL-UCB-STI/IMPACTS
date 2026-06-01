@@ -800,6 +800,14 @@ def test_hpc_job_prints_successful_stage_completion():
     assert "Stage job complete: stage=$STAGE" in job_script
 
 
+def test_hpc_scripts_default_impacts_dir_to_checkout_root():
+    for script_path in (Path("hpc/job.sh"), Path("hpc/job_runner.sh")):
+        script = script_path.read_text(encoding="utf-8")
+        assert "/global/scratch/users/$USER/sources/impacts" not in script
+        assert 'REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"' in script
+        assert 'IMPACTS_DIR="${IMPACTS_DIR:-$REPO_ROOT}"' in script
+
+
 def test_analysis_runner_resolves_modeled_emissions_from_pipeline_manifest(monkeypatch, tmp_path: Path):
     from impacts import runner as analysis_runner
 
