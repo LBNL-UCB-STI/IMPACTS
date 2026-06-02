@@ -134,24 +134,26 @@ def _build_full_exposure_grid(
             result[col] = False
         result[col] = result[col].fillna(False).astype(bool)
 
-    # AERMOD represents the local near-road increment. InMAP remains the
-    # regional background for the same receptor cell.
-    result["PrimaryPM25"] = result["inmap_PrimaryPM25"] + np.where(
+    # AERMOD and InMAP are both run on the same road emissions. Where AERMOD has
+    # coverage it replaces InMAP for primary pollutants at higher resolution;
+    # InMAP is the fallback where no AERMOD signal reached the cell.
+    # Secondary PM2.5 always comes from InMAP — AERMOD models primary dispersion only.
+    result["PrimaryPM25"] = np.where(
         result["has_aermod_primarypm25"],
         result["aermod_PrimaryPM25"],
-        0.0,
+        result["inmap_PrimaryPM25"],
     )
     result["SecondaryPM25"] = result["inmap_SecondaryPM25"]
     result["TotalPM25"] = result["SecondaryPM25"] + result["PrimaryPM25"]
-    result["BC"] = result["inmap_BC"] + np.where(
+    result["BC"] = np.where(
         result["has_aermod_bc"],
         result["aermod_BC"],
-        0.0,
+        result["inmap_BC"],
     )
-    result["NO2"] = result["inmap_NO2"] + np.where(
+    result["NO2"] = np.where(
         result["has_aermod_no2"],
         result["aermod_NO2"],
-        0.0,
+        result["inmap_NO2"],
     )
 
     ordered = [
