@@ -564,7 +564,7 @@ def run(
     passenger_vehicles_path: Optional[str] = None,
     freight_carriers_path: Optional[str] = None,
 ) -> dict[str, str]:
-    log_step_banner("Analysis Step 1", "Compare Fleet", logger=logger)
+    log_step_banner("Postprocess Step 1", "Compare Fleet", logger=logger)
     log_substep_banner("1.1", "compare BEAM fleet against EMFAC by emfacId", logger=logger)
     vehicle_lookup = _load_beam_vehicle_lookup(
         passenger_vehicle_types_path=passenger_vehicle_types_path,
@@ -596,5 +596,5 @@ def run(
     plot_path = _plot_model_year_fuel_combined(comparison, metadata=metadata, output_dir=output_dir)
     if plot_path:
         outputs["vmt_model_year_fuel_plot"] = plot_path
-    logger.info("Analysis Step 1 complete")
+    logger.info("Postprocess Step 1 complete")
     return outputs

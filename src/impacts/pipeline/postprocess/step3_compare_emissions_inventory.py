@@ -244,7 +244,7 @@ def run(
     inventory_label: str,
     pollutant_targets: dict[str, dict[str, tuple[str, ...]]],
 ) -> dict[str, str]:
-    log_step_banner("Analysis Step 3", f"Compare Emissions Inventory ({inventory_label})", logger=logger)
+    log_step_banner("Postprocess Step 3", f"Compare Emissions Inventory ({inventory_label})", logger=logger)
     log_substep_banner("3.1", f"compare modeled emissions with {inventory_label} inventory", logger=logger)
     county_lookup = _load_county_lookup(county_boundaries_path)
     modeled_df = _aggregate_modeled_emissions(
@@ -272,5 +272,5 @@ def run(
         )
         if plot_path:
             outputs[f"{pollutant}_plot"] = plot_path
-    logger.info("Analysis Step 3 complete")
+    logger.info("Postprocess Step 3 complete")
     return outputs

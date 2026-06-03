@@ -120,7 +120,7 @@ def _build_targets_table(sector_targets: list[dict[str, object]]) -> pd.DataFram
                     }
                 )
     if not rows:
-        raise ValueError("Analysis Step 2 requires configured annual sector targets.")
+        raise ValueError("Postprocess Step 2 requires configured annual sector targets.")
     return pd.DataFrame(rows)
 
 
@@ -353,7 +353,7 @@ def run(
     output_dir: Path,
     sector_targets: list[dict[str, object]],
 ) -> dict[str, str]:
-    log_step_banner("Analysis Step 2", "Compare Annual Targets", logger=logger)
+    log_step_banner("Postprocess Step 2", "Compare Annual Targets", logger=logger)
     log_substep_banner("2.1", "compare modeled emissions with configured annual targets", logger=logger)
     targets_df = _build_targets_table(sector_targets)
     modeled_df = _aggregate_modeled_to_targets(
@@ -392,5 +392,5 @@ def run(
             )
             if plot_path:
                 outputs[f"{source}_{pollutant}_plot"] = plot_path
-    logger.info("Analysis Step 2 complete")
+    logger.info("Postprocess Step 2 complete")
     return outputs
