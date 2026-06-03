@@ -64,7 +64,7 @@ def _load_vehicle_type_sectors(
     missing = sorted(required_columns - set(vehicle_types.columns))
     if missing:
         raise ValueError(
-            "Vehicle types input must include vehicleTypeId and emfacVehicleCategory for analysis Step 2. "
+            "Vehicle types input must include vehicleTypeId and emfacVehicleCategory for postprocess step 2. "
             f"Missing: {missing}"
         )
     category_mapping = read_table(vehicle_category_metadata_file).copy()
@@ -73,7 +73,7 @@ def _load_vehicle_type_sectors(
     if mapping_missing:
         raise ValueError(
             "Vehicle category metadata input must include emfac_vehicle_category and generic_vehicle_category "
-            f"for analysis Step 2. Missing: {mapping_missing}"
+            f"for postprocess step 2. Missing: {mapping_missing}"
         )
     category_mapping["emfac_vehicle_category"] = category_mapping["emfac_vehicle_category"].map(_normalize_token)
     category_mapping["generic_vehicle_category"] = category_mapping["generic_vehicle_category"].map(_normalize_token)
@@ -137,7 +137,7 @@ def _aggregate_modeled_to_targets(
     if missing:
         raise ValueError(
             "County-intersected modeled emissions input must include vehicleTypeId and process "
-            f"for analysis Step 2. Missing: {missing}"
+            f"for postprocess step 2. Missing: {missing}"
         )
 
     sector_lookup = _load_vehicle_type_sectors(
@@ -194,7 +194,7 @@ def _aggregate_modeled_to_targets(
             rows.append(grouped[["source", "sector", "pollutant", "simulation_tons"]])
 
     if not rows:
-        raise ValueError("Modeled emissions input does not include supported pollutant columns for analysis Step 2.")
+        raise ValueError("Modeled emissions input does not include supported pollutant columns for postprocess step 2.")
     return pd.concat(rows, ignore_index=True)
 
 

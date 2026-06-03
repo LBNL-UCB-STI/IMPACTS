@@ -35,7 +35,7 @@ def _load_county_lookup(county_boundaries_path: str) -> pd.DataFrame:
     county_gdf = gpd.read_file(county_boundaries_path)
     if "COUNTYFP" not in county_gdf.columns or "NAME" not in county_gdf.columns:
         raise ValueError(
-            "County boundaries must include COUNTYFP and NAME columns for analysis Step 3."
+            "County boundaries must include COUNTYFP and NAME columns for postprocess step 3."
         )
     lookup = county_gdf[["COUNTYFP", "NAME"]].drop_duplicates()
     lookup["COUNTYFP"] = normalize_county_fips(lookup["COUNTYFP"])
@@ -54,7 +54,7 @@ def _aggregate_modeled_emissions(
     if missing:
         raise ValueError(
             "County-intersected modeled emissions input must include county_COUNTYFP, vehicleTypeId, and process "
-            f"for analysis Step 3. Missing: {missing}"
+            f"for postprocess step 3. Missing: {missing}"
         )
     modeled["county_COUNTYFP"] = normalize_county_fips(modeled["county_COUNTYFP"])
     modeled = modeled.loc[modeled["county_COUNTYFP"].notna()].copy()
@@ -65,7 +65,7 @@ def _aggregate_modeled_emissions(
     }
     if not available:
         raise ValueError(
-            "Modeled emissions input does not include any supported pollutant columns for analysis Step 3."
+            "Modeled emissions input does not include any supported pollutant columns for postprocess step 3."
         )
     grouped = (
         modeled.groupby("county_COUNTYFP", dropna=False)[list(available.values())]
@@ -100,7 +100,7 @@ def _aggregate_inventory_emissions(
 ) -> pd.DataFrame:
     inventory = read_table(inventory_path)
     if "county" not in inventory.columns:
-        raise ValueError("Inventory input must include county for analysis Step 3.")
+        raise ValueError("Inventory input must include county for postprocess step 3.")
     rows: list[pd.DataFrame] = []
     for pollutant, selector in pollutant_targets.items():
         explicit_columns = tuple(selector.get("columns", ()))
@@ -138,7 +138,7 @@ def _aggregate_inventory_emissions(
         rows.append(grouped[["county", "pollutant", "emfac_tons"]])
     if not rows:
         raise ValueError(
-            "Inventory input does not include any configured pollutant columns for analysis Step 3."
+            "Inventory input does not include any configured pollutant columns for postprocess step 3."
         )
     return pd.concat(rows, ignore_index=True)
 
