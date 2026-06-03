@@ -15,10 +15,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from ..common import log_step_banner
-from ..common import log_substep_banner
-from ..common import normalize_county_fips
-from ..common import read_table
+from ...common import log_step_banner
+from ...common import log_substep_banner
+from ...common import normalize_county_fips
+from ...common import read_table
 
 logger = logging.getLogger(__name__)
 

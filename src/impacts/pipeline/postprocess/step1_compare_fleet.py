@@ -16,9 +16,9 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 import pandas as pd
 
-from ..common import log_step_banner
-from ..common import log_substep_banner
-from ..common import read_table
+from ...common import log_step_banner
+from ...common import log_substep_banner
+from ...common import read_table
 
 logger = logging.getLogger(__name__)
 

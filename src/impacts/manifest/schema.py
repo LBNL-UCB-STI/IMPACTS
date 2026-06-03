@@ -414,7 +414,7 @@ class PostprocessManifest:
     model: str
     pipeline_manifest_path: str
     output_dir: str
-    analysis_outputs: Dict[str, Any]
+    postprocess_outputs: Dict[str, Any]
     validation: Dict[str, Any]
     notes: List[str]
     postprocess_manifest_path: str
@@ -428,7 +428,7 @@ class PostprocessManifest:
                 "model",
                 "pipeline_manifest_path",
                 "output_dir",
-                "analysis_outputs",
+                "postprocess_outputs",
                 "validation",
                 "notes",
                 "postprocess_manifest_path",
@@ -440,7 +440,7 @@ class PostprocessManifest:
             model=_required_string(payload.get("model"), "model"),
             pipeline_manifest_path=_required_string(payload.get("pipeline_manifest_path"), "pipeline_manifest_path"),
             output_dir=_required_string(payload.get("output_dir"), "output_dir"),
-            analysis_outputs=_required_dict(payload.get("analysis_outputs"), "analysis_outputs"),
+            postprocess_outputs=_required_dict(payload.get("postprocess_outputs"), "postprocess_outputs"),
             validation=_required_dict(payload.get("validation"), "validation"),
             notes=_coerce_string_list(payload.get("notes")),
             postprocess_manifest_path=_required_string(

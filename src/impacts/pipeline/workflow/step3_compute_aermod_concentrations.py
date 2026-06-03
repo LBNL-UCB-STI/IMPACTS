@@ -50,7 +50,6 @@ _POLLUTANT_TO_CONCENTRATION_COLUMN: dict[str, str] = {
     "ROG": "SOA",
 }
 
-_KERNEL_RADIUS_METERS = 4500.0
 _ASRV_SOURCE_RATE_G_PER_S_M2 = 0.1
 _ASRV_ACTIVE_DAYS_PER_YEAR = default_aermod_active_days_per_year
 
@@ -342,7 +341,6 @@ def _asrv_cache_key(*, path: str, target_epsg: int, grid_size_meters: float, pat
             "size": stat.st_size,
             "target_epsg": int(target_epsg),
             "grid_size_meters": round(float(grid_size_meters), 6),
-            "kernel_radius_meters": _KERNEL_RADIUS_METERS,
             "pattern_keys": pattern_keys,
         },
         sort_keys=True,
@@ -512,7 +510,6 @@ def _build_kernel_for_pattern(pattern_df: pd.DataFrame, *, grid_size_meters: flo
     kernel["dx"] = kernel["Grid_X"] - float(center["Grid_X"])
     kernel["dy"] = kernel["Grid_Y"] - float(center["Grid_Y"])
     kernel["dist"] = np.sqrt(kernel["dx"] ** 2 + kernel["dy"] ** 2)
-    kernel = kernel.loc[kernel["dist"] <= _KERNEL_RADIUS_METERS]
     kernel["dix"] = np.rint(kernel["dx"] / grid_size_meters).astype(int)
     kernel["diy"] = np.rint(kernel["dy"] / grid_size_meters).astype(int)
     kernel = (

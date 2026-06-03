@@ -80,7 +80,7 @@ def rdata_to_parquet(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m impacts.pipeline.inmap.rdata_conversion",
+        prog="python -m impacts.tools.inmap.rdata_conversion",
         description="Convert one RData file into one or more parquet files.",
     )
     parser.add_argument("--input", required=True, help="Path to the .RData file")

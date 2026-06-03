@@ -206,9 +206,6 @@ def build_parser() -> argparse.ArgumentParser:
     postprocess_group.add_argument("--config")
     postprocess.add_argument("--postprocess-manifest")
 
-    analysis = subparsers.add_parser("analysis", help="Run maintained analysis outputs from workflow artifacts")
-    analysis.add_argument("--config", required=True)
-
     pipeline = subparsers.add_parser("pipeline", help="Run the maintained stage sequence from settings, honoring impacts.pipeline flags")
     pipeline.add_argument("--config", required=True)
     pipeline.add_argument("--profile", choices=("none", "memray", "time"), default="none")
@@ -388,14 +385,6 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("Pipeline command complete")
         return 0
 
-    if args.command == "analysis":
-        from impacts.runner import run_analysis_from_settings
-
-        run_analysis_from_settings(
-            settings_path=args.config,
-        )
-        return 0
-
     if args.command == "derive_settings_from_pilates":
         from impacts.config.settings_builder import derive_settings_from_pilates
 
@@ -430,7 +419,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "rdata_to_parquet":
-        from impacts.pipeline.inmap.rdata_conversion import rdata_to_parquet
+        from impacts.tools.inmap.rdata_conversion import rdata_to_parquet
 
         written = rdata_to_parquet(
             input_path=args.input,
@@ -442,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "build_nox_to_no2":
-        from impacts.pipeline.inmap.build_complete_nox_to_no2_matrix import main as build_nox_to_no2_main
+        from impacts.tools.inmap.build_complete_nox_to_no2_matrix import main as build_nox_to_no2_main
 
         build_nox_to_no2_main(
             [
