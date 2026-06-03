@@ -16,7 +16,6 @@ from scipy.signal import fftconvolve
 
 from ...common import log_step_banner
 from ...common import log_substep_banner
-from ...common import _configure_duckdb_progress_bar
 from ...common import _should_show_duckdb_progress_bar
 from ...common import configure_duckdb_connection
 from ...common import read_table

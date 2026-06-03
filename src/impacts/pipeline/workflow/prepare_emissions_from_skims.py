@@ -16,7 +16,6 @@ import pandas as pd
 
 from ...common import configure_duckdb_connection
 from ...common import _table_available_columns
-from ...common import normalize_county_fips
 from ...common import prepare_skims_for_grid_allocation
 from ...common import prepared_table_target
 from ...common import read_table
