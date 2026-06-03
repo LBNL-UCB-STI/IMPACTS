@@ -1,17 +1,12 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 import re
-import tempfile
 from typing import Optional
 
-os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "impacts-matplotlib"))
+from . import _common  # configures matplotlib backend and MPLCONFIGDIR
 
-import matplotlib
-
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 import pandas as pd
@@ -598,3 +593,54 @@ def run(
         outputs["vmt_model_year_fuel_plot"] = plot_path
     logger.info("Postprocess Step 1 complete")
     return outputs
+
+
+def run_from_output_dir(output_dir: Path) -> dict[str, str]:
+    """Run Step 1 from a pipeline output directory using manifest-resolved paths."""
+    from impacts.postprocessor import (
+        _resolve_inventory_emfacid_activity_path,
+        _resolve_optional_population_assignment_paths,
+        _resolve_skims_emissions_path,
+        _resolve_vehicle_types_paths,
+    )
+
+    from ._common import settings_path_from_output_dir
+
+    output_dir = Path(output_dir)
+    settings_path = settings_path_from_output_dir(output_dir)
+    skims_path = _resolve_skims_emissions_path(settings_path)
+    passenger_vt, freight_vt = _resolve_vehicle_types_paths(settings_path)
+    passenger_pop, freight_pop = _resolve_optional_population_assignment_paths(settings_path)
+    passenger_activity = _resolve_inventory_emfacid_activity_path(
+        settings_path, manifest_key="passenger_inventory_emfacid_file"
+    )
+    freight_activity = _resolve_inventory_emfacid_activity_path(
+        settings_path, manifest_key="freight_inventory_emfacid_file"
+    )
+    return run(
+        skims_emissions_path=str(skims_path),
+        passenger_vehicle_types_path=str(passenger_vt),
+        freight_vehicle_types_path=str(freight_vt),
+        emfac_passenger_activity_path=str(passenger_activity),
+        emfac_freight_activity_path=str(freight_activity),
+        output_dir=output_dir / "postprocess" / "fleet",
+        passenger_vehicles_path=str(passenger_pop) if passenger_pop else None,
+        freight_carriers_path=str(freight_pop) if freight_pop else None,
+    )
+
+
+if __name__ == "__main__":
+    import argparse
+    import logging as _logging
+
+    _logging.basicConfig(level=_logging.INFO, format="%(levelname)s %(message)s")
+
+    parser = argparse.ArgumentParser(
+        prog="python -m impacts.pipeline.postprocess.step1_compare_fleet",
+        description="Run fleet comparison from an IMPACTS output directory.",
+    )
+    parser.add_argument("output_dir", type=Path,
+                        help="Path to the main pipeline output folder.")
+    args = parser.parse_args()
+
+    run_from_output_dir(Path(args.output_dir))

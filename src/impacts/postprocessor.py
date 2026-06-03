@@ -182,11 +182,12 @@ def _run_postprocess_steps(settings_path: str | Path) -> Dict[str, str]:
     from .pipeline.postprocess.step1_compare_fleet import run as run_step1
     from .pipeline.postprocess.step2_compare_annual_targets import run as run_step2
     from .pipeline.postprocess.step3_compare_emissions_inventory import run as run_step3
+    from .pipeline.postprocess.step4_plot_concentrations import run as run_step4
+    from .pipeline.postprocess.step5_plot_exposure import run as run_step5
 
     settings = load_settings_from_yaml(settings_path)
-    output_dir = (
-        Path(resolve_path(settings.impacts.local_output_folder, settings_path)).resolve() / "postprocess"
-    )
+    output_root = Path(resolve_path(settings.impacts.local_output_folder, settings_path)).resolve()
+    output_dir = output_root / "postprocess"
     modeled_emissions_path = _resolve_modeled_emissions_path(settings_path)
     skims_emissions_path = _resolve_skims_emissions_path(settings_path)
     outputs: Dict[str, str] = {}
@@ -236,46 +237,71 @@ def _run_postprocess_steps(settings_path: str | Path) -> Dict[str, str]:
         )
         for key, value in target_outputs.items():
             outputs[f"annual_targets_{key}"] = value
-    if not settings.impacts.analysis.inventory_targets:
-        logger.info("Postprocess steps complete: output_dir=%s outputs=%d", output_dir, len(outputs))
-        return outputs
-    county_boundaries_path = _resolve_county_boundaries_path(settings_path)
-    county_order: list[str] = []
-    if settings.shared.geography.fips.counties:
-        import geopandas as gpd
+    if settings.impacts.analysis.inventory_targets:
+        county_boundaries_path = _resolve_county_boundaries_path(settings_path)
+        county_order: list[str] = []
+        if settings.shared.geography.fips.counties:
+            import geopandas as gpd
 
-        county_gdf = gpd.read_file(county_boundaries_path)
-        county_gdf["COUNTYFP"] = normalize_county_fips(county_gdf["COUNTYFP"])
-        wanted = set(normalize_county_fips(pd.Series(list(settings.shared.geography.fips.counties))).dropna().tolist())
-        county_order = (
-            county_gdf.loc[county_gdf["COUNTYFP"].isin(wanted), ["COUNTYFP", "NAME"]]
-            .drop_duplicates()
-            .sort_values("COUNTYFP")["NAME"]
-            .astype(str)
-            .tolist()
+            county_gdf = gpd.read_file(county_boundaries_path)
+            county_gdf["COUNTYFP"] = normalize_county_fips(county_gdf["COUNTYFP"])
+            wanted = set(normalize_county_fips(pd.Series(list(settings.shared.geography.fips.counties))).dropna().tolist())
+            county_order = (
+                county_gdf.loc[county_gdf["COUNTYFP"].isin(wanted), ["COUNTYFP", "NAME"]]
+                .drop_duplicates()
+                .sort_values("COUNTYFP")["NAME"]
+                .astype(str)
+                .tolist()
+            )
+        inventory_path = _resolve_inventory_target_path(settings_path, settings.impacts.analysis.inventory_file)
+        for target in settings.impacts.analysis.inventory_targets:
+            target_outputs = run_step3(
+                modeled_emissions_path=str(modeled_emissions_path),
+                inventory_path=str(inventory_path),
+                county_boundaries_path=str(county_boundaries_path),
+                output_dir=output_dir / "emissions_inventory",
+                county_order=county_order,
+                target_name=target.name,
+                inventory_label=f"{settings.impacts.analysis.inventory_label} {_humanize_target_name(target.name)}".strip(),
+                pollutant_targets={
+                    pollutant: {
+                        "columns": tuple(selector.columns),
+                        "prefixes": tuple(selector.prefixes),
+                        "exclude_columns": tuple(selector.exclude_columns),
+                        "exclude_prefixes": tuple(selector.exclude_prefixes),
+                    }
+                    for pollutant, selector in target.pollutants.items()
+                },
+            )
+            for key, value in target_outputs.items():
+                outputs[f"{target.name}_{key}"] = value
+
+    conc_path = output_root / "exposure" / "beam_concentration_distribution.parquet"
+    net_path = output_root / "preprocess" / "beam_osm_mapped.parquet"
+    pop_path = output_root / "exposure" / "beam_population_counts.parquet"
+    if conc_path.exists() and net_path.exists():
+        map_outputs = run_step4(
+            concentration_path=str(conc_path),
+            network_path=str(net_path),
+            output_dir=output_dir / "concentrations",
         )
-    inventory_path = _resolve_inventory_target_path(settings_path, settings.impacts.analysis.inventory_file)
-    for target in settings.impacts.analysis.inventory_targets:
-        target_outputs = run_step3(
-            modeled_emissions_path=str(modeled_emissions_path),
-            inventory_path=str(inventory_path),
-            county_boundaries_path=str(county_boundaries_path),
-            output_dir=output_dir,
-            county_order=county_order,
-            target_name=target.name,
-            inventory_label=f"{settings.impacts.analysis.inventory_label} {_humanize_target_name(target.name)}".strip(),
-            pollutant_targets={
-                pollutant: {
-                    "columns": tuple(selector.columns),
-                    "prefixes": tuple(selector.prefixes),
-                    "exclude_columns": tuple(selector.exclude_columns),
-                    "exclude_prefixes": tuple(selector.exclude_prefixes),
-                }
-                for pollutant, selector in target.pollutants.items()
-            },
+        for key, value in map_outputs.items():
+            outputs[f"concentration_{key}"] = value
+    else:
+        logger.info("Skipping Step 4: concentration or network output not found at %s", output_root)
+    if pop_path.exists() and conc_path.exists() and net_path.exists():
+        exp_outputs = run_step5(
+            population_path=str(pop_path),
+            concentration_path=str(conc_path),
+            network_path=str(net_path),
+            county_boundaries_path=str(_resolve_county_boundaries_path(settings_path)),
+            output_dir=output_dir / "exposure",
         )
-        for key, value in target_outputs.items():
-            outputs[f"{target.name}_{key}"] = value
+        for key, value in exp_outputs.items():
+            outputs[f"exposure_{key}"] = value
+    else:
+        logger.info("Skipping Step 5: exposure outputs not found at %s", output_root)
+
     logger.info("Postprocess steps complete: output_dir=%s outputs=%d", output_dir, len(outputs))
     return outputs
 

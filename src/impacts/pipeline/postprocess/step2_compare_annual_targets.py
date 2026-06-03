@@ -1,17 +1,12 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 import re
-import tempfile
 from typing import Optional
 
-os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "impacts-matplotlib"))
+from . import _common  # configures matplotlib backend and MPLCONFIGDIR
 
-import matplotlib
-
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -394,3 +389,63 @@ def run(
                 outputs[f"{source}_{pollutant}_plot"] = plot_path
     logger.info("Postprocess Step 2 complete")
     return outputs
+
+
+def run_from_output_dir(output_dir: Path) -> dict[str, str]:
+    """Run Step 2 from a pipeline output directory using manifest-resolved paths."""
+    from impacts.postprocessor import (
+        _resolve_modeled_emissions_path,
+        _resolve_vehicle_category_metadata_path,
+        _resolve_vehicle_types_paths,
+    )
+
+    from ._common import settings_path_from_output_dir
+    from ...config.settings_builder import load_settings_from_yaml
+
+    output_dir = Path(output_dir)
+    settings_path = settings_path_from_output_dir(output_dir)
+    settings = load_settings_from_yaml(settings_path)
+    if not settings.impacts.analysis.sector_targets:
+        logger.info("No sector targets configured, skipping Step 2.")
+        return {}
+    modeled_path = _resolve_modeled_emissions_path(settings_path)
+    passenger_vt, freight_vt = _resolve_vehicle_types_paths(settings_path)
+    vehicle_category_metadata = _resolve_vehicle_category_metadata_path(settings_path)
+    return run(
+        modeled_emissions_path=str(modeled_path),
+        passenger_vehicle_types_path=str(passenger_vt),
+        freight_vehicle_types_path=str(freight_vt),
+        vehicle_category_metadata_file=str(vehicle_category_metadata),
+        output_dir=output_dir / "postprocess" / "annual_targets",
+        sector_targets=[
+            {
+                "source": target.source,
+                "sector": target.sector,
+                "annual_pm25_short_tons": target.annual_pm25_short_tons,
+                "annual_nox_short_tons": target.annual_nox_short_tons,
+                "annual_pm10_short_tons": target.annual_pm10_short_tons,
+                "annual_tog_short_tons": target.annual_tog_short_tons,
+                "annual_rog_short_tons": target.annual_rog_short_tons,
+                "annual_co_short_tons": target.annual_co_short_tons,
+                "annual_sox_short_tons": target.annual_sox_short_tons,
+            }
+            for target in settings.impacts.analysis.sector_targets
+        ],
+    )
+
+
+if __name__ == "__main__":
+    import argparse
+    import logging as _logging
+
+    _logging.basicConfig(level=_logging.INFO, format="%(levelname)s %(message)s")
+
+    parser = argparse.ArgumentParser(
+        prog="python -m impacts.pipeline.postprocess.step2_compare_annual_targets",
+        description="Run annual targets comparison from an IMPACTS output directory.",
+    )
+    parser.add_argument("output_dir", type=Path,
+                        help="Path to the main pipeline output folder.")
+    args = parser.parse_args()
+
+    run_from_output_dir(Path(args.output_dir))

@@ -202,8 +202,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     postprocess = subparsers.add_parser("postprocess", help="Publish the canonical impacts exposure table artifact")
     postprocess_group = postprocess.add_mutually_exclusive_group(required=True)
-    postprocess_group.add_argument("--run-manifest")
-    postprocess_group.add_argument("--config")
+    postprocess_group.add_argument("--run-manifest", help="Path to an existing pipeline_manifest.yaml.")
+    postprocess_group.add_argument("--config", help="Path to a settings YAML (re-runs the full pipeline first).")
+    postprocess_group.add_argument(
+        "--output-dir",
+        help="Path to a completed pipeline output folder containing pipeline_manifest.yaml.",
+    )
     postprocess.add_argument("--postprocess-manifest")
 
     pipeline = subparsers.add_parser("pipeline", help="Run the maintained stage sequence from settings, honoring impacts.pipeline flags")
@@ -365,9 +369,17 @@ def main(argv: list[str] | None = None) -> int:
                 run_manifest_path=args.run_manifest,
                 manifest_path=args.postprocess_manifest,
             )
-        else:
+        elif args.config:
             postprocess_from_settings(
                 settings_path=args.config,
+                manifest_path=args.postprocess_manifest,
+            )
+        else:
+            pipeline_manifest = Path(args.output_dir) / "pipeline_manifest.yaml"
+            if not pipeline_manifest.exists():
+                parser.error(f"pipeline_manifest.yaml not found in {args.output_dir}")
+            postprocess_from_pipeline_manifest(
+                run_manifest_path=pipeline_manifest,
                 manifest_path=args.postprocess_manifest,
             )
         return 0

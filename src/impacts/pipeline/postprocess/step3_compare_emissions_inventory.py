@@ -1,17 +1,12 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 import re
-import tempfile
 from typing import Optional
 
-os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "impacts-matplotlib"))
+from . import _common  # configures matplotlib backend and MPLCONFIGDIR
 
-import matplotlib
-
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -172,10 +167,13 @@ def _build_comparison_table(
     return comparison
 
 
-def _write_comparison_table(comparison: pd.DataFrame, *, output_dir: Path) -> dict[str, str]:
+def _write_comparison_table(
+    comparison: pd.DataFrame, *, output_dir: Path, target_slug: str
+) -> dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    parquet_path = output_dir / "step3_emissions_comparison_by_county_pollutant.parquet"
-    csv_path = output_dir / "step3_emissions_comparison_by_county_pollutant.csv"
+    stem = f"step3_{target_slug}_emissions_comparison_by_county_pollutant"
+    parquet_path = output_dir / f"{stem}.parquet"
+    csv_path = output_dir / f"{stem}.csv"
     comparison.to_parquet(parquet_path, index=False)
     comparison.to_csv(csv_path, index=False)
     return {
@@ -190,6 +188,7 @@ def _plot_county_comparison(
     pollutant: str,
     inventory_label: str,
     output_dir: Path,
+    target_slug: str,
 ) -> Optional[str]:
     subset = comparison.loc[comparison["pollutant"] == pollutant].copy()
     if subset.empty:
@@ -226,8 +225,7 @@ def _plot_county_comparison(
         "NOx": "nox",
         "BC": "bc",
     }.get(pollutant, pollutant.lower().replace(".", ""))
-    filename = f"step3_county_{pollutant_slug}_simulation_vs_emfac.png"
-    output_path = output_dir / filename
+    output_path = output_dir / f"step3_{target_slug}_county_{pollutant_slug}_simulation_vs_emfac.png"
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
     return str(output_path)
@@ -261,16 +259,103 @@ def run(
         inventory_df=inventory_df,
         county_order=county_order,
     )
-    target_output_dir = output_dir / _slugify(target_name)
-    outputs = _write_comparison_table(comparison, output_dir=target_output_dir)
+    target_slug = _slugify(target_name)
+    outputs = _write_comparison_table(comparison, output_dir=output_dir, target_slug=target_slug)
     for pollutant in ("PM2.5", "NOx", "BC"):
         plot_path = _plot_county_comparison(
             comparison,
             pollutant=pollutant,
             inventory_label=inventory_label,
-            output_dir=target_output_dir,
+            output_dir=output_dir,
+            target_slug=target_slug,
         )
         if plot_path:
             outputs[f"{pollutant}_plot"] = plot_path
     logger.info("Postprocess Step 3 complete")
     return outputs
+
+
+def run_from_output_dir(output_dir: Path) -> dict[str, str]:
+    """Run Step 3 from a pipeline output directory using manifest-resolved paths."""
+    import pandas as pd
+
+    from impacts.postprocessor import (
+        _humanize_target_name,
+        _resolve_county_boundaries_path,
+        _resolve_inventory_target_path,
+        _resolve_modeled_emissions_path,
+    )
+
+    from ._common import settings_path_from_output_dir
+    from ...common import normalize_county_fips
+    from ...config.settings_builder import load_settings_from_yaml
+
+    output_dir = Path(output_dir)
+    settings_path = settings_path_from_output_dir(output_dir)
+    settings = load_settings_from_yaml(settings_path)
+    if not settings.impacts.analysis.inventory_targets:
+        logger.info("No inventory targets configured, skipping Step 3.")
+        return {}
+    modeled_path = _resolve_modeled_emissions_path(settings_path)
+    county_boundaries_path = _resolve_county_boundaries_path(settings_path)
+    county_order: list[str] = []
+    if settings.shared.geography.fips.counties:
+        import geopandas as gpd
+
+        county_gdf = gpd.read_file(county_boundaries_path)
+        county_gdf["COUNTYFP"] = normalize_county_fips(county_gdf["COUNTYFP"])
+        wanted = set(
+            normalize_county_fips(pd.Series(list(settings.shared.geography.fips.counties)))
+            .dropna()
+            .tolist()
+        )
+        county_order = (
+            county_gdf.loc[county_gdf["COUNTYFP"].isin(wanted), ["COUNTYFP", "NAME"]]
+            .drop_duplicates()
+            .sort_values("COUNTYFP")["NAME"]
+            .astype(str)
+            .tolist()
+        )
+    inventory_path = _resolve_inventory_target_path(
+        settings_path, settings.impacts.analysis.inventory_file
+    )
+    outputs: dict[str, str] = {}
+    for target in settings.impacts.analysis.inventory_targets:
+        target_outputs = run(
+            modeled_emissions_path=str(modeled_path),
+            inventory_path=str(inventory_path),
+            county_boundaries_path=str(county_boundaries_path),
+            output_dir=output_dir / "postprocess" / "emissions_inventory",
+            county_order=county_order,
+            target_name=target.name,
+            inventory_label=f"{settings.impacts.analysis.inventory_label} {_humanize_target_name(target.name)}".strip(),
+            pollutant_targets={
+                pollutant: {
+                    "columns": tuple(selector.columns),
+                    "prefixes": tuple(selector.prefixes),
+                    "exclude_columns": tuple(selector.exclude_columns),
+                    "exclude_prefixes": tuple(selector.exclude_prefixes),
+                }
+                for pollutant, selector in target.pollutants.items()
+            },
+        )
+        for key, value in target_outputs.items():
+            outputs[f"{target.name}_{key}"] = value
+    return outputs
+
+
+if __name__ == "__main__":
+    import argparse
+    import logging as _logging
+
+    _logging.basicConfig(level=_logging.INFO, format="%(levelname)s %(message)s")
+
+    parser = argparse.ArgumentParser(
+        prog="python -m impacts.pipeline.postprocess.step3_compare_emissions_inventory",
+        description="Run emissions inventory comparison from an IMPACTS output directory.",
+    )
+    parser.add_argument("output_dir", type=Path,
+                        help="Path to the main pipeline output folder.")
+    args = parser.parse_args()
+
+    run_from_output_dir(Path(args.output_dir))
