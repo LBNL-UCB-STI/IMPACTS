@@ -160,13 +160,12 @@ def _resolve_inventory_emfacid_activity_path(
 
 def _resolve_vehicle_category_metadata_path(settings_path: str | Path) -> Path:
     _, _, _, inputs = _load_context(settings_path)
-    for key in ("vehicle_category_metadata_file_input",):
-        try:
-            resolved = Path(resolve_required_manifest_input(inputs, key=key)).resolve()
-        except ValueError:
-            continue
+    try:
+        resolved = Path(resolve_required_manifest_input(inputs, key="vehicle_category_metadata_file_input")).resolve()
         if resolved.exists():
             return resolved
+    except ValueError:
+        pass
     settings = load_settings_from_yaml(settings_path)
     if not settings.impacts.emissions.vehicle_category_metadata_file:
         raise ValueError(

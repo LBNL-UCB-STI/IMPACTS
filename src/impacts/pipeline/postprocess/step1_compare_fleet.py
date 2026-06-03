@@ -6,6 +6,7 @@ import re
 from typing import Optional
 
 from . import _common  # configures matplotlib backend and MPLCONFIGDIR
+from ._common import _normalize_token
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
@@ -46,11 +47,6 @@ _FUEL_COLORS: dict[str, str] = {
     "Elec": "#2ca02c",
     "Phe": "#ff7f0e",
 }
-
-
-def _normalize_token(value: object) -> str:
-    return str("" if pd.isna(value) else value).strip()
-
 
 
 def _model_year_sort_key(year_group: str) -> int:

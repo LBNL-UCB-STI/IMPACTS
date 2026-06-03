@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-import re
 from typing import Optional
 
 from . import _common  # configures matplotlib backend and MPLCONFIGDIR
+from ._common import _slugify
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -82,10 +82,6 @@ def _aggregate_modeled_emissions(
         )
     return pd.concat(rows, ignore_index=True)
 
-
-def _slugify(value: str) -> str:
-    token = re.sub(r"[^A-Za-z0-9]+", "_", str(value).strip()).strip("_").lower()
-    return token or "target"
 
 
 def _aggregate_inventory_emissions(

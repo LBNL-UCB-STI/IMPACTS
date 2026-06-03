@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-import re
 from typing import Optional
 
 from . import _common  # configures matplotlib backend and MPLCONFIGDIR
+from ._common import _normalize_token, _slugify
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -36,14 +36,6 @@ _SECTOR_TARGET_FIELDS = {
     "annual_sox_short_tons": "SOx",
 }
 
-
-def _slugify(value: str) -> str:
-    token = re.sub(r"[^A-Za-z0-9]+", "_", str(value).strip()).strip("_").lower()
-    return token or "target"
-
-
-def _normalize_token(value: object) -> str:
-    return str("" if pd.isna(value) else value).strip()
 
 
 def _load_vehicle_type_sectors(

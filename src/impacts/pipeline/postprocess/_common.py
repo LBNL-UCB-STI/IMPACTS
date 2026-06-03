@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
+
+import pandas as pd
 
 os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "impacts-matplotlib"))
 
@@ -90,6 +93,19 @@ def _plot_scalar_layer(ax, gdf, column: str, cmap, vmax: float) -> None:
 
 def _add_network(ax, network_gdf) -> None:
     network_gdf.plot(ax=ax, color="#111111", linewidth=0.15, alpha=0.22, rasterized=True)
+
+
+# ---------------------------------------------------------------------------
+# String utilities shared across step files
+# ---------------------------------------------------------------------------
+
+def _normalize_token(value: object) -> str:
+    return str("" if pd.isna(value) else value).strip()
+
+
+def _slugify(value: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9]+", "_", str(value).strip()).strip("_").lower()
+    return token or "target"
 
 
 # ---------------------------------------------------------------------------
