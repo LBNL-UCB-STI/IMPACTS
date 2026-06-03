@@ -8,7 +8,7 @@ __all__ = [
     "step1_process_emissions",
     "step2_compute_inmap_concentrations",
     "step3_compute_aermod_concentrations",
-    "_step_label",
+    "step4_prepare_exposure",
 ]
 
 

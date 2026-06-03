@@ -4,4 +4,5 @@ __all__ = [
     "beam",
     "emfac",
     "inmap",
+    "prepare_sample_data",
 ]
