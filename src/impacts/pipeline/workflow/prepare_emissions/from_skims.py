@@ -14,14 +14,14 @@ from typing import Optional
 import duckdb
 import pandas as pd
 
-from ...common import configure_duckdb_connection
-from ...common import _table_available_columns
-from ...common import prepare_skims_for_grid_allocation
-from ...common import prepared_table_target
-from ...common import read_table
-from ...common import resolve_required_manifest_input
-from ...common import is_valid_parquet
-from . import _step_label
+from ....common import configure_duckdb_connection
+from ....common import _table_available_columns
+from ....common import prepare_skims_for_grid_allocation
+from ....common import prepared_table_target
+from ....common import read_table
+from ....common import resolve_required_manifest_input
+from ....common import is_valid_parquet
+from .. import _step_label
 from .annualization import annualize_prepared_skims_for_grid_allocation
 
 logger = logging.getLogger(__name__)
@@ -729,7 +729,7 @@ def load_or_prepare_skims_df(
             require_aermod_support=require_aermod_support,
         )
 
-    from .prepare_emissions_from_events import build_staged_skims_from_events
+    from .from_events import build_staged_skims_from_events
 
     events_skims_path = build_staged_skims_from_events(
         input_root=input_root,

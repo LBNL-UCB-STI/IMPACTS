@@ -23,12 +23,12 @@ from ...common import read_table
 from ...common import read_vector
 from ...common import resolve_required_manifest_input
 from ...manifest.schema import PipelineConfig
-from .prepare_emissions_from_skims import _build_zone_allocated_table
-from .prepare_emissions_from_skims import _build_zone_grouped_table
-from .prepare_emissions_from_skims import _compute_aermod_source_attributes_parquet
-from .prepare_emissions_from_skims import _load_vehicle_type_activity_lookup
-from .prepare_emissions_from_skims import _reuse_existing_outputs
-from .prepare_emissions_from_skims import load_or_prepare_skims_df
+from .prepare_emissions.from_skims import _build_zone_allocated_table
+from .prepare_emissions.from_skims import _build_zone_grouped_table
+from .prepare_emissions.from_skims import _compute_aermod_source_attributes_parquet
+from .prepare_emissions.from_skims import _load_vehicle_type_activity_lookup
+from .prepare_emissions.from_skims import _reuse_existing_outputs
+from .prepare_emissions.from_skims import load_or_prepare_skims_df
 from . import _step_label
 
 logger = logging.getLogger(__name__)

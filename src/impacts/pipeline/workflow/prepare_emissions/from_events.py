@@ -39,14 +39,14 @@ from typing import Optional
 
 import pandas as pd
 
-from ...config.defaults import grams_per_short_ton
-from ...config.defaults import meters_per_mile
-from ...config.defaults import parked_processes
-from ...manifest.file_ops import file_entry
-from ...common import prepared_table_target
-from ...common import read_table
-from ...common import resolve_required_manifest_input
-from ...common import normalize_county_fips
+from ....config.defaults import grams_per_short_ton
+from ....config.defaults import meters_per_mile
+from ....config.defaults import parked_processes
+from ....manifest.file_ops import file_entry
+from ....common import prepared_table_target
+from ....common import read_table
+from ....common import resolve_required_manifest_input
+from ....common import normalize_county_fips
 from .annualization import _build_skims_scale_factors
 from .annualization import resolve_skims_annualization_factors
 
@@ -616,7 +616,7 @@ def prepare_events_inputs(
     )
     logger.info("Step 1: wrote activity table %d rows → %s", len(activity_df), activity_path)
 
-    from .prepare_emissions_from_skims import prepare_staged_skims_for_processing
+    from .from_skims import prepare_staged_skims_for_processing
 
     skims_df = prepare_staged_skims_for_processing(
         input_root=input_root,

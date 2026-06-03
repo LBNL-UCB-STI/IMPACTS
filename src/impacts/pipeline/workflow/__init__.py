@@ -4,8 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 __all__ = [
-    "prepare_emissions_from_events",
-    "prepare_emissions_from_skims",
+    "prepare_emissions",
     "step1_process_emissions",
     "step2_compute_inmap_concentrations",
     "step3_compute_aermod_concentrations",
