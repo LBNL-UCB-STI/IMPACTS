@@ -144,8 +144,8 @@ impacts:
     # Acceptable values:
     # - inmap_only
     # - impute_inmap_primary_in_aermod_domain
-    # - scale_aermod_to_inmap_cell_primary
-    primary_pm25_integration_strategy: scale_aermod_to_inmap_cell_primary
+    # - scale_aermod_to_inmap_domain_primary
+    primary_pm25_integration_strategy: impute_inmap_primary_in_aermod_domain
 
   analysis:
     targets: # 2018 year: https://www.baaqmd.gov/en/about-air-quality/emission-inventory/emissions-lookup-tool

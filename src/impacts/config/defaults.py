@@ -44,13 +44,13 @@ primary_pm25_strategy_inmap_only: str = "inmap_only"
 primary_pm25_strategy_impute_inmap_primary_in_aermod_domain: str = "impute_inmap_primary_in_aermod_domain"
 """Use AERMOD PrimaryPM25 where available, and fall back to InMAP PrimaryPM25 elsewhere."""
 
-primary_pm25_strategy_scale_aermod_to_inmap_cell_primary: str = "scale_aermod_to_inmap_cell_primary"
-"""Scale AERMOD PrimaryPM25 within each InMAP cell to conserve the InMAP PrimaryPM25 budget."""
+primary_pm25_strategy_scale_aermod_to_inmap_domain_primary: str = "scale_aermod_to_inmap_domain_primary"
+"""Scale AERMOD PrimaryPM25 over the AERMOD-supported domain to match the same-domain InMAP PrimaryPM25 budget."""
 
 primary_pm25_integration_strategies: tuple[str, ...] = (
     primary_pm25_strategy_inmap_only,
     primary_pm25_strategy_impute_inmap_primary_in_aermod_domain,
-    primary_pm25_strategy_scale_aermod_to_inmap_cell_primary,
+    primary_pm25_strategy_scale_aermod_to_inmap_domain_primary,
 )
 """Allowed strategies for integrating primary PM2.5 into the exposure concentration surface."""
 

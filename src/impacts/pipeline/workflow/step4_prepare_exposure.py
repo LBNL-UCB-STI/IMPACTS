@@ -18,7 +18,7 @@ from ...common import resolve_required_manifest_input
 from ...config.defaults import primary_pm25_integration_strategies as default_primary_pm25_integration_strategies
 from ...config.defaults import primary_pm25_strategy_impute_inmap_primary_in_aermod_domain
 from ...config.defaults import primary_pm25_strategy_inmap_only
-from ...config.defaults import primary_pm25_strategy_scale_aermod_to_inmap_cell_primary
+from ...config.defaults import primary_pm25_strategy_scale_aermod_to_inmap_domain_primary
 from ...manifest.schema import PipelineConfig
 from . import _step_label
 
@@ -86,56 +86,43 @@ def _safe_geometry_area(gdf: gpd.GeoDataFrame) -> pd.Series:
     return area.where(np.isfinite(area) & area.gt(0.0), 1.0)
 
 
-def _scale_aermod_primary_to_inmap_primary(result: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+def _scale_aermod_primary_to_inmap_domain_primary(result: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     scaled = result.copy()
     area = _safe_geometry_area(scaled)
-    raw_aermod_primary = np.where(
-        scaled["has_aermod_primarypm25"],
-        scaled["aermod_PrimaryPM25"].clip(lower=0.0),
-        0.0,
-    )
-    budgets = pd.DataFrame(
-        {
-            _INMAP_SOURCE_ID_COLUMN: scaled[_INMAP_SOURCE_ID_COLUMN],
-            "target_budget": scaled["inmap_PrimaryPM25"].clip(lower=0.0) * area,
-            "aermod_budget": raw_aermod_primary * area,
-        }
-    )
-    budget_by_inmap = budgets.groupby(_INMAP_SOURCE_ID_COLUMN, dropna=False)[
-        ["target_budget", "aermod_budget"]
-    ].sum()
-    factors = budget_by_inmap["target_budget"] / budget_by_inmap["aermod_budget"].where(
-        budget_by_inmap["aermod_budget"].gt(_PRIMARY_PM25_MASS_EPSILON)
+    aermod_domain = scaled["has_aermod_primarypm25"]
+    raw_aermod_primary = pd.Series(
+        np.where(aermod_domain, scaled["aermod_PrimaryPM25"].clip(lower=0.0), 0.0),
+        index=scaled.index,
+        dtype="float64",
     )
 
-    factor_by_cell = scaled[_INMAP_SOURCE_ID_COLUMN].map(factors)
-    target_budget_by_cell = scaled[_INMAP_SOURCE_ID_COLUMN].map(budget_by_inmap["target_budget"])
-    aermod_budget_by_cell = scaled[_INMAP_SOURCE_ID_COLUMN].map(budget_by_inmap["aermod_budget"])
-    fallback_mask = (
-        aermod_budget_by_cell.le(_PRIMARY_PM25_MASS_EPSILON)
-        & target_budget_by_cell.gt(_PRIMARY_PM25_MASS_EPSILON)
+    target_budget = float(
+        (scaled.loc[aermod_domain, "inmap_PrimaryPM25"].clip(lower=0.0) * area[aermod_domain]).sum()
     )
-
-    scaled_primary = pd.Series(raw_aermod_primary, index=scaled.index, dtype="float64") * factor_by_cell.fillna(0.0)
-    scaled_primary.loc[fallback_mask] = scaled.loc[fallback_mask, "inmap_PrimaryPM25"].clip(lower=0.0)
-    scaled["aermod_PrimaryPM25_scale_factor"] = factor_by_cell
-    scaled["aermod_PrimaryPM25_scaled"] = scaled_primary.fillna(0.0)
-
-    finite_factors = factors.replace([np.inf, -np.inf], np.nan).dropna()
-    extreme = finite_factors.loc[(finite_factors < 0.1) | (finite_factors > 10.0)]
-    if not extreme.empty:
+    aermod_budget = float((raw_aermod_primary * area).sum())
+    scaled_primary = pd.Series(0.0, index=scaled.index, dtype="float64")
+    scale_factor = np.nan
+    if target_budget <= _PRIMARY_PM25_MASS_EPSILON:
+        scale_factor = 0.0
+    elif aermod_budget > _PRIMARY_PM25_MASS_EPSILON:
+        scale_factor = target_budget / aermod_budget
+        scaled_primary.loc[aermod_domain] = raw_aermod_primary.loc[aermod_domain] * scale_factor
+    else:
         logger.warning(
-            "Step 4 exposure integration found %d InMAP cells with extreme AERMOD PrimaryPM25 "
-            "mass-conservation scale factors; min=%.4g max=%.4g",
-            len(extreme),
-            float(extreme.min()),
-            float(extreme.max()),
+            "Step 4 exposure integration could not scale AERMOD PrimaryPM25 over the AERMOD domain "
+            "because the raw AERMOD PrimaryPM25 budget was zero; using InMAP PrimaryPM25 in that domain."
         )
-    if fallback_mask.any():
+        scaled_primary.loc[aermod_domain] = scaled.loc[aermod_domain, "inmap_PrimaryPM25"].clip(lower=0.0)
+
+    scaled["aermod_PrimaryPM25_scale_factor"] = np.where(aermod_domain, scale_factor, np.nan)
+    scaled["aermod_PrimaryPM25_scaled"] = scaled_primary
+    if np.isfinite(scale_factor) and scale_factor > 0.0 and (scale_factor < 0.1 or scale_factor > 10.0):
         logger.warning(
-            "Step 4 exposure integration used uniform InMAP PrimaryPM25 in %d AERMOD receptor cells "
-            "because their InMAP cells had no positive AERMOD PrimaryPM25 signal to scale.",
-            int(fallback_mask.sum()),
+            "Step 4 exposure integration found an extreme AERMOD-domain PrimaryPM25 "
+            "scale factor %.4g (target budget %.4g, raw AERMOD budget %.4g).",
+            float(scale_factor),
+            target_budget,
+            aermod_budget,
         )
     return scaled
 
@@ -215,9 +202,15 @@ def _build_full_exposure_grid(
             result["aermod_PrimaryPM25"],
             result["inmap_PrimaryPM25"],
         )
-    elif primary_strategy == primary_pm25_strategy_scale_aermod_to_inmap_cell_primary:
-        result = _scale_aermod_primary_to_inmap_primary(gpd.GeoDataFrame(result, geometry="geometry", crs=full_grid.crs))
-        result["PrimaryPM25"] = result["aermod_PrimaryPM25_scaled"]
+    elif primary_strategy == primary_pm25_strategy_scale_aermod_to_inmap_domain_primary:
+        result = _scale_aermod_primary_to_inmap_domain_primary(
+            gpd.GeoDataFrame(result, geometry="geometry", crs=full_grid.crs)
+        )
+        result["PrimaryPM25"] = np.where(
+            result["has_aermod_primarypm25"],
+            result["aermod_PrimaryPM25_scaled"],
+            result["inmap_PrimaryPM25"],
+        )
     else:
         raise ValueError(
             "pipeline.primary_pm25_integration_strategy must be one of "

@@ -120,7 +120,7 @@ def test_build_full_exposure_grid_uses_inmap_secondary_and_aermod_primary(tmp_pa
     assert bool(by_id.loc[11, "has_aermod_no2"]) is True
 
 
-def test_build_full_exposure_grid_can_scale_aermod_primary_to_inmap_primary_budget(tmp_path: Path) -> None:
+def test_build_full_exposure_grid_can_scale_aermod_primary_to_inmap_domain_budget(tmp_path: Path) -> None:
     full_grid = gpd.GeoDataFrame(
         {
             "aermod_cell_id": [11, 22, 33],
@@ -149,15 +149,15 @@ def test_build_full_exposure_grid_can_scale_aermod_primary_to_inmap_primary_budg
     )
     prepared_aermod = gpd.GeoDataFrame(
         {
-            "aermod_cell_id": [11, 22, 33],
-            "aermod_PrimaryPM25": [1.0, 3.0, 0.0],
-            "aermod_SecondaryPM25": [0.0, 0.0, 0.0],
-            "aermod_BC": [0.5, 0.6, 0.7],
-            "aermod_NO2": [3.0, 4.0, 5.0],
-            "has_aermod_primarypm25": [True, True, True],
-            "has_aermod_bc": [True, True, True],
-            "has_aermod_no2": [True, True, True],
-            "geometry": full_grid.geometry,
+            "aermod_cell_id": [11, 33],
+            "aermod_PrimaryPM25": [1.0, 3.0],
+            "aermod_SecondaryPM25": [0.0, 0.0],
+            "aermod_BC": [0.5, 0.7],
+            "aermod_NO2": [3.0, 5.0],
+            "has_aermod_primarypm25": [True, True],
+            "has_aermod_bc": [True, True],
+            "has_aermod_no2": [True, True],
+            "geometry": [full_grid.geometry.iloc[0], full_grid.geometry.iloc[2]],
         },
         geometry="geometry",
         crs=full_grid.crs,
@@ -167,26 +167,25 @@ def test_build_full_exposure_grid_can_scale_aermod_primary_to_inmap_primary_budg
         pipeline=_pipeline(
             tmp_path,
             grid_path,
-            primary_pm25_integration_strategy="scale_aermod_to_inmap_cell_primary",
+            primary_pm25_integration_strategy="scale_aermod_to_inmap_domain_primary",
         ),
         prepared_inmap=prepared_inmap,
         prepared_aermod=prepared_aermod,
     )
 
     by_id = result.drop(columns="geometry").set_index("aermod_cell_id")
-    assert by_id.loc[11, "aermod_PrimaryPM25_scale_factor"] == 2.0
-    assert by_id.loc[22, "aermod_PrimaryPM25_scale_factor"] == 2.0
-    assert by_id.loc[11, "PrimaryPM25"] == 2.0
-    assert by_id.loc[22, "PrimaryPM25"] == 6.0
-    assert by_id.loc[33, "PrimaryPM25"] == 7.0
-    assert by_id.loc[11, "TotalPM25"] == 3.0
-    assert by_id.loc[22, "TotalPM25"] == 7.0
-    assert by_id.loc[33, "TotalPM25"] == 9.0
-    primary_budget = {
-        int(inmap_cell_id): float((frame["PrimaryPM25"] * frame.geometry.area).sum())
-        for inmap_cell_id, frame in result.groupby("inmap_cell_id")
-    }
-    assert primary_budget == {101: 8.0, 202: 7.0}
+    assert by_id.loc[11, "aermod_PrimaryPM25_scale_factor"] == 2.75
+    assert pd.isna(by_id.loc[22, "aermod_PrimaryPM25_scale_factor"])
+    assert by_id.loc[33, "aermod_PrimaryPM25_scale_factor"] == 2.75
+    assert by_id.loc[11, "PrimaryPM25"] == 2.75
+    assert by_id.loc[22, "PrimaryPM25"] == 4.0
+    assert by_id.loc[33, "PrimaryPM25"] == 8.25
+    assert by_id.loc[11, "TotalPM25"] == 3.75
+    assert by_id.loc[22, "TotalPM25"] == 5.0
+    assert by_id.loc[33, "TotalPM25"] == 10.25
+    aermod_domain = result[result["has_aermod_primarypm25"]]
+    primary_budget = float((aermod_domain["PrimaryPM25"] * aermod_domain.geometry.area).sum())
+    assert primary_budget == 11.0
 
 
 def test_build_full_exposure_grid_can_ignore_aermod_primary_with_inmap_only_strategy(tmp_path: Path) -> None:
