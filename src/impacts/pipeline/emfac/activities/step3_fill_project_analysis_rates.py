@@ -69,14 +69,6 @@ _STATEWIDE_INVENTORY_BASE_SCHEMA = {
     "speed": "Float64",
 }
 
-_ACTIVITIES_RATE_MAPPINGS: dict[str, object] = {}
-
-
-def _set_activities_rate_mappings(mappings: dict[str, object]) -> None:
-    global _ACTIVITIES_RATE_MAPPINGS
-    _ACTIVITIES_RATE_MAPPINGS = {}
-
-
 def _format_numeric_series(values: pd.Series) -> pd.Series:
     return values.map(lambda value: f"{float(value):g}" if pd.notna(value) else pd.NA)
 
@@ -764,7 +756,6 @@ def _write_parquet(frame: pd.DataFrame, path: str) -> str:
 
 def run_step3(workflow: dict[str, object]) -> dict[str, object]:
     print("  Step 3. Fill Project Analysis Rates")
-    _set_activities_rate_mappings(workflow.get("run", {}).get("mappings", {}) or {})
     print("    3.1 Load rate sources and fallback inventories")
     (
         project_analysis_source,
