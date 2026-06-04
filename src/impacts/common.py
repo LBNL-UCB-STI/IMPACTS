@@ -757,7 +757,6 @@ def read_table(path: str | Path) -> pd.DataFrame:
     raise ValueError(f"Unsupported table format: {target}")
 
 
-
 def normalize_county_fips(series: pd.Series) -> pd.Series:
     extracted = series.astype("string").str.extract(r"(\d+)")[0]
     normalized = extracted.where(extracted.isna(), extracted.str.zfill(3))
