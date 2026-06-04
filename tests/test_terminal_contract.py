@@ -62,6 +62,7 @@ def _pipeline_payload(tmp_path: Path) -> dict:
         "vehicle_category_metadata_file": str(tmp_path / "vehicle_category_metadata.csv"),
         "annualization_days": {"light_duty": 327.0, "medium_heavy_duty": 312.0},
         "population_sample": 0.1,
+        "primary_pm25_integration_strategy": "impute_inmap_primary_with_aermod",
         "include_passenger": True,
         "include_freight": True,
     }
@@ -112,6 +113,7 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.dispersions.inmap.isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s is False
     assert config.impacts.pipeline.aermod is True
     assert config.impacts.pipeline.exposure is True
+    assert config.impacts.exposure.primary_pm25_integration_strategy == "impute_inmap_primary_with_aermod"
     assert config.impacts.population.passenger_folder == "urbansim/atlas-2019"
     assert config.impacts.emissions.beam.include_passenger is True
     assert config.impacts.emissions.beam.include_freight is True
@@ -148,11 +150,12 @@ def test_builtin_settings_source_of_truth_is_current() -> None:
     default_payload = yaml.safe_load(default_settings_path.read_text())
     default_config = load_settings_from_yaml(default_settings_path)
 
-    shared_keys = {"emissions", "dispersions", "analysis"}
+    shared_keys = {"emissions", "dispersions", "exposure", "analysis"}
     assert shared_keys <= set(default_payload["impacts"])
     assert shared_keys <= set(example_payload["impacts"])
     assert default_config.impacts.activities["project_analysis"]["main"]["folder_in_archive"] == "sfbay-emfac-project-analysis"
     assert default_config.impacts.population.vehicle_folder == "vehicle-tech"
+    assert default_config.impacts.exposure.primary_pm25_integration_strategy == "impute_inmap_primary_with_aermod"
 
 
 def test_native_settings_loader_normalizes_directly(tmp_path: Path) -> None:
@@ -489,6 +492,14 @@ def test_pipeline_manifest_allows_disabled_aermod_without_aermod_inputs(tmp_path
     assert config.asrv_patterns_file is None
 
 
+def test_pipeline_manifest_rejects_unknown_primary_pm25_integration_strategy(tmp_path: Path):
+    payload = _pipeline_payload(tmp_path)
+    payload["primary_pm25_integration_strategy"] = "unknown"
+
+    with pytest.raises(ValueError, match="primary_pm25_integration_strategy"):
+        PipelineConfig.from_dict(payload)
+
+
 def test_run_emissions_from_pipeline_manifest_uses_staged_intersections_from_preprocess(monkeypatch, tmp_path: Path):
     import impacts.pipeline.workflow.prepare_emissions.from_skims as from_skims_module
     import impacts.pipeline.workflow.step1_process_emissions as step1_process_emissions
@@ -623,6 +634,7 @@ def test_build_preprocess_manifest_runs_step3_and_registers_intersections(monkey
                     grid_size_meters=100.0,
                 ),
             ),
+            exposure=SimpleNamespace(primary_pm25_integration_strategy="impute_inmap_primary_with_aermod"),
         ),
     )
 

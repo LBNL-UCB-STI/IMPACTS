@@ -155,6 +155,7 @@ def build_preprocess_manifest(
         "population_sample": float(settings.impacts.population.population_sample),
         "transit_sample": float(settings.impacts.population.transit_sample),
         "freight_sample": getattr(settings.impacts.population, "freight_sample", None),
+        "primary_pm25_integration_strategy": settings.impacts.exposure.primary_pm25_integration_strategy,
         "include_non_osm_car_links": bool(beam_processing.include_non_osm_car_links),
         "include_passenger": bool(beam_processing.include_passenger),
         "include_freight": bool(beam_processing.include_freight),

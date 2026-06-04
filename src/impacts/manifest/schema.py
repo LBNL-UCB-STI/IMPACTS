@@ -10,6 +10,8 @@ from typing import List
 from typing import Optional
 
 from impacts.config.defaults import annualization_days_by_vehicle_group as default_annualization_days_by_vehicle_group
+from impacts.config.defaults import primary_pm25_integration_strategies as default_primary_pm25_integration_strategies
+from impacts.config.defaults import primary_pm25_integration_strategy as default_primary_pm25_integration_strategy
 from impacts.config.settings import build_pollutants_map_from_sources
 from ..config._coerce import _required_string, _optional_string, _required_int, _optional_int, _required_float, _optional_float, _required_bool, _coerce_string_list, _reject_unknown_keys
 
@@ -62,6 +64,7 @@ class PipelineConfig:
     population_sample: float = 1.0
     transit_sample: float = 1.0
     freight_sample: Optional[float] = None
+    primary_pm25_integration_strategy: str = default_primary_pm25_integration_strategy
     include_non_osm_car_links: bool = False
     include_passenger: bool = True
     include_freight: bool = True
@@ -109,6 +112,7 @@ class PipelineConfig:
                 "population_sample",
                 "transit_sample",
                 "freight_sample",
+                "primary_pm25_integration_strategy",
                 "include_non_osm_car_links",
                 "include_passenger",
                 "include_freight",
@@ -183,6 +187,10 @@ class PipelineConfig:
             population_sample=_required_float(payload.get("population_sample"), "pipeline.population_sample"),
             transit_sample=_optional_float(payload.get("transit_sample"), default=1.0),
             freight_sample=_optional_float(payload.get("freight_sample")),
+            primary_pm25_integration_strategy=(
+                _optional_string(payload.get("primary_pm25_integration_strategy"))
+                or default_primary_pm25_integration_strategy
+            ),
             include_non_osm_car_links=_required_bool(
                 payload.get("include_non_osm_car_links", False), "pipeline.include_non_osm_car_links"
             ),
@@ -197,6 +205,12 @@ class PipelineConfig:
             raise ValueError("Missing required value: pipeline.source_pollutants")
         if not result.pollutants:
             raise ValueError("Missing required value: pipeline.pollutants")
+        if result.primary_pm25_integration_strategy not in default_primary_pm25_integration_strategies:
+            raise ValueError(
+                "pipeline.primary_pm25_integration_strategy must be one of "
+                f"{sorted(default_primary_pm25_integration_strategies)}, "
+                f"got {result.primary_pm25_integration_strategy!r}"
+            )
         if result.inmap_enabled:
             if not result.inmap_grid_path:
                 raise ValueError("Missing required value: pipeline.inmap_grid_path")

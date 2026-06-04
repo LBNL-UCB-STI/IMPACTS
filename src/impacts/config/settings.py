@@ -13,6 +13,8 @@ import pandas as pd
 import yaml
 
 from .defaults import pollutants as canonical_pollutants
+from .defaults import primary_pm25_integration_strategies as default_primary_pm25_integration_strategies
+from .defaults import primary_pm25_integration_strategy as default_primary_pm25_integration_strategy
 from ._coerce import _required_string, _optional_string, _required_int, _optional_int, _required_float, _optional_float, _required_bool, _coerce_string_list, _reject_unknown_keys
 
 
@@ -296,6 +298,27 @@ class Dispersions:
             inmap=InmapDispersion.from_dict(dict(payload.get("inmap", {}) or {})),
             aermod=AermodDispersion.from_dict(dict(payload.get("aermod", {}) or {})),
         )
+
+
+@dataclass(frozen=True)
+class Exposure:
+    primary_pm25_integration_strategy: str = default_primary_pm25_integration_strategy
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "Exposure":
+        _reject_unknown_keys(
+            payload,
+            {"primary_pm25_integration_strategy"},
+            "impacts.exposure",
+        )
+        strategy = _optional_string(payload.get("primary_pm25_integration_strategy"))
+        strategy = strategy or default_primary_pm25_integration_strategy
+        if strategy not in default_primary_pm25_integration_strategies:
+            raise ValueError(
+                "impacts.exposure.primary_pm25_integration_strategy must be one of "
+                f"{sorted(default_primary_pm25_integration_strategies)}, got {strategy!r}"
+            )
+        return cls(primary_pm25_integration_strategy=strategy)
 
 
 @dataclass(frozen=True)
@@ -661,6 +684,7 @@ class Impacts:
     fleet: Dict[str, Any]
     emissions: Emissions
     dispersions: Dispersions
+    exposure: Exposure
     population: "Population"
     analysis: Analysis = field(default_factory=Analysis)
 
@@ -671,7 +695,7 @@ class Impacts:
             {
                 "local_output_folder", "local_input_folder", "seed", "scenario",
                 "pipeline", "population",
-                "activities", "fleet", "emissions", "dispersions", "analysis",
+                "activities", "fleet", "emissions", "dispersions", "exposure", "analysis",
             },
             "impacts",
         )
@@ -706,6 +730,7 @@ class Impacts:
             fleet=fleet,
             emissions=Emissions.from_dict(emissions_payload),
             dispersions=Dispersions.from_dict(dict(impacts_settings.get("dispersions", {}) or {})),
+            exposure=Exposure.from_dict(dict(impacts_settings.get("exposure", {}) or {})),
             population=population,
             analysis=Analysis.from_dict(dict(impacts_settings.get("analysis", {}) or {})),
         )
@@ -908,6 +933,11 @@ class ImpactsSettings:
                         "aermod": self.impacts.pipeline.postsim.aermod,
                         "exposure": self.impacts.pipeline.postsim.exposure,
                     },
+                },
+                "exposure": {
+                    "primary_pm25_integration_strategy": (
+                        self.impacts.exposure.primary_pm25_integration_strategy
+                    ),
                 },
                 "population": {
                     "passenger_folder": self.impacts.population.passenger_folder,

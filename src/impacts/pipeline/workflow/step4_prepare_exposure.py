@@ -15,12 +15,17 @@ from ...common import log_substep_banner
 from ...common import read_table
 from ...common import read_vector
 from ...common import resolve_required_manifest_input
+from ...config.defaults import primary_pm25_integration_strategies as default_primary_pm25_integration_strategies
+from ...config.defaults import primary_pm25_strategy_impute_inmap_primary_with_aermod
+from ...config.defaults import primary_pm25_strategy_inmap_only
+from ...config.defaults import primary_pm25_strategy_scale_aermod_to_inmap_primary
 from ...manifest.schema import PipelineConfig
 from . import _step_label
 
 logger = logging.getLogger(__name__)
 _INMAP_SOURCE_ID_COLUMN = "inmap_cell_id"
 _AERMOD_SOURCE_ID_COLUMN = "aermod_cell_id"
+_PRIMARY_PM25_MASS_EPSILON = 1e-12
 
 
 def _trace_frame(step: str, label: str, df: pd.DataFrame) -> None:
@@ -74,6 +79,65 @@ def _prepare_aermod_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
             prepared = prepared.rename(columns={source_col: renamed_col})
             keep.append(renamed_col)
     return prepared[keep + (["geometry"] if "geometry" in prepared.columns else [])]
+
+
+def _safe_geometry_area(gdf: gpd.GeoDataFrame) -> pd.Series:
+    area = pd.Series(gdf.geometry.area, index=gdf.index, dtype="float64")
+    return area.where(np.isfinite(area) & area.gt(0.0), 1.0)
+
+
+def _scale_aermod_primary_to_inmap_primary(result: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    scaled = result.copy()
+    area = _safe_geometry_area(scaled)
+    raw_aermod_primary = np.where(
+        scaled["has_aermod_primarypm25"],
+        scaled["aermod_PrimaryPM25"].clip(lower=0.0),
+        0.0,
+    )
+    budgets = pd.DataFrame(
+        {
+            _INMAP_SOURCE_ID_COLUMN: scaled[_INMAP_SOURCE_ID_COLUMN],
+            "target_budget": scaled["inmap_PrimaryPM25"].clip(lower=0.0) * area,
+            "aermod_budget": raw_aermod_primary * area,
+        }
+    )
+    budget_by_inmap = budgets.groupby(_INMAP_SOURCE_ID_COLUMN, dropna=False)[
+        ["target_budget", "aermod_budget"]
+    ].sum()
+    factors = budget_by_inmap["target_budget"] / budget_by_inmap["aermod_budget"].where(
+        budget_by_inmap["aermod_budget"].gt(_PRIMARY_PM25_MASS_EPSILON)
+    )
+
+    factor_by_cell = scaled[_INMAP_SOURCE_ID_COLUMN].map(factors)
+    target_budget_by_cell = scaled[_INMAP_SOURCE_ID_COLUMN].map(budget_by_inmap["target_budget"])
+    aermod_budget_by_cell = scaled[_INMAP_SOURCE_ID_COLUMN].map(budget_by_inmap["aermod_budget"])
+    fallback_mask = (
+        aermod_budget_by_cell.le(_PRIMARY_PM25_MASS_EPSILON)
+        & target_budget_by_cell.gt(_PRIMARY_PM25_MASS_EPSILON)
+    )
+
+    scaled_primary = pd.Series(raw_aermod_primary, index=scaled.index, dtype="float64") * factor_by_cell.fillna(0.0)
+    scaled_primary.loc[fallback_mask] = scaled.loc[fallback_mask, "inmap_PrimaryPM25"].clip(lower=0.0)
+    scaled["aermod_PrimaryPM25_scale_factor"] = factor_by_cell
+    scaled["aermod_PrimaryPM25_scaled"] = scaled_primary.fillna(0.0)
+
+    finite_factors = factors.replace([np.inf, -np.inf], np.nan).dropna()
+    extreme = finite_factors.loc[(finite_factors < 0.1) | (finite_factors > 10.0)]
+    if not extreme.empty:
+        logger.warning(
+            "Step 4 exposure integration found %d InMAP cells with extreme AERMOD PrimaryPM25 "
+            "mass-conservation scale factors; min=%.4g max=%.4g",
+            len(extreme),
+            float(extreme.min()),
+            float(extreme.max()),
+        )
+    if fallback_mask.any():
+        logger.warning(
+            "Step 4 exposure integration used uniform InMAP PrimaryPM25 in %d AERMOD receptor cells "
+            "because their InMAP cells had no positive AERMOD PrimaryPM25 signal to scale.",
+            int(fallback_mask.sum()),
+        )
+    return scaled
 
 
 def _build_full_exposure_grid(
@@ -134,15 +198,32 @@ def _build_full_exposure_grid(
             result[col] = False
         result[col] = result[col].fillna(False).astype(bool)
 
-    # AERMOD contributes high-resolution near-source increments for supported
-    # primary pollutants. InMAP remains the regional/base contribution and is
-    # used alone where no AERMOD signal reached the cell. Secondary PM2.5 always
-    # comes from InMAP because AERMOD models primary dispersion only.
-    result["PrimaryPM25"] = np.where(
-        result["has_aermod_primarypm25"],
-        result["inmap_PrimaryPM25"] + result["aermod_PrimaryPM25"],
-        result["inmap_PrimaryPM25"],
-    )
+    primary_strategy = pipeline.primary_pm25_integration_strategy
+    if primary_strategy == primary_pm25_strategy_inmap_only:
+        result["aermod_PrimaryPM25_scale_factor"] = np.nan
+        result["aermod_PrimaryPM25_scaled"] = 0.0
+        result["PrimaryPM25"] = result["inmap_PrimaryPM25"]
+    elif primary_strategy == primary_pm25_strategy_impute_inmap_primary_with_aermod:
+        result["aermod_PrimaryPM25_scale_factor"] = np.nan
+        result["aermod_PrimaryPM25_scaled"] = np.where(
+            result["has_aermod_primarypm25"],
+            result["aermod_PrimaryPM25"],
+            0.0,
+        )
+        result["PrimaryPM25"] = np.where(
+            result["has_aermod_primarypm25"],
+            result["aermod_PrimaryPM25"],
+            result["inmap_PrimaryPM25"],
+        )
+    elif primary_strategy == primary_pm25_strategy_scale_aermod_to_inmap_primary:
+        result = _scale_aermod_primary_to_inmap_primary(gpd.GeoDataFrame(result, geometry="geometry", crs=full_grid.crs))
+        result["PrimaryPM25"] = result["aermod_PrimaryPM25_scaled"]
+    else:
+        raise ValueError(
+            "pipeline.primary_pm25_integration_strategy must be one of "
+            f"{list(default_primary_pm25_integration_strategies)}, "
+            f"got {primary_strategy!r}"
+        )
     result["SecondaryPM25"] = result["inmap_SecondaryPM25"]
     result["TotalPM25"] = result["SecondaryPM25"] + result["PrimaryPM25"]
     result["BC"] = np.where(
@@ -160,7 +241,8 @@ def _build_full_exposure_grid(
         _AERMOD_SOURCE_ID_COLUMN, _INMAP_SOURCE_ID_COLUMN,
         "TotalPM25", "PrimaryPM25", "SecondaryPM25", "BC", "NO2",
         "inmap_PrimaryPM25", "inmap_SecondaryPM25",
-        "aermod_PrimaryPM25", "aermod_SecondaryPM25",
+        "aermod_PrimaryPM25", "aermod_PrimaryPM25_scaled", "aermod_PrimaryPM25_scale_factor",
+        "aermod_SecondaryPM25",
         "has_aermod_primarypm25", "has_aermod_bc", "has_aermod_no2",
     ]
     for col in ("inmap_BC", "inmap_NO2", "aermod_BC", "aermod_NO2"):

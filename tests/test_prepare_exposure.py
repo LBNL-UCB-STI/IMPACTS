@@ -11,7 +11,12 @@ from impacts.pipeline.workflow.step4_prepare_exposure import _prepare_aermod_exp
 from impacts.pipeline.workflow.step4_prepare_exposure import _build_full_exposure_grid
 
 
-def _pipeline(tmp_path: Path, grid_path: Path) -> PipelineConfig:
+def _pipeline(
+    tmp_path: Path,
+    grid_path: Path,
+    *,
+    primary_pm25_integration_strategy: str = "impute_inmap_primary_with_aermod",
+) -> PipelineConfig:
     return PipelineConfig.from_dict(
         {
             "beam_osm_id_col": "attributeOrigId",
@@ -50,6 +55,7 @@ def _pipeline(tmp_path: Path, grid_path: Path) -> PipelineConfig:
             "vehicle_category_metadata_file": str(tmp_path / "vehicle_category_metadata.csv"),
             "annualization_days": {"light_duty": 327.0, "medium_heavy_duty": 312.0},
             "population_sample": 0.1,
+            "primary_pm25_integration_strategy": primary_pm25_integration_strategy,
         }
     )
 
@@ -112,6 +118,132 @@ def test_build_full_exposure_grid_uses_inmap_secondary_and_aermod_primary(tmp_pa
     assert bool(by_id.loc[11, "has_aermod_primarypm25"]) is True
     assert bool(by_id.loc[11, "has_aermod_bc"]) is True
     assert bool(by_id.loc[11, "has_aermod_no2"]) is True
+
+
+def test_build_full_exposure_grid_can_scale_aermod_primary_to_inmap_primary_budget(tmp_path: Path) -> None:
+    full_grid = gpd.GeoDataFrame(
+        {
+            "aermod_cell_id": [11, 22, 33],
+            "inmap_cell_id": [101, 101, 202],
+            "geometry": [
+                Polygon([(0, 0), (1, 0), (1, 1), (0, 1)]),
+                Polygon([(1, 0), (2, 0), (2, 1), (1, 1)]),
+                Polygon([(2, 0), (3, 0), (3, 1), (2, 1)]),
+            ],
+        },
+        geometry="geometry",
+        crs="EPSG:26910",
+    )
+    grid_path = tmp_path / "full_grid.parquet"
+    full_grid.to_parquet(grid_path, index=False)
+
+    prepared_inmap = gpd.GeoDataFrame(
+        {
+            "inmap_cell_id": [101, 202],
+            "inmap_PrimaryPM25": [4.0, 7.0],
+            "inmap_SecondaryPM25": [1.0, 2.0],
+            "geometry": [full_grid.geometry.iloc[0].union(full_grid.geometry.iloc[1]), full_grid.geometry.iloc[2]],
+        },
+        geometry="geometry",
+        crs=full_grid.crs,
+    )
+    prepared_aermod = gpd.GeoDataFrame(
+        {
+            "aermod_cell_id": [11, 22, 33],
+            "aermod_PrimaryPM25": [1.0, 3.0, 0.0],
+            "aermod_SecondaryPM25": [0.0, 0.0, 0.0],
+            "aermod_BC": [0.5, 0.6, 0.7],
+            "aermod_NO2": [3.0, 4.0, 5.0],
+            "has_aermod_primarypm25": [True, True, True],
+            "has_aermod_bc": [True, True, True],
+            "has_aermod_no2": [True, True, True],
+            "geometry": full_grid.geometry,
+        },
+        geometry="geometry",
+        crs=full_grid.crs,
+    )
+
+    result = _build_full_exposure_grid(
+        pipeline=_pipeline(
+            tmp_path,
+            grid_path,
+            primary_pm25_integration_strategy="scale_aermod_to_inmap_primary",
+        ),
+        prepared_inmap=prepared_inmap,
+        prepared_aermod=prepared_aermod,
+    )
+
+    by_id = result.drop(columns="geometry").set_index("aermod_cell_id")
+    assert by_id.loc[11, "aermod_PrimaryPM25_scale_factor"] == 2.0
+    assert by_id.loc[22, "aermod_PrimaryPM25_scale_factor"] == 2.0
+    assert by_id.loc[11, "PrimaryPM25"] == 2.0
+    assert by_id.loc[22, "PrimaryPM25"] == 6.0
+    assert by_id.loc[33, "PrimaryPM25"] == 7.0
+    assert by_id.loc[11, "TotalPM25"] == 3.0
+    assert by_id.loc[22, "TotalPM25"] == 7.0
+    assert by_id.loc[33, "TotalPM25"] == 9.0
+    primary_budget = {
+        int(inmap_cell_id): float((frame["PrimaryPM25"] * frame.geometry.area).sum())
+        for inmap_cell_id, frame in result.groupby("inmap_cell_id")
+    }
+    assert primary_budget == {101: 8.0, 202: 7.0}
+
+
+def test_build_full_exposure_grid_can_ignore_aermod_primary_with_inmap_only_strategy(tmp_path: Path) -> None:
+    full_grid = gpd.GeoDataFrame(
+        {
+            "aermod_cell_id": [11, 22],
+            "inmap_cell_id": [101, 202],
+            "geometry": [
+                Polygon([(0, 0), (1, 0), (1, 1), (0, 1)]),
+                Polygon([(1, 0), (2, 0), (2, 1), (1, 1)]),
+            ],
+        },
+        geometry="geometry",
+        crs="EPSG:26910",
+    )
+    grid_path = tmp_path / "full_grid.parquet"
+    full_grid.to_parquet(grid_path, index=False)
+
+    prepared_inmap = gpd.GeoDataFrame(
+        {
+            "inmap_cell_id": [101, 202],
+            "inmap_PrimaryPM25": [0.1, 0.2],
+            "inmap_SecondaryPM25": [1.0, 2.0],
+            "geometry": full_grid.geometry,
+        },
+        geometry="geometry",
+        crs=full_grid.crs,
+    )
+    prepared_aermod = gpd.GeoDataFrame(
+        {
+            "aermod_cell_id": [11],
+            "aermod_PrimaryPM25": [10.0],
+            "aermod_SecondaryPM25": [0.0],
+            "has_aermod_primarypm25": [True],
+            "geometry": [full_grid.geometry.iloc[0]],
+        },
+        geometry="geometry",
+        crs=full_grid.crs,
+    )
+
+    result = _build_full_exposure_grid(
+        pipeline=_pipeline(
+            tmp_path,
+            grid_path,
+            primary_pm25_integration_strategy="inmap_only",
+        ),
+        prepared_inmap=prepared_inmap,
+        prepared_aermod=prepared_aermod,
+    ).drop(columns="geometry")
+
+    by_id = result.set_index("aermod_cell_id")
+    assert by_id.loc[11, "aermod_PrimaryPM25"] == 10.0
+    assert by_id.loc[11, "aermod_PrimaryPM25_scaled"] == 0.0
+    assert by_id.loc[11, "PrimaryPM25"] == 0.1
+    assert by_id.loc[11, "TotalPM25"] == 1.1
+    assert by_id.loc[22, "PrimaryPM25"] == 0.2
+    assert by_id.loc[22, "TotalPM25"] == 2.2
 
 
 def test_prepare_aermod_exposure_inputs_allows_partial_aermod_outputs(tmp_path: Path) -> None:
@@ -248,9 +380,9 @@ def test_build_full_exposure_grid_uses_per_pollutant_aermod_increment_masks(tmp_
     ).drop(columns="geometry")
 
     by_id = result.set_index("aermod_cell_id")
-    assert by_id.loc[11, "PrimaryPM25"] == 1.0
+    assert by_id.loc[11, "PrimaryPM25"] == 0.9
     assert by_id.loc[11, "SecondaryPM25"] == 1.0
-    assert by_id.loc[11, "TotalPM25"] == 2.0
+    assert by_id.loc[11, "TotalPM25"] == 1.9
     assert by_id.loc[11, "BC"] == 0.3
     assert by_id.loc[11, "NO2"] == 12.0
     assert by_id.loc[22, "PrimaryPM25"] == 0.2
