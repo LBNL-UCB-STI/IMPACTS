@@ -54,7 +54,7 @@ def _parse_workflow_and_config(args: argparse.Namespace) -> tuple[str | None, st
 
 def _ensure_activities(config_path: str) -> None:
     from impacts.config.settings_builder import load_settings_from_yaml
-    from impacts.pipeline.emfac.preparation import ensure_emfac_activities_outputs
+    from impacts.provisioner import ensure_emfac_activities_outputs
     settings = load_settings_from_yaml(config_path)
     ensure_emfac_activities_outputs(settings, Path(config_path))
 

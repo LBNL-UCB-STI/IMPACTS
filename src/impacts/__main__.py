@@ -41,7 +41,7 @@ def _resolve_pipeline_manifest_path(settings_path: str, manifest_name: str) -> P
 
 def _run_presim_from_settings(settings_path: str) -> None:
     from impacts.pipeline.emfac.fleet.main import main as run_fleet_main
-    from impacts.pipeline.emfac.preparation import ensure_emfac_activities_outputs
+    from impacts.provisioner import ensure_emfac_activities_outputs
 
     settings = load_settings_from_yaml(settings_path)
     activities_manifest_path: str | None = None
@@ -316,7 +316,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "activities":
-        from impacts.pipeline.emfac.preparation import ensure_emfac_activities_outputs
+        from impacts.provisioner import ensure_emfac_activities_outputs
 
         settings = load_settings_from_yaml(args.config)
         ensure_emfac_activities_outputs(settings, Path(args.config))
