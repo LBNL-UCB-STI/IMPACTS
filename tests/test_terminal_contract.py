@@ -728,10 +728,11 @@ def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_pat
         }
         return {"pipeline_manifest_path": str(tmp_path / "workspace" / "pipeline_manifest.yaml")}
 
-    def _fake_postprocess(run_manifest_path, manifest_path=None):
+    def _fake_postprocess(run_manifest_path, manifest_path=None, input_roots=None):
         calls["postprocess"] = {
             "run_manifest_path": str(run_manifest_path),
             "manifest_path": manifest_path,
+            "input_roots": tuple(input_roots or ()),
         }
         return {"postprocess_manifest_path": str(tmp_path / "impacts" / "postprocess_manifest.yaml")}
 
@@ -794,7 +795,7 @@ def test_postprocess_logs_pipeline_complete_after_steps_and_manifest(monkeypatch
         encoding="utf-8",
     )
 
-    def _fake_postprocess_steps(settings_path):
+    def _fake_postprocess_steps(settings_path, **_kwargs):
         logging.getLogger("impacts.postprocess.fake").info("postprocess steps complete for %s", settings_path)
         return {"postprocess_output": str(tmp_path / "postprocess.parquet")}
 
@@ -811,6 +812,313 @@ def test_postprocess_logs_pipeline_complete_after_steps_and_manifest(monkeypatch
     assert result["postprocess_manifest_path"].endswith("postprocess_manifest.yaml")
     assert steps_index < manifest_index < complete_index
     assert messages[-1] == f"Pipeline complete: postprocess_manifest={output_root / 'postprocess_manifest.yaml'}"
+
+
+def test_postprocess_impact_output_dir_cli_passes_output_root_override_and_impact_input_dir(monkeypatch, tmp_path: Path):
+    output_root = tmp_path / "copied_output"
+    input_root = tmp_path / "beam-data" / "sfbay"
+    output_root.mkdir()
+    input_root.mkdir(parents=True)
+    (output_root / "pipeline_manifest.yaml").write_text("{}", encoding="utf-8")
+    calls = {}
+
+    def _fake_postprocess(
+        run_manifest_path,
+        manifest_path=None,
+        output_root_override=None,
+        input_roots=None,
+    ):
+        calls["run_manifest_path"] = str(run_manifest_path)
+        calls["manifest_path"] = manifest_path
+        calls["output_root_override"] = str(output_root_override)
+        calls["input_roots"] = tuple(input_roots or ())
+        return {"postprocess_manifest_path": str(output_root / "postprocess_manifest.yaml")}
+
+    monkeypatch.setattr("impacts.postprocessor.postprocess_from_pipeline_manifest", _fake_postprocess)
+
+    assert main([
+        "postprocess",
+        "--impact-output-dir",
+        str(output_root),
+        "--impact-input-dir",
+        str(input_root),
+    ]) == 0
+
+    assert calls["run_manifest_path"] == str(output_root / "pipeline_manifest.yaml")
+    assert calls["manifest_path"] is None
+    assert calls["output_root_override"] == str(output_root)
+    assert calls["input_roots"] == (str(input_root),)
+
+
+def test_top_level_postprocess_help_describes_current_workflow(capsys):
+    stale_help = "canonical impacts " + "exposure table " + "artifact"
+
+    with pytest.raises(SystemExit):
+        main(["--help"])
+
+    help_text = capsys.readouterr().out
+    assert "Run postprocess comparisons and map plots" in help_text
+    assert stale_help not in help_text
+
+
+def test_postprocess_cli_rejects_legacy_output_dir_and_input_root_flags(tmp_path: Path):
+    output_root = tmp_path / "copied_output"
+    input_root = tmp_path / "beam-data" / "sfbay"
+    legacy_output_flag = "--" + "output-dir"
+    legacy_input_flag = "--" + "input-root"
+    output_root.mkdir()
+    input_root.mkdir(parents=True)
+    (output_root / "pipeline_manifest.yaml").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        main([
+            "postprocess",
+            legacy_output_flag,
+            str(output_root),
+            legacy_input_flag,
+            str(input_root),
+        ])
+
+
+def test_build_nox_to_no2_top_level_cli_uses_current_tool_contract(capsys):
+    with pytest.raises(SystemExit):
+        main(["build_nox_to_no2", "--help"])
+
+    help_text = capsys.readouterr().out
+    assert "--output-file" in help_text
+    assert "--cmaq-ratio-table" in help_text
+    assert "--regional-matrix" in help_text
+    assert "--output-name" not in help_text
+    assert "--input-dir" not in help_text
+    assert "--" + "output-dir" not in help_text
+
+
+def test_postprocess_output_root_override_localizes_stale_manifest_paths(
+    monkeypatch,
+    tmp_path: Path,
+):
+    output_root = tmp_path / "copied_output"
+    output_root.mkdir()
+    stale_root = Path("/global/scratch/users/hmlaarabi/sources/IMPACTS/examples/pilates/impacts/impacts_output")
+    run_manifest_path = output_root / "pipeline_manifest.yaml"
+    preprocess_manifest_path = output_root / "preprocess_manifest.yaml"
+    local_settings_path = output_root / "settings.yaml"
+    skims_emissions_path = output_root / "emissions" / "prepared_skims_for_grid_allocation.parquet"
+    skims_emissions_path.parent.mkdir(parents=True)
+    skims_emissions_path.write_text("", encoding="utf-8")
+    local_settings_path.write_text("impacts:\n  local_output_folder: impacts/impacts_output\n", encoding="utf-8")
+    run_manifest_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "1",
+                "model": "impacts",
+                "preprocess_manifest_path": str(stale_root / "preprocess_manifest.yaml"),
+                "output_dir": str(stale_root),
+                "command": "python -m impacts postsim",
+                "image": "unknown",
+                "outputs": {
+                    "skims_emissions": str(stale_root / "emissions" / "prepared_skims_for_grid_allocation.parquet"),
+                },
+                "pipeline": _pipeline_payload(tmp_path),
+                "population_inputs": {},
+                "deterministic_contract": {},
+                "execution": {"dispersion_completed": True, "stopped_after": "step4_prepare_exposure"},
+                "pipeline_manifest_path": str(run_manifest_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    preprocess_manifest_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "1",
+                "model": "impacts",
+                "settings_source": str(stale_root.parent.parent / "hpc-settings.yaml"),
+                "staging_dir": str(stale_root / "preprocess"),
+                "input_dir": str(stale_root / "preprocess"),
+                "preprocess_manifest_path": str(stale_root / "preprocess_manifest.yaml"),
+                "maintained_execution_path": [],
+                "inputs": {
+                    "settings": {
+                        "kind": "local",
+                        "source_path": str(stale_root / "settings.yaml"),
+                        "staged_path": str(stale_root / "settings.yaml"),
+                        "optional": False,
+                        "exists": True,
+                    }
+                },
+                "pipeline": _pipeline_payload(tmp_path),
+                "pilates_contract": {"stage": "terminal_postprocessing"},
+                "population_inputs": {},
+                "notes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls = {}
+
+    def _fake_postprocess_steps(
+        settings_path,
+        *,
+        run_manifest_path=None,
+        output_root=None,
+        allow_missing_comparison_inputs=False,
+        input_roots=None,
+    ):
+        calls["settings_path"] = str(settings_path)
+        calls["run_manifest_path"] = str(run_manifest_path)
+        calls["output_root"] = str(output_root)
+        calls["allow_missing_comparison_inputs"] = allow_missing_comparison_inputs
+        calls["input_roots"] = tuple(input_roots or ())
+        return {"postprocess_output": str(output_root / "postprocess" / "dummy.parquet")}
+
+    monkeypatch.setattr("impacts.postprocessor._run_postprocess_steps", _fake_postprocess_steps)
+
+    result = postprocess_from_pipeline_manifest(
+        run_manifest_path=run_manifest_path,
+        output_root_override=output_root,
+    )
+
+    assert result["output_dir"] == str(output_root.resolve())
+    assert result["postprocess_manifest_path"] == str(output_root / "postprocess_manifest.yaml")
+    assert calls["settings_path"] == str(local_settings_path.resolve())
+    assert calls["run_manifest_path"] == str(run_manifest_path)
+    assert calls["output_root"] == str(output_root.resolve())
+    assert calls["allow_missing_comparison_inputs"] is True
+    assert calls["input_roots"] == ()
+
+
+def test_postprocess_input_root_localizes_manifest_source_paths(monkeypatch, tmp_path: Path):
+    import impacts.postprocessor as postprocessor_module
+
+    output_root = tmp_path / "copied_output"
+    input_root = tmp_path / "beam-data" / "sfbay"
+    stale_input_root = Path("/global/scratch/users/hmlaarabi/sources/PILATES/pilates/beam/production/sfbay")
+    passenger_vt = input_root / "vehicle-tech" / "vehicleTypes--atlas--2019-Baseline--EM.csv"
+    freight_vt = input_root / "vehicle-tech" / "vehicleTypes--frism--2018-Baseline--EM.csv"
+    metadata = input_root / "vehicle-tech" / "emissions" / "emissions_vehicle_categories.csv"
+    for path in (passenger_vt, freight_vt, metadata):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+
+    preprocess_manifest = {
+        "inputs": {
+            "passenger_vehicle_types_input": {
+                "staged_path": str(stale_input_root / "vehicle-tech" / passenger_vt.name),
+            },
+            "freight_vehicle_types_input": {
+                "staged_path": str(stale_input_root / "vehicle-tech" / freight_vt.name),
+            },
+            "vehicle_category_metadata_file_input": {
+                "staged_path": str(stale_input_root / "vehicle-tech" / "emissions" / metadata.name),
+            },
+        }
+    }
+
+    monkeypatch.setattr(
+        postprocessor_module,
+        "_load_context_for_resolution",
+        lambda *_args, **_kwargs: (tmp_path / "pipeline_manifest.yaml", {}, preprocess_manifest, preprocess_manifest["inputs"]),
+    )
+
+    passenger_resolved, freight_resolved = postprocessor_module._resolve_vehicle_types_paths(
+        tmp_path / "settings.yaml",
+        output_root=output_root,
+        input_roots=(input_root,),
+    )
+    metadata_resolved = postprocessor_module._resolve_vehicle_category_metadata_path(
+        tmp_path / "settings.yaml",
+        output_root=output_root,
+        input_roots=(input_root,),
+    )
+
+    assert passenger_resolved == passenger_vt.resolve()
+    assert freight_resolved == freight_vt.resolve()
+    assert metadata_resolved == metadata.resolve()
+
+
+def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp_path: Path):
+    import impacts.postprocessor as postprocessor_module
+    import impacts.pipeline.postprocess.step1_compare_fleet as step1_module
+    import impacts.pipeline.postprocess.step2_compare_annual_targets as step2_module
+    import impacts.pipeline.postprocess.step3_compare_emissions_inventory as step3_module
+
+    output_root = tmp_path / "impacts_output"
+    output_root.mkdir()
+    output_dirs: dict[str, Path] = {}
+
+    class _Settings:
+        class impacts:
+            local_output_folder = str(output_root)
+
+            class analysis:
+                sector_targets = [
+                    SimpleNamespace(
+                        source="mobile_onroad",
+                        sector="all",
+                        annual_pm25_short_tons=1.0,
+                        annual_nox_short_tons=None,
+                        annual_pm10_short_tons=None,
+                        annual_tog_short_tons=None,
+                        annual_rog_short_tons=None,
+                        annual_co_short_tons=None,
+                        annual_sox_short_tons=None,
+                    )
+                ]
+                inventory_file = "inventory.parquet"
+                inventory_label = "EMFAC"
+                inventory_targets = [
+                    SimpleNamespace(
+                        name="inventory",
+                        pollutants={
+                            "PM25": SimpleNamespace(
+                                columns=("PM25",),
+                                prefixes=(),
+                                exclude_columns=(),
+                                exclude_prefixes=(),
+                            )
+                        },
+                    )
+                ]
+
+        class shared:
+            class geography:
+                class fips:
+                    counties = []
+
+    def _fake_step(name: str):
+        def _run(*, output_dir: Path, **_kwargs):
+            output_dirs[name] = Path(output_dir)
+            return {f"{name}_output": str(Path(output_dir) / f"{name}.png")}
+
+        return _run
+
+    monkeypatch.setattr(postprocessor_module, "load_settings_from_yaml", lambda _: _Settings())
+    monkeypatch.setattr(postprocessor_module, "_resolve_modeled_emissions_path", lambda *_args, **_kwargs: output_root / "modeled.parquet")
+    monkeypatch.setattr(postprocessor_module, "_resolve_skims_emissions_path", lambda *_args, **_kwargs: output_root / "skims.parquet")
+    monkeypatch.setattr(postprocessor_module, "_resolve_vehicle_types_paths", lambda *_args, **_kwargs: (output_root / "passenger.csv", output_root / "freight.csv"))
+    monkeypatch.setattr(postprocessor_module, "_resolve_optional_population_assignment_paths", lambda *_args, **_kwargs: (None, None))
+    monkeypatch.setattr(postprocessor_module, "_resolve_inventory_emfacid_activity_path", lambda *_args, **_kwargs: output_root / "activity.parquet")
+    monkeypatch.setattr(postprocessor_module, "_resolve_vehicle_category_metadata_path", lambda *_args, **_kwargs: output_root / "metadata.csv")
+    monkeypatch.setattr(postprocessor_module, "_resolve_county_boundaries_path", lambda *_args, **_kwargs: output_root / "county.gpkg")
+    monkeypatch.setattr(postprocessor_module, "_resolve_inventory_target_path", lambda *_args, **_kwargs: output_root / "inventory.parquet")
+    monkeypatch.setattr(step1_module, "run", _fake_step("step1"))
+    monkeypatch.setattr(step2_module, "run", _fake_step("step2"))
+    monkeypatch.setattr(step3_module, "run", _fake_step("step3"))
+
+    outputs = postprocessor_module._run_postprocess_steps(
+        tmp_path / "settings.yaml",
+        output_root=output_root,
+    )
+
+    assert output_dirs == {
+        "step1": output_root / "postprocess" / "fleet",
+        "step2": output_root / "postprocess" / "annual_targets",
+        "step3": output_root / "postprocess" / "emissions_inventory",
+    }
+    analysis_subdir = Path("postprocess") / "analysis"
+    assert all(str(analysis_subdir) not in str(path) for path in output_dirs.values())
+    assert set(outputs) == {"fleet_step1_output", "annual_targets_step2_output", "inventory_step3_output"}
 
 
 def test_hpc_job_prints_successful_stage_completion():

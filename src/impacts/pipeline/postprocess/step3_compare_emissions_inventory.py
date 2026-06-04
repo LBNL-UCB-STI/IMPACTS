@@ -4,12 +4,24 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from . import _common  # configures matplotlib backend and MPLCONFIGDIR
-from ._common import _slugify
+import duckdb
+
+from ._common import (
+    PLOT_DPI,
+    _advance_progress,
+    _close_progress,
+    _duckdb_identifier,
+    _set_progress_task,
+    _slugify,
+    _step_progress,
+)  # configures matplotlib backend before pyplot
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from tqdm.contrib.logging import logging_redirect_tqdm
 
+from ...common import _duckdb_scan_expression
+from ...common import configure_duckdb_connection
 from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import normalize_county_fips
@@ -43,30 +55,61 @@ def _aggregate_modeled_emissions(
     *,
     county_lookup: pd.DataFrame,
 ) -> pd.DataFrame:
-    modeled = read_table(modeled_emissions_path)
-    required_columns = {"county_COUNTYFP", "vehicleTypeId", "process"}
-    missing = sorted(required_columns - set(modeled.columns))
-    if missing:
-        raise ValueError(
-            "County-intersected modeled emissions input must include county_COUNTYFP, vehicleTypeId, and process "
-            f"for postprocess step 3. Missing: {missing}"
+    scan = _duckdb_scan_expression(modeled_emissions_path)
+    con = duckdb.connect(database=":memory:")
+    try:
+        configure_duckdb_connection(
+            con,
+            working_dir=Path(modeled_emissions_path).parent,
+            show_progress=False,
+            profile="balanced",
         )
-    modeled["county_COUNTYFP"] = normalize_county_fips(modeled["county_COUNTYFP"])
-    modeled = modeled.loc[modeled["county_COUNTYFP"].notna()].copy()
-    available = {
-        pollutant: column
-        for pollutant, column in _MODELED_POLLUTANT_COLUMNS.items()
-        if column in modeled.columns
-    }
-    if not available:
-        raise ValueError(
-            "Modeled emissions input does not include any supported pollutant columns for postprocess step 3."
+        columns = {row[0] for row in con.execute(f"DESCRIBE SELECT * FROM {scan}").fetchall()}
+        required_columns = {"county_COUNTYFP", "vehicleTypeId", "process"}
+        missing = sorted(required_columns - columns)
+        if missing:
+            raise ValueError(
+                "County-intersected modeled emissions input must include county_COUNTYFP, vehicleTypeId, and process "
+                f"for postprocess step 3. Missing: {missing}"
+            )
+        available = {
+            pollutant: column
+            for pollutant, column in _MODELED_POLLUTANT_COLUMNS.items()
+            if column in columns
+        }
+        if not available:
+            raise ValueError(
+                "Modeled emissions input does not include any supported pollutant columns for postprocess step 3."
+            )
+
+        county_expr = (
+            "LPAD(NULLIF(regexp_extract("
+            "COALESCE(CAST(county_COUNTYFP AS VARCHAR), ''), '(\\d+)', 1), ''), 3, '0')"
         )
-    grouped = (
-        modeled.groupby("county_COUNTYFP", dropna=False)[list(available.values())]
-        .sum(numeric_only=True)
-        .reset_index()
-    )
+        aggregate_columns = ",\n                ".join(
+            "SUM(COALESCE(TRY_CAST("
+            f"{_duckdb_identifier(column)} AS DOUBLE), 0.0)) AS {_duckdb_identifier(column)}"
+            for column in available.values()
+        )
+        grouped = con.execute(
+            f"""
+            WITH prepared AS (
+                SELECT
+                    {county_expr} AS county_COUNTYFP,
+                    {", ".join(_duckdb_identifier(column) for column in available.values())}
+                FROM {scan}
+            )
+            SELECT
+                county_COUNTYFP,
+                {aggregate_columns}
+            FROM prepared
+            WHERE county_COUNTYFP IS NOT NULL
+            GROUP BY county_COUNTYFP
+            """
+        ).fetchdf()
+    finally:
+        con.close()
+
     grouped = grouped.merge(county_lookup, how="left", left_on="county_COUNTYFP", right_on="COUNTYFP")
     rows: list[pd.DataFrame] = []
     for pollutant, column in available.items():
@@ -222,7 +265,7 @@ def _plot_county_comparison(
         "BC": "bc",
     }.get(pollutant, pollutant.lower().replace(".", ""))
     output_path = output_dir / f"step3_{target_slug}_county_{pollutant_slug}_simulation_vs_emfac.png"
-    fig.savefig(output_path, dpi=150)
+    fig.savefig(output_path, dpi=PLOT_DPI)
     plt.close(fig)
     return str(output_path)
 
@@ -240,33 +283,55 @@ def run(
 ) -> dict[str, str]:
     log_step_banner("Postprocess Step 3", f"Compare Emissions Inventory ({inventory_label})", logger=logger)
     log_substep_banner("3.1", f"compare modeled emissions with {inventory_label} inventory", logger=logger)
-    county_lookup = _load_county_lookup(county_boundaries_path)
-    modeled_df = _aggregate_modeled_emissions(
-        modeled_emissions_path,
-        county_lookup=county_lookup,
-    )
-    inventory_df = _aggregate_inventory_emissions(
-        inventory_path,
-        pollutant_targets=pollutant_targets,
-    )
-    inventory_df["emfac_tons"] = pd.to_numeric(inventory_df["emfac_tons"], errors="coerce").fillna(0.0)
-    comparison = _build_comparison_table(
-        modeled_df=modeled_df,
-        inventory_df=inventory_df,
-        county_order=county_order,
-    )
-    target_slug = _slugify(target_name)
-    outputs = _write_comparison_table(comparison, output_dir=output_dir, target_slug=target_slug)
-    for pollutant in ("PM2.5", "NOx", "BC"):
-        plot_path = _plot_county_comparison(
-            comparison,
-            pollutant=pollutant,
-            inventory_label=inventory_label,
-            output_dir=output_dir,
-            target_slug=target_slug,
-        )
-        if plot_path:
-            outputs[f"{pollutant}_plot"] = plot_path
+    with logging_redirect_tqdm():
+        progress = _step_progress(6, "Postprocess Step 3")
+        try:
+            _set_progress_task(progress, "county lookup", step_label="Postprocess Step 3")
+            county_lookup = _load_county_lookup(county_boundaries_path)
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "modeled emissions", step_label="Postprocess Step 3")
+            modeled_df = _aggregate_modeled_emissions(
+                modeled_emissions_path,
+                county_lookup=county_lookup,
+            )
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "inventory emissions", step_label="Postprocess Step 3")
+            inventory_df = _aggregate_inventory_emissions(
+                inventory_path,
+                pollutant_targets=pollutant_targets,
+            )
+            inventory_df["emfac_tons"] = pd.to_numeric(inventory_df["emfac_tons"], errors="coerce").fillna(0.0)
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "comparison table", step_label="Postprocess Step 3")
+            comparison = _build_comparison_table(
+                modeled_df=modeled_df,
+                inventory_df=inventory_df,
+                county_order=county_order,
+            )
+            target_slug = _slugify(target_name)
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "write tables", step_label="Postprocess Step 3")
+            outputs = _write_comparison_table(comparison, output_dir=output_dir, target_slug=target_slug)
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "plots", step_label="Postprocess Step 3")
+            for pollutant in ("PM2.5", "NOx", "BC"):
+                plot_path = _plot_county_comparison(
+                    comparison,
+                    pollutant=pollutant,
+                    inventory_label=inventory_label,
+                    output_dir=output_dir,
+                    target_slug=target_slug,
+                )
+                if plot_path:
+                    outputs[f"{pollutant}_plot"] = plot_path
+            _advance_progress(progress)
+        finally:
+            _close_progress(progress)
     logger.info("Postprocess Step 3 complete")
     return outputs
 
@@ -287,13 +352,22 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
     from ...config.settings_builder import load_settings_from_yaml
 
     output_dir = Path(output_dir)
+    run_manifest_path = output_dir / "pipeline_manifest.yaml"
     settings_path = settings_path_from_output_dir(output_dir)
     settings = load_settings_from_yaml(settings_path)
     if not settings.impacts.analysis.inventory_targets:
         logger.info("No inventory targets configured, skipping Step 3.")
         return {}
-    modeled_path = _resolve_modeled_emissions_path(settings_path)
-    county_boundaries_path = _resolve_county_boundaries_path(settings_path)
+    modeled_path = _resolve_modeled_emissions_path(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_dir,
+    )
+    county_boundaries_path = _resolve_county_boundaries_path(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_dir,
+    )
     county_order: list[str] = []
     if settings.shared.geography.fips.counties:
         import geopandas as gpd

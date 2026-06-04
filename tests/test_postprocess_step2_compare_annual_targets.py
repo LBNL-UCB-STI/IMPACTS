@@ -15,6 +15,7 @@ def test_postprocess_step2_compares_modeled_totals_to_annual_targets(tmp_path: P
             "process": ["RUNEX", "RUNEX", "RUNEX", "PRDUST"],
             "tons_per_year_PM2_5_county_allocated": [10.0, 20.0, 30.0, 40.0],
             "tons_per_year_NOx_county_allocated": [100.0, 200.0, 300.0, 0.0],
+            "tons_per_year_ROG_county_allocated": [1.0, 2.0, 3.0, 0.0],
         }
     )
     modeled_path = tmp_path / "beam_emissions_by_county_process.parquet"
@@ -59,10 +60,10 @@ def test_postprocess_step2_compares_modeled_totals_to_annual_targets(tmp_path: P
         vehicle_category_metadata_file=str(mapping_path),
         output_dir=tmp_path / "postprocess",
         sector_targets=[
-            {"source": "mobile_onroad", "sector": "passenger_cars", "annual_pm25_short_tons": 11.0, "annual_nox_short_tons": 101.0},
-            {"source": "mobile_onroad", "sector": "light_duty_trucks", "annual_pm25_short_tons": 21.0, "annual_nox_short_tons": 201.0},
-            {"source": "mobile_onroad", "sector": "heavy_duty_trucks", "annual_pm25_short_tons": 31.0, "annual_nox_short_tons": 301.0},
-            {"source": "road_dust", "sector": "all", "annual_pm25_short_tons": 41.0, "annual_nox_short_tons": None},
+            {"source": "mobile_onroad", "sector": "passenger_cars", "annual_pm25_short_tons": 11.0, "annual_nox_short_tons": 101.0, "annual_rog_short_tons": 1.1},
+            {"source": "mobile_onroad", "sector": "light_duty_trucks", "annual_pm25_short_tons": 21.0, "annual_nox_short_tons": 201.0, "annual_rog_short_tons": 2.1},
+            {"source": "mobile_onroad", "sector": "heavy_duty_trucks", "annual_pm25_short_tons": 31.0, "annual_nox_short_tons": 301.0, "annual_rog_short_tons": 3.1},
+            {"source": "road_dust", "sector": "all", "annual_pm25_short_tons": 41.0, "annual_nox_short_tons": None, "annual_rog_short_tons": None},
         ],
     )
 
@@ -73,3 +74,6 @@ def test_postprocess_step2_compares_modeled_totals_to_annual_targets(tmp_path: P
     assert comparison.loc[("road_dust", "all", "PM2.5"), "simulation_tons"] == 40.0
     assert comparison.loc[("mobile_onroad", "heavy_duty_trucks", "NOx"), "simulation_tons"] == 300.0
     assert comparison.loc[("mobile_onroad", "passenger_cars", "NOx"), "target_tons"] == 101.0
+    assert comparison.loc[("mobile_onroad", "passenger_cars", "ROG"), "simulation_tons"] == 1.0
+    assert comparison.loc[("mobile_onroad", "heavy_duty_trucks", "ROG"), "simulation_tons"] == 3.0
+    assert comparison.loc[("mobile_onroad", "light_duty_trucks", "ROG"), "target_tons"] == 2.1

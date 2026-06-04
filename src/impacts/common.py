@@ -807,7 +807,7 @@ def resolve_duckdb_temp_directory(path: str | Path) -> Path:
 def _duckdb_scan_expression(path: str | Path) -> str:
     target = Path(path)
     if target.suffix.lower() != ".parquet":
-        raise ValueError(f"Skims input must be parquet for DuckDB aggregation: {target}")
+        raise ValueError(f"Input must be parquet for DuckDB aggregation: {target}")
     path_sql = str(target).replace("'", "''")
     return f"read_parquet('{path_sql}')"
 

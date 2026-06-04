@@ -5,13 +5,24 @@ from pathlib import Path
 import re
 from typing import Optional
 
-from . import _common  # configures matplotlib backend and MPLCONFIGDIR
-from ._common import _normalize_token
+import duckdb
+
+from ._common import (
+    PLOT_DPI,
+    _advance_progress,
+    _close_progress,
+    _normalize_token,
+    _set_progress_task,
+    _step_progress,
+)  # configures matplotlib backend before pyplot
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 import pandas as pd
+from tqdm.contrib.logging import logging_redirect_tqdm
 
+from ...common import _duckdb_scan_expression
+from ...common import configure_duckdb_connection
 from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import read_table
@@ -140,6 +151,55 @@ def _build_beam_population_breakdown_from_assignments(
     vehicle_lookup: pd.DataFrame,
     assignment_group: str,
 ) -> pd.DataFrame:
+    if Path(assignments_path).suffix.lower() == ".parquet":
+        lookup = (
+            vehicle_lookup.loc[
+                vehicle_lookup["assignment_group"].eq(assignment_group),
+                ["vehicleTypeId", "emfacId"],
+            ]
+            .assign(
+                vehicleTypeId=lambda df: df["vehicleTypeId"].map(_normalize_token),
+                emfacId=lambda df: df["emfacId"].map(_normalize_token),
+            )
+            .loc[lambda df: df["vehicleTypeId"].ne("") & df["emfacId"].ne("")]
+            .drop_duplicates(subset=["vehicleTypeId"], keep="first")
+            .reset_index(drop=True)
+        )
+        if lookup.empty:
+            return pd.DataFrame(columns=["assignment_group", "emfacId", "beam_population_weight"])
+
+        scan = _duckdb_scan_expression(assignments_path)
+        con = duckdb.connect(database=":memory:")
+        try:
+            configure_duckdb_connection(
+                con,
+                working_dir=Path(assignments_path).parent,
+                show_progress=False,
+                profile="balanced",
+            )
+            columns = {row[0] for row in con.execute(f"DESCRIBE SELECT * FROM {scan}").fetchall()}
+            if "vehicleTypeId" not in columns:
+                raise ValueError("Fleet comparison assignment inputs require vehicleTypeId. Missing: ['vehicleTypeId']")
+            con.register("vehicle_lookup", lookup)
+            result = con.execute(
+                f"""
+                SELECT
+                    ? AS assignment_group,
+                    lookup.emfacId,
+                    COUNT(*) AS beam_population_weight
+                FROM {scan} AS assignments
+                INNER JOIN vehicle_lookup AS lookup
+                    ON TRIM(CAST(assignments.vehicleTypeId AS VARCHAR)) = lookup.vehicleTypeId
+                WHERE TRIM(COALESCE(CAST(assignments.vehicleTypeId AS VARCHAR), '')) <> ''
+                GROUP BY lookup.emfacId
+                ORDER BY lookup.emfacId
+                """,
+                [assignment_group],
+            ).fetchdf()
+        finally:
+            con.close()
+        return result[["assignment_group", "emfacId", "beam_population_weight"]]
+
     assignments = read_table(assignments_path).copy()
     required = {"vehicleTypeId"}
     missing = sorted(required - set(assignments.columns))
@@ -201,28 +261,69 @@ def _build_beam_vmt_breakdown(
     skims_emissions_path: str,
     vehicle_lookup: pd.DataFrame,
 ) -> pd.DataFrame:
-    skims = read_table(skims_emissions_path).copy()
-    required = {"linkId", "vehicleTypeId", "totVMT"}
-    missing = sorted(required - set(skims.columns))
-    if missing:
-        raise ValueError(
-            "Fleet comparison requires prepared skims with linkId, vehicleTypeId, and totVMT. "
-            f"Missing: {missing}"
+    lookup = (
+        vehicle_lookup[["vehicleTypeId", "assignment_group", "emfacId"]]
+        .assign(
+            vehicleTypeId=lambda df: df["vehicleTypeId"].map(_normalize_token),
+            assignment_group=lambda df: df["assignment_group"].map(_normalize_token),
+            emfacId=lambda df: df["emfacId"].map(_normalize_token),
         )
-    prepared = skims[["linkId", "vehicleTypeId", "totVMT"]].copy()
-    prepared["vehicleTypeId"] = prepared["vehicleTypeId"].map(_normalize_token)
-    prepared["totVMT"] = pd.to_numeric(prepared["totVMT"], errors="coerce").fillna(0.0)
-    prepared = (
-        prepared.groupby(["linkId", "vehicleTypeId"], dropna=False)["totVMT"]
-        .max()
-        .reset_index()
+        .loc[lambda df: df["vehicleTypeId"].ne("") & df["emfacId"].ne("")]
+        .drop_duplicates(subset=["vehicleTypeId"], keep="first")
+        .reset_index(drop=True)
     )
-    prepared = prepared.merge(vehicle_lookup, how="inner", on="vehicleTypeId")
-    return (
-        prepared.groupby(["assignment_group", "emfacId"], dropna=False)["totVMT"]
-        .sum()
-        .reset_index(name="beam_vmt")
-    )
+    if lookup.empty:
+        return pd.DataFrame(columns=["assignment_group", "emfacId", "beam_vmt"])
+
+    scan = _duckdb_scan_expression(skims_emissions_path)
+    con = duckdb.connect(database=":memory:")
+    try:
+        configure_duckdb_connection(
+            con,
+            working_dir=Path(skims_emissions_path).parent,
+            show_progress=False,
+            profile="balanced",
+        )
+        columns = {row[0] for row in con.execute(f"DESCRIBE SELECT * FROM {scan}").fetchall()}
+        required = {"linkId", "vehicleTypeId", "totVMT"}
+        missing = sorted(required - columns)
+        if missing:
+            raise ValueError(
+                "Fleet comparison requires prepared skims with linkId, vehicleTypeId, and totVMT. "
+                f"Missing: {missing}"
+            )
+        con.register("vehicle_lookup", lookup)
+        result = con.execute(
+            f"""
+            WITH link_vehicle_vmt AS (
+                SELECT
+                    skims.linkId,
+                    lookup.vehicleTypeId,
+                    lookup.assignment_group,
+                    lookup.emfacId,
+                    MAX(COALESCE(TRY_CAST(skims.totVMT AS DOUBLE), 0.0)) AS link_vmt
+                FROM {scan} AS skims
+                INNER JOIN vehicle_lookup AS lookup
+                    ON TRIM(CAST(skims.vehicleTypeId AS VARCHAR)) = lookup.vehicleTypeId
+                WHERE TRIM(COALESCE(CAST(skims.vehicleTypeId AS VARCHAR), '')) <> ''
+                GROUP BY
+                    skims.linkId,
+                    lookup.vehicleTypeId,
+                    lookup.assignment_group,
+                    lookup.emfacId
+            )
+            SELECT
+                assignment_group,
+                emfacId,
+                SUM(link_vmt) AS beam_vmt
+            FROM link_vehicle_vmt
+            GROUP BY assignment_group, emfacId
+            ORDER BY assignment_group, emfacId
+            """
+        ).fetchdf()
+    finally:
+        con.close()
+    return result[["assignment_group", "emfacId", "beam_vmt"]]
 
 
 def _aggregate_emfac_activity_by_emfac_id(path: str, *, assignment_group: str) -> pd.DataFrame:
@@ -481,7 +582,7 @@ def _plot_class_model_year_combined(
         )
     output_path = output_dir / "step1_vmt_by_class_and_model_year.png"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=150)
+    fig.savefig(output_path, dpi=PLOT_DPI)
     plt.close(fig)
     return str(output_path)
 
@@ -537,7 +638,7 @@ def _plot_model_year_fuel_combined(
         )
     output_path = output_dir / "step1_vmt_by_model_year_and_fuel.png"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=150)
+    fig.savefig(output_path, dpi=PLOT_DPI)
     plt.close(fig)
     return str(output_path)
 
@@ -555,36 +656,61 @@ def run(
 ) -> dict[str, str]:
     log_step_banner("Postprocess Step 1", "Compare Fleet", logger=logger)
     log_substep_banner("1.1", "compare BEAM fleet against EMFAC by emfacId", logger=logger)
-    vehicle_lookup = _load_beam_vehicle_lookup(
-        passenger_vehicle_types_path=passenger_vehicle_types_path,
-        freight_vehicle_types_path=freight_vehicle_types_path,
-    )
-    beam_population_breakdown = _build_beam_population_breakdown_with_actual_assignments(
-        vehicle_lookup=vehicle_lookup,
-        passenger_vehicles_path=passenger_vehicles_path,
-        freight_carriers_path=freight_carriers_path,
-    )
-    beam_vmt_breakdown = _build_beam_vmt_breakdown(
-        skims_emissions_path=skims_emissions_path,
-        vehicle_lookup=vehicle_lookup,
-    )
-    comparison = _build_comparison_table(
-        beam_population_breakdown=beam_population_breakdown,
-        beam_vmt_breakdown=beam_vmt_breakdown,
-        emfac_passenger_activity_path=emfac_passenger_activity_path,
-        emfac_freight_activity_path=emfac_freight_activity_path,
-    )
-    outputs = _write_tables(comparison, output_dir=output_dir)
-    metadata = _load_vehicle_metadata_lookup(
-        passenger_vehicle_types_path=passenger_vehicle_types_path,
-        freight_vehicle_types_path=freight_vehicle_types_path,
-    )
-    plot_path = _plot_class_model_year_combined(comparison, metadata=metadata, output_dir=output_dir)
-    if plot_path:
-        outputs["vmt_class_model_year_plot"] = plot_path
-    plot_path = _plot_model_year_fuel_combined(comparison, metadata=metadata, output_dir=output_dir)
-    if plot_path:
-        outputs["vmt_model_year_fuel_plot"] = plot_path
+    with logging_redirect_tqdm():
+        progress = _step_progress(7, "Postprocess Step 1")
+        try:
+            _set_progress_task(progress, "vehicle lookup", step_label="Postprocess Step 1")
+            vehicle_lookup = _load_beam_vehicle_lookup(
+                passenger_vehicle_types_path=passenger_vehicle_types_path,
+                freight_vehicle_types_path=freight_vehicle_types_path,
+            )
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "BEAM assignments", step_label="Postprocess Step 1")
+            beam_population_breakdown = _build_beam_population_breakdown_with_actual_assignments(
+                vehicle_lookup=vehicle_lookup,
+                passenger_vehicles_path=passenger_vehicles_path,
+                freight_carriers_path=freight_carriers_path,
+            )
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "BEAM skims VMT", step_label="Postprocess Step 1")
+            beam_vmt_breakdown = _build_beam_vmt_breakdown(
+                skims_emissions_path=skims_emissions_path,
+                vehicle_lookup=vehicle_lookup,
+            )
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "comparison table", step_label="Postprocess Step 1")
+            comparison = _build_comparison_table(
+                beam_population_breakdown=beam_population_breakdown,
+                beam_vmt_breakdown=beam_vmt_breakdown,
+                emfac_passenger_activity_path=emfac_passenger_activity_path,
+                emfac_freight_activity_path=emfac_freight_activity_path,
+            )
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "write tables", step_label="Postprocess Step 1")
+            outputs = _write_tables(comparison, output_dir=output_dir)
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "vehicle metadata", step_label="Postprocess Step 1")
+            metadata = _load_vehicle_metadata_lookup(
+                passenger_vehicle_types_path=passenger_vehicle_types_path,
+                freight_vehicle_types_path=freight_vehicle_types_path,
+            )
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "plots", step_label="Postprocess Step 1")
+            plot_path = _plot_class_model_year_combined(comparison, metadata=metadata, output_dir=output_dir)
+            if plot_path:
+                outputs["vmt_class_model_year_plot"] = plot_path
+            plot_path = _plot_model_year_fuel_combined(comparison, metadata=metadata, output_dir=output_dir)
+            if plot_path:
+                outputs["vmt_model_year_fuel_plot"] = plot_path
+            _advance_progress(progress)
+        finally:
+            _close_progress(progress)
     logger.info("Postprocess Step 1 complete")
     return outputs
 
@@ -601,15 +727,34 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
     from ._common import settings_path_from_output_dir
 
     output_dir = Path(output_dir)
+    run_manifest_path = output_dir / "pipeline_manifest.yaml"
     settings_path = settings_path_from_output_dir(output_dir)
-    skims_path = _resolve_skims_emissions_path(settings_path)
-    passenger_vt, freight_vt = _resolve_vehicle_types_paths(settings_path)
-    passenger_pop, freight_pop = _resolve_optional_population_assignment_paths(settings_path)
+    skims_path = _resolve_skims_emissions_path(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_dir,
+    )
+    passenger_vt, freight_vt = _resolve_vehicle_types_paths(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_dir,
+    )
+    passenger_pop, freight_pop = _resolve_optional_population_assignment_paths(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_dir,
+    )
     passenger_activity = _resolve_inventory_emfacid_activity_path(
-        settings_path, manifest_key="passenger_inventory_emfacid_file"
+        settings_path,
+        manifest_key="passenger_inventory_emfacid_file",
+        run_manifest_path=run_manifest_path,
+        output_root=output_dir,
     )
     freight_activity = _resolve_inventory_emfacid_activity_path(
-        settings_path, manifest_key="freight_inventory_emfacid_file"
+        settings_path,
+        manifest_key="freight_inventory_emfacid_file",
+        run_manifest_path=run_manifest_path,
+        output_root=output_dir,
     )
     return run(
         skims_emissions_path=str(skims_path),

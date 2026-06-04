@@ -199,15 +199,25 @@ def build_parser() -> argparse.ArgumentParser:
     postsim = subparsers.add_parser("postsim", help="Run the post-simulation group from settings")
     postsim.add_argument("--config", required=True)
 
-    postprocess = subparsers.add_parser("postprocess", help="Publish the canonical impacts exposure table artifact")
+    postprocess = subparsers.add_parser("postprocess", help="Run postprocess comparisons and map plots")
     postprocess_group = postprocess.add_mutually_exclusive_group(required=True)
     postprocess_group.add_argument("--run-manifest", help="Path to an existing pipeline_manifest.yaml.")
     postprocess_group.add_argument("--config", help="Path to a settings YAML (re-runs the full pipeline first).")
     postprocess_group.add_argument(
-        "--output-dir",
+        "--impact-output-dir",
         help="Path to a completed pipeline output folder containing pipeline_manifest.yaml.",
     )
     postprocess.add_argument("--postprocess-manifest")
+    postprocess.add_argument(
+        "--impact-input-dir",
+        action="append",
+        default=None,
+        help=(
+            "Additional local IMPACTS input directory used to resolve source paths recorded in manifests. "
+            "For copied PILATES/BEAM outputs, pass the local production region folder, e.g. "
+            "/path/to/beam-data/sfbay. Can be supplied more than once."
+        ),
+    )
 
     pipeline = subparsers.add_parser("pipeline", help="Run the maintained stage sequence from settings, honoring impacts.pipeline flags")
     pipeline.add_argument("--config", required=True)
@@ -251,10 +261,12 @@ def build_parser() -> argparse.ArgumentParser:
         "build_nox_to_no2",
         help="Build the workflow-ready full-domain NOx-to-NO2 matrix artifact.",
     )
-    build_nox_to_no2.add_argument("--input-dir", required=True)
-    build_nox_to_no2.add_argument("--output-dir", required=True)
-    build_nox_to_no2.add_argument("--isrm-zarr")
-    build_nox_to_no2.add_argument("--output-name")
+    build_nox_to_no2.add_argument("--output-file", required=True)
+    build_nox_to_no2.add_argument("--cmaq-ratio-table")
+    build_nox_to_no2.add_argument("--grid-polygon")
+    build_nox_to_no2.add_argument("--geopoints-file")
+    build_nox_to_no2.add_argument("--regional-matrix")
+    build_nox_to_no2.add_argument("--isrm-zarr", required=True)
 
     aggregate_emfac_activity = subparsers.add_parser(
         "aggregate_emfac_activity",
@@ -367,19 +379,23 @@ def main(argv: list[str] | None = None) -> int:
             postprocess_from_pipeline_manifest(
                 run_manifest_path=args.run_manifest,
                 manifest_path=args.postprocess_manifest,
+                input_roots=args.impact_input_dir,
             )
         elif args.config:
             postprocess_from_settings(
                 settings_path=args.config,
                 manifest_path=args.postprocess_manifest,
+                input_roots=args.impact_input_dir,
             )
         else:
-            pipeline_manifest = Path(args.output_dir) / "pipeline_manifest.yaml"
+            pipeline_manifest = Path(args.impact_output_dir) / "pipeline_manifest.yaml"
             if not pipeline_manifest.exists():
-                parser.error(f"pipeline_manifest.yaml not found in {args.output_dir}")
+                parser.error(f"pipeline_manifest.yaml not found in {args.impact_output_dir}")
             postprocess_from_pipeline_manifest(
                 run_manifest_path=pipeline_manifest,
                 manifest_path=args.postprocess_manifest,
+                output_root_override=args.impact_output_dir,
+                input_roots=args.impact_input_dir,
             )
         return 0
 
@@ -442,18 +458,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "build_nox_to_no2":
-        from impacts.tools.inmap.build_complete_nox_to_no2_matrix import main as build_nox_to_no2_main
+        from impacts.tools.inmap.build_complete_nox_to_no2_matrix import build_complete_matrix
 
-        build_nox_to_no2_main(
-            [
-                "--input-dir",
-                args.input_dir,
-                "--output-dir",
-                args.output_dir,
-                *(["--isrm-zarr", args.isrm_zarr] if args.isrm_zarr else []),
-                *(["--output-name", args.output_name] if args.output_name else []),
-            ]
+        output_path = build_complete_matrix(
+            output_file=args.output_file,
+            isrm_zarr=args.isrm_zarr,
+            ratio_table_path=args.cmaq_ratio_table,
+            regional_matrix_path=args.regional_matrix,
+            grid_path=args.grid_polygon,
+            geopoints_file=args.geopoints_file,
         )
+        print(output_path)
         return 0
 
     if args.command == "aggregate_emfac_activity":
@@ -474,7 +489,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     parser.error(f"Unknown command: {args.command}")
-    return 2
 
 
 if __name__ == "__main__":

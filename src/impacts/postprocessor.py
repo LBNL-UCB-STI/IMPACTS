@@ -19,13 +19,106 @@ from .manifest.schema import PreprocessManifest
 
 logger = logging.getLogger(__name__)
 
+_OUTPUT_PATH_MARKERS = (
+    "activities",
+    "preprocess",
+    "emissions",
+    "concentrations",
+    "exposure",
+    "postprocess",
+)
+
 
 def _humanize_target_name(name: str) -> str:
     return str(name).strip().replace("_", " ").replace("-", " ").title()
 
 
-def _resolve_settings_path(run_manifest_path: str | Path) -> Path:
+def _localize_output_path(raw: str | Path, output_root: Path | None) -> Path:
+    candidate = Path(str(raw)).expanduser()
+    if candidate.exists() or output_root is None:
+        return candidate.resolve()
+
+    output_root = Path(output_root).resolve()
+    direct_candidate = output_root / candidate.name
+    if direct_candidate.exists():
+        return direct_candidate.resolve()
+
+    parts = candidate.parts
+    for marker in _OUTPUT_PATH_MARKERS:
+        if marker not in parts:
+            continue
+        marker_index = parts.index(marker)
+        localized = output_root.joinpath(*parts[marker_index:])
+        if localized.exists():
+            return localized.resolve()
+
+    return candidate.resolve()
+
+
+def _normalize_input_roots(input_roots: tuple[str | Path, ...] | list[str | Path] | None) -> tuple[Path, ...]:
+    return tuple(Path(root).expanduser().resolve() for root in (input_roots or ()))
+
+
+def _localize_input_path(raw: str | Path, input_roots: tuple[Path, ...]) -> Path:
+    candidate = Path(str(raw)).expanduser()
+    if candidate.exists() or not input_roots:
+        return candidate.resolve()
+
+    parts = candidate.parts
+    for input_root in input_roots:
+        for index, part in enumerate(parts):
+            if part == input_root.name:
+                localized = input_root.joinpath(*parts[index + 1:])
+                if localized.exists():
+                    return localized.resolve()
+
+        for marker in ("vehicle-tech", "urbansim", "freight", "r5"):
+            if marker not in parts:
+                continue
+            localized = input_root.joinpath(*parts[parts.index(marker):])
+            if localized.exists():
+                return localized.resolve()
+
+    return candidate.resolve()
+
+
+def _localize_path(
+    raw: str | Path,
+    *,
+    output_root: Path | None = None,
+    input_roots: tuple[Path, ...] = (),
+) -> Path:
+    candidate = _localize_output_path(raw, output_root)
+    if candidate.exists():
+        return candidate
+    return _localize_input_path(raw, input_roots)
+
+
+def _localized_pipeline_manifest(
+    run_manifest_path: str | Path,
+    *,
+    output_root: Path | None = None,
+) -> dict[str, Any]:
     run_manifest = PipelineManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
+    if output_root is None:
+        return run_manifest
+
+    output_root = Path(output_root).resolve()
+    run_manifest["output_dir"] = str(output_root)
+    if run_manifest.get("preprocess_manifest_path"):
+        run_manifest["preprocess_manifest_path"] = str(
+            _localize_output_path(run_manifest["preprocess_manifest_path"], output_root)
+        )
+    outputs = run_manifest.get("outputs", {}) or {}
+    run_manifest["outputs"] = {
+        key: str(_localize_output_path(value, output_root)) if value else value
+        for key, value in outputs.items()
+    }
+    return run_manifest
+
+
+def _resolve_settings_path(run_manifest_path: str | Path, *, output_root: Path | None = None) -> Path:
+    run_manifest = _localized_pipeline_manifest(run_manifest_path, output_root=output_root)
     preprocess_manifest_path = run_manifest.get("preprocess_manifest_path")
     if not preprocess_manifest_path:
         raise ValueError("Postprocess requires preprocess_manifest_path in pipeline manifest.")
@@ -33,10 +126,40 @@ def _resolve_settings_path(run_manifest_path: str | Path) -> Path:
     settings_source = preprocess_manifest.get("settings_source")
     if not settings_source:
         raise ValueError("Postprocess requires settings_source in preprocess manifest.")
-    return Path(settings_source).resolve()
+    if output_root is None:
+        return Path(settings_source).resolve()
+
+    settings_path = _localize_output_path(settings_source, output_root)
+    if settings_path.exists():
+        return settings_path
+
+    inputs = preprocess_manifest.get("inputs", {}) or {}
+    settings_entry = inputs.get("settings", {}) or {}
+    for field in ("staged_path", "source_path", "path"):
+        raw = settings_entry.get(field)
+        if not raw:
+            continue
+        candidate = _localize_output_path(raw, output_root)
+        if candidate.exists():
+            return candidate
+
+    local_settings_path = Path(output_root) / "settings.yaml"
+    if local_settings_path.exists():
+        return local_settings_path.resolve()
+    return settings_path
 
 
-def _resolve_pipeline_manifest_path(settings_path: str | Path) -> Path:
+def _resolve_pipeline_manifest_path(
+    settings_path: str | Path,
+    *,
+    run_manifest_path: str | Path | None = None,
+) -> Path:
+    if run_manifest_path is not None:
+        candidate = Path(run_manifest_path).resolve()
+        if candidate.exists():
+            return candidate
+        raise FileNotFoundError(f"Postprocess run manifest was not found: {candidate}")
+
     candidate = (
         Path(resolve_path(load_settings_from_yaml(settings_path).impacts.local_output_folder, settings_path)).resolve()
         / "pipeline_manifest.yaml"
@@ -49,14 +172,28 @@ def _resolve_pipeline_manifest_path(settings_path: str | Path) -> Path:
     return candidate
 
 
-def _load_pipeline_manifest(settings_path: str | Path) -> tuple[Path, dict[str, Any]]:
-    run_manifest_path = _resolve_pipeline_manifest_path(settings_path)
-    run_manifest = PipelineManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
+def _load_pipeline_manifest(
+    settings_path: str | Path,
+    *,
+    run_manifest_path: str | Path | None = None,
+    output_root: Path | None = None,
+) -> tuple[Path, dict[str, Any]]:
+    run_manifest_path = _resolve_pipeline_manifest_path(settings_path, run_manifest_path=run_manifest_path)
+    run_manifest = _localized_pipeline_manifest(run_manifest_path, output_root=output_root)
     return run_manifest_path, run_manifest
 
 
-def _load_context(settings_path: str | Path) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
-    run_manifest_path, run_manifest = _load_pipeline_manifest(settings_path)
+def _load_context(
+    settings_path: str | Path,
+    *,
+    run_manifest_path: str | Path | None = None,
+    output_root: Path | None = None,
+) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    run_manifest_path, run_manifest = _load_pipeline_manifest(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
+    )
     preprocess_manifest_path = run_manifest.get("preprocess_manifest_path")
     if not preprocess_manifest_path:
         raise ValueError("Postprocess requires preprocess_manifest_path in pipeline manifest.")
@@ -65,12 +202,50 @@ def _load_context(settings_path: str | Path) -> tuple[Path, dict[str, Any], dict
     return run_manifest_path, run_manifest, preprocess_manifest, inputs
 
 
-def _resolve_modeled_emissions_path(settings_path: str | Path) -> Path:
-    _, run_manifest = _load_pipeline_manifest(settings_path)
+def _load_context_for_resolution(
+    settings_path: str | Path,
+    *,
+    run_manifest_path: str | Path | None = None,
+    output_root: Path | None = None,
+) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    if run_manifest_path is None and output_root is None:
+        return _load_context(settings_path)
+    return _load_context(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
+    )
+
+
+def _resolve_input_path(
+    inputs: dict[str, Any],
+    *,
+    key: str,
+    output_root: Path | None = None,
+    input_roots: tuple[Path, ...] = (),
+) -> Path:
+    return _localize_path(
+        resolve_required_manifest_input(inputs, key=key),
+        output_root=output_root,
+        input_roots=input_roots,
+    )
+
+
+def _resolve_modeled_emissions_path(
+    settings_path: str | Path,
+    *,
+    run_manifest_path: str | Path | None = None,
+    output_root: Path | None = None,
+) -> Path:
+    _, run_manifest = _load_pipeline_manifest(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
+    )
     candidate_raw = run_manifest.get("outputs", {}).get("beam_emissions_by_county_process")
     if not candidate_raw:
         raise ValueError("Postprocess requires beam_emissions_by_county_process in run_manifest.outputs.")
-    candidate = Path(candidate_raw).resolve()
+    candidate = _localize_output_path(candidate_raw, output_root)
     if not candidate.exists():
         raise FileNotFoundError(
             f"Postprocess requires county-intersected workflow emissions outputs. Expected {candidate}."
@@ -78,12 +253,21 @@ def _resolve_modeled_emissions_path(settings_path: str | Path) -> Path:
     return candidate
 
 
-def _resolve_skims_emissions_path(settings_path: str | Path) -> Path:
-    _, run_manifest = _load_pipeline_manifest(settings_path)
+def _resolve_skims_emissions_path(
+    settings_path: str | Path,
+    *,
+    run_manifest_path: str | Path | None = None,
+    output_root: Path | None = None,
+) -> Path:
+    _, run_manifest = _load_pipeline_manifest(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
+    )
     candidate_raw = run_manifest.get("outputs", {}).get("skims_emissions")
     if not candidate_raw:
         raise ValueError("Postprocess requires skims_emissions in run_manifest.outputs.")
-    candidate = Path(candidate_raw).resolve()
+    candidate = _localize_output_path(candidate_raw, output_root)
     if not candidate.exists():
         raise FileNotFoundError(
             f"Postprocess requires prepared skims output from the workflow run manifest. Expected {candidate}."
@@ -91,9 +275,24 @@ def _resolve_skims_emissions_path(settings_path: str | Path) -> Path:
     return candidate
 
 
-def _resolve_county_boundaries_path(settings_path: str | Path) -> Path:
-    _, _, _, inputs = _load_context(settings_path)
-    candidate = Path(resolve_required_manifest_input(inputs, key="county_boundaries")).resolve()
+def _resolve_county_boundaries_path(
+    settings_path: str | Path,
+    *,
+    run_manifest_path: str | Path | None = None,
+    output_root: Path | None = None,
+    input_roots: tuple[Path, ...] = (),
+) -> Path:
+    _, _, _, inputs = _load_context_for_resolution(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
+    )
+    candidate = _resolve_input_path(
+        inputs,
+        key="county_boundaries",
+        output_root=output_root,
+        input_roots=input_roots,
+    )
     if not candidate.exists():
         raise FileNotFoundError(
             f"Postprocess requires staged county boundaries from preprocess. Expected {candidate}."
@@ -101,10 +300,30 @@ def _resolve_county_boundaries_path(settings_path: str | Path) -> Path:
     return candidate
 
 
-def _resolve_vehicle_types_paths(settings_path: str | Path) -> tuple[Path, Path]:
-    _, _, _, inputs = _load_context(settings_path)
-    passenger_candidate = Path(resolve_required_manifest_input(inputs, key="passenger_vehicle_types_input")).resolve()
-    freight_candidate = Path(resolve_required_manifest_input(inputs, key="freight_vehicle_types_input")).resolve()
+def _resolve_vehicle_types_paths(
+    settings_path: str | Path,
+    *,
+    run_manifest_path: str | Path | None = None,
+    output_root: Path | None = None,
+    input_roots: tuple[Path, ...] = (),
+) -> tuple[Path, Path]:
+    _, _, _, inputs = _load_context_for_resolution(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
+    )
+    passenger_candidate = _resolve_input_path(
+        inputs,
+        key="passenger_vehicle_types_input",
+        output_root=output_root,
+        input_roots=input_roots,
+    )
+    freight_candidate = _resolve_input_path(
+        inputs,
+        key="freight_vehicle_types_input",
+        output_root=output_root,
+        input_roots=input_roots,
+    )
     if not passenger_candidate.exists():
         raise FileNotFoundError(
             f"Postprocess requires staged passenger vehicle types from preprocess. Expected {passenger_candidate}."
@@ -118,8 +337,17 @@ def _resolve_vehicle_types_paths(settings_path: str | Path) -> tuple[Path, Path]
 
 def _resolve_optional_population_assignment_paths(
     settings_path: str | Path,
+    *,
+    run_manifest_path: str | Path | None = None,
+    output_root: Path | None = None,
+    input_roots: tuple[Path, ...] = (),
 ) -> tuple[Path | None, Path | None]:
-    passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_vehicle_types_paths(settings_path)
+    passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_vehicle_types_paths(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
+        input_roots=input_roots,
+    )
     passenger_candidates = list(
         passenger_vehicle_types_path.parents[1].glob("urbansim/**/vehicles--*--EM.parquet")
     )
@@ -131,9 +359,19 @@ def _resolve_optional_population_assignment_paths(
     return passenger_vehicles_path, freight_carriers_path
 
 
-def _resolve_inventory_target_path(settings_path: str | Path, raw: str) -> Path:
+def _resolve_inventory_target_path(
+    settings_path: str | Path,
+    raw: str,
+    *,
+    output_root: Path | None = None,
+    input_roots: tuple[Path, ...] = (),
+) -> Path:
     raw_text = str(raw).strip()
-    candidate = Path(resolve_path(raw_text, settings_path) or raw_text).resolve()
+    candidate = _localize_path(
+        resolve_path(raw_text, settings_path) or raw_text,
+        output_root=output_root,
+        input_roots=input_roots,
+    )
     if candidate.exists():
         return candidate
     raise FileNotFoundError(
@@ -145,9 +383,21 @@ def _resolve_inventory_emfacid_activity_path(
     settings_path: str | Path,
     *,
     manifest_key: str,
+    run_manifest_path: str | Path | None = None,
+    output_root: Path | None = None,
+    input_roots: tuple[Path, ...] = (),
 ) -> Path:
-    _, _, _, inputs = _load_context(settings_path)
-    candidate = Path(resolve_required_manifest_input(inputs, key=manifest_key)).resolve()
+    _, _, _, inputs = _load_context_for_resolution(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
+    )
+    candidate = _resolve_input_path(
+        inputs,
+        key=manifest_key,
+        output_root=output_root,
+        input_roots=input_roots,
+    )
     if not candidate.exists():
         raise FileNotFoundError(
             f"Postprocess step 1 requires the EMFAC activity-by-emfacId file registered as "
@@ -157,10 +407,25 @@ def _resolve_inventory_emfacid_activity_path(
     return candidate
 
 
-def _resolve_vehicle_category_metadata_path(settings_path: str | Path) -> Path:
-    _, _, _, inputs = _load_context(settings_path)
+def _resolve_vehicle_category_metadata_path(
+    settings_path: str | Path,
+    *,
+    run_manifest_path: str | Path | None = None,
+    output_root: Path | None = None,
+    input_roots: tuple[Path, ...] = (),
+) -> Path:
+    _, _, _, inputs = _load_context_for_resolution(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
+    )
     try:
-        resolved = Path(resolve_required_manifest_input(inputs, key="vehicle_category_metadata_file_input")).resolve()
+        resolved = _resolve_input_path(
+            inputs,
+            key="vehicle_category_metadata_file_input",
+            output_root=output_root,
+            input_roots=input_roots,
+        )
         if resolved.exists():
             return resolved
     except ValueError:
@@ -173,10 +438,19 @@ def _resolve_vehicle_category_metadata_path(settings_path: str | Path) -> Path:
     return _resolve_inventory_target_path(
         settings_path,
         settings.impacts.emissions.vehicle_category_metadata_file,
+        output_root=output_root,
+        input_roots=input_roots,
     )
 
 
-def _run_postprocess_steps(settings_path: str | Path) -> dict[str, str]:
+def _run_postprocess_steps(
+    settings_path: str | Path,
+    *,
+    run_manifest_path: str | Path | None = None,
+    output_root: Path | None = None,
+    allow_missing_comparison_inputs: bool = False,
+    input_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
+) -> dict[str, str]:
     from .pipeline.postprocess.step1_compare_fleet import run as run_step1
     from .pipeline.postprocess.step2_compare_annual_targets import run as run_step2
     from .pipeline.postprocess.step3_compare_emissions_inventory import run as run_step3
@@ -184,59 +458,118 @@ def _run_postprocess_steps(settings_path: str | Path) -> dict[str, str]:
     from .pipeline.postprocess.step5_plot_exposure import run as run_step5
 
     settings = load_settings_from_yaml(settings_path)
-    output_root = Path(resolve_path(settings.impacts.local_output_folder, settings_path)).resolve()
+    if output_root is None:
+        output_root = Path(resolve_path(settings.impacts.local_output_folder, settings_path)).resolve()
+    else:
+        output_root = Path(output_root).resolve()
+    input_roots = _normalize_input_roots(input_roots)
     output_dir = output_root / "postprocess"
-    modeled_emissions_path = _resolve_modeled_emissions_path(settings_path)
-    skims_emissions_path = _resolve_skims_emissions_path(settings_path)
+    modeled_emissions_path = _resolve_modeled_emissions_path(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
+    )
+    skims_emissions_path = _resolve_skims_emissions_path(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
+    )
     outputs: dict[str, str] = {}
-    passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_vehicle_types_paths(settings_path)
-    passenger_vehicles_path, freight_carriers_path = _resolve_optional_population_assignment_paths(settings_path)
-    passenger_activity_path = _resolve_inventory_emfacid_activity_path(
-        settings_path,
-        manifest_key="passenger_inventory_emfacid_file",
-    )
-    freight_activity_path = _resolve_inventory_emfacid_activity_path(
-        settings_path,
-        manifest_key="freight_inventory_emfacid_file",
-    )
-    fleet_outputs = run_step1(
-        skims_emissions_path=str(skims_emissions_path),
-        passenger_vehicle_types_path=str(passenger_vehicle_types_path),
-        freight_vehicle_types_path=str(freight_vehicle_types_path),
-        emfac_passenger_activity_path=str(passenger_activity_path),
-        emfac_freight_activity_path=str(freight_activity_path),
-        output_dir=output_dir / "fleet",
-        passenger_vehicles_path=str(passenger_vehicles_path) if passenger_vehicles_path else None,
-        freight_carriers_path=str(freight_carriers_path) if freight_carriers_path else None,
-    )
-    for key, value in fleet_outputs.items():
-        outputs[f"fleet_{key}"] = value
-    if settings.impacts.analysis.sector_targets:
-        target_outputs = run_step2(
-            modeled_emissions_path=str(modeled_emissions_path),
+    try:
+        passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_vehicle_types_paths(
+            settings_path,
+            run_manifest_path=run_manifest_path,
+            output_root=output_root,
+            input_roots=input_roots,
+        )
+        passenger_vehicles_path, freight_carriers_path = _resolve_optional_population_assignment_paths(
+            settings_path,
+            run_manifest_path=run_manifest_path,
+            output_root=output_root,
+            input_roots=input_roots,
+        )
+        passenger_activity_path = _resolve_inventory_emfacid_activity_path(
+            settings_path,
+            manifest_key="passenger_inventory_emfacid_file",
+            run_manifest_path=run_manifest_path,
+            output_root=output_root,
+            input_roots=input_roots,
+        )
+        freight_activity_path = _resolve_inventory_emfacid_activity_path(
+            settings_path,
+            manifest_key="freight_inventory_emfacid_file",
+            run_manifest_path=run_manifest_path,
+            output_root=output_root,
+            input_roots=input_roots,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        if not allow_missing_comparison_inputs:
+            raise
+        logger.warning(
+            "Skipping Steps 1-2: comparison source inputs are not available from this output directory: %s",
+            exc,
+        )
+    else:
+        fleet_outputs = run_step1(
+            skims_emissions_path=str(skims_emissions_path),
             passenger_vehicle_types_path=str(passenger_vehicle_types_path),
             freight_vehicle_types_path=str(freight_vehicle_types_path),
-            vehicle_category_metadata_file=str(_resolve_vehicle_category_metadata_path(settings_path)),
-            output_dir=output_dir / "annual_targets",
-            sector_targets=[
-                {
-                    "source": target.source,
-                    "sector": target.sector,
-                    "annual_pm25_short_tons": target.annual_pm25_short_tons,
-                    "annual_nox_short_tons": target.annual_nox_short_tons,
-                    "annual_pm10_short_tons": target.annual_pm10_short_tons,
-                    "annual_tog_short_tons": target.annual_tog_short_tons,
-                    "annual_rog_short_tons": target.annual_rog_short_tons,
-                    "annual_co_short_tons": target.annual_co_short_tons,
-                    "annual_sox_short_tons": target.annual_sox_short_tons,
-                }
-                for target in settings.impacts.analysis.sector_targets
-            ],
+            emfac_passenger_activity_path=str(passenger_activity_path),
+            emfac_freight_activity_path=str(freight_activity_path),
+            output_dir=output_dir / "fleet",
+            passenger_vehicles_path=str(passenger_vehicles_path) if passenger_vehicles_path else None,
+            freight_carriers_path=str(freight_carriers_path) if freight_carriers_path else None,
         )
-        for key, value in target_outputs.items():
-            outputs[f"annual_targets_{key}"] = value
+        for key, value in fleet_outputs.items():
+            outputs[f"fleet_{key}"] = value
+        if settings.impacts.analysis.sector_targets:
+            try:
+                vehicle_category_metadata_path = _resolve_vehicle_category_metadata_path(
+                    settings_path,
+                    run_manifest_path=run_manifest_path,
+                    output_root=output_root,
+                    input_roots=input_roots,
+                )
+            except (FileNotFoundError, ValueError) as exc:
+                if not allow_missing_comparison_inputs:
+                    raise
+                logger.warning(
+                    "Skipping Step 2: annual-target source metadata is not available from this output directory: %s",
+                    exc,
+                )
+            else:
+                target_outputs = run_step2(
+                    modeled_emissions_path=str(modeled_emissions_path),
+                    passenger_vehicle_types_path=str(passenger_vehicle_types_path),
+                    freight_vehicle_types_path=str(freight_vehicle_types_path),
+                    vehicle_category_metadata_file=str(vehicle_category_metadata_path),
+                    output_dir=output_dir / "annual_targets",
+                    sector_targets=[
+                        {
+                            "source": target.source,
+                            "sector": target.sector,
+                            "annual_pm25_short_tons": target.annual_pm25_short_tons,
+                            "annual_nox_short_tons": target.annual_nox_short_tons,
+                            "annual_pm10_short_tons": target.annual_pm10_short_tons,
+                            "annual_tog_short_tons": target.annual_tog_short_tons,
+                            "annual_rog_short_tons": target.annual_rog_short_tons,
+                            "annual_co_short_tons": target.annual_co_short_tons,
+                            "annual_sox_short_tons": target.annual_sox_short_tons,
+                        }
+                        for target in settings.impacts.analysis.sector_targets
+                    ],
+                )
+                for key, value in target_outputs.items():
+                    outputs[f"annual_targets_{key}"] = value
+        else:
+            logger.info("Skipping Step 2: no annual sector targets configured.")
     if settings.impacts.analysis.inventory_targets:
-        county_boundaries_path = _resolve_county_boundaries_path(settings_path)
+        county_boundaries_path = _resolve_county_boundaries_path(
+            settings_path,
+            run_manifest_path=run_manifest_path,
+            output_root=output_root,
+            input_roots=input_roots,
+        )
         county_order: list[str] = []
         if settings.shared.geography.fips.counties:
             import geopandas as gpd
@@ -251,7 +584,12 @@ def _run_postprocess_steps(settings_path: str | Path) -> dict[str, str]:
                 .astype(str)
                 .tolist()
             )
-        inventory_path = _resolve_inventory_target_path(settings_path, settings.impacts.analysis.inventory_file)
+        inventory_path = _resolve_inventory_target_path(
+            settings_path,
+            settings.impacts.analysis.inventory_file,
+            output_root=output_root,
+            input_roots=input_roots,
+        )
         for target in settings.impacts.analysis.inventory_targets:
             target_outputs = run_step3(
                 modeled_emissions_path=str(modeled_emissions_path),
@@ -273,10 +611,15 @@ def _run_postprocess_steps(settings_path: str | Path) -> dict[str, str]:
             )
             for key, value in target_outputs.items():
                 outputs[f"{target.name}_{key}"] = value
+    else:
+        logger.info("Skipping Step 3: no inventory targets configured.")
 
     conc_path = output_root / "exposure" / "beam_concentration_distribution.parquet"
     net_path = output_root / "preprocess" / "beam_osm_mapped.parquet"
     pop_path = output_root / "exposure" / "beam_population_counts.parquet"
+    inmap_cells_path = output_root / "concentrations" / "beam_inmap_concentrations.parquet"
+    if not inmap_cells_path.exists():
+        inmap_cells_path = output_root / "preprocess" / "inmap_grid.parquet"
     if conc_path.exists() and net_path.exists():
         map_outputs = run_step4(
             concentration_path=str(conc_path),
@@ -292,7 +635,7 @@ def _run_postprocess_steps(settings_path: str | Path) -> dict[str, str]:
             population_path=str(pop_path),
             concentration_path=str(conc_path),
             network_path=str(net_path),
-            county_boundaries_path=str(_resolve_county_boundaries_path(settings_path)),
+            inmap_cells_path=str(inmap_cells_path) if inmap_cells_path.exists() else None,
             output_dir=output_dir / "exposure",
         )
         for key, value in exp_outputs.items():
@@ -307,14 +650,31 @@ def _run_postprocess_steps(settings_path: str | Path) -> dict[str, str]:
 def postprocess_from_pipeline_manifest(
     run_manifest_path: str | Path,
     manifest_path: str | Path | None = None,
+    output_root_override: str | Path | None = None,
+    input_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
 ) -> dict[str, Any]:
-    pipeline_manifest = PipelineManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
+    output_root_arg = Path(output_root_override).resolve() if output_root_override is not None else None
+    input_roots_arg = _normalize_input_roots(input_roots)
+    pipeline_manifest = _localized_pipeline_manifest(run_manifest_path, output_root=output_root_arg)
     output_root = Path(str(pipeline_manifest.get("output_dir"))).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
 
     log_step_banner("Postprocess", "Run Postprocess Steps", logger=logger)
-    settings_path = _resolve_settings_path(run_manifest_path)
-    postprocess_outputs = _run_postprocess_steps(settings_path)
+    settings_path = _resolve_settings_path(run_manifest_path, output_root=output_root_arg)
+    if output_root_arg is None:
+        postprocess_outputs = _run_postprocess_steps(
+            settings_path,
+            run_manifest_path=run_manifest_path,
+            input_roots=input_roots_arg,
+        )
+    else:
+        postprocess_outputs = _run_postprocess_steps(
+            settings_path,
+            run_manifest_path=run_manifest_path,
+            output_root=output_root,
+            allow_missing_comparison_inputs=True,
+            input_roots=input_roots_arg,
+        )
 
     postprocess_manifest = {
         "contract_version": pipeline_manifest.get("contract_version", "1"),
@@ -343,6 +703,7 @@ def postprocess_from_pipeline_manifest(
 def postprocess_from_settings(
     settings_path: str | Path,
     manifest_path: str | Path | None = None,
+    input_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
 ) -> dict[str, Any]:
     from impacts.preprocessor import preprocess_workflow
     from impacts.runner import run_aermod_from_pipeline_manifest
@@ -378,4 +739,5 @@ def postprocess_from_settings(
     return postprocess_from_pipeline_manifest(
         run_manifest_path=run_manifest_path,
         manifest_path=manifest_path,
+        input_roots=input_roots,
     )

@@ -1,12 +1,12 @@
 """Postprocess Step 5 — Plot exposure maps.
 
-Generates three maps:
+Generates three InMAP-cell exposure maps:
 
-1. **Population count** — persons per 100 m cell (green gradient).
+1. **Population count** — persons summed by InMAP cell.
 2. **Population-weighted concentration (PWC)** — Σ(TotalPM25 × persons) / Σ(persons)
-   aggregated to county level; unit stays μg/m³.
-3. **Bivariate map** — each 100 m cell colored by both TotalPM25 (one axis) and
-   person count (other axis) using a 3×3 palette; dark purple = high on both.
+   by InMAP cell; unit stays μg/m³.
+3. **Bivariate map** — each InMAP cell colored by both PWC (one axis) and
+   population (other axis) using a 3×3 palette; dark purple = high on both.
 
 Standalone usage::
 
@@ -18,19 +18,28 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-
 from ...common import log_step_banner
 from ._common import (
     CMAP_PM25,
     CMAP_POP,
+    MAP_DPI,
+    MAP_FIGSIZE,
+    _advance_progress,
     _add_basemap,
     _add_colorbar,
     _add_network,
+    _close_progress,
+    _map_progress,
+    _padded_extent_from_bounds,
+    _set_progress_task,
 )
+
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from matplotlib.colors import PowerNorm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -52,109 +61,105 @@ _BV_COLORS: dict[tuple[int, int], str] = {
 
 
 # ---------------------------------------------------------------------------
-# Plot 1 — population count
+# InMAP exposure aggregation
 # ---------------------------------------------------------------------------
 
-def _plot_population(pop_wm, net_wm, out_path: Path) -> Optional[str]:
-    vals = pop_wm["person_count"].dropna()
-    nonzero = vals[vals > 0]
-    if nonzero.empty:
-        logger.warning("  No positive population counts, skipping.")
-        return None
-
-    vmax = float(nonzero.quantile(0.99))
-    logger.info("  population  vmax=%.1f → %s", vmax, out_path.name)
-
-    fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
-    ax.set_aspect("equal")
-    pop_wm.loc[nonzero.index, ["person_count", "geometry"]].plot(
-        ax=ax, column="person_count", cmap=CMAP_POP,
-        vmin=0, vmax=vmax, edgecolor="none", rasterized=True,
+def _merge_population_concentration(pop_gdf, conc_gdf):
+    merged = pop_gdf[["aermod_cell_id", "person_count"]].merge(
+        conc_gdf[["aermod_cell_id", "inmap_cell_id", "TotalPM25"]],
+        on="aermod_cell_id",
+        how="inner",
     )
-    _add_network(ax, net_wm)
-    _add_basemap(ax)
-    _add_colorbar(fig, ax, CMAP_POP, vmax, "Population per 100 m cell")
-    ax.set_title("Population per 100 m cell", fontsize=13, pad=10)
-    ax.set_axis_off()
-    fig.tight_layout(pad=0.5)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    logger.info("  Saved → %s", out_path)
-    return str(out_path)
+    merged["person_count"] = pd.to_numeric(merged["person_count"], errors="coerce").fillna(0.0)
+    merged["TotalPM25"] = pd.to_numeric(merged["TotalPM25"], errors="coerce").fillna(0.0)
+    merged = merged.loc[merged["person_count"].gt(0)].copy()
+    merged["pm25_exposure_burden"] = merged["TotalPM25"] * merged["person_count"]
+    return merged
 
 
-# ---------------------------------------------------------------------------
-# Plot 2 — population-weighted concentration by county
-# ---------------------------------------------------------------------------
+def _aggregate_exposure_to_inmap(pop_gdf, conc_gdf, inmap_gdf):
+    merged = _merge_population_concentration(pop_gdf, conc_gdf)
+    merged["inmap_cell_id"] = pd.to_numeric(merged["inmap_cell_id"], errors="coerce")
+    merged = merged.loc[merged["inmap_cell_id"].notna()].copy()
+    if merged.empty:
+        empty = inmap_gdf.iloc[0:0][["inmap_cell_id", "geometry"]].copy()
+        empty["population"] = pd.Series(dtype="float64")
+        empty["exposure_burden"] = pd.Series(dtype="float64")
+        empty["pwc_pm25"] = pd.Series(dtype="float64")
+        return empty
 
-def _compute_pwc(pop_gdf, conc_gdf, counties_gdf) -> "gpd.GeoDataFrame":
-    """Join cells to counties and compute PWC = Σ(PM25×pop) / Σ(pop) per county."""
-    import geopandas as gpd
-
-    merged = pop_gdf[["aermod_cell_id", "person_count", "geometry"]].merge(
-        conc_gdf[["aermod_cell_id", "TotalPM25"]], on="aermod_cell_id", how="inner"
-    )
-    merged = merged[merged["person_count"] > 0].copy()
-
-    # Spatial join cell centroids → counties (faster than polygon overlay)
-    centroids = merged.copy()
-    centroids["geometry"] = merged.geometry.centroid
-    joined = centroids.sjoin(
-        counties_gdf[["NAME", "geometry"]], how="left", predicate="within"
-    )
-
-    pwc = (
-        joined.groupby("NAME")
-        .apply(
-            lambda g: (g["TotalPM25"] * g["person_count"]).sum() / g["person_count"].sum()
+    grouped = (
+        merged.groupby("inmap_cell_id", dropna=False)
+        .agg(
+            population=("person_count", "sum"),
+            exposure_burden=("pm25_exposure_burden", "sum"),
         )
-        .rename("pwc_pm25")
         .reset_index()
     )
+    grouped["pwc_pm25"] = grouped["exposure_burden"] / grouped["population"]
 
-    return counties_gdf[["NAME", "geometry"]].merge(pwc, on="NAME", how="left")
+    inmap = inmap_gdf.copy()
+    inmap["inmap_cell_id"] = pd.to_numeric(inmap["inmap_cell_id"], errors="coerce")
+    return inmap[["inmap_cell_id", "geometry"]].merge(grouped, on="inmap_cell_id", how="inner")
 
 
-def _plot_pwc_county(pop_gdf, conc_gdf, counties_gdf, net_wm, out_path: Path) -> Optional[str]:
-    logger.info("  Computing population-weighted concentration by county …")
-    pwc_gdf = _compute_pwc(pop_gdf, conc_gdf, counties_gdf)
+# ---------------------------------------------------------------------------
+# InMAP map rendering
+# ---------------------------------------------------------------------------
 
-    pwc_wm = pwc_gdf.to_crs(epsg=3857)
-    vmax = float(pwc_wm["pwc_pm25"].dropna().max())
-    logger.info("  PWC choropleth  vmax=%.4f μg/m³ → %s", vmax, out_path.name)
+def _plot_inmap_scalar(
+    inmap_exposure_gdf,
+    net_gdf,
+    *,
+    column: str,
+    title: str,
+    colorbar_label: str,
+    cmap,
+    out_path: Path,
+    gamma: float = 1.0,
+) -> Optional[str]:
+    values = inmap_exposure_gdf[column].dropna()
+    positive = values[values > 0]
+    if positive.empty:
+        logger.warning("  No positive values for %s, skipping.", column)
+        return None
 
-    fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
+    plot_gdf = inmap_exposure_gdf.loc[inmap_exposure_gdf[column].gt(0), [column, "geometry"]].copy()
+    vmax = float(positive.quantile(0.99))
+    logger.info("  %s  cells=%d vmax=%.4f → %s", column, len(plot_gdf), vmax, out_path.name)
+
+    fig, ax = plt.subplots(figsize=MAP_FIGSIZE, dpi=MAP_DPI)
     ax.set_aspect("equal")
-
-    pwc_wm.plot(
-        ax=ax, column="pwc_pm25", cmap=CMAP_PM25,
-        vmin=0, vmax=vmax, edgecolor="#555555", linewidth=0.5, rasterized=True,
-        missing_kwds={"color": "#dddddd", "edgecolor": "#555555"},
+    norm = PowerNorm(gamma=gamma, vmin=0, vmax=vmax)
+    plot_gdf.plot(
+        ax=ax,
+        column=column,
+        cmap=cmap,
+        norm=norm,
+        edgecolor="#555555",
+        linewidth=0.18,
+        rasterized=True,
+        zorder=2,
     )
-    _add_network(ax, net_wm)
-    _add_basemap(ax)
-    _add_colorbar(fig, ax, CMAP_PM25, vmax, "Population-weighted PM₂.₅ (μg/m³)")
+    xmin, xmax, ymin, ymax = _padded_extent_from_bounds(plot_gdf.total_bounds)
+    ax.set_xlim(xmin, xmax)
+    ax.set_ylim(ymin, ymax)
+    _add_network(ax, net_gdf)
+    _add_basemap(ax, crs=plot_gdf.crs)
+    _add_colorbar(fig, ax, cmap, vmax, colorbar_label, norm=norm)
 
-    # County name labels at centroid
-    for _, row in pwc_wm.iterrows():
-        if pd.notna(row["pwc_pm25"]):
-            cx, cy = row.geometry.centroid.x, row.geometry.centroid.y
-            ax.text(cx, cy, row["NAME"], ha="center", va="center",
-                    fontsize=7, color="#222222", fontweight="bold")
-
-    ax.set_title("Population-weighted PM₂.₅ concentration by county (μg/m³)", fontsize=12, pad=10)
+    ax.set_title(title, fontsize=12, pad=10)
     ax.set_axis_off()
     fig.tight_layout(pad=0.5)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, dpi=MAP_DPI, bbox_inches="tight")
     plt.close(fig)
     logger.info("  Saved → %s", out_path)
     return str(out_path)
 
 
 # ---------------------------------------------------------------------------
-# Plot 3 — bivariate map (concentration × population)
+# Plot 3 — bivariate map (PWC × population)
 # ---------------------------------------------------------------------------
 
 def _add_bivariate_legend(ax) -> None:
@@ -180,21 +185,27 @@ def _add_bivariate_legend(ax) -> None:
         spine.set_visible(False)
 
 
-def _plot_bivariate(pop_gdf, conc_gdf, net_wm, out_path: Path) -> Optional[str]:
-    import geopandas as gpd
+def _tertile_classes(values: pd.Series) -> pd.Series:
+    if len(values) < 3 or values.nunique(dropna=True) < 2:
+        return pd.Series(np.zeros(len(values), dtype=int), index=values.index)
+    return pd.qcut(values.rank(method="first"), q=3, labels=[0, 1, 2]).astype(int)
+
+
+def _plot_bivariate(inmap_exposure_gdf, net_gdf, out_path: Path) -> Optional[str]:
     from matplotlib.colors import BoundaryNorm, ListedColormap
 
-    merged = pop_gdf[["aermod_cell_id", "person_count", "geometry"]].merge(
-        conc_gdf[["aermod_cell_id", "TotalPM25"]], on="aermod_cell_id", how="inner"
-    )
-    merged = merged[(merged["person_count"] > 0) & (merged["TotalPM25"] > 0)].copy()
+    merged = inmap_exposure_gdf[
+        ["population", "pwc_pm25", "geometry"]
+    ].loc[
+        inmap_exposure_gdf["population"].gt(0) & inmap_exposure_gdf["pwc_pm25"].gt(0)
+    ].copy()
     if merged.empty:
         logger.warning("  No cells with both population and concentration, skipping bivariate map.")
         return None
 
     # Bin each variable into 3 quantile classes (0=low, 1=mid, 2=high)
-    merged["conc_class"] = pd.qcut(merged["TotalPM25"], q=3, labels=[0, 1, 2]).astype(int)
-    merged["pop_class"]  = pd.qcut(merged["person_count"], q=3, labels=[0, 1, 2]).astype(int)
+    merged["conc_class"] = _tertile_classes(merged["pwc_pm25"])
+    merged["pop_class"] = _tertile_classes(merged["population"])
 
     # Map (conc_class, pop_class) → integer 0–8
     merged["bv_class"] = merged["conc_class"] * 3 + merged["pop_class"]
@@ -203,24 +214,32 @@ def _plot_bivariate(pop_gdf, conc_gdf, net_wm, out_path: Path) -> Optional[str]:
     cmap_bv = ListedColormap(colors_9)
     norm_bv = BoundaryNorm(np.arange(10) - 0.5, 9)
 
-    bv_gdf = gpd.GeoDataFrame(merged[["bv_class", "geometry"]], crs=pop_gdf.crs)
-    bv_wm = bv_gdf.to_crs(epsg=3857)
+    logger.info("  Bivariate InMAP map  %d populated cells → %s", len(merged), out_path.name)
 
-    logger.info("  Bivariate map  %d populated cells → %s", len(bv_wm), out_path.name)
-
-    fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
+    fig, ax = plt.subplots(figsize=MAP_FIGSIZE, dpi=MAP_DPI)
     ax.set_aspect("equal")
-    bv_wm.plot(ax=ax, column="bv_class", cmap=cmap_bv, norm=norm_bv,
-               edgecolor="none", rasterized=True)
-    _add_network(ax, net_wm)
-    _add_basemap(ax)
+    merged.plot(
+        ax=ax,
+        column="bv_class",
+        cmap=cmap_bv,
+        norm=norm_bv,
+        edgecolor="#555555",
+        linewidth=0.18,
+        rasterized=True,
+        zorder=2,
+    )
+    xmin, xmax, ymin, ymax = _padded_extent_from_bounds(merged.total_bounds)
+    ax.set_xlim(xmin, xmax)
+    ax.set_ylim(ymin, ymax)
+    _add_network(ax, net_gdf)
+    _add_basemap(ax, crs=inmap_exposure_gdf.crs)
     _add_bivariate_legend(ax)
 
-    ax.set_title("PM₂.₅ concentration × population density", fontsize=13, pad=10)
+    ax.set_title("Population-weighted PM₂.₅ × population by InMAP cell", fontsize=12, pad=10)
     ax.set_axis_off()
     fig.tight_layout(pad=0.5)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, dpi=MAP_DPI, bbox_inches="tight")
     plt.close(fig)
     logger.info("  Saved → %s", out_path)
     return str(out_path)
@@ -235,7 +254,7 @@ def run(
     population_path: str,
     concentration_path: str,
     network_path: str,
-    county_boundaries_path: str,
+    inmap_cells_path: str | None = None,
     output_dir: Path,
 ) -> dict[str, str]:
     """Render all exposure maps.
@@ -248,8 +267,9 @@ def run(
         Path to ``beam_concentration_distribution.parquet``.
     network_path:
         Path to ``beam_osm_mapped.parquet``.
-    county_boundaries_path:
-        Path to staged county boundaries (GeoPackage or GeoJSON).
+    inmap_cells_path:
+        Path to InMAP cell geometries, preferably ``beam_inmap_concentrations.parquet``
+        or the staged ``inmap_grid.parquet``.
     output_dir:
         Directory where PNG files are written.
     """
@@ -259,32 +279,74 @@ def run(
     output_dir = Path(output_dir)
 
     logger.info("Loading population …")
-    pop_gdf = gpd.read_parquet(population_path)
+    pop_gdf = gpd.read_parquet(population_path, columns=["aermod_cell_id", "person_count", "geometry"])
     logger.info("Loading concentration …")
-    conc_gdf = gpd.read_parquet(concentration_path)
+    conc_gdf = pd.read_parquet(concentration_path, columns=["aermod_cell_id", "inmap_cell_id", "TotalPM25"])
     logger.info("Loading network …")
     net_gdf = gpd.read_parquet(network_path)[["geometry"]].drop_duplicates()
-    logger.info("Loading county boundaries …")
-    counties_gdf = gpd.read_file(county_boundaries_path)[["NAME", "geometry"]]
+    if not inmap_cells_path:
+        logger.warning("Skipping Step 5: InMAP cell geometries are required for exposure maps.")
+        return {}
+    logger.info("Loading InMAP cell geometries …")
+    inmap_gdf = gpd.read_parquet(inmap_cells_path)[["inmap_cell_id", "geometry"]].drop_duplicates()
 
-    logger.info("Reprojecting network to Web Mercator …")
-    net_wm = net_gdf.to_crs(epsg=3857)
-    del net_gdf
+    logger.info("Aligning map layers to population CRS …")
+    if net_gdf.crs != pop_gdf.crs:
+        net_gdf = net_gdf.to_crs(pop_gdf.crs)
+    if inmap_gdf.crs != pop_gdf.crs:
+        inmap_gdf = inmap_gdf.to_crs(pop_gdf.crs)
+    logger.info("Aggregating exposure metrics to InMAP cells …")
+    inmap_exposure_gdf = _aggregate_exposure_to_inmap(pop_gdf, conc_gdf, inmap_gdf)
+    inmap_exposure_gdf = inmap_exposure_gdf.loc[
+        inmap_exposure_gdf["population"].gt(0)
+        & inmap_exposure_gdf["pwc_pm25"].notna()
+    ].copy()
+    if inmap_exposure_gdf.empty:
+        logger.warning("Skipping Step 5: no populated InMAP cells with PM2.5 concentration.")
+        return {}
 
     outputs: dict[str, str] = {}
 
-    result = _plot_population(pop_gdf.to_crs(epsg=3857), net_wm, output_dir / "population.png")
-    if result:
-        outputs["population_map"] = result
+    with logging_redirect_tqdm():
+        progress = _map_progress(3, "Postprocess Step 5")
+        try:
+            _set_progress_task(progress, "population inmap", step_label="Postprocess Step 5")
+            result = _plot_inmap_scalar(
+                inmap_exposure_gdf,
+                net_gdf,
+                column="population",
+                title="Population by InMAP cell",
+                colorbar_label="Population per InMAP cell",
+                cmap=CMAP_POP,
+                out_path=output_dir / "population.png",
+                gamma=0.55,
+            )
+            if result:
+                outputs["population_map"] = result
+            _advance_progress(progress)
 
-    result = _plot_pwc_county(pop_gdf, conc_gdf, counties_gdf, net_wm,
-                              output_dir / "pwc_county.png")
-    if result:
-        outputs["pwc_county_map"] = result
+            _set_progress_task(progress, "pwc inmap", step_label="Postprocess Step 5")
+            result = _plot_inmap_scalar(
+                inmap_exposure_gdf,
+                net_gdf,
+                column="pwc_pm25",
+                title="Population-weighted PM₂.₅ concentration by InMAP cell",
+                colorbar_label="Population-weighted PM₂.₅ (μg/m³)",
+                cmap=CMAP_PM25,
+                out_path=output_dir / "pwc_inmap.png",
+                gamma=0.65,
+            )
+            if result:
+                outputs["pwc_inmap_map"] = result
+            _advance_progress(progress)
 
-    result = _plot_bivariate(pop_gdf, conc_gdf, net_wm, output_dir / "bivariate.png")
-    if result:
-        outputs["bivariate_map"] = result
+            _set_progress_task(progress, "bivariate", step_label="Postprocess Step 5")
+            result = _plot_bivariate(inmap_exposure_gdf, net_gdf, output_dir / "bivariate.png")
+            if result:
+                outputs["bivariate_map"] = result
+            _advance_progress(progress)
+        finally:
+            _close_progress(progress)
 
     logger.info("Postprocess Step 5 complete: %d maps written to %s", len(outputs), output_dir)
     return outputs
@@ -292,9 +354,7 @@ def run(
 
 def run_from_output_dir(output_dir: Path) -> dict[str, str]:
     """Run Step 5 from a pipeline output directory using manifest-resolved paths."""
-    from impacts.postprocessor import _resolve_county_boundaries_path
-
-    from ._common import pipeline_outputs, settings_path_from_output_dir
+    from ._common import pipeline_outputs
 
     output_dir = Path(output_dir)
     outs = pipeline_outputs(output_dir)
@@ -305,13 +365,18 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
         output_dir / "exposure" / "beam_population_counts.parquet"
     )
     net_path = str(output_dir / "preprocess" / "beam_osm_mapped.parquet")
-    settings_path = settings_path_from_output_dir(output_dir)
-    county_path = _resolve_county_boundaries_path(settings_path)
+    inmap_cells_path = outs.get("beam_inmap_concentrations") or str(
+        output_dir / "concentrations" / "beam_inmap_concentrations.parquet"
+    )
+    if not Path(inmap_cells_path).exists():
+        inmap_cells_path = str(output_dir / "preprocess" / "inmap_grid.parquet")
+    if not Path(inmap_cells_path).exists():
+        inmap_cells_path = None
     return run(
         population_path=pop_path,
         concentration_path=conc_path,
         network_path=net_path,
-        county_boundaries_path=str(county_path),
+        inmap_cells_path=inmap_cells_path,
         output_dir=output_dir / "postprocess" / "exposure",
     )
 

@@ -13,18 +13,26 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-import matplotlib.pyplot as plt
-
 from ...common import log_step_banner
 from ._common import (
     CMAP_BC,
     CMAP_NO2,
     CMAP_PM25,
+    MAP_DPI,
+    MAP_FIGSIZE,
+    _advance_progress,
     _add_basemap,
     _add_colorbar,
     _add_network,
-    _plot_scalar_layer,
+    _close_progress,
+    _grid_raster_layout,
+    _map_progress,
+    _plot_raster_layer,
+    _set_progress_task,
 )
+
+import matplotlib.pyplot as plt
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +46,12 @@ _LAYERS = [
 ]
 
 
-def _plot_one(conc_wm, net_wm, column: str, title: str, cmap, vmax_q: float, out_path: Path) -> Optional[str]:
-    if column not in conc_wm.columns:
+def _plot_one(conc_gdf, net_gdf, layout, column: str, title: str, cmap, vmax_q: float, out_path: Path) -> Optional[str]:
+    if column not in conc_gdf.columns:
         logger.warning("  Column %s not in concentration data, skipping.", column)
         return None
 
-    vals = conc_wm[column].dropna()
+    vals = conc_gdf[column].dropna()
     nonzero = vals[vals > 0]
     if nonzero.empty:
         logger.warning("  Column %s has no positive values, skipping.", column)
@@ -52,18 +60,25 @@ def _plot_one(conc_wm, net_wm, column: str, title: str, cmap, vmax_q: float, out
     vmax = float(nonzero.quantile(vmax_q))
     logger.info("  %s  vmax=%.4f → %s", column, vmax, out_path.name)
 
-    fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
+    fig, ax = plt.subplots(figsize=MAP_FIGSIZE, dpi=MAP_DPI)
     ax.set_aspect("equal")
-    _plot_scalar_layer(ax, conc_wm, column, cmap, vmax)
-    _add_network(ax, net_wm)
-    _add_basemap(ax)
+    _plot_raster_layer(
+        ax,
+        conc_gdf,
+        column,
+        cmap,
+        layout=layout,
+        vmax=vmax,
+    )
+    _add_network(ax, net_gdf)
+    _add_basemap(ax, crs=conc_gdf.crs)
     _add_colorbar(fig, ax, cmap, vmax, title)
     ax.set_title(title, fontsize=13, pad=10)
     ax.set_axis_off()
     fig.tight_layout(pad=0.5)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, dpi=MAP_DPI, bbox_inches="tight")
     plt.close(fig)
     logger.info("  Saved → %s", out_path)
     return str(out_path)
@@ -91,22 +106,28 @@ def run(
     log_step_banner("Postprocess Step 4", "Plot Concentrations", logger=logger)
     output_dir = Path(output_dir)
 
+    concentration_columns = ["geometry", *[column for column, _, _, _ in _LAYERS]]
     logger.info("Loading concentration data …")
-    conc_gdf = gpd.read_parquet(concentration_path)
+    conc_gdf = gpd.read_parquet(concentration_path, columns=concentration_columns)
     logger.info("Loading network …")
     net_gdf = gpd.read_parquet(network_path)[["geometry"]].drop_duplicates()
 
-    logger.info("Reprojecting to Web Mercator …")
-    conc_wm = conc_gdf.to_crs(epsg=3857)
-    net_wm = net_gdf.to_crs(epsg=3857)
-    del conc_gdf, net_gdf
+    logger.info("Building native grid raster layout …")
+    layout = _grid_raster_layout(conc_gdf)
 
     outputs: dict[str, str] = {}
-    for column, title, cmap, vmax_q in _LAYERS:
-        result = _plot_one(conc_wm, net_wm, column, title, cmap, vmax_q,
-                           output_dir / f"{column.lower()}.png")
-        if result is not None:
-            outputs[f"{column.lower()}_map"] = result
+    with logging_redirect_tqdm():
+        progress = _map_progress(len(_LAYERS), "Postprocess Step 4")
+        try:
+            for column, title, cmap, vmax_q in _LAYERS:
+                _set_progress_task(progress, column, step_label="Postprocess Step 4")
+                result = _plot_one(conc_gdf, net_gdf, layout, column, title, cmap, vmax_q,
+                                   output_dir / f"{column.lower()}.png")
+                if result is not None:
+                    outputs[f"{column.lower()}_map"] = result
+                _advance_progress(progress)
+        finally:
+            _close_progress(progress)
 
     logger.info("Postprocess Step 4 complete: %d maps written to %s", len(outputs), output_dir)
     return outputs

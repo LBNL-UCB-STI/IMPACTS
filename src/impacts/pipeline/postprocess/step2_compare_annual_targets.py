@@ -4,12 +4,25 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from . import _common  # configures matplotlib backend and MPLCONFIGDIR
-from ._common import _normalize_token, _slugify
+import duckdb
+
+from ._common import (
+    PLOT_DPI,
+    _advance_progress,
+    _close_progress,
+    _duckdb_identifier,
+    _normalize_token,
+    _set_progress_task,
+    _slugify,
+    _step_progress,
+)  # configures matplotlib backend before pyplot
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from tqdm.contrib.logging import logging_redirect_tqdm
 
+from ...common import _duckdb_scan_expression
+from ...common import configure_duckdb_connection
 from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import read_table
@@ -35,7 +48,6 @@ _SECTOR_TARGET_FIELDS = {
     "annual_co_short_tons": "CO",
     "annual_sox_short_tons": "SOx",
 }
-
 
 
 def _load_vehicle_type_sectors(
@@ -118,37 +130,93 @@ def _aggregate_modeled_to_targets(
     freight_vehicle_types_path: str,
     vehicle_category_metadata_file: str,
 ) -> pd.DataFrame:
-    modeled = read_table(modeled_emissions_path)
-    required_columns = {"vehicleTypeId", "process"}
-    missing = sorted(required_columns - set(modeled.columns))
-    if missing:
-        raise ValueError(
-            "County-intersected modeled emissions input must include vehicleTypeId and process "
-            f"for postprocess step 2. Missing: {missing}"
-        )
-
     sector_lookup = _load_vehicle_type_sectors(
         passenger_vehicle_types_path,
         freight_vehicle_types_path,
         vehicle_category_metadata_file=vehicle_category_metadata_file,
     )
-    modeled = modeled.copy()
-    modeled["vehicleTypeId"] = modeled["vehicleTypeId"].map(_normalize_token)
-    modeled["process"] = modeled["process"].map(_normalize_token).str.upper()
-    modeled = modeled.merge(sector_lookup, how="left", on="vehicleTypeId")
-    missing_vehicle_types = modeled.loc[modeled["sector"].isna(), "vehicleTypeId"].drop_duplicates().tolist()
-    if missing_vehicle_types:
-        raise ValueError(
-            "Could not resolve analysis sector for modeled vehicleTypeId values: "
-            f"{missing_vehicle_types[:10]}"
+    sector_lookup = (
+        sector_lookup.assign(
+            vehicleTypeId=lambda df: df["vehicleTypeId"].map(_normalize_token),
+            sector=lambda df: df["sector"].map(_normalize_token),
         )
+        .loc[lambda df: df["vehicleTypeId"].ne("") & df["sector"].ne("")]
+        .drop_duplicates(subset=["vehicleTypeId"], keep="first")
+        .reset_index(drop=True)
+    )
+    scan = _duckdb_scan_expression(modeled_emissions_path)
+    con = duckdb.connect(database=":memory:")
+    try:
+        configure_duckdb_connection(
+            con,
+            working_dir=Path(modeled_emissions_path).parent,
+            show_progress=False,
+            profile="balanced",
+        )
+        columns = {row[0] for row in con.execute(f"DESCRIBE SELECT * FROM {scan}").fetchall()}
+        required_columns = {"vehicleTypeId", "process"}
+        missing = sorted(required_columns - columns)
+        if missing:
+            raise ValueError(
+                "County-intersected modeled emissions input must include vehicleTypeId and process "
+                f"for postprocess step 2. Missing: {missing}"
+            )
+        available = {
+            pollutant: column
+            for pollutant, column in _MODELED_POLLUTANT_COLUMNS.items()
+            if column in columns
+        }
+        if not available:
+            raise ValueError(
+                "Modeled emissions input does not include supported pollutant columns for postprocess step 2."
+            )
+
+        con.register("sector_lookup", sector_lookup)
+        missing_vehicle_types = con.execute(
+            f"""
+            WITH modeled_vehicle_types AS (
+                SELECT DISTINCT TRIM(CAST(vehicleTypeId AS VARCHAR)) AS vehicleTypeId
+                FROM {scan}
+                WHERE TRIM(COALESCE(CAST(vehicleTypeId AS VARCHAR), '')) <> ''
+            )
+            SELECT modeled_vehicle_types.vehicleTypeId
+            FROM modeled_vehicle_types
+            LEFT JOIN sector_lookup
+                ON modeled_vehicle_types.vehicleTypeId = sector_lookup.vehicleTypeId
+            WHERE sector_lookup.vehicleTypeId IS NULL
+            LIMIT 10
+            """
+        ).fetchdf()["vehicleTypeId"].tolist()
+        if missing_vehicle_types:
+            raise ValueError(
+                "Could not resolve analysis sector for modeled vehicleTypeId values: "
+                f"{missing_vehicle_types}"
+            )
+
+        aggregate_columns = ",\n                    ".join(
+            "SUM(COALESCE(TRY_CAST(modeled."
+            f"{_duckdb_identifier(column)} AS DOUBLE), 0.0)) AS {_duckdb_identifier(_slugify(pollutant))}"
+            for pollutant, column in available.items()
+        )
+        grouped = con.execute(
+            f"""
+            SELECT
+                sector_lookup.sector,
+                UPPER(TRIM(COALESCE(CAST(modeled.process AS VARCHAR), ''))) AS process,
+                {aggregate_columns}
+            FROM {scan} AS modeled
+            INNER JOIN sector_lookup
+                ON TRIM(CAST(modeled.vehicleTypeId AS VARCHAR)) = sector_lookup.vehicleTypeId
+            GROUP BY sector_lookup.sector, UPPER(TRIM(COALESCE(CAST(modeled.process AS VARCHAR), '')))
+            """
+        ).fetchdf()
+    finally:
+        con.close()
 
     rows: list[pd.DataFrame] = []
-    for pollutant, column in _MODELED_POLLUTANT_COLUMNS.items():
-        if column not in modeled.columns:
-            continue
-        frame = modeled[["process", "sector", column]].copy()
-        frame[column] = pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
+    for pollutant in available:
+        column = _slugify(pollutant)
+        frame = grouped[["process", "sector", column]].copy()
         if pollutant == "PM2.5":
             road_dust = (
                 frame.loc[frame["process"].eq("PRDUST"), [column]]
@@ -172,13 +240,13 @@ def _aggregate_modeled_to_targets(
                 )
             )
         else:
-            grouped = frame.groupby("sector", dropna=False)[column].sum().reset_index()
-            if grouped.empty:
+            pollutant_grouped = frame.groupby("sector", dropna=False)[column].sum().reset_index()
+            if pollutant_grouped.empty:
                 continue
-            grouped["source"] = "mobile_onroad"
-            grouped["pollutant"] = pollutant
-            grouped = grouped.rename(columns={column: "simulation_tons"})
-            rows.append(grouped[["source", "sector", "pollutant", "simulation_tons"]])
+            pollutant_grouped["source"] = "mobile_onroad"
+            pollutant_grouped["pollutant"] = pollutant
+            pollutant_grouped = pollutant_grouped.rename(columns={column: "simulation_tons"})
+            rows.append(pollutant_grouped[["source", "sector", "pollutant", "simulation_tons"]])
 
     if not rows:
         raise ValueError("Modeled emissions input does not include supported pollutant columns for postprocess step 2.")
@@ -250,7 +318,7 @@ def _plot_source_pollutant_comparison(
     ax.grid(axis="y", alpha=0.2)
     fig.tight_layout()
     output_path = output_dir / f"step2_{_slugify(source)}_{_slugify(pollutant)}_simulation_vs_target.png"
-    fig.savefig(output_path, dpi=150)
+    fig.savefig(output_path, dpi=PLOT_DPI)
     plt.close(fig)
     return str(output_path)
 
@@ -326,7 +394,7 @@ def _plot_combined_pollutant_comparison(
 
     fig.tight_layout()
     output_path = output_dir / f"step2_{_slugify(primary_source)}_{_slugify(pollutant)}_simulation_vs_target.png"
-    fig.savefig(output_path, dpi=150)
+    fig.savefig(output_path, dpi=PLOT_DPI)
     plt.close(fig)
     return str(output_path)
 
@@ -342,43 +410,62 @@ def run(
 ) -> dict[str, str]:
     log_step_banner("Postprocess Step 2", "Compare Annual Targets", logger=logger)
     log_substep_banner("2.1", "compare modeled emissions with configured annual targets", logger=logger)
-    targets_df = _build_targets_table(sector_targets)
-    modeled_df = _aggregate_modeled_to_targets(
-        modeled_emissions_path,
-        passenger_vehicle_types_path=passenger_vehicle_types_path,
-        freight_vehicle_types_path=freight_vehicle_types_path,
-        vehicle_category_metadata_file=vehicle_category_metadata_file,
-    )
-    comparison = _build_comparison_table(
-        modeled_df=modeled_df,
-        targets_df=targets_df,
-    )
-    outputs = _write_comparison_table(comparison, output_dir=output_dir)
-    plotted: set[tuple[str, str]] = set()
-    for pollutant in comparison["pollutant"].unique():
-        sources = set(comparison.loc[comparison["pollutant"].eq(pollutant), "source"].tolist())
-        if "mobile_onroad" in sources and "road_dust" in sources:
-            plot_path = _plot_combined_pollutant_comparison(
-                comparison,
-                primary_source="mobile_onroad",
-                secondary_source="road_dust",
-                pollutant=str(pollutant),
-                output_dir=output_dir,
+    with logging_redirect_tqdm():
+        progress = _step_progress(5, "Postprocess Step 2")
+        try:
+            _set_progress_task(progress, "targets", step_label="Postprocess Step 2")
+            targets_df = _build_targets_table(sector_targets)
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "modeled emissions", step_label="Postprocess Step 2")
+            modeled_df = _aggregate_modeled_to_targets(
+                modeled_emissions_path,
+                passenger_vehicle_types_path=passenger_vehicle_types_path,
+                freight_vehicle_types_path=freight_vehicle_types_path,
+                vehicle_category_metadata_file=vehicle_category_metadata_file,
             )
-            if plot_path:
-                outputs[f"mobile_onroad_{pollutant}_plot"] = plot_path
-            plotted.update({("mobile_onroad", pollutant), ("road_dust", pollutant)})
-        for source in sorted(sources):
-            if (source, pollutant) in plotted:
-                continue
-            plot_path = _plot_source_pollutant_comparison(
-                comparison,
-                source=str(source),
-                pollutant=str(pollutant),
-                output_dir=output_dir,
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "comparison table", step_label="Postprocess Step 2")
+            comparison = _build_comparison_table(
+                modeled_df=modeled_df,
+                targets_df=targets_df,
             )
-            if plot_path:
-                outputs[f"{source}_{pollutant}_plot"] = plot_path
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "write tables", step_label="Postprocess Step 2")
+            outputs = _write_comparison_table(comparison, output_dir=output_dir)
+            _advance_progress(progress)
+
+            _set_progress_task(progress, "plots", step_label="Postprocess Step 2")
+            plotted: set[tuple[str, str]] = set()
+            for pollutant in comparison["pollutant"].unique():
+                sources = set(comparison.loc[comparison["pollutant"].eq(pollutant), "source"].tolist())
+                if "mobile_onroad" in sources and "road_dust" in sources:
+                    plot_path = _plot_combined_pollutant_comparison(
+                        comparison,
+                        primary_source="mobile_onroad",
+                        secondary_source="road_dust",
+                        pollutant=str(pollutant),
+                        output_dir=output_dir,
+                    )
+                    if plot_path:
+                        outputs[f"mobile_onroad_{pollutant}_plot"] = plot_path
+                    plotted.update({("mobile_onroad", pollutant), ("road_dust", pollutant)})
+                for source in sorted(sources):
+                    if (source, pollutant) in plotted:
+                        continue
+                    plot_path = _plot_source_pollutant_comparison(
+                        comparison,
+                        source=str(source),
+                        pollutant=str(pollutant),
+                        output_dir=output_dir,
+                    )
+                    if plot_path:
+                        outputs[f"{source}_{pollutant}_plot"] = plot_path
+            _advance_progress(progress)
+        finally:
+            _close_progress(progress)
     logger.info("Postprocess Step 2 complete")
     return outputs
 
@@ -395,14 +482,27 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
     from ...config.settings_builder import load_settings_from_yaml
 
     output_dir = Path(output_dir)
+    run_manifest_path = output_dir / "pipeline_manifest.yaml"
     settings_path = settings_path_from_output_dir(output_dir)
     settings = load_settings_from_yaml(settings_path)
     if not settings.impacts.analysis.sector_targets:
         logger.info("No sector targets configured, skipping Step 2.")
         return {}
-    modeled_path = _resolve_modeled_emissions_path(settings_path)
-    passenger_vt, freight_vt = _resolve_vehicle_types_paths(settings_path)
-    vehicle_category_metadata = _resolve_vehicle_category_metadata_path(settings_path)
+    modeled_path = _resolve_modeled_emissions_path(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_dir,
+    )
+    passenger_vt, freight_vt = _resolve_vehicle_types_paths(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_dir,
+    )
+    vehicle_category_metadata = _resolve_vehicle_category_metadata_path(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_dir,
+    )
     return run(
         modeled_emissions_path=str(modeled_path),
         passenger_vehicle_types_path=str(passenger_vt),
