@@ -9,6 +9,8 @@ import duckdb
 
 from ._common import (
     CHART_LEGEND_FONTSIZE,
+    CLASS_GROUP_LABELS,
+    CLASS_GROUP_ORDER,
     PLOT_DPI,
     _advance_progress,
     _close_progress,
@@ -16,6 +18,7 @@ from ._common import (
     _set_progress_task,
     _step_progress,
     _style_chart_axes,
+    load_postprocess_vehicle_metadata,
 )  # configures matplotlib backend before pyplot
 
 import matplotlib.pyplot as plt
@@ -31,29 +34,6 @@ from ...common import read_table
 
 logger = logging.getLogger(__name__)
 
-_VEHICLE_CLASS_GROUP_MAP: dict[str, str] = {
-    "Class 2&B3 Vocational": "class12ab3",
-    "Class 4-6 Vocational": "class456",
-    "Class 7&8 Tractor": "class78",
-    "Class 7&8 Vocational": "class78",
-}
-
-_CATEGORY_CLASS_GROUP_MAP: dict[str, str] = {
-    "LDA": "class12ab3",
-    "LDT1": "class12ab3",
-    "LDT2": "class12ab3",
-    "MDV": "class12ab3",
-    "MCY": "class12ab3",
-    "LHD1": "class456",
-    "LHD2": "class456",
-    "UBUS": "class78",
-    "SBUS": "class78",
-    "MH": "class78",
-}
-
-_CLASS_GROUP_ORDER = ["class12ab3", "class456", "class78"]
-_CLASS_GROUP_LABELS = {"class12ab3": "Class 1-2b3", "class456": "Class 4-5-6", "class78": "Class 7-8"}
-
 _FUEL_COLORS: dict[str, str] = {
     "Dsl": "#d62728",
     "Gas": "#1f77b4",
@@ -67,53 +47,28 @@ def _model_year_sort_key(year_group: str) -> int:
     return int(m.group()) if m else 9999
 
 
-def _derive_class_group(row: pd.Series) -> Optional[str]:
-    vehicle_class = _normalize_token(row.get("vehicleClass") or "")
-    if vehicle_class:
-        result = _VEHICLE_CLASS_GROUP_MAP.get(vehicle_class)
-        if result:
-            return result
-    category = _normalize_token(row.get("emfacVehicleCategory") or "")
-    if not category:
-        return None
-    if category in _CATEGORY_CLASS_GROUP_MAP:
-        return _CATEGORY_CLASS_GROUP_MAP[category]
-    m = re.search(r"Class\s*(\d+)", category)
-    if m:
-        return "class456" if int(m.group(1)) <= 6 else "class78"
-    if category.startswith("T7") or category in ("T6TS", "T7IS"):
-        return "class78"
-    return None
-
-
 def _load_vehicle_metadata_lookup(
     *,
     passenger_vehicle_types_path: str,
     freight_vehicle_types_path: str,
+    population_sample: float = 1.0,
+    transit_sample: float = 1.0,
+    freight_sample: Optional[float] = None,
 ) -> pd.DataFrame:
-    passenger = read_table(passenger_vehicle_types_path).copy()
-    freight = read_table(freight_vehicle_types_path).copy()
-    for df in (passenger, freight):
-        if "emfacResolvedModelYear" in df.columns:
-            df.rename(columns={"emfacResolvedModelYear": "model_year_group"}, inplace=True)
-    combined = pd.concat([passenger, freight], ignore_index=True, sort=False)
-    for col in ("emfacId", "emfacVehicleCategory", "emfacFuel", "model_year_group", "vehicleClass"):
-        if col not in combined.columns:
-            combined[col] = None
-    combined["class_group"] = combined.apply(_derive_class_group, axis=1)
     return (
-        combined[["emfacId", "class_group", "model_year_group", "emfacFuel"]]
-        .rename(columns={"emfacFuel": "fuel"})
-        .assign(
-            emfacId=lambda df: df["emfacId"].map(_normalize_token),
-            model_year_group=lambda df: df["model_year_group"].map(
-                lambda v: _normalize_token(v) if pd.notna(v) else ""
-            ),
-            fuel=lambda df: df["fuel"].map(lambda v: _normalize_token(v) if pd.notna(v) else ""),
+        load_postprocess_vehicle_metadata(
+            passenger_vehicle_types_path=passenger_vehicle_types_path,
+            freight_vehicle_types_path=freight_vehicle_types_path,
+            population_sample=population_sample,
+            transit_sample=transit_sample,
+            freight_sample=freight_sample,
         )
         .loc[lambda df: df["emfacId"].ne("")]
-        .drop_duplicates(subset=["emfacId"], keep="first")
-        .reset_index(drop=True)
+        .groupby(["assignment_group", "emfacId", "class_group", "model_year_group", "fuel"], dropna=False)[
+            ["fleet_vmt_prior", "fleet_population_prior"]
+        ]
+        .sum()
+        .reset_index()
     )
 
 
@@ -121,29 +76,19 @@ def _load_beam_vehicle_lookup(
     *,
     passenger_vehicle_types_path: str,
     freight_vehicle_types_path: str,
+    population_sample: float,
+    transit_sample: float,
+    freight_sample: Optional[float],
 ) -> pd.DataFrame:
-    passenger = read_table(passenger_vehicle_types_path).copy()
-    freight = read_table(freight_vehicle_types_path).copy()
-    passenger["assignment_group"] = "passenger"
-    freight["assignment_group"] = "freight"
-    vehicle_types = pd.concat([passenger, freight], ignore_index=True, sort=False)
-    required = {"vehicleTypeId", "emfacId", "sampleProbabilityWithinCategory"}
-    missing = sorted(required - set(vehicle_types.columns))
-    if missing:
-        raise ValueError(
-            "Fleet comparison requires vehicle types inputs with vehicleTypeId, emfacId, and "
-            f"sampleProbabilityWithinCategory. Missing: {missing}"
-        )
-    prepared = vehicle_types.copy()
-    prepared["vehicleTypeId"] = prepared["vehicleTypeId"].map(_normalize_token)
-    prepared["emfacId"] = prepared["emfacId"].map(_normalize_token)
-    prepared["sampleProbabilityWithinCategory"] = pd.to_numeric(
-        prepared["sampleProbabilityWithinCategory"],
-        errors="coerce",
-    ).fillna(0.0)
-    prepared = prepared.loc[prepared["vehicleTypeId"].ne("") & prepared["emfacId"].ne("")].copy()
-    return prepared[
-        ["vehicleTypeId", "assignment_group", "emfacId", "sampleProbabilityWithinCategory"]
+    metadata = load_postprocess_vehicle_metadata(
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
+        population_sample=population_sample,
+        transit_sample=transit_sample,
+        freight_sample=freight_sample,
+    )
+    return metadata.loc[metadata["emfacId"].ne("")][
+        ["vehicleTypeId", "assignment_group", "emfacId", "sample_scale_factor"]
     ].drop_duplicates(subset=["vehicleTypeId"], keep="first")
 
 
@@ -157,11 +102,15 @@ def _build_beam_population_breakdown_from_assignments(
         lookup = (
             vehicle_lookup.loc[
                 vehicle_lookup["assignment_group"].eq(assignment_group),
-                ["vehicleTypeId", "emfacId"],
+                ["vehicleTypeId", "emfacId", "sample_scale_factor"],
             ]
             .assign(
                 vehicleTypeId=lambda df: df["vehicleTypeId"].map(_normalize_token),
                 emfacId=lambda df: df["emfacId"].map(_normalize_token),
+                sample_scale_factor=lambda df: pd.to_numeric(
+                    df["sample_scale_factor"],
+                    errors="coerce",
+                ).fillna(0.0),
             )
             .loc[lambda df: df["vehicleTypeId"].ne("") & df["emfacId"].ne("")]
             .drop_duplicates(subset=["vehicleTypeId"], keep="first")
@@ -188,7 +137,7 @@ def _build_beam_population_breakdown_from_assignments(
                 SELECT
                     ? AS assignment_group,
                     lookup.emfacId,
-                    COUNT(*) AS beam_population_weight
+                    SUM(lookup.sample_scale_factor) AS beam_population_weight
                 FROM {scan} AS assignments
                 INNER JOIN vehicle_lookup AS lookup
                     ON TRIM(CAST(assignments.vehicleTypeId AS VARCHAR)) = lookup.vehicleTypeId
@@ -214,13 +163,20 @@ def _build_beam_population_breakdown_from_assignments(
     prepared["vehicleTypeId"] = prepared["vehicleTypeId"].map(_normalize_token)
     prepared = prepared.loc[prepared["vehicleTypeId"].ne("")].copy()
     prepared = prepared.merge(
-        vehicle_lookup.loc[vehicle_lookup["assignment_group"].eq(assignment_group), ["vehicleTypeId", "emfacId"]],
+        vehicle_lookup.loc[
+            vehicle_lookup["assignment_group"].eq(assignment_group),
+            ["vehicleTypeId", "emfacId", "sample_scale_factor"],
+        ],
         how="inner",
         on="vehicleTypeId",
     )
+    prepared["sample_scale_factor"] = pd.to_numeric(
+        prepared["sample_scale_factor"],
+        errors="coerce",
+    ).fillna(0.0)
     return (
-        prepared.groupby(["emfacId"], dropna=False)
-        .size()
+        prepared.groupby(["emfacId"], dropna=False)["sample_scale_factor"]
+        .sum()
         .reset_index(name="beam_population_weight")
         .assign(assignment_group=assignment_group)
         [["assignment_group", "emfacId", "beam_population_weight"]]
@@ -486,7 +442,7 @@ def _draw_stacked_bars(
     segment_handles = [Patch(facecolor=c, label=s) for s, c in zip(segment_labels, segment_colors)]
     style_handles = [
         Patch(facecolor="white", edgecolor="gray", label="BEAM"),
-        Patch(facecolor="white", edgecolor="gray", hatch="//", label="EMFAC"),
+        Patch(facecolor="white", edgecolor="gray", hatch="//", label="EMFAC fleet-prior target"),
     ]
     _style_chart_axes(ax, legend=False)
     ax.legend(
@@ -502,16 +458,47 @@ def _build_class_model_year_panel_data(
     metadata: pd.DataFrame,
     assignment_group: str,
 ) -> Optional[pd.DataFrame]:
-    subset = (
+    meta = metadata.loc[metadata["assignment_group"].eq(assignment_group)].copy()
+    meta = meta.loc[
+        meta["class_group"].notna()
+        & meta["model_year_group"].notna()
+        & meta["model_year_group"].ne("")
+    ].copy()
+    if meta.empty:
+        return None
+
+    prior_total = float(meta["fleet_vmt_prior"].sum())
+    if prior_total <= 0:
+        raise ValueError(
+            f"Postprocess Step 1 requires positive fleetVmtPrior values for {assignment_group} vehicle types."
+        )
+    target_total = float(
+        comparison.loc[comparison["assignment_group"].eq(assignment_group), "emfac_vmt"].sum()
+    )
+    meta["emfac_vmt"] = meta["fleet_vmt_prior"] / prior_total * target_total
+    target = (
+        meta.groupby(["class_group", "model_year_group"], dropna=False)["emfac_vmt"]
+        .sum()
+        .reset_index()
+    )
+
+    beam = (
         comparison.loc[comparison["assignment_group"].eq(assignment_group)]
-        .merge(metadata[["emfacId", "class_group", "model_year_group"]], on="emfacId", how="left")
+        .merge(
+            meta[["assignment_group", "emfacId", "class_group", "model_year_group"]],
+            on=["assignment_group", "emfacId"],
+            how="left",
+        )
         .loc[lambda df: df["class_group"].notna() & df["model_year_group"].notna() & df["model_year_group"].ne("")]
     )
-    if subset.empty:
-        return None
+    beam = (
+        beam.groupby(["class_group", "model_year_group"], dropna=False)["beam_vmt"]
+        .sum()
+        .reset_index()
+    )
     return (
-        subset.groupby(["class_group", "model_year_group"], dropna=False)[["beam_vmt", "emfac_vmt"]]
-        .sum().reset_index()
+        beam.merge(target, on=["class_group", "model_year_group"], how="outer")
+        .fillna({"beam_vmt": 0.0, "emfac_vmt": 0.0})
     )
 
 
@@ -521,16 +508,48 @@ def _build_model_year_fuel_panel_data(
     metadata: pd.DataFrame,
     assignment_group: str,
 ) -> Optional[pd.DataFrame]:
-    subset = (
+    meta = metadata.loc[metadata["assignment_group"].eq(assignment_group)].copy()
+    meta = meta.loc[
+        meta["model_year_group"].notna()
+        & meta["model_year_group"].ne("")
+        & meta["fuel"].notna()
+        & meta["fuel"].ne("")
+    ].copy()
+    if meta.empty:
+        return None
+
+    prior_total = float(meta["fleet_vmt_prior"].sum())
+    if prior_total <= 0:
+        raise ValueError(
+            f"Postprocess Step 1 requires positive fleetVmtPrior values for {assignment_group} vehicle types."
+        )
+    target_total = float(
+        comparison.loc[comparison["assignment_group"].eq(assignment_group), "emfac_vmt"].sum()
+    )
+    meta["emfac_vmt"] = meta["fleet_vmt_prior"] / prior_total * target_total
+    target = (
+        meta.groupby(["model_year_group", "fuel"], dropna=False)["emfac_vmt"]
+        .sum()
+        .reset_index()
+    )
+
+    beam = (
         comparison.loc[comparison["assignment_group"].eq(assignment_group)]
-        .merge(metadata[["emfacId", "model_year_group", "fuel"]], on="emfacId", how="left")
+        .merge(
+            meta[["assignment_group", "emfacId", "model_year_group", "fuel"]],
+            on=["assignment_group", "emfacId"],
+            how="left",
+        )
         .loc[lambda df: df["model_year_group"].notna() & df["model_year_group"].ne("") & df["fuel"].notna() & df["fuel"].ne("")]
     )
-    if subset.empty:
-        return None
+    beam = (
+        beam.groupby(["model_year_group", "fuel"], dropna=False)["beam_vmt"]
+        .sum()
+        .reset_index()
+    )
     return (
-        subset.groupby(["model_year_group", "fuel"], dropna=False)[["beam_vmt", "emfac_vmt"]]
-        .sum().reset_index()
+        beam.merge(target, on=["model_year_group", "fuel"], how="outer")
+        .fillna({"beam_vmt": 0.0, "emfac_vmt": 0.0})
     )
 
 
@@ -563,9 +582,9 @@ def _plot_class_model_year_combined(
         axes = [axes]
     for ax, assignment_group in zip(axes, groups_in_order):
         grouped = panel_data[assignment_group]
-        class_groups = [c for c in _CLASS_GROUP_ORDER if c in grouped["class_group"].unique()]
+        class_groups = [c for c in CLASS_GROUP_ORDER if c in grouped["class_group"].unique()]
         local_years = sorted(grouped["model_year_group"].unique().tolist(), key=_model_year_sort_key)
-        display_labels = [_CLASS_GROUP_LABELS.get(c, c) for c in class_groups]
+        display_labels = [CLASS_GROUP_LABELS.get(c, c) for c in class_groups]
         beam_pivot = (
             grouped.pivot_table(index="class_group", columns="model_year_group", values="beam_vmt", aggfunc="sum")
             .reindex(index=class_groups, columns=local_years).fillna(0.0)
@@ -660,6 +679,9 @@ def run(
     output_dir: Path,
     passenger_vehicles_path: Optional[str] = None,
     freight_carriers_path: Optional[str] = None,
+    population_sample: float = 1.0,
+    transit_sample: float = 1.0,
+    freight_sample: Optional[float] = None,
 ) -> dict[str, str]:
     log_step_banner("Postprocess Step 1", "Compare Fleet", logger=logger)
     log_substep_banner("1.1", "compare BEAM fleet against EMFAC by emfacId", logger=logger)
@@ -670,6 +692,9 @@ def run(
             vehicle_lookup = _load_beam_vehicle_lookup(
                 passenger_vehicle_types_path=passenger_vehicle_types_path,
                 freight_vehicle_types_path=freight_vehicle_types_path,
+                population_sample=population_sample,
+                transit_sample=transit_sample,
+                freight_sample=freight_sample,
             )
             _advance_progress(progress)
 
@@ -705,6 +730,9 @@ def run(
             metadata = _load_vehicle_metadata_lookup(
                 passenger_vehicle_types_path=passenger_vehicle_types_path,
                 freight_vehicle_types_path=freight_vehicle_types_path,
+                population_sample=population_sample,
+                transit_sample=transit_sample,
+                freight_sample=freight_sample,
             )
             _advance_progress(progress)
 
@@ -725,6 +753,7 @@ def run(
 def run_from_output_dir(output_dir: Path) -> dict[str, str]:
     """Run Step 1 from a pipeline output directory using manifest-resolved paths."""
     from impacts.postprocessor import (
+        _load_pipeline_manifest,
         _resolve_inventory_emfacid_activity_path,
         _resolve_optional_population_assignment_paths,
         _resolve_skims_emissions_path,
@@ -736,6 +765,12 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
     output_dir = Path(output_dir)
     run_manifest_path = output_dir / "pipeline_manifest.yaml"
     settings_path = settings_path_from_output_dir(output_dir)
+    _, run_manifest = _load_pipeline_manifest(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_dir,
+    )
+    pipeline = run_manifest.get("pipeline", {}) or {}
     skims_path = _resolve_skims_emissions_path(
         settings_path,
         run_manifest_path=run_manifest_path,
@@ -772,6 +807,14 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
         output_dir=output_dir / "postprocess" / "fleet",
         passenger_vehicles_path=str(passenger_pop) if passenger_pop else None,
         freight_carriers_path=str(freight_pop) if freight_pop else None,
+        population_sample=float(pipeline.get("population_sample", 1.0)),
+        transit_sample=float(pipeline.get("transit_sample", 1.0)),
+        freight_sample=(
+            float(pipeline["freight_sample"])
+            if pipeline.get("freight_sample") is not None
+            and str(pipeline.get("freight_sample")).strip() != ""
+            else None
+        ),
     )
 
 

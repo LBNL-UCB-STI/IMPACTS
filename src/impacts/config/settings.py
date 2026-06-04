@@ -816,6 +816,7 @@ class Population:
     frism_year: Optional[int] = None
     population_sample: float = 1.0
     transit_sample: float = 1.0
+    freight_sample: Optional[float] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Population":
@@ -829,6 +830,7 @@ class Population:
                 "frism_year",
                 "population_sample",
                 "transit_sample",
+                "freight_sample",
             },
             "impacts.population",
         )
@@ -840,6 +842,7 @@ class Population:
             frism_year=_optional_int(payload.get("frism_year")),
             population_sample=_required_float(payload.get("population_sample", 1.0), "impacts.population.population_sample"),
             transit_sample=_optional_float(payload.get("transit_sample"), default=1.0),
+            freight_sample=_optional_float(payload.get("freight_sample")),
         )
 
 
@@ -914,6 +917,7 @@ class ImpactsSettings:
                     "frism_year": self.impacts.population.frism_year,
                     "population_sample": self.impacts.population.population_sample,
                     "transit_sample": self.impacts.population.transit_sample,
+                    "freight_sample": self.impacts.population.freight_sample,
                 },
                 "activities": self.impacts.activities,
                 "fleet": self.impacts.fleet,

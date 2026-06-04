@@ -298,6 +298,230 @@ def _duckdb_identifier(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Vehicle metadata and annualization helpers shared by postprocess steps
+# ---------------------------------------------------------------------------
+
+VEHICLE_CLASS_GROUP_MAP: dict[str, str] = {
+    "Class 1&2A Vocational": "class12ab3",
+    "Class 2&B3 Vocational": "class12ab3",
+    "Class 4-6 Vocational": "class456",
+    "Class 7&8 Tractor": "class78",
+    "Class 7&8 Vocational": "class78",
+}
+
+CATEGORY_CLASS_GROUP_MAP: dict[str, str] = {
+    "LDA": "class12ab3",
+    "LDT1": "class12ab3",
+    "LDT2": "class12ab3",
+    "MDV": "class12ab3",
+    "MCY": "class12ab3",
+    "LHD1": "class456",
+    "LHD2": "class456",
+    "UBUS": "class78",
+    "SBUS": "class78",
+    "MH": "class78",
+}
+
+CLASS_GROUP_ORDER = ["class12ab3", "class456", "class78"]
+CLASS_GROUP_LABELS = {
+    "class12ab3": "Class 1-2b3",
+    "class456": "Class 4-5-6",
+    "class78": "Class 7-8",
+}
+
+
+def _validate_sample_fraction(name: str, value: float) -> float:
+    numeric = float(value)
+    if not 0 < numeric <= 1:
+        raise ValueError(f"{name} must be in the interval (0, 1], got {value}")
+    return numeric
+
+
+def _derive_class_group(row: pd.Series) -> str | None:
+    vehicle_class = _normalize_token(row.get("vehicleClass") or "")
+    if vehicle_class:
+        result = VEHICLE_CLASS_GROUP_MAP.get(vehicle_class)
+        if result:
+            return result
+    category = _normalize_token(row.get("emfacVehicleCategory") or "")
+    if not category:
+        return None
+    if category in CATEGORY_CLASS_GROUP_MAP:
+        return CATEGORY_CLASS_GROUP_MAP[category]
+    match = re.search(r"Class\s*(\d+)", category)
+    if match:
+        return "class456" if int(match.group(1)) <= 6 else "class78"
+    if category.startswith("T7") or category in ("T6TS", "T7IS"):
+        return "class78"
+    return None
+
+
+def _load_assignment_vehicle_types(
+    *,
+    passenger_vehicle_types_path: str,
+    freight_vehicle_types_path: str,
+) -> pd.DataFrame:
+    from ...common import read_table
+
+    frames: list[pd.DataFrame] = []
+    for assignment_group, path in (
+        ("passenger", passenger_vehicle_types_path),
+        ("freight", freight_vehicle_types_path),
+    ):
+        frame = read_table(path).copy()
+        if "vehicleTypeId" not in frame.columns:
+            raise ValueError(f"{assignment_group} vehicle types input must include vehicleTypeId.")
+        frame["assignment_group"] = assignment_group
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True, sort=False)
+
+
+def _vehicle_type_sample_scale(
+    vehicle_types: pd.DataFrame,
+    *,
+    population_sample: float,
+    transit_sample: float,
+    freight_sample: float | None,
+) -> pd.Series:
+    from ..workflow.prepare_emissions.annualization import _is_transit_vehicle_type
+
+    population_sample = _validate_sample_fraction("population_sample", population_sample)
+    transit_sample = _validate_sample_fraction("transit_sample", transit_sample)
+    resolved_freight_sample = (
+        _validate_sample_fraction("freight_sample", freight_sample)
+        if freight_sample is not None
+        else population_sample
+    )
+
+    scale = pd.Series(1.0 / population_sample, index=vehicle_types.index, dtype="float64")
+    freight_mask = vehicle_types["assignment_group"].eq("freight")
+    if freight_mask.any():
+        scale.loc[freight_mask] = 1.0 / resolved_freight_sample
+    transit_mask = vehicle_types["vehicleTypeId"].map(_is_transit_vehicle_type)
+    if transit_mask.any():
+        scale.loc[transit_mask] = 1.0
+    return scale
+
+
+def _load_sector_lookup(vehicle_category_metadata_file: str | None) -> pd.DataFrame:
+    from ...common import read_table
+
+    if not vehicle_category_metadata_file:
+        return pd.DataFrame(columns=["emfacVehicleCategory", "sector"])
+    category_mapping = read_table(vehicle_category_metadata_file).copy()
+    required = {"emfac_vehicle_category", "generic_vehicle_category"}
+    missing = sorted(required - set(category_mapping.columns))
+    if missing:
+        raise ValueError(
+            "Vehicle category metadata input must include emfac_vehicle_category and generic_vehicle_category. "
+            f"Missing: {missing}"
+        )
+    category_mapping["emfac_vehicle_category"] = category_mapping["emfac_vehicle_category"].map(_normalize_token)
+    category_mapping["generic_vehicle_category"] = category_mapping["generic_vehicle_category"].map(_normalize_token)
+    return (
+        category_mapping.loc[
+            category_mapping["emfac_vehicle_category"].ne("")
+            & category_mapping["generic_vehicle_category"].ne("")
+        ][["emfac_vehicle_category", "generic_vehicle_category"]]
+        .rename(columns={"emfac_vehicle_category": "emfacVehicleCategory", "generic_vehicle_category": "sector"})
+        .drop_duplicates(subset=["emfacVehicleCategory"], keep="first")
+        .reset_index(drop=True)
+    )
+
+
+def load_postprocess_vehicle_metadata(
+    *,
+    passenger_vehicle_types_path: str,
+    freight_vehicle_types_path: str,
+    vehicle_category_metadata_file: str | None = None,
+    population_sample: float = 1.0,
+    transit_sample: float = 1.0,
+    freight_sample: float | None = None,
+) -> pd.DataFrame:
+    """Return standardized vehicle metadata for postprocess comparisons.
+
+    The sample scaling mirrors the emissions-preparation annualization path:
+    passenger rows use ``population_sample``, freight rows use ``freight_sample``
+    when provided, and transit rows are left unscaled.
+    """
+    vehicle_types = _load_assignment_vehicle_types(
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
+    )
+    if "emfacResolvedModelYear" in vehicle_types.columns:
+        vehicle_types = vehicle_types.rename(columns={"emfacResolvedModelYear": "model_year_group"})
+    for column in (
+        "emfacId",
+        "emfacVehicleCategory",
+        "emfacFuel",
+        "model_year_group",
+        "vehicleClass",
+        "fleetVmtPrior",
+        "fleetPopulationPrior",
+    ):
+        if column not in vehicle_types.columns:
+            vehicle_types[column] = None
+
+    vehicle_types["vehicleTypeId"] = vehicle_types["vehicleTypeId"].map(_normalize_token)
+    vehicle_types["assignment_group"] = vehicle_types["assignment_group"].map(_normalize_token)
+    vehicle_types["emfacId"] = vehicle_types["emfacId"].map(_normalize_token)
+    vehicle_types["emfacVehicleCategory"] = vehicle_types["emfacVehicleCategory"].map(_normalize_token)
+    vehicle_types["model_year_group"] = vehicle_types["model_year_group"].map(
+        lambda value: _normalize_token(value) if pd.notna(value) else ""
+    )
+    vehicle_types["fuel"] = vehicle_types["emfacFuel"].map(
+        lambda value: _normalize_token(value) if pd.notna(value) else ""
+    )
+    vehicle_types["class_group"] = vehicle_types.apply(_derive_class_group, axis=1)
+    vehicle_types["fleet_vmt_prior"] = pd.to_numeric(vehicle_types["fleetVmtPrior"], errors="coerce").fillna(0.0)
+    vehicle_types["fleet_population_prior"] = pd.to_numeric(
+        vehicle_types["fleetPopulationPrior"],
+        errors="coerce",
+    ).fillna(0.0)
+    vehicle_types["sample_scale_factor"] = _vehicle_type_sample_scale(
+        vehicle_types,
+        population_sample=population_sample,
+        transit_sample=transit_sample,
+        freight_sample=freight_sample,
+    )
+
+    sector_lookup = _load_sector_lookup(vehicle_category_metadata_file)
+    if not sector_lookup.empty:
+        vehicle_types = vehicle_types.merge(
+            sector_lookup,
+            how="left",
+            on="emfacVehicleCategory",
+        )
+    else:
+        vehicle_types["sector"] = ""
+    vehicle_types["sector"] = vehicle_types["sector"].map(
+        lambda value: _normalize_token(value) if pd.notna(value) else ""
+    )
+
+    return (
+        vehicle_types.loc[
+            vehicle_types["vehicleTypeId"].ne("")
+            & vehicle_types["assignment_group"].ne("")
+        ][
+            [
+                "vehicleTypeId",
+                "assignment_group",
+                "emfacId",
+                "emfacVehicleCategory",
+                "class_group",
+                "model_year_group",
+                "fuel",
+                "sector",
+                "fleet_vmt_prior",
+                "fleet_population_prior",
+                "sample_scale_factor",
+            ]
+        ]
+        .reset_index(drop=True)
+    )
+
+
+# ---------------------------------------------------------------------------
 # Manifest-based path helpers (used by run_from_output_dir in all 5 steps)
 # ---------------------------------------------------------------------------
 

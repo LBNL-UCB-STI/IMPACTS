@@ -286,6 +286,7 @@ def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_d
                 "    frism_year: 2018",
                 "    population_sample: 0.1",
                 "    transit_sample: 1.0",
+                "    freight_sample: 0.009900990099009901",
                 "  emissions:",
                 "    include_passenger: false",
                 "    include_freight: true",
@@ -303,6 +304,7 @@ def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_d
         encoding="utf-8",
     )
     config = load_settings_from_yaml(settings_yaml)
+    assert config.impacts.population.freight_sample == 0.009900990099009901
     assert config.impacts.emissions.defaults.default_annualization_days.light_duty == 327.0
     assert config.impacts.emissions.defaults.default_annualization_days.medium_heavy_duty == 312.0
     assert config.impacts.emissions.vehicle_category_metadata_file == "vehicle-tech/emissions/emissions_vehicle_categories.csv"
@@ -320,9 +322,11 @@ def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_d
     payload = _pipeline_payload(tmp_path)
     payload["vehicle_category_metadata_file"] = str(days_csv)
     payload["annualization_days"] = {"light_duty": 327.0, "medium_heavy_duty": 312.0}
+    payload["freight_sample"] = 0.009900990099009901
     pipeline = PipelineConfig.from_dict(payload)
     assert pipeline.vehicle_category_metadata_file == str(days_csv)
     assert pipeline.annualization_days == {"light_duty": 327.0, "medium_heavy_duty": 312.0}
+    assert pipeline.freight_sample == 0.009900990099009901
     assert pipeline.include_passenger is True
     assert pipeline.include_freight is True
 

@@ -49,11 +49,15 @@ def _build_skims_scale_factors(
     *,
     population_sample: float,
     transit_sample: float,
+    freight_sample: Optional[float] = None,
+    assignment_group_by_vehicle_type: Optional[dict[str, str]] = None,
 ) -> pd.Series:
     if not 0 < population_sample <= 1:
         raise ValueError(f"population_sample must be in the interval (0, 1], got {population_sample}")
     if not 0 < transit_sample <= 1:
         raise ValueError(f"transit_sample must be in the interval (0, 1], got {transit_sample}")
+    if freight_sample is not None and not 0 < freight_sample <= 1:
+        raise ValueError(f"freight_sample must be in the interval (0, 1], got {freight_sample}")
 
     scale_factors = pd.Series(
         np.full(len(prepared), 1.0 / population_sample, dtype=float),
@@ -62,9 +66,15 @@ def _build_skims_scale_factors(
     if "vehicleTypeId" not in prepared.columns:
         return scale_factors
 
+    if freight_sample is not None and assignment_group_by_vehicle_type:
+        assignment_groups = prepared["vehicleTypeId"].astype(str).str.strip().map(assignment_group_by_vehicle_type)
+        freight_mask = assignment_groups.eq("freight")
+        if freight_mask.any():
+            scale_factors.loc[freight_mask] = 1.0 / freight_sample
+
     transit_mask = prepared["vehicleTypeId"].map(_is_transit_vehicle_type)
     if transit_mask.any():
-        scale_factors.loc[transit_mask] = 1.0 / transit_sample
+        scale_factors.loc[transit_mask] = 1.0
     return scale_factors
 
 
@@ -82,6 +92,7 @@ def annualize_prepared_skims_for_grid_allocation(
     freight_vehicle_types_path: Optional[str] = None,
     population_sample: float = 1.0,
     transit_sample: float = 1.0,
+    freight_sample: Optional[float] = None,
 ) -> pd.DataFrame:
     started = time.perf_counter()
     link_lengths = read_table(network_path)
@@ -112,6 +123,10 @@ def annualize_prepared_skims_for_grid_allocation(
         passenger_vehicle_types_path=passenger_vehicle_types_path,
         freight_vehicle_types_path=freight_vehicle_types_path,
     )
+    assignment_group_lookup = _resolve_vehicle_type_assignment_group_lookup(
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
+    )
     tailpipe_height_lookup = _resolve_vehicle_type_tailpipe_height_lookup(
         vehicle_category_metadata_file=vehicle_category_metadata_file,
         passenger_vehicle_types_path=passenger_vehicle_types_path,
@@ -125,9 +140,11 @@ def annualize_prepared_skims_for_grid_allocation(
         link_lengths=link_lengths,
         beam_length_col=beam_length_col,
         annualization_days_lookup=annualization_days_lookup,
+        assignment_group_lookup=assignment_group_lookup,
         tailpipe_height_lookup=tailpipe_height_lookup,
         population_sample=population_sample,
         transit_sample=transit_sample,
+        freight_sample=freight_sample,
         started=started,
     )
 
@@ -149,11 +166,20 @@ def _annualize_prepared_skims_with_duckdb(
     link_lengths: pd.DataFrame,
     beam_length_col: str,
     annualization_days_lookup: dict[str, float],
+    assignment_group_lookup: dict[str, str],
     tailpipe_height_lookup: dict[str, float],
     population_sample: float,
     transit_sample: float,
+    freight_sample: Optional[float],
     started: float,
 ) -> pd.DataFrame:
+    if not 0 < population_sample <= 1:
+        raise ValueError(f"population_sample must be in the interval (0, 1], got {population_sample}")
+    if not 0 < transit_sample <= 1:
+        raise ValueError(f"transit_sample must be in the interval (0, 1], got {transit_sample}")
+    if freight_sample is not None and not 0 < freight_sample <= 1:
+        raise ValueError(f"freight_sample must be in the interval (0, 1], got {freight_sample}")
+    resolved_freight_sample = float(freight_sample if freight_sample is not None else population_sample)
     scan = _duckdb_scan_expression(prepared_skims_path)
     con = duckdb.connect(database=":memory:")
     show_progress = _should_show_duckdb_progress_bar()
@@ -163,6 +189,7 @@ def _annualize_prepared_skims_with_duckdb(
             "annualization_days": list(annualization_days_lookup.values()),
         }
     )
+    lookup_df["assignment_group"] = lookup_df["vehicleTypeId"].map(assignment_group_lookup).fillna("")
     has_height_lookup = bool(tailpipe_height_lookup)
     height_lookup_df = pd.DataFrame(
         {
@@ -207,7 +234,9 @@ def _annualize_prepared_skims_with_duckdb(
         vehicle_type_expr = "trim(CAST(source.vehicleTypeId AS VARCHAR))"
         scale_expr = (
             f"CASE WHEN regexp_matches(upper({vehicle_type_expr}), '(^|[-_])(BUS|RAIL|FERRY|SUBWAY|TRAM|TRAIN|COACH)($|[-_])') "
-            f"THEN {1.0 / transit_sample} ELSE {1.0 / population_sample} END"
+            "THEN 1.0 "
+            f"WHEN lookup.assignment_group = 'freight' THEN {1.0 / resolved_freight_sample} "
+            f"ELSE {1.0 / population_sample} END"
         )
         obs_expr = "COALESCE(TRY_CAST(source.observations AS DOUBLE), 0.0)"
         annualization_expr = "lookup.annualization_days"
@@ -340,6 +369,45 @@ def _resolve_vehicle_type_tailpipe_height_lookup(
         vehicle_type_id: float(height_by_category.get(category, _DEFAULT_TAILPIPE_HEIGHT_METERS))
         for vehicle_type_id, category in vehicle_type_category_lookup.items()
     }
+
+
+def _resolve_vehicle_type_assignment_group_lookup(
+    *,
+    passenger_vehicle_types_path: Optional[str],
+    freight_vehicle_types_path: Optional[str],
+) -> dict[str, str]:
+    if not passenger_vehicle_types_path or not freight_vehicle_types_path:
+        return {}
+    passenger = read_table(passenger_vehicle_types_path).copy()
+    freight = read_table(freight_vehicle_types_path).copy()
+    frames: list[pd.DataFrame] = []
+    for assignment_group, frame in (("passenger", passenger), ("freight", freight)):
+        if "vehicleTypeId" not in frame.columns:
+            raise ValueError(f"{assignment_group} vehicle types input must include vehicleTypeId.")
+        prepared = frame[["vehicleTypeId"]].copy()
+        prepared["vehicleTypeId"] = prepared["vehicleTypeId"].astype(str).str.strip()
+        prepared = prepared.loc[prepared["vehicleTypeId"].ne("")].copy()
+        prepared["assignment_group"] = assignment_group
+        frames.append(prepared)
+    if not frames:
+        return {}
+    vehicle_types = pd.concat(frames, ignore_index=True, sort=False)
+    duplicates = (
+        vehicle_types.groupby("vehicleTypeId", dropna=False)["assignment_group"]
+        .nunique()
+        .loc[lambda series: series > 1]
+    )
+    if not duplicates.empty:
+        sample = duplicates.index.astype(str).tolist()[:10]
+        raise ValueError(
+            "Passenger and freight vehicle types inputs contain overlapping vehicleTypeId values: "
+            f"{sample}"
+        )
+    return (
+        vehicle_types.drop_duplicates(subset=["vehicleTypeId"], keep="first")
+        .set_index("vehicleTypeId")["assignment_group"]
+        .to_dict()
+    )
 
 
 def _resolve_skims_annualization_factors_from_lookup(

@@ -183,6 +183,42 @@ def _load_pipeline_manifest(
     return run_manifest_path, run_manifest
 
 
+def _coerce_optional_float(value: object) -> float | None:
+    if value is None or str(value).strip() == "":
+        return None
+    return float(value)
+
+
+def _resolve_postprocess_sample_config(
+    settings,
+    settings_path: str | Path,
+    *,
+    run_manifest_path: str | Path | None = None,
+    output_root: Path | None = None,
+) -> tuple[float, float, float | None]:
+    population_settings = getattr(settings.impacts, "population", None)
+    population_sample = float(getattr(population_settings, "population_sample", 1.0))
+    transit_sample = float(getattr(population_settings, "transit_sample", 1.0))
+    freight_sample = _coerce_optional_float(getattr(population_settings, "freight_sample", None))
+
+    try:
+        _, run_manifest = _load_pipeline_manifest(
+            settings_path,
+            run_manifest_path=run_manifest_path,
+            output_root=output_root,
+        )
+    except FileNotFoundError:
+        if run_manifest_path is not None:
+            raise
+        run_manifest = {}
+
+    pipeline = run_manifest.get("pipeline", {}) or {}
+    population_sample = float(pipeline.get("population_sample", population_sample))
+    transit_sample = float(pipeline.get("transit_sample", transit_sample))
+    freight_sample = _coerce_optional_float(pipeline.get("freight_sample", freight_sample))
+    return population_sample, transit_sample, freight_sample
+
+
 def _load_context(
     settings_path: str | Path,
     *,
@@ -462,6 +498,12 @@ def _run_postprocess_steps(
         output_root = Path(resolve_path(settings.impacts.local_output_folder, settings_path)).resolve()
     else:
         output_root = Path(output_root).resolve()
+    population_sample, transit_sample, freight_sample = _resolve_postprocess_sample_config(
+        settings,
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
+    )
     input_roots = _normalize_input_roots(input_roots)
     output_dir = output_root / "postprocess"
     modeled_emissions_path = _resolve_modeled_emissions_path(
@@ -519,6 +561,9 @@ def _run_postprocess_steps(
             output_dir=output_dir / "fleet",
             passenger_vehicles_path=str(passenger_vehicles_path) if passenger_vehicles_path else None,
             freight_carriers_path=str(freight_carriers_path) if freight_carriers_path else None,
+            population_sample=population_sample,
+            transit_sample=transit_sample,
+            freight_sample=freight_sample,
         )
         for key, value in fleet_outputs.items():
             outputs[f"fleet_{key}"] = value

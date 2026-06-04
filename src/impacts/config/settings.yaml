@@ -46,6 +46,7 @@ impacts:
     frism_year: 2018
     population_sample: 0.001
     transit_sample: 1.0
+    freight_sample:
   activities:
     emissions_raw_archive: vehicle-tech/emissions/emissions_raw.tar.zst
     region_label: SF

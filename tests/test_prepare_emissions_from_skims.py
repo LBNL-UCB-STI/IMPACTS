@@ -66,7 +66,7 @@ def test_resolve_duckdb_temp_directory_stays_under_impacts_output_tmp_root(tmp_p
     assert resolved.exists()
 
 
-def test_build_skims_scale_factors_uses_transit_sample_for_non_bus_transit() -> None:
+def test_build_skims_scale_factors_keeps_transit_unscaled() -> None:
     prepared = pd.DataFrame(
         [
             {"vehicleTypeId": "pax-car"},
@@ -82,7 +82,31 @@ def test_build_skims_scale_factors_uses_transit_sample_for_non_bus_transit() -> 
         transit_sample=0.25,
     )
 
-    assert factors.tolist() == [10.0, 4.0, 4.0, 4.0]
+    assert factors.tolist() == [10.0, 1.0, 1.0, 1.0]
+
+
+def test_build_skims_scale_factors_uses_freight_sample_for_freight_vehicle_types() -> None:
+    prepared = pd.DataFrame(
+        [
+            {"vehicleTypeId": "pax-car"},
+            {"vehicleTypeId": "ft-md"},
+            {"vehicleTypeId": "BUS-DEFAULT"},
+        ]
+    )
+
+    factors = _build_skims_scale_factors(
+        prepared,
+        population_sample=0.1,
+        transit_sample=1.0,
+        freight_sample=1.0 / 101.0,
+        assignment_group_by_vehicle_type={
+            "pax-car": "passenger",
+            "ft-md": "freight",
+            "BUS-DEFAULT": "transit",
+        },
+    )
+
+    assert factors.tolist() == [10.0, 101.0, 1.0]
 
 
 def test_prepare_skims_for_grid_allocation_aggregates_parquet_without_eager_raw_read(
@@ -446,6 +470,7 @@ def test_prepare_staged_skims_for_processing_reuses_grouped_intermediate(tmp_pat
         annualization_days={"light_duty": 327.0, "medium_heavy_duty": 312.0},
         population_sample=1.0,
         transit_sample=1.0,
+        freight_sample=None,
         include_passenger=True,
         include_freight=True,
     )
@@ -477,6 +502,7 @@ def test_load_or_prepare_skims_df_rejects_stale_prepared_cache_for_aermod(tmp_pa
             annualization_days={"light_duty": 327.0},
             population_sample=1.0,
             transit_sample=1.0,
+            freight_sample=None,
             include_passenger=True,
             include_freight=False,
             manifest_inputs=None,
@@ -525,6 +551,7 @@ def test_prepare_staged_skims_for_processing_rebuilds_invalid_grouped_intermedia
         annualization_days={"light_duty": 327.0, "medium_heavy_duty": 312.0},
         population_sample=1.0,
         transit_sample=1.0,
+        freight_sample=None,
         include_passenger=True,
         include_freight=True,
     )
@@ -596,6 +623,7 @@ def test_annualize_prepared_skims_uses_grouped_input_without_eager_read(tmp_path
         freight_vehicle_types_path=str(freight_path),
         population_sample=1.0,
         transit_sample=1.0,
+        freight_sample=0.5,
     )
 
     assert list(result.columns) == ["linkId", "vehicleTypeId", "process", "roadCategory", "totTrips", "totVMT", "tons_per_year_NOx"]
@@ -605,8 +633,8 @@ def test_annualize_prepared_skims_uses_grouped_input_without_eager_read(tmp_path
     assert written["vehicleTypeId"].tolist() == ["pax-car", "ft-md"]
     assert written["process"].tolist() == ["RUNEX", "RUNEX"]
     assert written["roadCategory"].tolist() == ["local", "arterial"]
-    assert written["totTrips"].tolist() == [654.0, 936.0]
-    assert written["totVMT"].tolist() == pytest.approx([654.0, 1872.0])
+    assert written["totTrips"].tolist() == [654.0, 1872.0]
+    assert written["totVMT"].tolist() == pytest.approx([654.0, 3744.0])
     assert written["tons_per_year_NOx"].tolist() == pytest.approx(
-        [10.0 * 327.0 / 907184.74, 30.0 * 312.0 / 907184.74]
+        [10.0 * 327.0 / 907184.74, 30.0 * 2.0 * 312.0 / 907184.74]
     )

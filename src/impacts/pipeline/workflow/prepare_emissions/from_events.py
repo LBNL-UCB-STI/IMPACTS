@@ -48,6 +48,7 @@ from ....common import read_table
 from ....common import resolve_required_manifest_input
 from ....common import normalize_county_fips
 from .annualization import _build_skims_scale_factors
+from .annualization import _resolve_vehicle_type_assignment_group_lookup
 from .annualization import resolve_skims_annualization_factors
 
 logger = logging.getLogger(__name__)
@@ -289,6 +290,7 @@ def _calculate_emissions(
     freight_vehicle_types_path: Optional[str],
     population_sample: float,
     transit_sample: float,
+    freight_sample: Optional[float],
 ) -> pd.DataFrame:
     """Join emission rates onto zone-expanded skims and add tons_per_year_{pollutant}_{zone}_allocated columns.
 
@@ -299,7 +301,8 @@ def _calculate_emissions(
         pollutants_map: canonical_pollutant → rate_file_pollutant_name mapping.
         vehicle_category_metadata_file: vehicle metadata catalog with optional operation_days_per_year.
         population_sample: simulation sample fraction for non-transit rows.
-        transit_sample: simulation sample fraction for BUS vehicle types.
+        transit_sample: accepted for configuration parity; transit rows are not sample-expanded.
+        freight_sample: optional simulation sample fraction for freight rows.
     """
     from ..tools.beam.events_to_skims_emissions import read_rates_directory
 
@@ -337,12 +340,18 @@ def _calculate_emissions(
         passenger_vehicle_types_path=passenger_vehicle_types_path,
         freight_vehicle_types_path=freight_vehicle_types_path,
     )
+    assignment_group_lookup = _resolve_vehicle_type_assignment_group_lookup(
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
+    )
     scale = (
         annualization_factors
         * _build_skims_scale_factors(
             skims,
             population_sample=population_sample,
             transit_sample=transit_sample,
+            freight_sample=freight_sample,
+            assignment_group_by_vehicle_type=assignment_group_lookup,
         )
         / grams_per_short_ton
     )
@@ -457,6 +466,7 @@ def build_skims_from_events(
     freight_vehicle_types_path: Optional[str] = None,
     population_sample: Optional[float] = None,
     transit_sample: Optional[float] = None,
+    freight_sample: Optional[float] = None,
 ) -> pd.DataFrame:
     """Parse PathTraversal events and return a skims DataFrame.
     """
@@ -506,6 +516,7 @@ def build_skims_from_events(
             freight_vehicle_types_path=freight_vehicle_types_path,
             population_sample=population_sample,
             transit_sample=transit_sample,
+            freight_sample=freight_sample,
         )
 
     return skims
@@ -580,6 +591,9 @@ def prepare_events_inputs(
     annualization_days: dict[str, float],
     population_sample: float,
     transit_sample: float,
+    freight_sample: Optional[float],
+    include_passenger: bool = True,
+    include_freight: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """Build prepared skims/activity tables from registered BEAM events."""
     events_path = find_staged_events_path(manifest_inputs)
@@ -632,6 +646,9 @@ def prepare_events_inputs(
         annualization_days=annualization_days,
         population_sample=float(population_sample),
         transit_sample=float(transit_sample),
+        freight_sample=freight_sample,
+        include_passenger=include_passenger,
+        include_freight=include_freight,
     )
     prepared_skims_path = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
 

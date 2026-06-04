@@ -61,6 +61,7 @@ class PipelineConfig:
     )
     population_sample: float = 1.0
     transit_sample: float = 1.0
+    freight_sample: Optional[float] = None
     include_non_osm_car_links: bool = False
     include_passenger: bool = True
     include_freight: bool = True
@@ -107,6 +108,7 @@ class PipelineConfig:
                 "annualization_days",
                 "population_sample",
                 "transit_sample",
+                "freight_sample",
                 "include_non_osm_car_links",
                 "include_passenger",
                 "include_freight",
@@ -180,6 +182,7 @@ class PipelineConfig:
             annualization_days=_required_dict(payload.get("annualization_days"), "pipeline.annualization_days"),
             population_sample=_required_float(payload.get("population_sample"), "pipeline.population_sample"),
             transit_sample=_optional_float(payload.get("transit_sample"), default=1.0),
+            freight_sample=_optional_float(payload.get("freight_sample")),
             include_non_osm_car_links=_required_bool(
                 payload.get("include_non_osm_car_links", False), "pipeline.include_non_osm_car_links"
             ),

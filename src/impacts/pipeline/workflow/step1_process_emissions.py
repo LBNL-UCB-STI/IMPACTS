@@ -681,6 +681,7 @@ def run(
         annualization_days=dict(pipeline.annualization_days),
         population_sample=float(pipeline.population_sample),
         transit_sample=float(pipeline.transit_sample),
+        freight_sample=pipeline.freight_sample,
         include_passenger=bool(pipeline.include_passenger),
         include_freight=bool(pipeline.include_freight),
         manifest_inputs=manifest_inputs,

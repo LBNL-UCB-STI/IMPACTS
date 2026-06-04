@@ -22,14 +22,23 @@ def test_postprocess_step1_compares_beam_fleet_to_emfac_by_emfac_id(tmp_path: Pa
         {
             "vehicleTypeId": ["pax-a", "pax-b"],
             "emfacId": ["pre2004LDAGas", "post2014LDAGas"],
-            "sampleProbabilityWithinCategory": [0.4, 0.6],
+            "emfacVehicleCategory": ["LDA", "LDA"],
+            "emfacFuel": ["Gas", "Gas"],
+            "emfacResolvedModelYear": ["pre2004", "post2014"],
+            "fleetVmtPrior": [0.25, 0.75],
+            "fleetPopulationPrior": [0.25, 0.75],
         }
     )
     freight_vehicle_types = pd.DataFrame(
         {
             "vehicleTypeId": ["ft-a"],
             "emfacId": ["2003to2006T7TractorDsl"],
-            "sampleProbabilityWithinCategory": [1.0],
+            "emfacVehicleCategory": ["T7 Tractor"],
+            "emfacFuel": ["Dsl"],
+            "emfacResolvedModelYear": ["2003to2006"],
+            "vehicleClass": ["Class 7&8 Tractor"],
+            "fleetVmtPrior": [1.0],
+            "fleetPopulationPrior": [1.0],
         }
     )
     passenger_vehicle_types_path = tmp_path / "vehicleTypes--atlas.csv"
@@ -78,11 +87,14 @@ def test_postprocess_step1_compares_beam_fleet_to_emfac_by_emfac_id(tmp_path: Pa
         output_dir=tmp_path / "postprocess",
         passenger_vehicles_path=str(passenger_vehicles_path),
         freight_carriers_path=str(freight_carriers_path),
+        population_sample=0.5,
+        freight_sample=0.25,
     )
 
     comparison = pd.read_parquet(outputs["comparison_parquet"]).set_index(["assignment_group", "emfacId"])
-    assert comparison.loc[("passenger", "pre2004LDAGas"), "beam_population_weight"] == 2
-    assert comparison.loc[("passenger", "post2014LDAGas"), "beam_population_weight"] == 3
+    assert comparison.loc[("passenger", "pre2004LDAGas"), "beam_population_weight"] == 4
+    assert comparison.loc[("passenger", "post2014LDAGas"), "beam_population_weight"] == 6
+    assert comparison.loc[("freight", "2003to2006T7TractorDsl"), "beam_population_weight"] == 4
     assert comparison.loc[("passenger", "pre2004LDAGas"), "beam_vmt"] == 10.0
     assert comparison.loc[("passenger", "post2014LDAGas"), "beam_vmt"] == 20.0
     assert comparison.loc[("passenger", "pre2004LDAGas"), "emfac_population_share"] == 0.2
@@ -105,14 +117,23 @@ def test_postprocess_step1_uses_actual_passenger_vehicle_assignments_when_availa
         {
             "vehicleTypeId": ["pax-a", "pax-b"],
             "emfacId": ["pre2004LDAGas", "post2014LDAGas"],
-            "sampleProbabilityWithinCategory": [0.99, 0.01],
+            "emfacVehicleCategory": ["LDA", "LDA"],
+            "emfacFuel": ["Gas", "Gas"],
+            "emfacResolvedModelYear": ["pre2004", "post2014"],
+            "fleetVmtPrior": [0.25, 0.75],
+            "fleetPopulationPrior": [0.25, 0.75],
         }
     )
     freight_vehicle_types = pd.DataFrame(
         {
             "vehicleTypeId": ["ft-a"],
             "emfacId": ["2003to2006T7TractorDsl"],
-            "sampleProbabilityWithinCategory": [1.0],
+            "emfacVehicleCategory": ["T7 Tractor"],
+            "emfacFuel": ["Dsl"],
+            "emfacResolvedModelYear": ["2003to2006"],
+            "vehicleClass": ["Class 7&8 Tractor"],
+            "fleetVmtPrior": [1.0],
+            "fleetPopulationPrior": [1.0],
         }
     )
     passenger_vehicle_types_path = tmp_path / "vehicleTypes--atlas.csv"

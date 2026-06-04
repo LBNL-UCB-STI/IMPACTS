@@ -16,6 +16,7 @@ from ._common import (
     _slugify,
     _step_progress,
     _style_chart_axes,
+    load_postprocess_vehicle_metadata,
 )  # configures matplotlib backend before pyplot
 
 import matplotlib.pyplot as plt
@@ -26,7 +27,6 @@ from ...common import _duckdb_scan_expression
 from ...common import configure_duckdb_connection
 from ...common import log_step_banner
 from ...common import log_substep_banner
-from ...common import read_table
 
 logger = logging.getLogger(__name__)
 
@@ -57,47 +57,14 @@ def _load_vehicle_type_sectors(
     *,
     vehicle_category_metadata_file: str,
 ) -> pd.DataFrame:
-    passenger = read_table(passenger_vehicle_types_path).copy()
-    freight = read_table(freight_vehicle_types_path).copy()
-    vehicle_types = pd.concat([passenger, freight], ignore_index=True, sort=False)
-    required_columns = {"vehicleTypeId", "emfacVehicleCategory"}
-    missing = sorted(required_columns - set(vehicle_types.columns))
-    if missing:
-        raise ValueError(
-            "Vehicle types input must include vehicleTypeId and emfacVehicleCategory for postprocess step 2. "
-            f"Missing: {missing}"
-        )
-    category_mapping = read_table(vehicle_category_metadata_file).copy()
-    mapping_required = {"emfac_vehicle_category", "generic_vehicle_category"}
-    mapping_missing = sorted(mapping_required - set(category_mapping.columns))
-    if mapping_missing:
-        raise ValueError(
-            "Vehicle category metadata input must include emfac_vehicle_category and generic_vehicle_category "
-            f"for postprocess step 2. Missing: {mapping_missing}"
-        )
-    category_mapping["emfac_vehicle_category"] = category_mapping["emfac_vehicle_category"].map(_normalize_token)
-    category_mapping["generic_vehicle_category"] = category_mapping["generic_vehicle_category"].map(_normalize_token)
-    category_mapping = category_mapping.loc[
-        category_mapping["emfac_vehicle_category"].ne("") & category_mapping["generic_vehicle_category"].ne("")
-    ].copy()
-    category_mapping = (
-        category_mapping[["emfac_vehicle_category", "generic_vehicle_category"]]
-        .drop_duplicates(subset=["emfac_vehicle_category"], keep="first")
-        .reset_index(drop=True)
-    )
-    prepared = vehicle_types.copy()
-    prepared["vehicleTypeId"] = prepared["vehicleTypeId"].map(_normalize_token)
-    prepared["emfacVehicleCategory"] = prepared["emfacVehicleCategory"].map(_normalize_token)
-    prepared = prepared.loc[prepared["vehicleTypeId"].ne("")].copy()
-    prepared = prepared.merge(
-        category_mapping,
-        how="left",
-        left_on="emfacVehicleCategory",
-        right_on="emfac_vehicle_category",
+    prepared = load_postprocess_vehicle_metadata(
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
+        vehicle_category_metadata_file=vehicle_category_metadata_file,
     )
     return (
-        prepared[["vehicleTypeId", "generic_vehicle_category"]]
-        .rename(columns={"generic_vehicle_category": "sector"})
+        prepared[["vehicleTypeId", "sector"]]
+        .loc[lambda df: df["sector"].ne("")]
         .drop_duplicates(subset=["vehicleTypeId"], keep="first")
         .reset_index(drop=True)
     )
