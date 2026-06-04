@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from impacts.pipeline.emfac.common import read_atlas_vehicles_input
+from impacts.pipeline.emfac._common import read_atlas_vehicles_input
 from impacts.pipeline.emfac.fleet.step1_build_vehicle_types import _build_atlas_vehicle_type_targets
 from impacts.pipeline.emfac.fleet.step1_build_vehicle_types import _build_passenger_vehicle_types_from_atlas_targets
 from impacts.pipeline.emfac.fleet.step3_map_emfac_atlas import _assign_passenger_fuel_consumption_fields

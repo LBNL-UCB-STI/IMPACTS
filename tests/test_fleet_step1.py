@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from impacts.pipeline.emfac.common import read_atlas_vehicles_input
+from impacts.pipeline.emfac._common import read_atlas_vehicles_input
 
 
 def test_read_atlas_vehicles_input_accepts_raw_snake_case_schema(tmp_path: Path) -> None:

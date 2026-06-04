@@ -8,11 +8,11 @@ import pyarrow.parquet as pq
 import pytest
 
 import impacts.common as common
-import impacts.pipeline.workflow.annualization as annualization_module
-import impacts.pipeline.workflow.prepare_emissions_from_skims as prepare_skims_module
-from impacts.pipeline.workflow.annualization import _build_skims_scale_factors
-from impacts.pipeline.workflow.annualization import annualize_prepared_skims_for_grid_allocation
-from impacts.pipeline.workflow.prepare_emissions_from_skims import _build_zone_allocated_table
+import impacts.pipeline.workflow.prepare_emissions.annualization as annualization_module
+import impacts.pipeline.workflow.prepare_emissions.from_skims as prepare_skims_module
+from impacts.pipeline.workflow.prepare_emissions.annualization import _build_skims_scale_factors
+from impacts.pipeline.workflow.prepare_emissions.annualization import annualize_prepared_skims_for_grid_allocation
+from impacts.pipeline.workflow.prepare_emissions.from_skims import _build_zone_allocated_table
 
 
 def test_configure_duckdb_progress_bar_toggles_settings() -> None:
@@ -394,7 +394,7 @@ def test_build_zone_allocated_table_uses_supplied_step_label(caplog, tmp_path: P
         ]
     )
 
-    with caplog.at_level("INFO", logger="impacts.pipeline.workflow.prepare_emissions_from_skims"):
+    with caplog.at_level("INFO", logger="impacts.pipeline.workflow.prepare_emissions.from_skims"):
         allocated = _build_zone_allocated_table(
             grouped_df=grouped,
             skims_df=skims,

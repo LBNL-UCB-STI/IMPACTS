@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from impacts.pipeline.emfac.common import read_frism_carriers_input
+from impacts.pipeline.emfac._common import read_frism_carriers_input
 from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _build_freight_bayesian_log_score
 from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _build_freight_naics_sector_weight_lookup
 from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import _build_payload_mass_thresholds

@@ -5,10 +5,10 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from ...common import log_step_banner
-from ...common import log_substep_banner
-from ...manifest.file_ops import write_structured_file
-from ...manifest.schema import ActivitiesManifest
+from .common import log_step_banner
+from .common import log_substep_banner
+from .manifest.file_ops import write_structured_file
+from .manifest.schema import ActivitiesManifest
 
 logger = logging.getLogger(__name__)
 
@@ -194,8 +194,8 @@ def _extract_archive(archive: Path, destination: Path) -> None:
 
 
 def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
-    from ...manifest.file_ops import resolve_path
-    from ...config.path_registry import build_registry
+    from .manifest.file_ops import resolve_path
+    from .config.path_registry import build_registry
 
     local_input_folder = Path(resolve_path(settings.impacts.local_input_folder, config_path)).resolve()
     local_input_folder.mkdir(parents=True, exist_ok=True)
@@ -355,9 +355,9 @@ def _ensure_raw_data(cfg: dict[str, Any]) -> None:
 
 
 def _build_workflow(settings, config_path: Path) -> dict[str, Any]:
-    from ...config.path_registry import build_registry
-    from ...config.settings import _build_activities_config_from_root
-    from ...config.settings import _build_activities_workflow
+    from .config.path_registry import build_registry
+    from .config.settings import _build_activities_config_from_root
+    from .config.settings import _build_activities_workflow
 
     cfg = _normalize_raw_input_paths(_resolve_activities_config(settings, config_path))
     registry = build_registry(settings, config_path)
@@ -422,7 +422,7 @@ def _run_emfac_step(workflow: dict[str, Any], *, step_name: str, runner) -> dict
 # Activities workflow
 # ---------------------------------------------------------------------------
 
-def _run_activities_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
+def _run_activities_steps(workflow: dict[str, Any]) -> dict[str, Any]:
     from impacts.pipeline.emfac._common import write_failure_trace, write_trace
     from impacts.pipeline.emfac.activities.step1_prepare_emissions_and_activities_tables import run_step1
     from impacts.pipeline.emfac.activities.step2_build_comprehensive_project_analysis import run_step2
@@ -496,7 +496,7 @@ def _ensure_fleet_activities_exist(workflow: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _run_fleet_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
+def _run_fleet_steps(workflow: dict[str, Any]) -> dict[str, Any]:
     from impacts.pipeline.emfac._common import write_failure_trace, write_trace
     from impacts.pipeline.emfac.fleet.step1_build_vehicle_types import run_step1
     from impacts.pipeline.emfac.fleet.step2_map_emfac_bus_bike import run_step2
@@ -560,7 +560,7 @@ def run_fleet(
     except Exception as error:
         raise_runtime_error("config_load", error)
     workflow = _ensure_fleet_activities_exist(workflow)
-    _run_fleet_workflow(workflow)
+    _run_fleet_steps(workflow)
 
 
 # ---------------------------------------------------------------------------
@@ -590,14 +590,14 @@ def ensure_emfac_activities_outputs(settings, config_path: Path) -> dict[str, An
     log_substep_banner("3", "build workflow config", logger=logger)
     workflow = _build_workflow(settings, config_path)
 
-    log_substep_banner("4", "run activities workflow", logger=logger)
-    _run_activities_workflow(workflow)
+    log_substep_banner("4", "run activities steps", logger=logger)
+    _run_activities_steps(workflow)
 
     log_substep_banner("5", "validate outputs", logger=logger)
     if not _outputs_exist(workflow):
         output_dir = Path(str(workflow["paths"]["final_activity_by_emfacid_output_passenger"])).parent
         raise RuntimeError(
-            f"EMFAC activities workflow completed but expected outputs not found in {output_dir}."
+            f"EMFAC activities provisioning completed but expected outputs not found in {output_dir}."
         )
     logger.info("EMFAC activities outputs validated.")
     return _write_activities_manifest(

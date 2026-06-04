@@ -437,7 +437,7 @@ def test_manifest_models_round_trip_current_shape(tmp_path: Path):
             "model": "impacts",
             "pipeline_manifest_path": run_manifest["pipeline_manifest_path"],
             "output_dir": str(tmp_path / "impacts"),
-            "analysis_outputs": {},
+            "postprocess_outputs": {},
             "validation": {},
             "notes": [],
             "postprocess_manifest_path": str(tmp_path / "impacts" / "postprocess_manifest.yaml"),
@@ -447,7 +447,7 @@ def test_manifest_models_round_trip_current_shape(tmp_path: Path):
     assert activities_manifest["outputs"]["outputs_root"].endswith("emfac")
     assert preprocess_manifest["pipeline"]["region"] == "sfbay"
     assert run_manifest["execution"]["stopped_after"] == "step1_process_emissions"
-    assert postprocess_manifest["analysis_outputs"] == {}
+    assert postprocess_manifest["postprocess_outputs"] == {}
 
 
 def test_pipeline_manifest_allows_disabled_inmap_without_inmap_inputs(tmp_path: Path):
@@ -484,7 +484,7 @@ def test_pipeline_manifest_allows_disabled_aermod_without_aermod_inputs(tmp_path
 
 
 def test_run_emissions_from_pipeline_manifest_uses_staged_intersections_from_preprocess(monkeypatch, tmp_path: Path):
-    import impacts.pipeline.workflow.prepare_emissions_from_skims as prepare_emissions_from_skims
+    import impacts.pipeline.workflow.prepare_emissions.from_skims as from_skims_module
     import impacts.pipeline.workflow.step1_process_emissions as step1_process_emissions
     import impacts.runner as runner_module
 
@@ -538,7 +538,7 @@ def test_run_emissions_from_pipeline_manifest_uses_staged_intersections_from_pre
         },
     )
     monkeypatch.setattr(
-        prepare_emissions_from_skims,
+        from_skims_module,
         "resolve_prepared_skims_path",
         lambda input_root: str(tmp_path / "prepared_skims.parquet"),
     )
@@ -692,10 +692,10 @@ def test_cli_rejects_removed_run_command() -> None:
 def test_cli_fleet_uses_activities_manifest(monkeypatch, tmp_path: Path) -> None:
     captured = {}
 
-    def _fake_run_fleet_main(*, activities_manifest_path):
+    def _fake_run_fleet(*, activities_manifest_path):
         captured["activities_manifest_path"] = str(activities_manifest_path)
 
-    monkeypatch.setattr("impacts.pipeline.emfac.fleet.main.main", _fake_run_fleet_main)
+    monkeypatch.setattr("impacts.provisioner.run_fleet", _fake_run_fleet)
 
     assert main(["fleet", "--activities-manifest", str(tmp_path / "activities_manifest.yaml")]) == 0
     assert captured["activities_manifest_path"].endswith("activities_manifest.yaml")
@@ -750,16 +750,17 @@ def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_pat
     assert calls["postprocess"]["run_manifest_path"].endswith("pipeline_manifest.yaml")
 
 
-def test_postprocess_logs_pipeline_complete_after_analysis_and_manifest(monkeypatch, caplog, tmp_path: Path):
+def test_postprocess_logs_pipeline_complete_after_steps_and_manifest(monkeypatch, caplog, tmp_path: Path):
     output_root = tmp_path / "impacts_output"
     run_manifest_path = output_root / "pipeline_manifest.yaml"
     run_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    preprocess_manifest_path = output_root / "preprocess_manifest.yaml"
     run_manifest_path.write_text(
         json.dumps(
             {
                 "contract_version": "1",
                 "model": "impacts",
-                "preprocess_manifest_path": str(output_root / "preprocess_manifest.yaml"),
+                "preprocess_manifest_path": str(preprocess_manifest_path),
                 "output_dir": str(output_root),
                 "command": "python -m impacts postsim",
                 "image": "unknown",
@@ -773,23 +774,42 @@ def test_postprocess_logs_pipeline_complete_after_analysis_and_manifest(monkeypa
         ),
         encoding="utf-8",
     )
+    preprocess_manifest_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "1",
+                "model": "impacts",
+                "settings_source": str(tmp_path / "settings.yaml"),
+                "staging_dir": str(output_root / "preprocess"),
+                "input_dir": str(output_root / "preprocess"),
+                "preprocess_manifest_path": str(preprocess_manifest_path),
+                "maintained_execution_path": [],
+                "inputs": {},
+                "pipeline": _pipeline_payload(tmp_path),
+                "pilates_contract": {"stage": "terminal_postprocessing"},
+                "population_inputs": {},
+                "notes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    def _fake_analysis(run_manifest_path):
-        logging.getLogger("impacts.analysis.fake").info("analysis complete for %s", run_manifest_path)
-        return {"analysis_output": str(tmp_path / "analysis.parquet")}
+    def _fake_postprocess_steps(settings_path):
+        logging.getLogger("impacts.postprocess.fake").info("postprocess steps complete for %s", settings_path)
+        return {"postprocess_output": str(tmp_path / "postprocess.parquet")}
 
-    monkeypatch.setattr("impacts.runner.run_analysis_from_pipeline_manifest", _fake_analysis)
+    monkeypatch.setattr("impacts.postprocessor._run_postprocess_steps", _fake_postprocess_steps)
 
     with caplog.at_level(logging.INFO):
         result = postprocess_from_pipeline_manifest(run_manifest_path=run_manifest_path)
 
     messages = [record.getMessage() for record in caplog.records]
-    analysis_index = messages.index(f"analysis complete for {run_manifest_path}")
+    steps_index = messages.index(f"postprocess steps complete for {tmp_path / 'settings.yaml'}")
     manifest_index = messages.index(f"Postprocess manifest written: {output_root / 'postprocess_manifest.yaml'}")
     complete_index = messages.index(f"Pipeline complete: postprocess_manifest={output_root / 'postprocess_manifest.yaml'}")
 
     assert result["postprocess_manifest_path"].endswith("postprocess_manifest.yaml")
-    assert analysis_index < manifest_index < complete_index
+    assert steps_index < manifest_index < complete_index
     assert messages[-1] == f"Pipeline complete: postprocess_manifest={output_root / 'postprocess_manifest.yaml'}"
 
 
@@ -808,8 +828,8 @@ def test_hpc_scripts_default_impacts_dir_to_checkout_root():
         assert 'IMPACTS_DIR="${IMPACTS_DIR:-$REPO_ROOT}"' in script
 
 
-def test_analysis_runner_resolves_modeled_emissions_from_pipeline_manifest(monkeypatch, tmp_path: Path):
-    from impacts import runner as analysis_runner
+def test_postprocessor_resolves_modeled_emissions_from_pipeline_manifest(monkeypatch, tmp_path: Path):
+    import impacts.postprocessor as postprocessor_module
 
     output_root = tmp_path / "impacts"
     emissions_path = output_root / "beam_emissions_by_county_process.parquet"
@@ -851,27 +871,21 @@ def test_analysis_runner_resolves_modeled_emissions_from_pipeline_manifest(monke
                 class fips:
                     counties = []
 
-    class _AnalysisSettings(_Settings):
-        class impacts(_Settings.impacts):
-            class analysis:
-                sector_targets = []
-                targets = []
-
-    monkeypatch.setattr(analysis_runner, "load_settings_from_yaml", lambda _: _AnalysisSettings())
-    monkeypatch.setattr(analysis_runner, "resolve_path", lambda path, _: path)
+    monkeypatch.setattr(postprocessor_module, "load_settings_from_yaml", lambda _: _Settings())
+    monkeypatch.setattr(postprocessor_module, "resolve_path", lambda path, _: path)
     monkeypatch.setattr(
-        analysis_runner.PipelineManifest,
+        postprocessor_module.PipelineManifest,
         "from_dict",
         classmethod(lambda cls, payload: SimpleNamespace(to_dict=lambda: payload)),
     )
 
-    resolved = analysis_runner._resolve_analysis_modeled_emissions_path(tmp_path / "settings.yaml")
+    resolved = postprocessor_module._resolve_modeled_emissions_path(tmp_path / "settings.yaml")
 
     assert resolved == emissions_path.resolve()
 
 
-def test_analysis_runner_resolves_county_boundaries_from_input_manifest(monkeypatch, tmp_path: Path):
-    from impacts import runner as analysis_runner
+def test_postprocessor_resolves_county_boundaries_from_input_manifest(monkeypatch, tmp_path: Path):
+    import impacts.postprocessor as postprocessor_module
 
     output_root = tmp_path / "impacts"
     input_root = tmp_path / "input"
@@ -940,20 +954,20 @@ def test_analysis_runner_resolves_county_boundaries_from_input_manifest(monkeypa
                 class fips:
                     counties = []
 
-    monkeypatch.setattr(analysis_runner, "load_settings_from_yaml", lambda _: _Settings())
-    monkeypatch.setattr(analysis_runner, "resolve_path", lambda path, _: path)
+    monkeypatch.setattr(postprocessor_module, "load_settings_from_yaml", lambda _: _Settings())
+    monkeypatch.setattr(postprocessor_module, "resolve_path", lambda path, _: path)
     monkeypatch.setattr(
-        analysis_runner.PipelineManifest,
+        postprocessor_module.PipelineManifest,
         "from_dict",
         classmethod(lambda cls, payload: SimpleNamespace(to_dict=lambda: payload)),
     )
     monkeypatch.setattr(
-        analysis_runner.PreprocessManifest,
+        postprocessor_module.PreprocessManifest,
         "from_dict",
         classmethod(lambda cls, payload: SimpleNamespace(to_dict=lambda: payload)),
     )
 
-    resolved = analysis_runner._resolve_analysis_county_boundaries_path(tmp_path / "settings.yaml")
+    resolved = postprocessor_module._resolve_county_boundaries_path(tmp_path / "settings.yaml")
 
     assert resolved == county_path.resolve()
 

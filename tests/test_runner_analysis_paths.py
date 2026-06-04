@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from impacts.runner import _resolve_analysis_inventory_emfacid_activity_path
-from impacts.runner import _resolve_analysis_vehicle_category_metadata_path
+from impacts.postprocessor import _resolve_inventory_emfacid_activity_path
+from impacts.postprocessor import _resolve_vehicle_category_metadata_path
 
 
-def test_resolve_analysis_inventory_emfacid_activity_path_uses_colocated_emfacid_file_only(
+def test_resolve_inventory_emfacid_activity_path_uses_colocated_emfacid_file_only(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -17,7 +17,7 @@ def test_resolve_analysis_inventory_emfacid_activity_path_uses_colocated_emfacid
     missing_path = tmp_path / "passenger-activity-by-emfacid.parquet"
 
     monkeypatch.setattr(
-        "impacts.runner._load_analysis_context",
+        "impacts.postprocessor._load_context",
         lambda _: (
             None,
             None,
@@ -35,7 +35,7 @@ def test_resolve_analysis_inventory_emfacid_activity_path_uses_colocated_emfacid
     )
 
     with pytest.raises(FileNotFoundError) as error:
-        _resolve_analysis_inventory_emfacid_activity_path(
+        _resolve_inventory_emfacid_activity_path(
             settings_path,
             manifest_key="passenger_inventory_emfacid_file",
         )
@@ -43,7 +43,7 @@ def test_resolve_analysis_inventory_emfacid_activity_path_uses_colocated_emfacid
     assert str(missing_path.resolve()) in str(error.value)
 
 
-def test_resolve_analysis_vehicle_category_metadata_path_prefers_manifest_input(
+def test_resolve_vehicle_category_metadata_path_prefers_manifest_input(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -52,7 +52,7 @@ def test_resolve_analysis_vehicle_category_metadata_path_prefers_manifest_input(
     metadata_path = tmp_path / "emissions_vehicle_categories.csv"
     metadata_path.write_text("emfac_vehicle_category,generic_vehicle_category,operation_days_per_year,idle_time_fraction\n")
     monkeypatch.setattr(
-        "impacts.runner._load_analysis_context",
+        "impacts.postprocessor._load_context",
         lambda _: (
             None,
             None,
@@ -69,6 +69,6 @@ def test_resolve_analysis_vehicle_category_metadata_path_prefers_manifest_input(
         ),
     )
 
-    resolved = _resolve_analysis_vehicle_category_metadata_path(settings_path)
+    resolved = _resolve_vehicle_category_metadata_path(settings_path)
 
     assert resolved == metadata_path.resolve()
