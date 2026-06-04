@@ -14,6 +14,7 @@ from ._common import (
     _set_progress_task,
     _slugify,
     _step_progress,
+    _style_chart_axes,
 )  # configures matplotlib backend before pyplot
 
 import matplotlib.pyplot as plt
@@ -255,8 +256,8 @@ def _plot_county_comparison(
     ax.set_xticklabels(subset["county"].tolist(), rotation=45, ha="right")
     ax.set_ylabel("Annual tons")
     ax.set_title(f"{pollutant} by County: Simulation vs {inventory_label}")
-    ax.legend()
     ax.grid(axis="y", alpha=0.2)
+    _style_chart_axes(ax)
     fig.tight_layout()
 
     pollutant_slug = {

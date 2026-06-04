@@ -20,6 +20,7 @@ from ._common import (
     CMAP_PM25,
     MAP_DPI,
     MAP_FIGSIZE,
+    MAP_TITLE_FONTSIZE,
     _advance_progress,
     _add_basemap,
     _add_colorbar,
@@ -73,7 +74,7 @@ def _plot_one(conc_gdf, net_gdf, layout, column: str, title: str, cmap, vmax_q: 
     _add_network(ax, net_gdf)
     _add_basemap(ax, crs=conc_gdf.crs)
     _add_colorbar(fig, ax, cmap, vmax, title)
-    ax.set_title(title, fontsize=13, pad=10)
+    ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
     ax.set_axis_off()
     fig.tight_layout(pad=0.5)
 

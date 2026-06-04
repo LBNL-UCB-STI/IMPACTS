@@ -24,6 +24,7 @@ from ._common import (
     CMAP_POP,
     MAP_DPI,
     MAP_FIGSIZE,
+    MAP_TITLE_FONTSIZE,
     _advance_progress,
     _add_basemap,
     _add_colorbar,
@@ -148,7 +149,7 @@ def _plot_inmap_scalar(
     _add_basemap(ax, crs=plot_gdf.crs)
     _add_colorbar(fig, ax, cmap, vmax, colorbar_label, norm=norm)
 
-    ax.set_title(title, fontsize=12, pad=10)
+    ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
     ax.set_axis_off()
     fig.tight_layout(pad=0.5)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -164,7 +165,7 @@ def _plot_inmap_scalar(
 
 def _add_bivariate_legend(ax) -> None:
     """Draw a 3×3 color grid inset in the bottom-left corner."""
-    ax_leg = ax.inset_axes([0.02, 0.02, 0.14, 0.14])
+    ax_leg = ax.inset_axes([0.02, 0.02, 0.20, 0.20])
     for r in range(3):       # concentration axis (rows, bottom=low)
         for c in range(3):   # population axis (columns, left=low)
             ax_leg.add_patch(
@@ -174,12 +175,12 @@ def _add_bivariate_legend(ax) -> None:
     ax_leg.set_xlim(0, 3)
     ax_leg.set_ylim(0, 3)
     ax_leg.set_xticks([1.5])
-    ax_leg.set_xticklabels(["Population →"], fontsize=5.5)
+    ax_leg.set_xticklabels(["Population →"], fontsize=18)
     ax_leg.xaxis.set_ticks_position("top")
     ax_leg.xaxis.set_label_position("top")
     ax_leg.set_yticks([1.5])
-    ax_leg.set_yticklabels(["PM₂.₅ →"], fontsize=5.5, rotation=90, va="center")
-    ax_leg.tick_params(length=0, pad=1)
+    ax_leg.set_yticklabels(["PM₂.₅ →"], fontsize=18, rotation=90, va="center")
+    ax_leg.tick_params(length=0, pad=6)
     ax_leg.set_facecolor("none")
     for spine in ax_leg.spines.values():
         spine.set_visible(False)
@@ -235,7 +236,11 @@ def _plot_bivariate(inmap_exposure_gdf, net_gdf, out_path: Path) -> Optional[str
     _add_basemap(ax, crs=inmap_exposure_gdf.crs)
     _add_bivariate_legend(ax)
 
-    ax.set_title("Population-weighted PM₂.₅ × population by InMAP cell", fontsize=12, pad=10)
+    ax.set_title(
+        "Population-weighted PM₂.₅ × population by InMAP cell",
+        fontsize=MAP_TITLE_FONTSIZE,
+        pad=16,
+    )
     ax.set_axis_off()
     fig.tight_layout(pad=0.5)
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -15,6 +15,7 @@ from ._common import (
     _set_progress_task,
     _slugify,
     _step_progress,
+    _style_chart_axes,
 )  # configures matplotlib backend before pyplot
 
 import matplotlib.pyplot as plt
@@ -314,8 +315,8 @@ def _plot_source_pollutant_comparison(
     ax.set_xticklabels(subset["sector"].tolist(), rotation=30, ha="right")
     ax.set_ylabel("Annual tons")
     ax.set_title(f"{source} {pollutant}: Simulation vs Target")
-    ax.legend()
     ax.grid(axis="y", alpha=0.2)
+    _style_chart_axes(ax)
     fig.tight_layout()
     output_path = output_dir / f"step2_{_slugify(source)}_{_slugify(pollutant)}_simulation_vs_target.png"
     fig.savefig(output_path, dpi=PLOT_DPI)
@@ -366,8 +367,8 @@ def _plot_combined_pollutant_comparison(
     ax_top.set_xticklabels(primary["sector"].tolist(), rotation=30, ha="right")
     ax_top.set_ylabel("Annual tons")
     ax_top.set_title(f"{primary_source} {pollutant}: Simulation vs Target")
-    ax_top.legend()
     ax_top.grid(axis="y", alpha=0.2)
+    _style_chart_axes(ax_top)
 
     height = 0.38
     y = range(len(secondary))
@@ -389,8 +390,8 @@ def _plot_combined_pollutant_comparison(
     ax_bot.set_yticklabels(secondary["sector"].tolist())
     ax_bot.set_xlabel("Annual tons")
     ax_bot.set_title(f"{secondary_source} {pollutant}: Simulation vs Target")
-    ax_bot.legend()
     ax_bot.grid(axis="x", alpha=0.2)
+    _style_chart_axes(ax_bot)
 
     fig.tight_layout()
     output_path = output_dir / f"step2_{_slugify(primary_source)}_{_slugify(pollutant)}_simulation_vs_target.png"

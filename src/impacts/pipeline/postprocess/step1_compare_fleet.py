@@ -8,12 +8,14 @@ from typing import Optional
 import duckdb
 
 from ._common import (
+    CHART_LEGEND_FONTSIZE,
     PLOT_DPI,
     _advance_progress,
     _close_progress,
     _normalize_token,
     _set_progress_task,
     _step_progress,
+    _style_chart_axes,
 )  # configures matplotlib backend before pyplot
 
 import matplotlib.pyplot as plt
@@ -486,7 +488,12 @@ def _draw_stacked_bars(
         Patch(facecolor="white", edgecolor="gray", label="BEAM"),
         Patch(facecolor="white", edgecolor="gray", hatch="//", label="EMFAC"),
     ]
-    ax.legend(handles=segment_handles + style_handles, loc="upper right", fontsize=8)
+    _style_chart_axes(ax, legend=False)
+    ax.legend(
+        handles=segment_handles + style_handles,
+        loc="upper right",
+        fontsize=CHART_LEGEND_FONTSIZE,
+    )
 
 
 def _build_class_model_year_panel_data(

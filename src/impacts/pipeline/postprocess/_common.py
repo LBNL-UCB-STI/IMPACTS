@@ -30,9 +30,20 @@ logger = logging.getLogger(__name__)
 MAP_CONTEXT_PADDING_FRACTION = 0.04
 MAP_CONTEXT_MIN_PADDING = 2_000.0
 PLOT_DPI = 300
+CHART_TITLE_FONTSIZE = 18
+CHART_AXIS_LABEL_FONTSIZE = 16
+CHART_TICK_LABEL_FONTSIZE = 13
+CHART_LEGEND_FONTSIZE = 13
 MAP_FIGSIZE = (24, 24)
 MAP_DPI = 400
+MAP_TITLE_FONTSIZE = 28
 MAP_BASEMAP_ZOOM_ADJUST = 1
+MAP_COLORBAR_FRACTION = 0.04
+MAP_COLORBAR_PAD = 0.025
+MAP_COLORBAR_SHRINK = 0.74
+MAP_COLORBAR_LABEL_FONTSIZE = 24
+MAP_COLORBAR_TICK_FONTSIZE = 20
+MAP_COLORBAR_LABELPAD = 18
 
 # ---------------------------------------------------------------------------
 # Colormaps — fully opaque, mild low values → saturated high values
@@ -125,9 +136,27 @@ def _add_colorbar(fig, ax, cmap, vmax: float, label: str, *, norm=None) -> None:
         norm=norm if norm is not None else plt.Normalize(vmin=0, vmax=vmax),
     )
     sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.02, shrink=0.65)
-    cbar.set_label(label, fontsize=9)
-    cbar.ax.tick_params(labelsize=8)
+    cbar = fig.colorbar(
+        sm,
+        ax=ax,
+        fraction=MAP_COLORBAR_FRACTION,
+        pad=MAP_COLORBAR_PAD,
+        shrink=MAP_COLORBAR_SHRINK,
+    )
+    cbar.set_label(label, fontsize=MAP_COLORBAR_LABEL_FONTSIZE, labelpad=MAP_COLORBAR_LABELPAD)
+    cbar.ax.tick_params(labelsize=MAP_COLORBAR_TICK_FONTSIZE, pad=6)
+    cbar.ax.yaxis.get_offset_text().set_fontsize(MAP_COLORBAR_TICK_FONTSIZE)
+
+
+def _style_chart_axes(ax, *, legend: bool = True) -> None:
+    ax.title.set_fontsize(CHART_TITLE_FONTSIZE)
+    ax.xaxis.label.set_fontsize(CHART_AXIS_LABEL_FONTSIZE)
+    ax.yaxis.label.set_fontsize(CHART_AXIS_LABEL_FONTSIZE)
+    ax.tick_params(axis="both", labelsize=CHART_TICK_LABEL_FONTSIZE)
+    if legend:
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(fontsize=CHART_LEGEND_FONTSIZE)
 
 
 def _grid_raster_layout(gdf) -> _GridRasterLayout:
