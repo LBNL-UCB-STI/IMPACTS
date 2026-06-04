@@ -15,7 +15,7 @@ def _pipeline(
     tmp_path: Path,
     grid_path: Path,
     *,
-    primary_pm25_integration_strategy: str = "impute_inmap_primary_with_aermod",
+    primary_pm25_integration_strategy: str = "impute_inmap_primary_in_aermod_domain",
 ) -> PipelineConfig:
     return PipelineConfig.from_dict(
         {
@@ -167,7 +167,7 @@ def test_build_full_exposure_grid_can_scale_aermod_primary_to_inmap_primary_budg
         pipeline=_pipeline(
             tmp_path,
             grid_path,
-            primary_pm25_integration_strategy="scale_aermod_to_inmap_primary",
+            primary_pm25_integration_strategy="scale_aermod_to_inmap_cell_primary",
         ),
         prepared_inmap=prepared_inmap,
         prepared_aermod=prepared_aermod,

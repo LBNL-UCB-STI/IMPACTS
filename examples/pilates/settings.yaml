@@ -140,12 +140,12 @@ impacts:
       asrv_patterns_epsg: 4326
 
   exposure:
-    # Default fallback: impute_inmap_primary_with_aermod
+    # Default fallback: impute_inmap_primary_in_aermod_domain
     # Acceptable values:
     # - inmap_only
-    # - impute_inmap_primary_with_aermod
-    # - scale_aermod_to_inmap_primary
-    primary_pm25_integration_strategy: impute_inmap_primary_with_aermod
+    # - impute_inmap_primary_in_aermod_domain
+    # - scale_aermod_to_inmap_cell_primary
+    primary_pm25_integration_strategy: impute_inmap_primary_in_aermod_domain
 
   analysis:
 

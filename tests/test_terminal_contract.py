@@ -62,7 +62,7 @@ def _pipeline_payload(tmp_path: Path) -> dict:
         "vehicle_category_metadata_file": str(tmp_path / "vehicle_category_metadata.csv"),
         "annualization_days": {"light_duty": 327.0, "medium_heavy_duty": 312.0},
         "population_sample": 0.1,
-        "primary_pm25_integration_strategy": "impute_inmap_primary_with_aermod",
+        "primary_pm25_integration_strategy": "impute_inmap_primary_in_aermod_domain",
         "include_passenger": True,
         "include_freight": True,
     }
@@ -113,7 +113,7 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.dispersions.inmap.isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s is False
     assert config.impacts.pipeline.aermod is True
     assert config.impacts.pipeline.exposure is True
-    assert config.impacts.exposure.primary_pm25_integration_strategy == "impute_inmap_primary_with_aermod"
+    assert config.impacts.exposure.primary_pm25_integration_strategy == "impute_inmap_primary_in_aermod_domain"
     assert config.impacts.population.passenger_folder == "urbansim/atlas-2019"
     assert config.impacts.emissions.beam.include_passenger is True
     assert config.impacts.emissions.beam.include_freight is True
@@ -155,7 +155,7 @@ def test_builtin_settings_source_of_truth_is_current() -> None:
     assert shared_keys <= set(example_payload["impacts"])
     assert default_config.impacts.activities["project_analysis"]["main"]["folder_in_archive"] == "sfbay-emfac-project-analysis"
     assert default_config.impacts.population.vehicle_folder == "vehicle-tech"
-    assert default_config.impacts.exposure.primary_pm25_integration_strategy == "impute_inmap_primary_with_aermod"
+    assert default_config.impacts.exposure.primary_pm25_integration_strategy == "impute_inmap_primary_in_aermod_domain"
 
 
 def test_native_settings_loader_normalizes_directly(tmp_path: Path) -> None:
@@ -634,7 +634,7 @@ def test_build_preprocess_manifest_runs_step3_and_registers_intersections(monkey
                     grid_size_meters=100.0,
                 ),
             ),
-            exposure=SimpleNamespace(primary_pm25_integration_strategy="impute_inmap_primary_with_aermod"),
+            exposure=SimpleNamespace(primary_pm25_integration_strategy="impute_inmap_primary_in_aermod_domain"),
         ),
     )
 

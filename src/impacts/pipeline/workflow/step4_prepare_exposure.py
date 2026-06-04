@@ -16,9 +16,9 @@ from ...common import read_table
 from ...common import read_vector
 from ...common import resolve_required_manifest_input
 from ...config.defaults import primary_pm25_integration_strategies as default_primary_pm25_integration_strategies
-from ...config.defaults import primary_pm25_strategy_impute_inmap_primary_with_aermod
+from ...config.defaults import primary_pm25_strategy_impute_inmap_primary_in_aermod_domain
 from ...config.defaults import primary_pm25_strategy_inmap_only
-from ...config.defaults import primary_pm25_strategy_scale_aermod_to_inmap_primary
+from ...config.defaults import primary_pm25_strategy_scale_aermod_to_inmap_cell_primary
 from ...manifest.schema import PipelineConfig
 from . import _step_label
 
@@ -203,7 +203,7 @@ def _build_full_exposure_grid(
         result["aermod_PrimaryPM25_scale_factor"] = np.nan
         result["aermod_PrimaryPM25_scaled"] = 0.0
         result["PrimaryPM25"] = result["inmap_PrimaryPM25"]
-    elif primary_strategy == primary_pm25_strategy_impute_inmap_primary_with_aermod:
+    elif primary_strategy == primary_pm25_strategy_impute_inmap_primary_in_aermod_domain:
         result["aermod_PrimaryPM25_scale_factor"] = np.nan
         result["aermod_PrimaryPM25_scaled"] = np.where(
             result["has_aermod_primarypm25"],
@@ -215,7 +215,7 @@ def _build_full_exposure_grid(
             result["aermod_PrimaryPM25"],
             result["inmap_PrimaryPM25"],
         )
-    elif primary_strategy == primary_pm25_strategy_scale_aermod_to_inmap_primary:
+    elif primary_strategy == primary_pm25_strategy_scale_aermod_to_inmap_cell_primary:
         result = _scale_aermod_primary_to_inmap_primary(gpd.GeoDataFrame(result, geometry="geometry", crs=full_grid.crs))
         result["PrimaryPM25"] = result["aermod_PrimaryPM25_scaled"]
     else:

@@ -41,20 +41,20 @@ tons_per_year_to_ug_per_s: float = grams_per_short_ton * 1_000_000.0 / (365.0 * 
 primary_pm25_strategy_inmap_only: str = "inmap_only"
 """Use InMAP PrimaryPM25 only when constructing the exposure concentration surface."""
 
-primary_pm25_strategy_impute_inmap_primary_with_aermod: str = "impute_inmap_primary_with_aermod"
+primary_pm25_strategy_impute_inmap_primary_in_aermod_domain: str = "impute_inmap_primary_in_aermod_domain"
 """Use AERMOD PrimaryPM25 where available, and fall back to InMAP PrimaryPM25 elsewhere."""
 
-primary_pm25_strategy_scale_aermod_to_inmap_primary: str = "scale_aermod_to_inmap_primary"
+primary_pm25_strategy_scale_aermod_to_inmap_cell_primary: str = "scale_aermod_to_inmap_cell_primary"
 """Scale AERMOD PrimaryPM25 within each InMAP cell to conserve the InMAP PrimaryPM25 budget."""
 
 primary_pm25_integration_strategies: tuple[str, ...] = (
     primary_pm25_strategy_inmap_only,
-    primary_pm25_strategy_impute_inmap_primary_with_aermod,
-    primary_pm25_strategy_scale_aermod_to_inmap_primary,
+    primary_pm25_strategy_impute_inmap_primary_in_aermod_domain,
+    primary_pm25_strategy_scale_aermod_to_inmap_cell_primary,
 )
 """Allowed strategies for integrating primary PM2.5 into the exposure concentration surface."""
 
-primary_pm25_integration_strategy: str = primary_pm25_strategy_impute_inmap_primary_with_aermod
+primary_pm25_integration_strategy: str = primary_pm25_strategy_impute_inmap_primary_in_aermod_domain
 """Default primary PM2.5 integration strategy."""
 
 # ---------------------------------------------------------------------------
