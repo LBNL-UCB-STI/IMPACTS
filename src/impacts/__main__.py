@@ -121,7 +121,6 @@ def _resolve_profile_target(args: argparse.Namespace) -> tuple[Path, list[str], 
         forwarded_args = ["pipeline", "--config", args.config, "--profile", "none"]
         default_name = "pipeline"
         return output_root, forwarded_args, default_name
-    return None
 
 
 def _maybe_relaunch_with_profiler(args: argparse.Namespace) -> int | None:
@@ -479,7 +478,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-
-
-
     main()
