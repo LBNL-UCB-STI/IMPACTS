@@ -20,8 +20,8 @@ from impacts.config.settings import ATLAS_HOUSEHOLDS_SCHEMA
 from impacts.config.settings import ATLAS_PERSONS_SCHEMA
 from impacts.config.settings import read_table
 from impacts.config.settings import resolve_workflow_path
-from impacts.pipeline.emfac.common import read_atlas_vehicles_input
-from impacts.pipeline.emfac.common import read_frism_carriers_input
+from impacts.pipeline.emfac._common import read_atlas_vehicles_input
+from impacts.pipeline.emfac._common import read_frism_carriers_input
 
 
 def _read_csv(

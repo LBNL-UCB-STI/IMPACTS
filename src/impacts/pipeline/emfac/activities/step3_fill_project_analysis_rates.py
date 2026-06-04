@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from impacts.pipeline.emfac.common import frame_summary
-from impacts.pipeline.emfac.common import write_trace
+from impacts.pipeline.emfac._common import frame_summary
+from impacts.pipeline.emfac._common import write_trace
 from impacts.config.settings import _apply_table_schema
 
 ACTIVITY_COLUMN = "speedMph_timeMin"

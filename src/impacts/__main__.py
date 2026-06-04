@@ -464,6 +464,7 @@ def main(argv: list[str] | None = None) -> int:
             input_paths=args.inputs,
             output_path=args.output,
             county_col=args.county_col,
+            vehicle_category_col=args.vehicle_category_col,
             year_col=args.year_col,
             vmt_col=args.vmt_col,
             trips_col=args.trips_col,

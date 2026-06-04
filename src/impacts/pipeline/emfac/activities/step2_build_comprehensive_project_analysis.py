@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from impacts.pipeline.emfac.common import frame_summary
+from impacts.pipeline.emfac._common import frame_summary
 from impacts.config.settings import _apply_table_schema
 from impacts.config.settings import build_model_category_fuel_mapping
-from impacts.pipeline.emfac.common import write_trace
+from impacts.pipeline.emfac._common import write_trace
 
 ACTIVITY_COLUMN = "speedMph_timeMin"
 SPEED_PROCESSES = ["RUNEX", "PMBW", "PTOEX"]

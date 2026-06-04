@@ -4,9 +4,9 @@ from impacts.pipeline.emfac.activities.step1_prepare_emissions_and_activities_ta
 from impacts.pipeline.emfac.activities.step2_build_comprehensive_project_analysis import run_step2
 from impacts.pipeline.emfac.activities.step3_fill_project_analysis_rates import run_step3
 from impacts.pipeline.emfac.activities.step4_finalize_output import run_step4
-from impacts.pipeline.emfac.common import raise_runtime_error
-from impacts.pipeline.emfac.common import write_failure_trace
-from impacts.pipeline.emfac.common import write_trace
+from impacts.pipeline.emfac._common import raise_runtime_error
+from impacts.pipeline.emfac._common import write_failure_trace
+from impacts.pipeline.emfac._common import write_trace
 
 
 def _print_run_banner(workflow: dict[str, object]) -> None:

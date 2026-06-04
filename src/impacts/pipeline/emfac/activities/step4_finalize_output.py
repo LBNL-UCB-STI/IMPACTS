@@ -14,10 +14,10 @@ from impacts.common import _should_show_duckdb_progress_bar
 from impacts.common import configure_duckdb_connection
 from impacts.pipeline.emfac.activities.step3_fill_project_analysis_rates import ACTIVITY_COLUMN
 from impacts.pipeline.emfac.activities.step3_fill_project_analysis_rates import POLLUTANT_COLUMNS
-from impacts.pipeline.emfac.common import frame_summary
-from impacts.pipeline.emfac.common import write_trace
-from impacts.pipeline.emfac.common import assign_model_year_groups
-from impacts.pipeline.emfac.common import model_year_group_id_component
+from impacts.pipeline.emfac._common import frame_summary
+from impacts.pipeline.emfac._common import write_trace
+from impacts.pipeline.emfac._common import assign_model_year_groups
+from impacts.pipeline.emfac._common import model_year_group_id_component
 
 ACTIVITY_JOIN_COLUMNS = ["county", "vehicleCategory", "fuel", "modelYear"]
 PTO_PROCESS_NAME = "PTOEX"
