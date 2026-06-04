@@ -81,9 +81,7 @@ def _load_vehicle_metadata_lookup(
     passenger = read_table(passenger_vehicle_types_path).copy()
     freight = read_table(freight_vehicle_types_path).copy()
     for df in (passenger, freight):
-        if "emfacModelYearGroup" in df.columns and "model_year_group" not in df.columns:
-            df.rename(columns={"emfacModelYearGroup": "model_year_group"}, inplace=True)
-        if "emfacResolvedModelYear" in df.columns and "model_year_group" not in df.columns:
+        if "emfacResolvedModelYear" in df.columns:
             df.rename(columns={"emfacResolvedModelYear": "model_year_group"}, inplace=True)
     combined = pd.concat([passenger, freight], ignore_index=True, sort=False)
     for col in ("emfacId", "emfacVehicleCategory", "emfacFuel", "model_year_group", "vehicleClass"):

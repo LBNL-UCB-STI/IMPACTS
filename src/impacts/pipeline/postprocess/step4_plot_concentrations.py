@@ -50,9 +50,6 @@ def _plot_one(conc_wm, net_wm, column: str, title: str, cmap, vmax_q: float, out
         return None
 
     vmax = float(nonzero.quantile(vmax_q))
-    if vmax <= 0:
-        vmax = float(nonzero.max())
-
     logger.info("  %s  vmax=%.4f → %s", column, vmax, out_path.name)
 
     fig, ax = plt.subplots(figsize=(10, 10), dpi=150)

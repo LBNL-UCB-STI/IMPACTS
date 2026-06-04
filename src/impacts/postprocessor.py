@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any
-from typing import Dict
 
 import pandas as pd
 
@@ -177,7 +176,7 @@ def _resolve_vehicle_category_metadata_path(settings_path: str | Path) -> Path:
     )
 
 
-def _run_postprocess_steps(settings_path: str | Path) -> Dict[str, str]:
+def _run_postprocess_steps(settings_path: str | Path) -> dict[str, str]:
     from .pipeline.postprocess.step1_compare_fleet import run as run_step1
     from .pipeline.postprocess.step2_compare_annual_targets import run as run_step2
     from .pipeline.postprocess.step3_compare_emissions_inventory import run as run_step3
@@ -189,7 +188,7 @@ def _run_postprocess_steps(settings_path: str | Path) -> Dict[str, str]:
     output_dir = output_root / "postprocess"
     modeled_emissions_path = _resolve_modeled_emissions_path(settings_path)
     skims_emissions_path = _resolve_skims_emissions_path(settings_path)
-    outputs: Dict[str, str] = {}
+    outputs: dict[str, str] = {}
     passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_vehicle_types_paths(settings_path)
     passenger_vehicles_path, freight_carriers_path = _resolve_optional_population_assignment_paths(settings_path)
     passenger_activity_path = _resolve_inventory_emfacid_activity_path(
@@ -308,7 +307,7 @@ def _run_postprocess_steps(settings_path: str | Path) -> Dict[str, str]:
 def postprocess_from_pipeline_manifest(
     run_manifest_path: str | Path,
     manifest_path: str | Path | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     pipeline_manifest = PipelineManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
     output_root = Path(str(pipeline_manifest.get("output_dir"))).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -344,7 +343,7 @@ def postprocess_from_pipeline_manifest(
 def postprocess_from_settings(
     settings_path: str | Path,
     manifest_path: str | Path | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from impacts.preprocessor import preprocess_workflow
     from impacts.runner import run_aermod_from_pipeline_manifest
     from impacts.runner import run_emissions_from_pipeline_manifest

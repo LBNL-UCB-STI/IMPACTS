@@ -206,7 +206,6 @@ def _plot_bivariate(pop_gdf, conc_gdf, net_wm, out_path: Path) -> Optional[str]:
     bv_gdf = gpd.GeoDataFrame(merged[["bv_class", "geometry"]], crs=pop_gdf.crs)
     bv_wm = bv_gdf.to_crs(epsg=3857)
 
-    vmax_bv = float(merged["TotalPM25"].quantile(0.99))
     logger.info("  Bivariate map  %d populated cells → %s", len(bv_wm), out_path.name)
 
     fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
