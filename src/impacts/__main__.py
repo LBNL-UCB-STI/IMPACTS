@@ -40,7 +40,7 @@ def _resolve_pipeline_manifest_path(settings_path: str, manifest_name: str) -> P
 
 
 def _run_presim_from_settings(settings_path: str) -> None:
-    from impacts.pipeline.emfac.fleet.main import main as run_fleet_main
+    from impacts.provisioner import run_fleet
     from impacts.provisioner import ensure_emfac_activities_outputs
 
     settings = load_settings_from_yaml(settings_path)
@@ -49,7 +49,7 @@ def _run_presim_from_settings(settings_path: str) -> None:
         activities_manifest = ensure_emfac_activities_outputs(settings, Path(settings_path))
         activities_manifest_path = activities_manifest["activities_manifest_path"]
     if settings.impacts.pipeline.presim.fleet:
-        run_fleet_main(activities_manifest_path=activities_manifest_path)
+        run_fleet(activities_manifest_path=activities_manifest_path)
     if activities_manifest_path:
         logger.info("Presim stage complete: activities_manifest=%s", activities_manifest_path)
     else:
@@ -323,9 +323,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "fleet":
-        from impacts.pipeline.emfac.fleet.main import main as run_fleet_main
+        from impacts.provisioner import run_fleet
 
-        run_fleet_main(activities_manifest_path=args.activities_manifest)
+        run_fleet(activities_manifest_path=args.activities_manifest)
         return 0
 
     if args.command == "emissions":

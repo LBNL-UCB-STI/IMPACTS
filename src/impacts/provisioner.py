@@ -402,9 +402,172 @@ def _build_workflow(settings, config_path: Path) -> dict[str, Any]:
     return _build_activities_workflow(raw, config_path)
 
 
-def ensure_emfac_activities_outputs(settings, config_path: Path) -> dict[str, Any]:
-    from .activities.main import run_workflow as run_activities_workflow
+# ---------------------------------------------------------------------------
+# Shared step runner
+# ---------------------------------------------------------------------------
 
+def _run_emfac_step(workflow: dict[str, Any], *, step_name: str, runner) -> dict[str, Any]:
+    from impacts.pipeline.emfac._common import raise_runtime_error, write_failure_trace, write_trace
+    write_trace(workflow, f"{step_name}_start", {"step": step_name, "status": "started"})
+    try:
+        updated_workflow = runner(workflow)
+    except Exception as error:
+        write_failure_trace(workflow, step=step_name, error=error, payload={"status": "failed"})
+        raise_runtime_error(step_name, error)
+    write_trace(updated_workflow, f"{step_name}_success", {"step": step_name, "status": "completed"})
+    return updated_workflow
+
+
+# ---------------------------------------------------------------------------
+# Activities workflow
+# ---------------------------------------------------------------------------
+
+def _run_activities_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
+    from impacts.pipeline.emfac._common import write_failure_trace, write_trace
+    from impacts.pipeline.emfac.activities.step1_prepare_emissions_and_activities_tables import run_step1
+    from impacts.pipeline.emfac.activities.step2_build_comprehensive_project_analysis import run_step2
+    from impacts.pipeline.emfac.activities.step3_fill_project_analysis_rates import run_step3
+    from impacts.pipeline.emfac.activities.step4_finalize_output import run_step4
+
+    run = workflow["run"]
+    paths = workflow["paths"]
+    print(f"\n{'='*50}")
+    print(f"  EMFAC TABLE ASSEMBLY - {run['region_label']} {run['calendar_year']}")
+    print(f"  Passenger Rates Output: {paths['final_output_passenger']}")
+    print(f"  Passenger Inventory Activity by Model Year Output: {paths['final_activity_by_model_year_output_passenger']}")
+    print(f"  Passenger Inventory Activity by EMFAC ID Output: {paths['final_activity_by_emfacid_output_passenger']}")
+    print(f"  Passenger Inventory Final Fleet Output: {paths['final_fleet_output_passenger']}")
+    print(f"  Freight Rates Output: {paths['final_output_freight']}")
+    print(f"  Freight Inventory Activity by Model Year Output: {paths['final_activity_by_model_year_output_freight']}")
+    print(f"  Freight Inventory Activity by EMFAC ID Output: {paths['final_activity_by_emfacid_output_freight']}")
+    print(f"  Freight Inventory Final Fleet Output: {paths['final_fleet_output_freight']}")
+    print(f"{'='*50}\n")
+
+    write_trace(workflow, "workflow_start", {"status": "started", "run": run, "paths": paths})
+    try:
+        workflow = _run_emfac_step(workflow, step_name="step1_prepare_emissions_and_activities_tables", runner=run_step1)
+        workflow = _run_emfac_step(workflow, step_name="step2_build_comprehensive_project_analysis", runner=run_step2)
+        workflow = _run_emfac_step(workflow, step_name="step3_fill_project_analysis_rates", runner=run_step3)
+        workflow = _run_emfac_step(workflow, step_name="step4_finalize_output", runner=run_step4)
+    except Exception as error:
+        if isinstance(error, RuntimeError):
+            write_failure_trace(workflow, step="workflow", error=error, payload={"status": "failed"})
+        raise
+    write_trace(workflow, "workflow_success", {"status": "completed"})
+    print("  DONE")
+    return workflow
+
+
+# ---------------------------------------------------------------------------
+# Fleet workflow
+# ---------------------------------------------------------------------------
+
+def _missing_fleet_activities_outputs(workflow: dict[str, Any]) -> dict[str, Path]:
+    activities = workflow["config"]["activities"]
+    rates_store_root = Path(str(activities["emissions_store_root"])).expanduser().resolve()
+    rates_store_dataset = rates_store_root / "dataset"
+    rates_store_duckdb = rates_store_root / "dataset.duckdb"
+    required_outputs = {
+        "passenger_rates_file": Path(str(activities["passenger_rates_file"])),
+        "passenger_activity_file": Path(str(activities["passenger_activity_file"])),
+        "passenger_fleet_file": Path(str(activities["passenger_fleet_file"])),
+        "freight_rates_file": Path(str(activities["freight_rates_file"])),
+        "freight_activity_file": Path(str(activities["freight_activity_file"])),
+        "freight_fleet_file": Path(str(activities["freight_fleet_file"])),
+        "rates_store_dataset": rates_store_dataset,
+        "rates_store_duckdb": rates_store_duckdb,
+    }
+    missing = {label: path for label, path in required_outputs.items() if not path.exists()}
+    if not missing:
+        partition_exists = any(rates_store_dataset.glob("emfacId=*/*.parquet"))
+        if not partition_exists:
+            missing["rates_store_partitions"] = rates_store_dataset
+    return missing
+
+
+def _ensure_fleet_activities_exist(workflow: dict[str, Any]) -> dict[str, Any]:
+    missing = _missing_fleet_activities_outputs(workflow)
+    if not missing:
+        return workflow
+    missing_paths = "\n".join(f"  missing: {path}" for path in missing.values())
+    raise FileNotFoundError(
+        "Fleet workflow requires EMFAC activities outputs to exist before running.\n"
+        f"{missing_paths}"
+    )
+
+
+def _run_fleet_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
+    from impacts.pipeline.emfac._common import write_failure_trace, write_trace
+    from impacts.pipeline.emfac.fleet.step1_build_vehicle_types import run_step1
+    from impacts.pipeline.emfac.fleet.step2_map_emfac_bus_bike import run_step2
+    from impacts.pipeline.emfac.fleet.step3_map_emfac_atlas import run_step3
+    from impacts.pipeline.emfac.fleet.step4_map_emfac_frism import run_step4
+
+    output_path = workflow["config"]["output"]
+    print(f"{'='*50}")
+    print(f"  EMISSIONS PROCESSING - {str(workflow['area']).upper()} REGION")
+    print(f"  Scenario: {workflow['scenario']}")
+    print(f"  Output: {output_path}")
+    print(f"{'='*50}")
+
+    write_trace(workflow, "workflow_start", {
+        "status": "started",
+        "area": workflow["area"],
+        "scenario": workflow["scenario"],
+        "output": output_path,
+        "paths": workflow["paths"],
+    })
+    try:
+        workflow = _run_emfac_step(workflow, step_name="step1_build_vehicle_types", runner=run_step1)
+        workflow = _run_emfac_step(workflow, step_name="step2_map_emfac_bus_bike", runner=run_step2)
+        workflow = _run_emfac_step(workflow, step_name="step3_map_emfac_atlas", runner=run_step3)
+        workflow = _run_emfac_step(workflow, step_name="step4_map_emfac_frism", runner=run_step4)
+    except Exception as error:
+        if isinstance(error, RuntimeError):
+            write_failure_trace(workflow, step="workflow", error=error, payload={"status": "failed"})
+        raise
+    write_trace(workflow, "workflow_success", {"status": "completed"})
+    if workflow.get("mapped_passenger_vehicles_file"):
+        print(f"  Passenger vehicles file: {workflow['mapped_passenger_vehicles_file']}")
+    if workflow.get("mapped_freight_carriers_file"):
+        print(f"  Freight carriers file: {workflow['mapped_freight_carriers_file']}")
+    if workflow.get("mapped_passenger_vehicle_types_file"):
+        print(f"  Passenger vehicle types file: {workflow['mapped_passenger_vehicle_types_file']}")
+    if workflow.get("built_freight_vehicle_types_file"):
+        print(f"  Freight vehicle types file: {workflow['built_freight_vehicle_types_file']}")
+    print("  DONE")
+    return workflow
+
+
+def run_fleet(
+    config_path: str | Path | None = None,
+    *,
+    activities_manifest_path: str | Path | None = None,
+) -> None:
+    """Run the fleet mapping workflow against existing activities outputs."""
+    from impacts.config.settings import load_default_fleet_workflow
+    from impacts.config.settings import load_fleet_workflow
+    from impacts.config.settings import load_fleet_workflow_from_activities_manifest
+    from impacts.pipeline.emfac._common import raise_runtime_error
+
+    try:
+        if activities_manifest_path is not None:
+            workflow = load_fleet_workflow_from_activities_manifest(activities_manifest_path)
+        elif config_path is not None:
+            workflow = load_fleet_workflow(config_path)
+        else:
+            workflow = load_default_fleet_workflow()
+    except Exception as error:
+        raise_runtime_error("config_load", error)
+    workflow = _ensure_fleet_activities_exist(workflow)
+    _run_fleet_workflow(workflow)
+
+
+# ---------------------------------------------------------------------------
+# Activities provisioning
+# ---------------------------------------------------------------------------
+
+def ensure_emfac_activities_outputs(settings, config_path: Path) -> dict[str, Any]:
     cfg = _resolve_activities_config(settings, config_path)
     manifest_path = _activities_manifest_path(Path(str(cfg["output_root"])).resolve())
 
@@ -428,7 +591,7 @@ def ensure_emfac_activities_outputs(settings, config_path: Path) -> dict[str, An
     workflow = _build_workflow(settings, config_path)
 
     log_substep_banner("4", "run activities workflow", logger=logger)
-    run_activities_workflow(workflow)
+    _run_activities_workflow(workflow)
 
     log_substep_banner("5", "validate outputs", logger=logger)
     if not _outputs_exist(workflow):
