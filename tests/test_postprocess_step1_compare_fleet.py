@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from impacts.analysis.step1_compare_fleet import run
+from impacts.pipeline.postprocess.step1_compare_fleet import run
 
 
-def test_analysis_step1_compares_beam_fleet_to_emfac_by_emfac_id(tmp_path: Path) -> None:
+def test_postprocess_step1_compares_beam_fleet_to_emfac_by_emfac_id(tmp_path: Path) -> None:
     skims = pd.DataFrame(
         {
             "linkId": [1, 1, 2, 3, 3],
@@ -75,7 +75,7 @@ def test_analysis_step1_compares_beam_fleet_to_emfac_by_emfac_id(tmp_path: Path)
         freight_vehicle_types_path=str(freight_vehicle_types_path),
         emfac_passenger_activity_path=str(passenger_activity_path),
         emfac_freight_activity_path=str(freight_activity_path),
-        output_dir=tmp_path / "analysis",
+        output_dir=tmp_path / "postprocess",
         passenger_vehicles_path=str(passenger_vehicles_path),
         freight_carriers_path=str(freight_carriers_path),
     )
@@ -90,7 +90,7 @@ def test_analysis_step1_compares_beam_fleet_to_emfac_by_emfac_id(tmp_path: Path)
     assert comparison.loc[("freight", "2003to2006T7TractorDsl"), "beam_vmt_share"] == 1.0
 
 
-def test_analysis_step1_uses_actual_passenger_vehicle_assignments_when_available(tmp_path: Path) -> None:
+def test_postprocess_step1_uses_actual_passenger_vehicle_assignments_when_available(tmp_path: Path) -> None:
     skims = pd.DataFrame(
         {
             "linkId": [1, 2],
@@ -153,7 +153,7 @@ def test_analysis_step1_uses_actual_passenger_vehicle_assignments_when_available
         freight_vehicle_types_path=str(freight_vehicle_types_path),
         emfac_passenger_activity_path=str(passenger_activity_path),
         emfac_freight_activity_path=str(freight_activity_path),
-        output_dir=tmp_path / "analysis",
+        output_dir=tmp_path / "postprocess",
         passenger_vehicles_path=str(passenger_vehicles_path),
     )
 

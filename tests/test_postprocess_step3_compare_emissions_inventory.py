@@ -6,10 +6,10 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Polygon
 
-from impacts.analysis.step3_compare_emissions_inventory import run
+from impacts.pipeline.postprocess.step3_compare_emissions_inventory import run
 
 
-def test_analysis_step3_writes_comparison_table_and_plots(tmp_path: Path) -> None:
+def test_postprocess_step3_writes_comparison_table_and_plots(tmp_path: Path) -> None:
     modeled = pd.DataFrame(
         {
             "county_COUNTYFP": ["001", "001", "013"],
@@ -56,7 +56,7 @@ def test_analysis_step3_writes_comparison_table_and_plots(tmp_path: Path) -> Non
     county_boundaries_path = tmp_path / "county_boundaries.gpkg"
     county_boundaries.to_file(county_boundaries_path, driver="GPKG")
 
-    output_dir = tmp_path / "analysis"
+    output_dir = tmp_path / "postprocess"
     outputs = run(
         modeled_emissions_path=str(modeled_path),
         inventory_path=str(inventory_path),
@@ -96,7 +96,7 @@ def test_analysis_step3_writes_comparison_table_and_plots(tmp_path: Path) -> Non
     assert Path(outputs["BC_plot"]).exists()
 
 
-def test_analysis_step3_can_compare_road_dust_pm25_only(tmp_path: Path) -> None:
+def test_postprocess_step3_can_compare_road_dust_pm25_only(tmp_path: Path) -> None:
     modeled = pd.DataFrame(
         {
             "county_COUNTYFP": ["001"],
@@ -134,7 +134,7 @@ def test_analysis_step3_can_compare_road_dust_pm25_only(tmp_path: Path) -> None:
         modeled_emissions_path=str(modeled_path),
         inventory_path=str(inventory_path),
         county_boundaries_path=str(county_boundaries_path),
-        output_dir=tmp_path / "analysis",
+        output_dir=tmp_path / "postprocess",
         county_order=["Alameda"],
         target_name="road_dust_baaqmd",
         inventory_label="BAAQMD Road Dust",

@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from impacts.analysis.step2_compare_annual_targets import run
+from impacts.pipeline.postprocess.step2_compare_annual_targets import run
 
 
-def test_analysis_step2_compares_modeled_totals_to_annual_targets(tmp_path: Path) -> None:
+def test_postprocess_step2_compares_modeled_totals_to_annual_targets(tmp_path: Path) -> None:
     modeled = pd.DataFrame(
         {
             "countyfp": ["001", "001", "001", "001"],
@@ -57,7 +57,7 @@ def test_analysis_step2_compares_modeled_totals_to_annual_targets(tmp_path: Path
         passenger_vehicle_types_path=str(passenger_vehicle_types_path),
         freight_vehicle_types_path=str(freight_vehicle_types_path),
         vehicle_category_metadata_file=str(mapping_path),
-        output_dir=tmp_path / "analysis",
+        output_dir=tmp_path / "postprocess",
         sector_targets=[
             {"source": "mobile_onroad", "sector": "passenger_cars", "annual_pm25_short_tons": 11.0, "annual_nox_short_tons": 101.0},
             {"source": "mobile_onroad", "sector": "light_duty_trucks", "annual_pm25_short_tons": 21.0, "annual_nox_short_tons": 201.0},
