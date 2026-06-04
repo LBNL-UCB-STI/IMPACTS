@@ -453,8 +453,10 @@ def _assemble_concentration_results(
     factor: float,
     arrays: dict[str, np.ndarray],
     source_id_col: str,
+    already_scaled_outputs: set[str] | None = None,
 ) -> pd.DataFrame:
     """Step 2.3: assemble concentration outputs on the receptor dimension."""
+    already_scaled_outputs = already_scaled_outputs or set()
     n_receptors = int(receptor_cells.size)
     logger.info("%s assembling concentration DataFrame for %d receptors", _step_label("2.3"), n_receptors)
     for name, arr in arrays.items():
@@ -478,7 +480,8 @@ def _assemble_concentration_results(
     ] + ["TotalPM25"]
     for output_key in ordered_output_keys:
         if output_key in arrays:
-            results[output_key] = factor * arrays[output_key]
+            scale = 1.0 if output_key in already_scaled_outputs else factor
+            results[output_key] = scale * arrays[output_key]
 
     _trace_frame("3", "concentrations", results, key_cols=[source_id_col])
     return results
@@ -546,6 +549,7 @@ def compute_isrm_concentrations(
     receptor_cells: np.ndarray,
     source_id_col: str = "inmap_cell_id",
     isrm_nox_to_no2_ratios_file: Optional[str] = None,
+    isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s: bool = False,
     pollutants_map: Optional[dict[str, str]] = None,
 ) -> pd.DataFrame:
     emis, available_pollutants = _prepare_grid_emissions(
@@ -563,6 +567,7 @@ def compute_isrm_concentrations(
     requested_pollutant_set = set(requested_pollutants)
     specs = _concentration_specs()
     arrays: dict[str, np.ndarray] = {}
+    already_scaled_outputs: set[str] = set()
     concentration_plan: list[tuple[str, dict[str, str]]] = []
     for concentration_name in concentrations:
         spec = specs.get(concentration_name)
@@ -615,6 +620,7 @@ def compute_isrm_concentrations(
         ):
             concentration_output = spec["output"]
             if concentration_output == "NO2":
+                no2_from_zarr = "NO2" in sr
                 no2_response = _compute_no2_response(
                     sr=sr,
                     source_cells=source_cells,
@@ -624,6 +630,15 @@ def compute_isrm_concentrations(
                 )
                 if no2_response is not None:
                     arrays["NO2"] = no2_response
+                    if (
+                        not no2_from_zarr
+                        and not isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s
+                    ):
+                        # Current configured NOx->NO2 artifacts are built from
+                        # InMAP response matrices already expressed in
+                        # concentration units. Future raw matrices can opt into
+                        # the generic factor via the pipeline flag.
+                        already_scaled_outputs.add("NO2")
                 continue
 
             arrays[concentration_output] = _compute_species_response(
@@ -652,6 +667,7 @@ def compute_isrm_concentrations(
         factor=factor,
         arrays=arrays,
         source_id_col=source_id_col,
+        already_scaled_outputs=already_scaled_outputs,
     )
 
 
@@ -711,6 +727,9 @@ def run(
         receptor_cells=beam_inmap_grid_ids,
         source_id_col="inmap_cell_id",
         isrm_nox_to_no2_ratios_file=pipeline.isrm_nox_to_no2_ratios_file,
+        isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s=(
+            pipeline.isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s
+        ),
         pollutants_map=pipeline.pollutants_map,
     )
     output_path = raw_dir / "beam_inmap_concentrations.parquet"

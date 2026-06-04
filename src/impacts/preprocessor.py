@@ -117,6 +117,9 @@ def build_preprocess_manifest(
         "aermod_grid_path": staged_aermod_grid,
         "isrm_url": staged_isrm,
         "isrm_nox_to_no2_ratios_file": staged_isrm_nox_to_no2_ratios_file,
+        "isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s": bool(
+            inmap.isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s
+        ),
         "asrv_patterns_file": staged_asrv_patterns_file,
         "asrv_patterns_epsg": int(asrv_patterns_epsg) if asrv_patterns_epsg is not None else None,
         "grid_size_meters": float(aermod.grid_size_meters) if aermod.grid_size_meters is not None else None,

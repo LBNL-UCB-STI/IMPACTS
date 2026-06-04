@@ -232,6 +232,7 @@ class Beam:
 class InmapDispersion:
     isrm_zarr: Optional[str] = None
     isrm_nox_to_no2_ratios_file: Optional[str] = None
+    isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s: bool = False
     grid_path: Optional[str] = None
     grid_id: Optional[str] = None
     grid_epsg: Optional[int] = None
@@ -240,12 +241,23 @@ class InmapDispersion:
     def from_dict(cls, payload: Dict[str, Any]) -> "InmapDispersion":
         _reject_unknown_keys(
             payload,
-            {"isrm_zarr", "isrm_nox_to_no2_ratios_file", "grid_path", "grid_id", "grid_epsg"},
+            {
+                "isrm_zarr",
+                "isrm_nox_to_no2_ratios_file",
+                "isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s",
+                "grid_path",
+                "grid_id",
+                "grid_epsg",
+            },
             "impacts.dispersions.inmap",
         )
         return cls(
             isrm_zarr=_optional_string(payload.get("isrm_zarr")),
             isrm_nox_to_no2_ratios_file=_optional_string(payload.get("isrm_nox_to_no2_ratios_file")),
+            isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s=_required_bool(
+                payload.get("isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s", False),
+                "impacts.dispersions.inmap.isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s",
+            ),
             grid_path=_optional_string(payload.get("grid_path")),
             grid_id=_optional_string(payload.get("grid_id")),
             grid_epsg=_optional_int(payload.get("grid_epsg")),
@@ -921,6 +933,9 @@ class ImpactsSettings:
                         "inmap": {
                             "isrm_zarr": self.impacts.dispersions.inmap.isrm_zarr,
                             "isrm_nox_to_no2_ratios_file": self.impacts.dispersions.inmap.isrm_nox_to_no2_ratios_file,
+                            "isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s": (
+                                self.impacts.dispersions.inmap.isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s
+                            ),
                             "grid_path": self.impacts.dispersions.inmap.grid_path,
                             "grid_id": self.impacts.dispersions.inmap.grid_id,
                             "grid_epsg": self.impacts.dispersions.inmap.grid_epsg,

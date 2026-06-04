@@ -35,6 +35,7 @@ class PipelineConfig:
     inmap_grid_epsg: Optional[int] = None
     isrm_url: Optional[str] = None
     isrm_nox_to_no2_ratios_file: Optional[str] = None
+    isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s: bool = False
     asrv_patterns_file: Optional[str] = None
     asrv_patterns_epsg: Optional[int] = None
     aermod_full_grid_path: Optional[str] = None
@@ -81,6 +82,7 @@ class PipelineConfig:
                 "mapping_columns",
                 "isrm_url",
                 "isrm_nox_to_no2_ratios_file",
+                "isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s",
                 "asrv_patterns_file",
                 "asrv_patterns_epsg",
                 "grid_size_meters",
@@ -125,6 +127,10 @@ class PipelineConfig:
             inmap_grid_epsg=_optional_int(payload.get("inmap_grid_epsg")),
             isrm_url=_optional_string(payload.get("isrm_url")),
             isrm_nox_to_no2_ratios_file=_optional_string(payload.get("isrm_nox_to_no2_ratios_file")),
+            isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s=_required_bool(
+                payload.get("isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s", False),
+                "pipeline.isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s",
+            ),
             asrv_patterns_file=_optional_string(payload.get("asrv_patterns_file")),
             asrv_patterns_epsg=_optional_int(payload.get("asrv_patterns_epsg")),
             aermod_full_grid_path=_optional_string(payload.get("aermod_full_grid_path")),

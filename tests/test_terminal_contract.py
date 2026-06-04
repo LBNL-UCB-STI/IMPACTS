@@ -38,6 +38,7 @@ def _pipeline_payload(tmp_path: Path) -> dict:
         "mapping_columns": {"link_id": "linkId", "grid_id": "isrm"},
         "isrm_url": str(tmp_path / "isrm.zarr"),
         "isrm_nox_to_no2_ratios_file": str(tmp_path / "matrix.npz"),
+        "isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s": False,
         "grid_size_meters": 100.0,
         "asrv_patterns_file": str(tmp_path / "asrv_patterns.parquet"),
         "asrv_patterns_epsg": 4326,
@@ -108,6 +109,7 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.local_output_folder == "impacts/impacts_output"
     assert config.impacts.pipeline.inmap is True
     assert config.impacts.dispersions.inmap.grid_path.endswith("isrm_polygon_wgs84.gpkg")
+    assert config.impacts.dispersions.inmap.isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s is False
     assert config.impacts.pipeline.aermod is True
     assert config.impacts.pipeline.exposure is True
     assert config.impacts.population.passenger_folder == "urbansim/atlas-2019"
@@ -608,7 +610,10 @@ def test_build_preprocess_manifest_runs_step3_and_registers_intersections(monkey
                 ),
             ),
             dispersions=SimpleNamespace(
-                inmap=SimpleNamespace(grid_epsg=26910),
+                inmap=SimpleNamespace(
+                    grid_epsg=26910,
+                    isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s=False,
+                ),
                 aermod=SimpleNamespace(
                     asrv_patterns_epsg=4326,
                     grid_size_meters=100.0,
@@ -683,6 +688,8 @@ def test_build_preprocess_manifest_runs_step3_and_registers_intersections(monkey
     assert manifest["inputs"]["county_intersection"]["source_path"].endswith("beam_osm_county_intersection.parquet")
     assert manifest["inputs"]["inmap_intersection"]["source_path"].endswith("beam_osm_inmap_intersection.parquet")
     assert manifest["inputs"]["aermod_intersection"]["source_path"].endswith("beam_osm_aermod_intersection.parquet")
+    assert manifest["pipeline"]["isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s"] is False
+
 
 def test_cli_rejects_removed_run_command() -> None:
     with pytest.raises(SystemExit):

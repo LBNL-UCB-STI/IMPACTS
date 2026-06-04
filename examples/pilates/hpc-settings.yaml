@@ -130,6 +130,7 @@ impacts:
     inmap:
       isrm_zarr: /global/home/users/hmlaarabi/scratch/isrm_v1.2.1.zarr
       isrm_nox_to_no2_ratios_file: vehicle-tech/dispersions/inmap/nox_to_no2_full_isrm_matrix.npz
+      isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s: false
       grid_path: vehicle-tech/dispersions/inmap/isrm_polygon_wgs84.gpkg
       grid_id: isrm
       grid_epsg: 4326
