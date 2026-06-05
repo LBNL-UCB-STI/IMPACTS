@@ -7,8 +7,6 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
-from ..common import make_progress
-
 
 def _parse_scalar(raw: str):
     value = raw.strip()
@@ -209,6 +207,7 @@ def is_remote_path(path: str) -> bool:
 
 
 def _copy_directory_with_progress(src: Path, dst: Path) -> None:
+    from ..common import make_progress  # deferred to avoid circular import with common.py
     files = [path for path in src.rglob("*") if path.is_file()]
     progress = make_progress(f"Staging {src.name}", total=len(files), unit="file")
     try:
