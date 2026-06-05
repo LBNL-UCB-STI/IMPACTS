@@ -238,6 +238,65 @@ echo "$SBATCH_OUTPUT"
 JOB_ID="$(printf '%s' "$SBATCH_OUTPUT" | sed -n 's/.*Submitted batch job //p' | tr -d '[:space:]')"
 echo "Job submitted. Log: $JOB_LOG_FILE_PATH"
 
+# ── parse config fields for run summary ──────────────────────────────
+_IMP_SCENARIO="" _RUN_REGION="" _RUN_SCENARIO="" _RUN_YEAR=""
+_INC_PASSENGER="" _INC_FREIGHT=""
+while IFS='=' read -r _k _v; do
+    case "$_k" in
+        IMP_SCENARIO)  _IMP_SCENARIO="$_v" ;;
+        RUN_REGION)    _RUN_REGION="$_v" ;;
+        RUN_SCENARIO)  _RUN_SCENARIO="$_v" ;;
+        RUN_YEAR)      _RUN_YEAR="$_v" ;;
+        INC_PASSENGER) _INC_PASSENGER="$_v" ;;
+        INC_FREIGHT)   _INC_FREIGHT="$_v" ;;
+    esac
+done < <(awk '
+    function val(s,    v) {
+        v = s; sub(/^[^:]+:[[:space:]]*/, "", v)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); return v
+    }
+    /^run:/     { top="run";     sub1=""; sub2="" }
+    /^impacts:/ { top="impacts"; sub1=""; sub2="" }
+    /^[^[:space:]#]/ && !/^run:/ && !/^impacts:/ { top=""; sub1=""; sub2="" }
+    top != "" && /^  [^[:space:]]/ {
+        sub1=$0; sub(/^[[:space:]]+/,"",sub1); sub(/:.*$/,"",sub1); sub2=""
+        if (top=="run") {
+            if (sub1=="region")     print "RUN_REGION="   val($0)
+            if (sub1=="scenario")   print "RUN_SCENARIO=" val($0)
+            if (sub1=="start_year") print "RUN_YEAR="     val($0)
+        }
+        if (top=="impacts" && sub1=="scenario") print "IMP_SCENARIO=" val($0)
+    }
+    top != "" && sub1 != "" && /^    [^[:space:]]/ {
+        sub2=$0; sub(/^[[:space:]]+/,"",sub2); sub(/:.*$/,"",sub2)
+        if (top=="impacts" && sub1=="emissions") {
+            if (sub2=="include_passenger") print "INC_PASSENGER=" val($0)
+            if (sub2=="include_freight")   print "INC_FREIGHT="   val($0)
+        }
+    }
+' "$CONFIG_PATH")
+
+_fleet=""
+if [ "${_INC_PASSENGER:-true}" != "false" ]; then _fleet="passenger"; fi
+if [ "${_INC_FREIGHT:-true}" != "false" ]; then
+    _fleet="${_fleet:+$_fleet  }freight"
+else
+    _fleet="${_fleet:+$_fleet  }(freight: off)"
+fi
+
+_region="${_RUN_REGION:-?}"
+if [ -n "${_RUN_SCENARIO:-}" ]; then _region="$_region / ${_RUN_SCENARIO}"; fi
+if [ -n "${_RUN_YEAR:-}"     ]; then _region="$_region  (${_RUN_YEAR})";    fi
+
+printf '\n'
+printf '  Scenario : %s\n' "${_IMP_SCENARIO:-?}"
+printf '  Region   : %s\n' "$_region"
+printf '  Fleet    : %s\n' "${_fleet:-(unknown)}"
+printf '  Output   : %s\n' "$JOB_LOG_DIR"
+printf '  Stage    : %s\n' "$stage_arg"
+printf '  Resources: %s  %sG  %s\n' "$PARTITION" "$MEMORY_LIMIT_GB" "$TIME_LIMIT"
+printf '\n'
+
 if [ "$watch" = true ]; then
     printf '\n'
     [ -n "$JOB_ID" ] && printf '  Job %s queued on %s.\n' "$JOB_ID" "$PARTITION"
