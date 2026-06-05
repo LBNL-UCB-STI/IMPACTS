@@ -32,7 +32,7 @@ partition_arg="lr7"
 account_arg=""
 high_mem=false
 hours_arg=""
-follow=false
+watch=false
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -60,12 +60,12 @@ while [ $# -gt 0 ]; do
         hours_arg="${2:-}"
         shift 2
         ;;
-    -f|--follow)
-        follow=true
+    -w|--watch)
+        watch=true
         shift
         ;;
     -h|--help)
-        echo "Usage: $0 -c <config> -a <account> [-s stage] [-p partition] [--high-mem|-H] [-t hours] [-f]"
+        echo "Usage: $0 -c <config> -a <account> [-s stage] [-p partition] [--high-mem|-H] [-t hours] [-w]"
         echo "  -c             Path to impacts config file (required)"
         echo "  -a, --account  Slurm account name (required)"
         echo "  -s, --stage    Stage to run: pipeline (default), preprocess, presim, activities,"
@@ -73,11 +73,11 @@ while [ $# -gt 0 ]; do
         echo "  -p             Partition: lr4, lr5, lr6, lr7 (default), lr8, lr_bigmem, cm1, cm2"
         echo "  --high-mem     Request high-memory config (lr6: 180G, lr7: 480G)"
         echo "  -t, --hours    Job time limit in hours (default: 24)"
-        echo "  -f, --follow   Stream log output after submission (Ctrl+C detaches, job keeps running)"
+        echo "  -w, --watch    Stream log output after submission (Ctrl+C detaches, job keeps running)"
         exit 0
         ;;
     *)
-        echo "Usage: $0 -c <config> -a <account> [-s stage] [-p partition] [--high-mem|-H] [-t hours] [-f]"
+        echo "Usage: $0 -c <config> -a <account> [-s stage] [-p partition] [--high-mem|-H] [-t hours] [-w]"
         exit 2
         ;;
     esac
@@ -238,7 +238,7 @@ echo "$SBATCH_OUTPUT"
 JOB_ID="$(printf '%s' "$SBATCH_OUTPUT" | sed -n 's/.*Submitted batch job //p' | tr -d '[:space:]')"
 echo "Job submitted. Log: $JOB_LOG_FILE_PATH"
 
-if [ "$follow" = true ]; then
+if [ "$watch" = true ]; then
     printf '\n'
     [ -n "$JOB_ID" ] && printf '  Job %s queued on %s.\n' "$JOB_ID" "$PARTITION"
     printf '  Ctrl+C to detach at any time — job will keep running.\n\n'
