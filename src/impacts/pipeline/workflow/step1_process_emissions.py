@@ -22,6 +22,7 @@ from ...common import normalize_county_fips
 from ...common import read_table
 from ...common import read_vector
 from ...common import resolve_required_manifest_input
+from ...common import _running_with_real_terminal
 from ...manifest.schema import PipelineConfig
 from .prepare_emissions.from_skims import _build_zone_allocated_table
 from .prepare_emissions.from_skims import _build_zone_grouped_table
@@ -587,7 +588,7 @@ def _build_county_corrected_table(
             desc="Step 1.3 activity corrections",
             leave=True,
             dynamic_ncols=True,
-            disable=not logger.isEnabledFor(logging.INFO),
+            disable=not (logger.isEnabledFor(logging.INFO) and _running_with_real_terminal()),
         )
         passenger_vehicle_types_path = resolve_required_manifest_input(manifest_inputs, key="passenger_vehicle_types_input")
         freight_vehicle_types_path = resolve_required_manifest_input(manifest_inputs, key="freight_vehicle_types_input")

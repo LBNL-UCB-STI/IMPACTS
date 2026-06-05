@@ -56,6 +56,28 @@ install_python_deps() {
     fi
 }
 
+configure_python_geospatial_data_paths() {
+    local pyproj_data_dir
+    local gdal_data_dir
+
+    pyproj_data_dir="$("$VENV_PATH/bin/python3" -c 'from pathlib import Path; import pyproj; print(Path(pyproj.__file__).resolve().parent / "proj_dir" / "share" / "proj")')"
+    if [ ! -f "$pyproj_data_dir/proj.db" ]; then
+        echo "ERROR: pyproj PROJ database not found: $pyproj_data_dir/proj.db" >&2
+        exit 1
+    fi
+
+    export PROJ_DATA="$pyproj_data_dir"
+    export PROJ_LIB="$pyproj_data_dir"
+
+    gdal_data_dir="$("$VENV_PATH/bin/python3" -c 'from pathlib import Path; import rasterio; print(Path(rasterio.__file__).resolve().parent / "gdal_data")')"
+    if [ -d "$gdal_data_dir" ]; then
+        export GDAL_DATA="$gdal_data_dir"
+        echo "GDAL data: $GDAL_DATA"
+    fi
+
+    "$VENV_PATH/bin/python3" -c 'import pyproj; pyproj.CRS.from_epsg(3857); print(f"PROJ data: {pyproj.datadir.get_data_dir()}")'
+}
+
 if [ "${1:-}" = "" ]; then
     echo "Usage: $0 <config> [stage]"
     exit 2
@@ -92,6 +114,7 @@ if [ ! -f "$REQUIREMENTS_FILE" ]; then
 fi
 
 install_python_deps "$REQUIREMENTS_FILE"
+configure_python_geospatial_data_paths
 
 # Install impacts itself in editable mode
 "$VENV_PATH/bin/python3" -m pip install -e "$IMPACTS_DIR" --no-deps --quiet

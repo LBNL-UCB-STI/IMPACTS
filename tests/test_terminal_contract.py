@@ -1262,6 +1262,16 @@ def test_hpc_requirements_include_postprocess_basemap_stack():
         assert package in requirements
 
 
+def test_hpc_job_uses_venv_geospatial_data_paths():
+    job_script = Path("hpc/job.sh").read_text(encoding="utf-8")
+
+    assert "configure_python_geospatial_data_paths" in job_script
+    assert 'export PROJ_DATA="$pyproj_data_dir"' in job_script
+    assert 'export PROJ_LIB="$pyproj_data_dir"' in job_script
+    assert 'export GDAL_DATA="$gdal_data_dir"' in job_script
+    assert "pyproj.CRS.from_epsg(3857)" in job_script
+
+
 def test_postprocessor_resolves_modeled_emissions_from_pipeline_manifest(monkeypatch, tmp_path: Path):
     import impacts.postprocessor as postprocessor_module
 

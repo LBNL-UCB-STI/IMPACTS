@@ -8,6 +8,7 @@ from shapely.geometry import Polygon
 
 from impacts.pipeline.workflow.step2_compute_inmap_concentrations import _assemble_concentration_results
 from impacts.pipeline.workflow.step2_compute_inmap_concentrations import _build_beam_inmap_concentrations_gdf
+from impacts.pipeline.workflow.step2_compute_inmap_concentrations import _read_sparse_transfer_matrix_npz
 
 
 def test_build_beam_inmap_concentrations_gdf_preserves_inmap_cell_id(tmp_path: Path) -> None:
@@ -76,3 +77,39 @@ def test_assemble_concentration_results_scales_no2_when_requested() -> None:
 
     assert result["PrimaryPM25"].tolist() == [10.0, 20.0]
     assert result["NO2"].tolist() == [30.0, 40.0]
+
+
+def test_sparse_no2_npz_loader_disables_tqdm_for_batch_logs(monkeypatch, tmp_path: Path) -> None:
+    import numpy as np
+    import impacts.pipeline.workflow.step2_compute_inmap_concentrations as step2_module
+
+    calls = []
+
+    class _FakeProgress:
+        def update(self, value):
+            pass
+
+        def close(self):
+            pass
+
+    def _fake_tqdm(*args, **kwargs):
+        calls.append(kwargs)
+        return _FakeProgress()
+
+    npz_path = tmp_path / "matrix.npz"
+    np.savez(
+        npz_path,
+        source_ids=np.array([1], dtype=np.int64),
+        receptor_ids=np.array([2], dtype=np.int64),
+        values=np.array([3.0], dtype=np.float64),
+        source_dim=np.array(4),
+        receptor_dim=np.array(5),
+    )
+    monkeypatch.setattr(step2_module, "_running_with_real_terminal", lambda: False)
+    monkeypatch.setattr(step2_module, "tqdm", _fake_tqdm)
+
+    matrix = _read_sparse_transfer_matrix_npz(str(npz_path))
+
+    assert matrix["source_dim"] == 4
+    assert calls
+    assert calls[0]["disable"] is True

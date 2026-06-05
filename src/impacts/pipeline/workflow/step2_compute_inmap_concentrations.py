@@ -18,6 +18,7 @@ from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import read_table
 from ...common import read_vector
+from ...common import _running_with_real_terminal
 from ...config.defaults import concentrations
 from ...config.defaults import pollutants as default_pollutants
 from ...config.defaults import tons_per_year_to_ug_per_s
@@ -25,6 +26,10 @@ from ...manifest.schema import PipelineConfig
 from . import _step_label
 
 logger = logging.getLogger(__name__)
+
+
+def _show_tqdm_progress() -> bool:
+    return logger.isEnabledFor(logging.INFO) and _running_with_real_terminal()
 
 
 def _trace_columns(step: str, label: str, columns: list[str]) -> None:
@@ -93,6 +98,7 @@ def _read_sparse_transfer_matrix_npz(path: str) -> dict[str, np.ndarray | int]:
         dynamic_ncols=True,
         file=sys.stdout,
         leave=True,
+        disable=not _show_tqdm_progress(),
     )
     try:
         with np.load(path) as data:
@@ -617,6 +623,7 @@ def compute_isrm_concentrations(
             file=sys.stdout,
             dynamic_ncols=True,
             leave=True,
+            disable=not _show_tqdm_progress(),
         ):
             concentration_output = spec["output"]
             if concentration_output == "NO2":
