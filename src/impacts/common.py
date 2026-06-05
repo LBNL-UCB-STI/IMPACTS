@@ -46,6 +46,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _running_with_real_terminal() -> bool:
+    return sys.stdout.isatty() or sys.stderr.isatty()
+
+
 def _normalized_stage_label(label: str, *, logger: logging.Logger, is_substep: bool = False) -> str:
     text = str(label).strip()
     upper = text.upper()
@@ -438,20 +442,37 @@ def generate_fishnet_from_bounds(
     mask_union = mask_gdf.geometry.union_all() if hasattr(mask_gdf.geometry, "union_all") else mask_gdf.geometry.unary_union
     filter_started = time.perf_counter()
     keep_mask = np.zeros(len(fishnet), dtype=bool)
-    progress = tqdm(
-        total=len(fishnet),
-        desc="Filtering AERMOD fishnet",
-        unit="cell",
-        dynamic_ncols=True,
-        leave=True,
-    )
+    progress = None
+    progress_step = max(1, len(fishnet) // 10)
+    next_progress_log = progress_step
+    if _running_with_real_terminal():
+        progress = tqdm(
+            total=len(fishnet),
+            desc="Filtering AERMOD fishnet",
+            unit="cell",
+            dynamic_ncols=True,
+            file=sys.stdout,
+            leave=True,
+            mininterval=1.0,
+        )
     try:
         for start in range(0, len(fishnet), default_chunk_size):
             stop = min(start + default_chunk_size, len(fishnet))
             keep_mask[start:stop] = fishnet.geometry.iloc[start:stop].intersects(mask_union).to_numpy()
-            progress.update(stop - start)
+            if progress is not None:
+                progress.update(stop - start)
+            elif stop >= next_progress_log or stop == len(fishnet):
+                logger.info(
+                    "Preprocess: filtering AERMOD fishnet progress %.0f%% (%d/%d cells)",
+                    100.0 * stop / len(fishnet),
+                    stop,
+                    len(fishnet),
+                )
+                while next_progress_log <= stop:
+                    next_progress_log += progress_step
     finally:
-        progress.close()
+        if progress is not None:
+            progress.close()
     fishnet = fishnet.loc[keep_mask]
     logger.info(
         "Preprocess: filtered fishnet candidates to the staged InMAP footprint in %.2fs → %d rows kept",

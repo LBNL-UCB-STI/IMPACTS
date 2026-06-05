@@ -5,7 +5,6 @@ from contextlib import contextmanager
 import logging
 import os
 from pathlib import Path
-import sys
 import time
 from typing import Iterator
 from typing import Optional
@@ -23,6 +22,7 @@ from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import read_vector
 from ...common import resolve_required_manifest_input
+from ...common import _running_with_real_terminal
 from ...manifest.schema import PipelineConfig
 
 logger = logging.getLogger(__name__)
@@ -49,11 +49,6 @@ _AERMOD_INTERSECTION_COLUMNS = [
     "aermod_link_length_m",
     "geometry",
 ]
-
-
-def _running_with_real_terminal() -> bool:
-    return sys.stdout.isatty() or sys.stderr.isatty()
-
 
 def _osm_chordify_tqdm_ncols() -> int:
     raw_value = os.environ.get("IMPACTS_OSM_CHORDIFY_TQDM_NCOLS", "").strip()

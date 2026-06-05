@@ -35,12 +35,19 @@ show_system_info() {
 
 install_python_deps() {
     local req_file="$1"
+    local setup_file="$IMPACTS_DIR/setup.cfg"
     local marker="$VENV_PATH/.last_requirements_hash"
     local current_hash
-    current_hash="$(sha256sum "$req_file" | awk '{print $1}')"
+    # The editable project install uses --no-deps below, so dependency metadata
+    # changes in setup.cfg must also invalidate the HPC requirements marker.
+    if [ -f "$setup_file" ]; then
+        current_hash="$({ sha256sum "$req_file"; sha256sum "$setup_file"; } | sha256sum | awk '{print $1}')"
+    else
+        current_hash="$(sha256sum "$req_file" | awk '{print $1}')"
+    fi
 
     if [ ! -f "$marker" ] || [ "$current_hash" != "$(cat "$marker")" ]; then
-        echo "Installing/updating Python dependencies from $req_file ..."
+        echo "Installing/updating Python dependencies from $req_file and setup.cfg ..."
         "$VENV_PATH/bin/python3" -m pip install --upgrade pip setuptools wheel
         "$VENV_PATH/bin/python3" -m pip install -r "$req_file"
         printf "%s\n" "$current_hash" > "$marker"

@@ -1247,6 +1247,21 @@ def test_hpc_scripts_default_impacts_dir_to_checkout_root():
         assert 'IMPACTS_DIR="${IMPACTS_DIR:-$REPO_ROOT}"' in script
 
 
+def test_hpc_dependency_marker_includes_project_metadata():
+    job_script = Path("hpc/job.sh").read_text(encoding="utf-8")
+
+    assert 'local setup_file="$IMPACTS_DIR/setup.cfg"' in job_script
+    assert 'sha256sum "$setup_file"' in job_script
+    assert 'pip install -e "$IMPACTS_DIR" --no-deps' in job_script
+
+
+def test_hpc_requirements_include_postprocess_basemap_stack():
+    requirements = Path("hpc/requirements-hpc.txt").read_text(encoding="utf-8")
+
+    for package in ("contextily", "rasterio", "xyzservices", "mercantile", "pillow"):
+        assert package in requirements
+
+
 def test_postprocessor_resolves_modeled_emissions_from_pipeline_manifest(monkeypatch, tmp_path: Path):
     import impacts.postprocessor as postprocessor_module
 
