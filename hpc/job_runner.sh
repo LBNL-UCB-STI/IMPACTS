@@ -288,13 +288,20 @@ _region="${_RUN_REGION:-?}"
 if [ -n "${_RUN_SCENARIO:-}" ]; then _region="$_region / ${_RUN_SCENARIO}"; fi
 if [ -n "${_RUN_YEAR:-}"     ]; then _region="$_region  (${_RUN_YEAR})";    fi
 
+_tdays="${TIME_LIMIT%%-*}"
+_thours="${TIME_LIMIT#*-}"; _thours="${_thours%%:*}"; _thours=$(( 10#$_thours ))
+if   [ "$_thours" -eq 0 ]; then _tlabel="${_tdays}d"
+elif [ "$_tdays"  -eq 0 ]; then _tlabel="${_thours}h"
+else                             _tlabel="${_tdays}d ${_thours}h"
+fi
+
 printf '\n'
 printf '  Scenario : %s\n' "${_IMP_SCENARIO:-?}"
 printf '  Region   : %s\n' "$_region"
 printf '  Fleet    : %s\n' "${_fleet:-(unknown)}"
 printf '  Output   : %s\n' "$JOB_LOG_DIR"
 printf '  Stage    : %s\n' "$stage_arg"
-printf '  Resources: %s  %sG  %s\n' "$PARTITION" "$MEMORY_LIMIT_GB" "$TIME_LIMIT"
+printf '  Resources: %s  %sG  %s\n' "$PARTITION" "$MEMORY_LIMIT_GB" "$_tlabel"
 printf '\n'
 
 if [ "$watch" = true ]; then
