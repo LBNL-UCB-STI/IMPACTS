@@ -102,7 +102,9 @@ def _build_concentration_delta(conc_gdf, delta_baseline_concentration_path: str 
             "Current beam_concentration_distribution is missing columns required for delta baseline comparison: "
             f"{missing_current}"
         )
+    logger.info("  Reading baseline from %s …", Path(delta_baseline_concentration_path).name)
     baseline = pd.read_parquet(delta_baseline_concentration_path, columns=baseline_required)
+    logger.info("  Baseline: %d rows", len(baseline))
     if baseline[key].duplicated().any():
         duplicates = int(baseline[key].duplicated().sum())
         raise ValueError(
@@ -118,11 +120,13 @@ def _build_concentration_delta(conc_gdf, delta_baseline_concentration_path: str 
         )
     baseline = baseline.rename(columns={column: f"{column}_baseline" for column in DELTA_COLUMNS})
     current = current.rename(columns={column: f"{column}_current" for column in DELTA_COLUMNS})
+    logger.info("  Merging current (%d rows) vs baseline (%d rows) on %s …", len(current), len(baseline), key)
     merged = current.merge(baseline, how="left", on=key, validate="one_to_one")
+    logger.info("  Merged: %d rows — computing deltas for: %s", len(merged), ", ".join(DELTA_COLUMNS))
     missing_baseline = merged[f"{DELTA_COLUMNS[0]}_baseline"].isna().sum()
     if missing_baseline:
         logger.warning(
-            "  Baseline concentration distribution is missing %d current aermod cells; deltas are null there.",
+            "  Baseline is missing %d current aermod cells; deltas will be null there.",
             int(missing_baseline),
         )
 
@@ -133,6 +137,7 @@ def _build_concentration_delta(conc_gdf, delta_baseline_concentration_path: str 
         merged[current_col] = pd.to_numeric(merged[current_col], errors="coerce")
         merged[baseline_col] = pd.to_numeric(merged[baseline_col], errors="coerce")
         merged[delta_col] = merged[current_col] - merged[baseline_col]
+    logger.info("  Delta table ready.")
     return merged
 
 
