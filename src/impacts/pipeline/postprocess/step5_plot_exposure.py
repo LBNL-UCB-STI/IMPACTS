@@ -40,7 +40,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.colors import PowerNorm
-from tqdm.contrib.logging import logging_redirect_tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -312,46 +311,45 @@ def run(
 
     outputs: dict[str, str] = {}
 
-    with logging_redirect_tqdm():
-        progress = _map_progress(3, "Postprocess Step 5")
-        try:
-            _set_progress_task(progress, "population inmap", step_label="Postprocess Step 5")
-            result = _plot_inmap_scalar(
-                inmap_exposure_gdf,
-                net_gdf,
-                column="population",
-                title="Population by InMAP cell",
-                colorbar_label="Population per InMAP cell",
-                cmap=CMAP_POP,
-                out_path=output_dir / "population.png",
-                gamma=0.55,
-            )
-            if result:
-                outputs["population_map"] = result
-            _advance_progress(progress)
+    progress = _map_progress(3, "Postprocess Step 5")
+    try:
+        _set_progress_task(progress, "population inmap", step_label="Postprocess Step 5")
+        result = _plot_inmap_scalar(
+            inmap_exposure_gdf,
+            net_gdf,
+            column="population",
+            title="Population by InMAP cell",
+            colorbar_label="Population per InMAP cell",
+            cmap=CMAP_POP,
+            out_path=output_dir / "population.png",
+            gamma=0.55,
+        )
+        if result:
+            outputs["population_map"] = result
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "pwc inmap", step_label="Postprocess Step 5")
-            result = _plot_inmap_scalar(
-                inmap_exposure_gdf,
-                net_gdf,
-                column="pwc_pm25",
-                title="Population-weighted PM₂.₅ concentration by InMAP cell",
-                colorbar_label="Population-weighted PM₂.₅ (μg/m³)",
-                cmap=CMAP_PM25,
-                out_path=output_dir / "pwc_inmap.png",
-                gamma=0.65,
-            )
-            if result:
-                outputs["pwc_inmap_map"] = result
-            _advance_progress(progress)
+        _set_progress_task(progress, "pwc inmap", step_label="Postprocess Step 5")
+        result = _plot_inmap_scalar(
+            inmap_exposure_gdf,
+            net_gdf,
+            column="pwc_pm25",
+            title="Population-weighted PM₂.₅ concentration by InMAP cell",
+            colorbar_label="Population-weighted PM₂.₅ (μg/m³)",
+            cmap=CMAP_PM25,
+            out_path=output_dir / "pwc_inmap.png",
+            gamma=0.65,
+        )
+        if result:
+            outputs["pwc_inmap_map"] = result
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "bivariate", step_label="Postprocess Step 5")
-            result = _plot_bivariate(inmap_exposure_gdf, net_gdf, output_dir / "bivariate.png")
-            if result:
-                outputs["bivariate_map"] = result
-            _advance_progress(progress)
-        finally:
-            _close_progress(progress)
+        _set_progress_task(progress, "bivariate", step_label="Postprocess Step 5")
+        result = _plot_bivariate(inmap_exposure_gdf, net_gdf, output_dir / "bivariate.png")
+        if result:
+            outputs["bivariate_map"] = result
+        _advance_progress(progress)
+    finally:
+        _close_progress(progress)
 
     logger.info("Postprocess Step 5 complete: %d maps written to %s", len(outputs), output_dir)
     return outputs

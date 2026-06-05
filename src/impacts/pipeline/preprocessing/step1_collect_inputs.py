@@ -2,16 +2,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-import sys
 from typing import Any
 from typing import Dict
 from typing import Optional
 
-from tqdm import tqdm
-from tqdm.contrib.logging import logging_redirect_tqdm
-
 from ...common import find_preferred_file
 from ...common import log_step_banner
+from ...common import make_progress
+from ...common import _set_progress_task
 from ...common import log_substep_banner
 from ...common import required_local_path
 from ...common import resolve_beam_network_local_path
@@ -36,39 +34,6 @@ from ...manifest.file_ops import resolve_required_path
 
 logger = logging.getLogger(__name__)
 
-
-def _progress_enabled() -> bool:
-    return logger.isEnabledFor(logging.INFO) and sys.stdout.isatty()
-
-
-def _progress(total: int, desc: str) -> Optional[tqdm]:
-    if not _progress_enabled():
-        return None
-    return tqdm(
-        total=total,
-        desc=desc,
-        unit="task",
-        dynamic_ncols=True,
-        file=sys.stdout,
-        leave=False,
-    )
-
-
-def _set_progress_task(progress: Optional[tqdm], label: str, *, step_label: str) -> None:
-    if progress is None:
-        logger.info("%s progress: %s", step_label, label)
-        return
-    progress.set_postfix_str(label)
-
-
-def _advance_progress(progress: Optional[tqdm]) -> None:
-    if progress is not None:
-        progress.update(1)
-
-
-def _close_progress(progress: Optional[tqdm]) -> None:
-    if progress is not None:
-        progress.close()
 
 
 def _register_manifest_input(
@@ -192,166 +157,164 @@ def run(
     staged_asrv_patterns_file = None
 
     log_substep_banner("1.1", "register BEAM output files", logger=logger)
-    with logging_redirect_tqdm():
-        progress = _progress(3, "Preprocess Step 1.1")
-        try:
-            _set_progress_task(progress, "network", step_label="Preprocess Step 1.1")
-            network_entry = find_latest_beam_network_reference(optional=True)
-            if network_entry:
-                staged_network = _use_existing_reference(manifest_inputs, "network", network_entry)
-            else:
-                network_source = resolve_beam_network_local_path(beam_output_root)
-                staged_network = _register_manifest_input(
-                    manifest_inputs,
-                    input_root=input_root,
-                    key="network",
-                    source_path=network_source,
-                    relative_target=Path(network_source).name,
-                    artifact_key=BEAM_NETWORK_PREFIX,
-                    metadata={"artifact_family": BEAM_NETWORK_PREFIX},
-                )
-            _advance_progress(progress)
-
-            _set_progress_task(progress, "skims", step_label="Preprocess Step 1.1")
-            skims_source = resolve_emissions_skims_local_path(beam_output_root)
-            staged_skims = _register_manifest_input(
+    progress = make_progress("Preprocess Step 1.1", total=3, unit="task", leave=False)
+    try:
+        _set_progress_task(progress, "network", step_label="Preprocess Step 1.1")
+        network_entry = find_latest_beam_network_reference(optional=True)
+        if network_entry:
+            staged_network = _use_existing_reference(manifest_inputs, "network", network_entry)
+        else:
+            network_source = resolve_beam_network_local_path(beam_output_root)
+            staged_network = _register_manifest_input(
                 manifest_inputs,
                 input_root=input_root,
-                key="emissions_skims_input",
-                source_path=skims_source,
-                relative_target=Path(skims_source).name,
-                metadata={"artifact_family": "emissions_skims_input"},
-                optional=True,
+                key="network",
+                source_path=network_source,
+                relative_target=Path(network_source).name,
+                artifact_key=BEAM_NETWORK_PREFIX,
+                metadata={"artifact_family": BEAM_NETWORK_PREFIX},
             )
-            _advance_progress(progress)
+        progress.update(1)
 
-            _set_progress_task(progress, "events", step_label="Preprocess Step 1.1")
-            events_entry = find_latest_beam_events_reference(optional=True)
-            if events_entry:
-                staged_events = _use_existing_reference(manifest_inputs, "events_input", events_entry)
-            else:
-                events_source = resolve_latest_events_local_path(Path(beam_output_root))
-                if events_source:
-                    staged_events = _register_manifest_input(
-                        manifest_inputs,
-                        input_root=input_root,
-                        key="events_input",
-                        source_path=events_source,
-                        relative_target=Path(events_source).name,
-                        artifact_key=BEAM_EVENTS_PREFIX,
-                        metadata={"artifact_family": BEAM_EVENTS_PREFIX},
-                        optional=True,
-                    )
-            _advance_progress(progress)
-        finally:
-            _close_progress(progress)
+        _set_progress_task(progress, "skims", step_label="Preprocess Step 1.1")
+        skims_source = resolve_emissions_skims_local_path(beam_output_root)
+        staged_skims = _register_manifest_input(
+            manifest_inputs,
+            input_root=input_root,
+            key="emissions_skims_input",
+            source_path=skims_source,
+            relative_target=Path(skims_source).name,
+            metadata={"artifact_family": "emissions_skims_input"},
+            optional=True,
+        )
+        progress.update(1)
+
+        _set_progress_task(progress, "events", step_label="Preprocess Step 1.1")
+        events_entry = find_latest_beam_events_reference(optional=True)
+        if events_entry:
+            staged_events = _use_existing_reference(manifest_inputs, "events_input", events_entry)
+        else:
+            events_source = resolve_latest_events_local_path(Path(beam_output_root))
+            if events_source:
+                staged_events = _register_manifest_input(
+                    manifest_inputs,
+                    input_root=input_root,
+                    key="events_input",
+                    source_path=events_source,
+                    relative_target=Path(events_source).name,
+                    artifact_key=BEAM_EVENTS_PREFIX,
+                    metadata={"artifact_family": BEAM_EVENTS_PREFIX},
+                    optional=True,
+                )
+        progress.update(1)
+    finally:
+        progress.close()
 
     log_substep_banner("1.2", "register emissions processing inputs", logger=logger)
     substep_12_total = 4  # osm, rates, passenger vehicle types, freight vehicle types
     if emissions.vehicle_category_metadata_file:
         substep_12_total += 1
-    with logging_redirect_tqdm():
-        progress = _progress(substep_12_total, "Preprocess Step 1.2")
-        try:
-            _set_progress_task(progress, "osm", step_label="Preprocess Step 1.2")
-            osm_entry = find_beam_r5_osm_reference(optional=True)
-            if osm_entry:
-                staged_osm = _use_existing_reference(manifest_inputs, "osm_network", osm_entry)
-            else:
-                osm_root = str(registry.locate_required(
-                    emissions.osm_network_folder, label="impacts.emissions.osm_network_folder"
-                ))
-                osm_source = resolve_osm_pbf_local_path(osm_root) or required_local_path(
-                    osm_root, "impacts.emissions.osm_network_folder"
-                )
-                staged_osm = _register_manifest_input(
-                    manifest_inputs,
-                    input_root=input_root,
-                    key="osm_network",
-                    source_path=osm_source,
-                    relative_target=Path(osm_source).name,
-                    artifact_key=BEAM_R5_OSM_FILE_KEY,
-                    metadata={"artifact_family": BEAM_R5_OSM_FILE_KEY},
-                )
-            _advance_progress(progress)
+    progress = make_progress("Preprocess Step 1.2", total=substep_12_total, unit="task", leave=False)
+    try:
+        _set_progress_task(progress, "osm", step_label="Preprocess Step 1.2")
+        osm_entry = find_beam_r5_osm_reference(optional=True)
+        if osm_entry:
+            staged_osm = _use_existing_reference(manifest_inputs, "osm_network", osm_entry)
+        else:
+            osm_root = str(registry.locate_required(
+                emissions.osm_network_folder, label="impacts.emissions.osm_network_folder"
+            ))
+            osm_source = resolve_osm_pbf_local_path(osm_root) or required_local_path(
+                osm_root, "impacts.emissions.osm_network_folder"
+            )
+            staged_osm = _register_manifest_input(
+                manifest_inputs,
+                input_root=input_root,
+                key="osm_network",
+                source_path=osm_source,
+                relative_target=Path(osm_source).name,
+                artifact_key=BEAM_R5_OSM_FILE_KEY,
+                metadata={"artifact_family": BEAM_R5_OSM_FILE_KEY},
+            )
+        progress.update(1)
 
-            _set_progress_task(progress, "emissions rates", step_label="Preprocess Step 1.2")
-            emissions_rates_source = str(registry.locate_required(
-                emissions.rates_folder, label="impacts.emissions.rates_folder"
+        _set_progress_task(progress, "emissions rates", step_label="Preprocess Step 1.2")
+        emissions_rates_source = str(registry.locate_required(
+            emissions.rates_folder, label="impacts.emissions.rates_folder"
+        ))
+        _register_manifest_input(
+            manifest_inputs,
+            input_root=input_root,
+            key="rates_folder",
+            source_path=emissions_rates_source,
+            relative_target=emissions.rates_folder,
+            metadata={"artifact_family": "rates_folder"},
+        )
+        progress.update(1)
+
+        _set_progress_task(progress, "passenger vehicle types", step_label="Preprocess Step 1.2")
+        passenger_vtypes_path = beam_processing.passenger_vehicle_types_file
+        if passenger_vtypes_path:
+            passenger_vehicle_types_source = str(registry.locate_required(
+                passenger_vtypes_path, label="impacts.emissions.passenger_vehicle_types_file"
+            ))
+        else:
+            found = _glob_vehicle_types_file(
+                region_input_root / (population.vehicle_folder or ""), "atlas"
+            )
+            passenger_vehicle_types_source = required_local_path(
+                found, "impacts.emissions.passenger_vehicle_types_file"
+            )
+        _register_manifest_input(
+            manifest_inputs,
+            input_root=input_root,
+            key="passenger_vehicle_types_input",
+            source_path=passenger_vehicle_types_source,
+            relative_target=Path(passenger_vehicle_types_source).name,
+            metadata={"artifact_family": "passenger_vehicle_types_input"},
+        )
+        progress.update(1)
+
+        _set_progress_task(progress, "freight vehicle types", step_label="Preprocess Step 1.2")
+        freight_vtypes_path = beam_processing.freight_vehicle_types_file
+        if freight_vtypes_path:
+            freight_vehicle_types_source = str(registry.locate_required(
+                freight_vtypes_path, label="impacts.emissions.freight_vehicle_types_file"
+            ))
+        else:
+            found = _glob_vehicle_types_file(
+                region_input_root / (population.vehicle_folder or ""), "frism"
+            )
+            freight_vehicle_types_source = required_local_path(
+                found, "impacts.emissions.freight_vehicle_types_file"
+            )
+        _register_manifest_input(
+            manifest_inputs,
+            input_root=input_root,
+            key="freight_vehicle_types_input",
+            source_path=freight_vehicle_types_source,
+            relative_target=Path(freight_vehicle_types_source).name,
+            metadata={"artifact_family": "freight_vehicle_types_input"},
+        )
+        progress.update(1)
+
+        if emissions.vehicle_category_metadata_file:
+            _set_progress_task(progress, "vehicle category metadata", step_label="Preprocess Step 1.2")
+            vehicle_category_metadata_source = str(registry.locate_required(
+                emissions.vehicle_category_metadata_file,
+                label="impacts.emissions.vehicle_category_metadata_file",
             ))
             _register_manifest_input(
                 manifest_inputs,
                 input_root=input_root,
-                key="rates_folder",
-                source_path=emissions_rates_source,
-                relative_target=emissions.rates_folder,
-                metadata={"artifact_family": "rates_folder"},
+                key="vehicle_category_metadata_file_input",
+                source_path=vehicle_category_metadata_source,
+                relative_target=Path(vehicle_category_metadata_source).name,
+                metadata={"artifact_family": "vehicle_category_metadata_file_input"},
             )
-            _advance_progress(progress)
-
-            _set_progress_task(progress, "passenger vehicle types", step_label="Preprocess Step 1.2")
-            passenger_vtypes_path = beam_processing.passenger_vehicle_types_file
-            if passenger_vtypes_path:
-                passenger_vehicle_types_source = str(registry.locate_required(
-                    passenger_vtypes_path, label="impacts.emissions.passenger_vehicle_types_file"
-                ))
-            else:
-                found = _glob_vehicle_types_file(
-                    region_input_root / (population.vehicle_folder or ""), "atlas"
-                )
-                passenger_vehicle_types_source = required_local_path(
-                    found, "impacts.emissions.passenger_vehicle_types_file"
-                )
-            _register_manifest_input(
-                manifest_inputs,
-                input_root=input_root,
-                key="passenger_vehicle_types_input",
-                source_path=passenger_vehicle_types_source,
-                relative_target=Path(passenger_vehicle_types_source).name,
-                metadata={"artifact_family": "passenger_vehicle_types_input"},
-            )
-            _advance_progress(progress)
-
-            _set_progress_task(progress, "freight vehicle types", step_label="Preprocess Step 1.2")
-            freight_vtypes_path = beam_processing.freight_vehicle_types_file
-            if freight_vtypes_path:
-                freight_vehicle_types_source = str(registry.locate_required(
-                    freight_vtypes_path, label="impacts.emissions.freight_vehicle_types_file"
-                ))
-            else:
-                found = _glob_vehicle_types_file(
-                    region_input_root / (population.vehicle_folder or ""), "frism"
-                )
-                freight_vehicle_types_source = required_local_path(
-                    found, "impacts.emissions.freight_vehicle_types_file"
-                )
-            _register_manifest_input(
-                manifest_inputs,
-                input_root=input_root,
-                key="freight_vehicle_types_input",
-                source_path=freight_vehicle_types_source,
-                relative_target=Path(freight_vehicle_types_source).name,
-                metadata={"artifact_family": "freight_vehicle_types_input"},
-            )
-            _advance_progress(progress)
-
-            if emissions.vehicle_category_metadata_file:
-                _set_progress_task(progress, "vehicle category metadata", step_label="Preprocess Step 1.2")
-                vehicle_category_metadata_source = str(registry.locate_required(
-                    emissions.vehicle_category_metadata_file,
-                    label="impacts.emissions.vehicle_category_metadata_file",
-                ))
-                _register_manifest_input(
-                    manifest_inputs,
-                    input_root=input_root,
-                    key="vehicle_category_metadata_file_input",
-                    source_path=vehicle_category_metadata_source,
-                    relative_target=Path(vehicle_category_metadata_source).name,
-                    metadata={"artifact_family": "vehicle_category_metadata_file_input"},
-                )
-                _advance_progress(progress)
-        finally:
-            _close_progress(progress)
+            progress.update(1)
+    finally:
+        progress.close()
 
     log_substep_banner("1.3", "register EMFAC inventory inputs", logger=logger)
     local_output_folder = Path(resolve_path(impacts.local_output_folder, config_path)).resolve()
@@ -385,62 +348,61 @@ def run(
         substep_13_total += 1
     if emissions.inventory.enable_freight_activity_correction:
         substep_13_total += 1
-    with logging_redirect_tqdm():
-        progress = _progress(substep_13_total, "Preprocess Step 1.3")
-        try:
-            if emissions.inventory.enable_passenger_activity_correction:
-                _set_progress_task(progress, "passenger inventory", step_label="Preprocess Step 1.3")
-                passenger_inventory_source = str(registry.locate_required(
-                    passenger_inv_path, label="impacts.emissions.inventory.passenger_file"
-                ))
-                staged_passenger_inventory_file = _register_manifest_input(
-                    manifest_inputs,
-                    input_root=input_root,
-                    key="passenger_inventory_file",
-                    source_path=passenger_inventory_source,
-                    relative_target=Path(passenger_inventory_source).name,
-                    metadata={"artifact_family": "passenger_inventory_file"},
-                )
-                _advance_progress(progress)
-
-            _set_progress_task(progress, "passenger emfac inventory", step_label="Preprocess Step 1.3")
-            _register_manifest_input(
+    progress = make_progress("Preprocess Step 1.3", total=substep_13_total, unit="task", leave=False)
+    try:
+        if emissions.inventory.enable_passenger_activity_correction:
+            _set_progress_task(progress, "passenger inventory", step_label="Preprocess Step 1.3")
+            passenger_inventory_source = str(registry.locate_required(
+                passenger_inv_path, label="impacts.emissions.inventory.passenger_file"
+            ))
+            staged_passenger_inventory_file = _register_manifest_input(
                 manifest_inputs,
                 input_root=input_root,
-                key="passenger_inventory_emfacid_file",
-                source_path=passenger_emfacid_source,
-                relative_target=Path(passenger_emfacid_source).name,
-                metadata={"artifact_family": "passenger_inventory_emfacid_file"},
+                key="passenger_inventory_file",
+                source_path=passenger_inventory_source,
+                relative_target=Path(passenger_inventory_source).name,
+                metadata={"artifact_family": "passenger_inventory_file"},
             )
-            _advance_progress(progress)
+            progress.update(1)
 
-            if emissions.inventory.enable_freight_activity_correction:
-                _set_progress_task(progress, "freight inventory", step_label="Preprocess Step 1.3")
-                freight_inventory_source = str(registry.locate_required(
-                    freight_inv_path, label="impacts.emissions.inventory.freight_file"
-                ))
-                staged_freight_inventory_file = _register_manifest_input(
-                    manifest_inputs,
-                    input_root=input_root,
-                    key="freight_inventory_file",
-                    source_path=freight_inventory_source,
-                    relative_target=Path(freight_inventory_source).name,
-                    metadata={"artifact_family": "freight_inventory_file"},
-                )
-                _advance_progress(progress)
+        _set_progress_task(progress, "passenger emfac inventory", step_label="Preprocess Step 1.3")
+        _register_manifest_input(
+            manifest_inputs,
+            input_root=input_root,
+            key="passenger_inventory_emfacid_file",
+            source_path=passenger_emfacid_source,
+            relative_target=Path(passenger_emfacid_source).name,
+            metadata={"artifact_family": "passenger_inventory_emfacid_file"},
+        )
+        progress.update(1)
 
-            _set_progress_task(progress, "freight emfac inventory", step_label="Preprocess Step 1.3")
-            _register_manifest_input(
+        if emissions.inventory.enable_freight_activity_correction:
+            _set_progress_task(progress, "freight inventory", step_label="Preprocess Step 1.3")
+            freight_inventory_source = str(registry.locate_required(
+                freight_inv_path, label="impacts.emissions.inventory.freight_file"
+            ))
+            staged_freight_inventory_file = _register_manifest_input(
                 manifest_inputs,
                 input_root=input_root,
-                key="freight_inventory_emfacid_file",
-                source_path=freight_emfacid_source,
-                relative_target=Path(freight_emfacid_source).name,
-                metadata={"artifact_family": "freight_inventory_emfacid_file"},
+                key="freight_inventory_file",
+                source_path=freight_inventory_source,
+                relative_target=Path(freight_inventory_source).name,
+                metadata={"artifact_family": "freight_inventory_file"},
             )
-            _advance_progress(progress)
-        finally:
-            _close_progress(progress)
+            progress.update(1)
+
+        _set_progress_task(progress, "freight emfac inventory", step_label="Preprocess Step 1.3")
+        _register_manifest_input(
+            manifest_inputs,
+            input_root=input_root,
+            key="freight_inventory_emfacid_file",
+            source_path=freight_emfacid_source,
+            relative_target=Path(freight_emfacid_source).name,
+            metadata={"artifact_family": "freight_inventory_emfacid_file"},
+        )
+        progress.update(1)
+    finally:
+        progress.close()
 
     if pipeline.inmap or pipeline.aermod:
         log_substep_banner("1.4", "register dispersion inputs", logger=logger)
@@ -449,70 +411,69 @@ def run(
             substep_14_total += 3  # grid, nox-to-no2 ratios, isrm store
         if pipeline.aermod:
             substep_14_total += 1  # asrv patterns
-        with logging_redirect_tqdm():
-            progress = _progress(substep_14_total, "Preprocess Step 1.4")
-            try:
-                if pipeline.inmap:
-                    _set_progress_task(progress, "inmap grid", step_label="Preprocess Step 1.4")
-                    inmap_grid_source = str(registry.locate_required(
-                        inmap.grid_path, label="impacts.dispersions.inmap.grid_path"
-                    ))
-                    staged_inmap_grid = _register_manifest_input(
-                        manifest_inputs,
-                        input_root=input_root,
-                        key="inmap_grid",
-                        source_path=inmap_grid_source,
-                        relative_target=inmap.grid_path,
-                        metadata={"artifact_family": "inmap_grid"},
-                    )
-                    _advance_progress(progress)
+        progress = make_progress("Preprocess Step 1.4", total=substep_14_total, unit="task", leave=False)
+        try:
+            if pipeline.inmap:
+                _set_progress_task(progress, "inmap grid", step_label="Preprocess Step 1.4")
+                inmap_grid_source = str(registry.locate_required(
+                    inmap.grid_path, label="impacts.dispersions.inmap.grid_path"
+                ))
+                staged_inmap_grid = _register_manifest_input(
+                    manifest_inputs,
+                    input_root=input_root,
+                    key="inmap_grid",
+                    source_path=inmap_grid_source,
+                    relative_target=inmap.grid_path,
+                    metadata={"artifact_family": "inmap_grid"},
+                )
+                progress.update(1)
 
-                    _set_progress_task(progress, "nox-to-no2 ratios", step_label="Preprocess Step 1.4")
-                    no2_matrix_source = str(registry.locate_required(
-                        inmap.isrm_nox_to_no2_ratios_file,
-                        label="impacts.dispersions.inmap.isrm_nox_to_no2_ratios_file",
-                    ))
-                    staged_isrm_nox_to_no2_ratios_file = _register_manifest_input(
-                        manifest_inputs,
-                        input_root=input_root,
-                        key="isrm_nox_to_no2_ratios_file",
-                        source_path=no2_matrix_source,
-                        relative_target=inmap.isrm_nox_to_no2_ratios_file,
-                        metadata={"artifact_family": "isrm_nox_to_no2_ratios_file"},
-                    )
-                    _advance_progress(progress)
+                _set_progress_task(progress, "nox-to-no2 ratios", step_label="Preprocess Step 1.4")
+                no2_matrix_source = str(registry.locate_required(
+                    inmap.isrm_nox_to_no2_ratios_file,
+                    label="impacts.dispersions.inmap.isrm_nox_to_no2_ratios_file",
+                ))
+                staged_isrm_nox_to_no2_ratios_file = _register_manifest_input(
+                    manifest_inputs,
+                    input_root=input_root,
+                    key="isrm_nox_to_no2_ratios_file",
+                    source_path=no2_matrix_source,
+                    relative_target=inmap.isrm_nox_to_no2_ratios_file,
+                    metadata={"artifact_family": "isrm_nox_to_no2_ratios_file"},
+                )
+                progress.update(1)
 
-                    _set_progress_task(progress, "isrm store", step_label="Preprocess Step 1.4")
-                    isrm_source = str(registry.locate_required(
-                        inmap.isrm_zarr, label="impacts.dispersions.inmap.isrm_zarr"
-                    ))
-                    staged_isrm = _register_manifest_input(
-                        manifest_inputs,
-                        input_root=input_root,
-                        key="isrm",
-                        source_path=isrm_source,
-                        relative_target=Path(isrm_source).name,
-                        metadata={"artifact_family": "isrm"},
-                        prefer_reference=False,
-                    )
-                    _advance_progress(progress)
+                _set_progress_task(progress, "isrm store", step_label="Preprocess Step 1.4")
+                isrm_source = str(registry.locate_required(
+                    inmap.isrm_zarr, label="impacts.dispersions.inmap.isrm_zarr"
+                ))
+                staged_isrm = _register_manifest_input(
+                    manifest_inputs,
+                    input_root=input_root,
+                    key="isrm",
+                    source_path=isrm_source,
+                    relative_target=Path(isrm_source).name,
+                    metadata={"artifact_family": "isrm"},
+                    prefer_reference=False,
+                )
+                progress.update(1)
 
-                if pipeline.aermod:
-                    _set_progress_task(progress, "asrv patterns", step_label="Preprocess Step 1.4")
-                    asrv_source = str(registry.locate_required(
-                        aermod.asrv_patterns_file, label="impacts.dispersions.aermod.asrv_patterns_file"
-                    ))
-                    staged_asrv_patterns_file = _register_manifest_input(
-                        manifest_inputs,
-                        input_root=input_root,
-                        key="asrv_patterns_file",
-                        source_path=asrv_source,
-                        relative_target=aermod.asrv_patterns_file,
-                        metadata={"artifact_family": "asrv_patterns_file"},
-                    )
-                    _advance_progress(progress)
-            finally:
-                _close_progress(progress)
+            if pipeline.aermod:
+                _set_progress_task(progress, "asrv patterns", step_label="Preprocess Step 1.4")
+                asrv_source = str(registry.locate_required(
+                    aermod.asrv_patterns_file, label="impacts.dispersions.aermod.asrv_patterns_file"
+                ))
+                staged_asrv_patterns_file = _register_manifest_input(
+                    manifest_inputs,
+                    input_root=input_root,
+                    key="asrv_patterns_file",
+                    source_path=asrv_source,
+                    relative_target=aermod.asrv_patterns_file,
+                    metadata={"artifact_family": "asrv_patterns_file"},
+                )
+                progress.update(1)
+        finally:
+            progress.close()
 
     population_inputs: Dict[str, Any] = {}
     if pipeline.exposure:
@@ -526,31 +487,30 @@ def run(
             "persons": BEAM_POPULATION_PREFIX,
             "households": BEAM_HOUSEHOLDS_PREFIX,
         }
-        with logging_redirect_tqdm():
-            progress = _progress(2, "Preprocess Step 1.5")
-            try:
-                for stem in ("persons", "households"):
-                    _set_progress_task(progress, stem, step_label="Preprocess Step 1.5")
-                    existing_entry = population_artifact_entries[stem]
-                    if existing_entry is not None:
-                        population_inputs[stem] = existing_entry
-                        _advance_progress(progress)
-                        continue
-                    source_path = _locate_exchange_file(population_root, stem)
-                    if source_path:
-                        register_managed_input(
-                            manifest_inputs=population_inputs,
-                            input_root=input_root,
-                            key=stem,
-                            source_path=source_path,
-                            relative_target=str(Path(population.passenger_folder) / Path(source_path).name),
-                            artifact_key=population_artifact_keys[stem],
-                            prefer_reference=True,
-                            metadata={"artifact_family": population_artifact_keys[stem]},
-                        )
-                    _advance_progress(progress)
-            finally:
-                _close_progress(progress)
+        progress = make_progress("Preprocess Step 1.5", total=2, unit="task", leave=False)
+        try:
+            for stem in ("persons", "households"):
+                _set_progress_task(progress, stem, step_label="Preprocess Step 1.5")
+                existing_entry = population_artifact_entries[stem]
+                if existing_entry is not None:
+                    population_inputs[stem] = existing_entry
+                    progress.update(1)
+                    continue
+                source_path = _locate_exchange_file(population_root, stem)
+                if source_path:
+                    register_managed_input(
+                        manifest_inputs=population_inputs,
+                        input_root=input_root,
+                        key=stem,
+                        source_path=source_path,
+                        relative_target=str(Path(population.passenger_folder) / Path(source_path).name),
+                        artifact_key=population_artifact_keys[stem],
+                        prefer_reference=True,
+                        metadata={"artifact_family": population_artifact_keys[stem]},
+                    )
+                progress.update(1)
+        finally:
+            progress.close()
 
     logger.info("Preprocess Step 1 complete")
     return {

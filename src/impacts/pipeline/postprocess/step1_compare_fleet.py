@@ -24,7 +24,6 @@ from ._common import (
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 import pandas as pd
-from tqdm.contrib.logging import logging_redirect_tqdm
 
 from ...common import _duckdb_scan_expression
 from ...common import configure_duckdb_connection
@@ -685,67 +684,66 @@ def run(
 ) -> dict[str, str]:
     log_step_banner("Postprocess Step 1", "Compare Fleet", logger=logger)
     log_substep_banner("1.1", "compare BEAM fleet against EMFAC by emfacId", logger=logger)
-    with logging_redirect_tqdm():
-        progress = _step_progress(7, "Postprocess Step 1")
-        try:
-            _set_progress_task(progress, "vehicle lookup", step_label="Postprocess Step 1")
-            vehicle_lookup = _load_beam_vehicle_lookup(
-                passenger_vehicle_types_path=passenger_vehicle_types_path,
-                freight_vehicle_types_path=freight_vehicle_types_path,
-                population_sample=population_sample,
-                transit_sample=transit_sample,
-                freight_sample=freight_sample,
-            )
-            _advance_progress(progress)
+    progress = _step_progress(7, "Postprocess Step 1")
+    try:
+        _set_progress_task(progress, "vehicle lookup", step_label="Postprocess Step 1")
+        vehicle_lookup = _load_beam_vehicle_lookup(
+            passenger_vehicle_types_path=passenger_vehicle_types_path,
+            freight_vehicle_types_path=freight_vehicle_types_path,
+            population_sample=population_sample,
+            transit_sample=transit_sample,
+            freight_sample=freight_sample,
+        )
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "BEAM assignments", step_label="Postprocess Step 1")
-            beam_population_breakdown = _build_beam_population_breakdown_with_actual_assignments(
-                vehicle_lookup=vehicle_lookup,
-                passenger_vehicles_path=passenger_vehicles_path,
-                freight_carriers_path=freight_carriers_path,
-            )
-            _advance_progress(progress)
+        _set_progress_task(progress, "BEAM assignments", step_label="Postprocess Step 1")
+        beam_population_breakdown = _build_beam_population_breakdown_with_actual_assignments(
+            vehicle_lookup=vehicle_lookup,
+            passenger_vehicles_path=passenger_vehicles_path,
+            freight_carriers_path=freight_carriers_path,
+        )
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "BEAM skims VMT", step_label="Postprocess Step 1")
-            beam_vmt_breakdown = _build_beam_vmt_breakdown(
-                skims_emissions_path=skims_emissions_path,
-                vehicle_lookup=vehicle_lookup,
-            )
-            _advance_progress(progress)
+        _set_progress_task(progress, "BEAM skims VMT", step_label="Postprocess Step 1")
+        beam_vmt_breakdown = _build_beam_vmt_breakdown(
+            skims_emissions_path=skims_emissions_path,
+            vehicle_lookup=vehicle_lookup,
+        )
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "comparison table", step_label="Postprocess Step 1")
-            comparison = _build_comparison_table(
-                beam_population_breakdown=beam_population_breakdown,
-                beam_vmt_breakdown=beam_vmt_breakdown,
-                emfac_passenger_activity_path=emfac_passenger_activity_path,
-                emfac_freight_activity_path=emfac_freight_activity_path,
-            )
-            _advance_progress(progress)
+        _set_progress_task(progress, "comparison table", step_label="Postprocess Step 1")
+        comparison = _build_comparison_table(
+            beam_population_breakdown=beam_population_breakdown,
+            beam_vmt_breakdown=beam_vmt_breakdown,
+            emfac_passenger_activity_path=emfac_passenger_activity_path,
+            emfac_freight_activity_path=emfac_freight_activity_path,
+        )
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "write tables", step_label="Postprocess Step 1")
-            outputs = _write_tables(comparison, output_dir=output_dir)
-            _advance_progress(progress)
+        _set_progress_task(progress, "write tables", step_label="Postprocess Step 1")
+        outputs = _write_tables(comparison, output_dir=output_dir)
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "vehicle metadata", step_label="Postprocess Step 1")
-            metadata = _load_vehicle_metadata_lookup(
-                passenger_vehicle_types_path=passenger_vehicle_types_path,
-                freight_vehicle_types_path=freight_vehicle_types_path,
-                population_sample=population_sample,
-                transit_sample=transit_sample,
-                freight_sample=freight_sample,
-            )
-            _advance_progress(progress)
+        _set_progress_task(progress, "vehicle metadata", step_label="Postprocess Step 1")
+        metadata = _load_vehicle_metadata_lookup(
+            passenger_vehicle_types_path=passenger_vehicle_types_path,
+            freight_vehicle_types_path=freight_vehicle_types_path,
+            population_sample=population_sample,
+            transit_sample=transit_sample,
+            freight_sample=freight_sample,
+        )
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "plots", step_label="Postprocess Step 1")
-            plot_path = _plot_class_model_year_combined(comparison, metadata=metadata, output_dir=output_dir)
-            if plot_path:
-                outputs["vmt_class_model_year_plot"] = plot_path
-            plot_path = _plot_model_year_fuel_combined(comparison, metadata=metadata, output_dir=output_dir)
-            if plot_path:
-                outputs["vmt_model_year_fuel_plot"] = plot_path
-            _advance_progress(progress)
-        finally:
-            _close_progress(progress)
+        _set_progress_task(progress, "plots", step_label="Postprocess Step 1")
+        plot_path = _plot_class_model_year_combined(comparison, metadata=metadata, output_dir=output_dir)
+        if plot_path:
+            outputs["vmt_class_model_year_plot"] = plot_path
+        plot_path = _plot_model_year_fuel_combined(comparison, metadata=metadata, output_dir=output_dir)
+        if plot_path:
+            outputs["vmt_model_year_fuel_plot"] = plot_path
+        _advance_progress(progress)
+    finally:
+        _close_progress(progress)
     logger.info("Postprocess Step 1 complete")
     return outputs
 

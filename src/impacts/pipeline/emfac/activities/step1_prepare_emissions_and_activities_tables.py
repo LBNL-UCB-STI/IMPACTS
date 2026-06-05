@@ -8,8 +8,7 @@ from tempfile import TemporaryDirectory
 from functools import lru_cache
 
 import pandas as pd
-from tqdm import tqdm
-
+from impacts.common import make_progress
 from impacts.pipeline.emfac._common import frame_summary
 from impacts.pipeline.emfac._common import write_trace
 from impacts.config.settings import _apply_table_schema
@@ -854,15 +853,14 @@ def clean_emfac_to_parquet(
         raise ValueError(f"Unsupported source type: {source_type}")
 
     files = _iter_input_csvs(input_path)
-    _iter = (
-        tqdm(files, desc=desc, unit="file", dynamic_ncols=True, leave=True, file=sys.stdout, disable=False)
-        if desc
-        else files
-    )
-    cleaned_frames = [
-        _clean_file(path, source_type=source_type, region_label=region_label)
-        for path in _iter
-    ]
+    progress = make_progress(desc or "Loading EMFAC files", total=len(files), unit="file")
+    cleaned_frames = []
+    try:
+        for path in files:
+            cleaned_frames.append(_clean_file(path, source_type=source_type, region_label=region_label))
+            progress.update(1)
+    finally:
+        progress.close()
     combined = pd.concat(cleaned_frames, ignore_index=True)
     if year is not None:
         combined = combined.loc[combined["calendar_year"] == year].copy()

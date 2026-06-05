@@ -16,8 +16,6 @@ import osm_chordify
 import pandas as pd
 import shapely.wkb
 from shapely.geometry import LineString
-from tqdm.contrib.logging import logging_redirect_tqdm
-
 from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import read_vector
@@ -510,8 +508,7 @@ def run(
     else:
         staged_osm = resolve_required_manifest_input(manifest_inputs, key="osm_network")
         logger.info("Step 3.1: mapping BEAM network to OSM using %s", staged_osm)
-        with logging_redirect_tqdm():
-            mapped_network = _map_beam_network_to_osm(
+        mapped_network = _map_beam_network_to_osm(
                 osm_path=staged_osm,
                 network_path=staged_network,
                 output_path=mapped_network_path,
@@ -532,7 +529,7 @@ def run(
     if pipeline.inmap_enabled:
         log_substep_banner("3.2", "intersect with InMAP grid", logger=logger)
         logger.info("Step 3.2: intersecting with inMAP grid %s", pipeline.inmap_grid_path)
-        with logging_redirect_tqdm(), _log_safe_osm_chordify_progress():
+        with _log_safe_osm_chordify_progress():
             inmap_intersection = intersect_road_network_with_zones(
                 mapped_network,
                 epsg,
@@ -556,7 +553,7 @@ def run(
     if pipeline.aermod_enabled:
         log_substep_banner("3.3", "intersect with AERMOD grid", logger=logger)
         logger.info("Step 3.3: intersecting line network with AERMOD grid %s", pipeline.aermod_grid_path)
-        with logging_redirect_tqdm(), _log_safe_osm_chordify_progress():
+        with _log_safe_osm_chordify_progress():
             aermod_intersection = intersect_road_network_with_zones(
                 mapped_network,
                 epsg,
@@ -588,7 +585,7 @@ def run(
         time.perf_counter() - county_setup_started,
     )
     county_match_started = time.perf_counter()
-    with logging_redirect_tqdm(), _log_safe_osm_chordify_progress():
+    with _log_safe_osm_chordify_progress():
         C_matched = intersect_road_network_with_zones(
             B, epsg, county_gdf, output_epsg=epsg, zone_label="county",
         )

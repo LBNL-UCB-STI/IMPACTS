@@ -19,7 +19,6 @@ from ._common import (
 
 import matplotlib.pyplot as plt
 import pandas as pd
-from tqdm.contrib.logging import logging_redirect_tqdm
 
 from ...common import _duckdb_scan_expression
 from ...common import configure_duckdb_connection
@@ -284,55 +283,54 @@ def run(
 ) -> dict[str, str]:
     log_step_banner("Postprocess Step 3", f"Compare Emissions Inventory ({inventory_label})", logger=logger)
     log_substep_banner("3.1", f"compare modeled emissions with {inventory_label} inventory", logger=logger)
-    with logging_redirect_tqdm():
-        progress = _step_progress(6, "Postprocess Step 3")
-        try:
-            _set_progress_task(progress, "county lookup", step_label="Postprocess Step 3")
-            county_lookup = _load_county_lookup(county_boundaries_path)
-            _advance_progress(progress)
+    progress = _step_progress(6, "Postprocess Step 3")
+    try:
+        _set_progress_task(progress, "county lookup", step_label="Postprocess Step 3")
+        county_lookup = _load_county_lookup(county_boundaries_path)
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "modeled emissions", step_label="Postprocess Step 3")
-            modeled_df = _aggregate_modeled_emissions(
-                modeled_emissions_path,
-                county_lookup=county_lookup,
+        _set_progress_task(progress, "modeled emissions", step_label="Postprocess Step 3")
+        modeled_df = _aggregate_modeled_emissions(
+            modeled_emissions_path,
+            county_lookup=county_lookup,
+        )
+        _advance_progress(progress)
+
+        _set_progress_task(progress, "inventory emissions", step_label="Postprocess Step 3")
+        inventory_df = _aggregate_inventory_emissions(
+            inventory_path,
+            pollutant_targets=pollutant_targets,
+        )
+        inventory_df["emfac_tons"] = pd.to_numeric(inventory_df["emfac_tons"], errors="coerce").fillna(0.0)
+        _advance_progress(progress)
+
+        _set_progress_task(progress, "comparison table", step_label="Postprocess Step 3")
+        comparison = _build_comparison_table(
+            modeled_df=modeled_df,
+            inventory_df=inventory_df,
+            county_order=county_order,
+        )
+        target_slug = _slugify(target_name)
+        _advance_progress(progress)
+
+        _set_progress_task(progress, "write tables", step_label="Postprocess Step 3")
+        outputs = _write_comparison_table(comparison, output_dir=output_dir, target_slug=target_slug)
+        _advance_progress(progress)
+
+        _set_progress_task(progress, "plots", step_label="Postprocess Step 3")
+        for pollutant in ("PM2.5", "NOx", "BC"):
+            plot_path = _plot_county_comparison(
+                comparison,
+                pollutant=pollutant,
+                inventory_label=inventory_label,
+                output_dir=output_dir,
+                target_slug=target_slug,
             )
-            _advance_progress(progress)
-
-            _set_progress_task(progress, "inventory emissions", step_label="Postprocess Step 3")
-            inventory_df = _aggregate_inventory_emissions(
-                inventory_path,
-                pollutant_targets=pollutant_targets,
-            )
-            inventory_df["emfac_tons"] = pd.to_numeric(inventory_df["emfac_tons"], errors="coerce").fillna(0.0)
-            _advance_progress(progress)
-
-            _set_progress_task(progress, "comparison table", step_label="Postprocess Step 3")
-            comparison = _build_comparison_table(
-                modeled_df=modeled_df,
-                inventory_df=inventory_df,
-                county_order=county_order,
-            )
-            target_slug = _slugify(target_name)
-            _advance_progress(progress)
-
-            _set_progress_task(progress, "write tables", step_label="Postprocess Step 3")
-            outputs = _write_comparison_table(comparison, output_dir=output_dir, target_slug=target_slug)
-            _advance_progress(progress)
-
-            _set_progress_task(progress, "plots", step_label="Postprocess Step 3")
-            for pollutant in ("PM2.5", "NOx", "BC"):
-                plot_path = _plot_county_comparison(
-                    comparison,
-                    pollutant=pollutant,
-                    inventory_label=inventory_label,
-                    output_dir=output_dir,
-                    target_slug=target_slug,
-                )
-                if plot_path:
-                    outputs[f"{pollutant}_plot"] = plot_path
-            _advance_progress(progress)
-        finally:
-            _close_progress(progress)
+            if plot_path:
+                outputs[f"{pollutant}_plot"] = plot_path
+        _advance_progress(progress)
+    finally:
+        _close_progress(progress)
     logger.info("Postprocess Step 3 complete")
     return outputs
 

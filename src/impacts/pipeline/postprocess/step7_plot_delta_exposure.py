@@ -35,7 +35,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.colors import BoundaryNorm, ListedColormap
-from tqdm.contrib.logging import logging_redirect_tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -290,42 +289,41 @@ def run(
     logger.info("  Saved → %s", table_path)
 
     outputs: dict[str, str] = {"delta_exposure_table": str(table_path)}
-    with logging_redirect_tqdm():
-        progress = _map_progress(3, "Postprocess Step 7")
-        try:
-            _set_progress_task(progress, "pwc delta inmap", step_label="Postprocess Step 7")
-            result = _plot_inmap_delta_scalar(
-                inmap_delta_gdf,
-                net_gdf,
-                column="pwc_pm25_delta",
-                title="Population-weighted PM₂.₅ delta by InMAP cell",
-                colorbar_label="Population-weighted PM₂.₅ delta (current - baseline, μg/m³)",
-                out_path=output_dir / "pwc_inmap_delta.png",
-            )
-            if result:
-                outputs["pwc_inmap_delta_map"] = result
-            _advance_progress(progress)
+    progress = _map_progress(3, "Postprocess Step 7")
+    try:
+        _set_progress_task(progress, "pwc delta inmap", step_label="Postprocess Step 7")
+        result = _plot_inmap_delta_scalar(
+            inmap_delta_gdf,
+            net_gdf,
+            column="pwc_pm25_delta",
+            title="Population-weighted PM₂.₅ delta by InMAP cell",
+            colorbar_label="Population-weighted PM₂.₅ delta (current - baseline, μg/m³)",
+            out_path=output_dir / "pwc_inmap_delta.png",
+        )
+        if result:
+            outputs["pwc_inmap_delta_map"] = result
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "exposure burden delta", step_label="Postprocess Step 7")
-            result = _plot_inmap_delta_scalar(
-                inmap_delta_gdf,
-                net_gdf,
-                column="exposure_burden_delta",
-                title="PM₂.₅ exposure burden delta by InMAP cell",
-                colorbar_label="PM₂.₅ exposure burden delta (person·μg/m³)",
-                out_path=output_dir / "exposure_burden_delta.png",
-            )
-            if result:
-                outputs["exposure_burden_delta_map"] = result
-            _advance_progress(progress)
+        _set_progress_task(progress, "exposure burden delta", step_label="Postprocess Step 7")
+        result = _plot_inmap_delta_scalar(
+            inmap_delta_gdf,
+            net_gdf,
+            column="exposure_burden_delta",
+            title="PM₂.₅ exposure burden delta by InMAP cell",
+            colorbar_label="PM₂.₅ exposure burden delta (person·μg/m³)",
+            out_path=output_dir / "exposure_burden_delta.png",
+        )
+        if result:
+            outputs["exposure_burden_delta_map"] = result
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "bivariate delta", step_label="Postprocess Step 7")
-            result = _plot_delta_bivariate(inmap_delta_gdf, net_gdf, output_dir / "bivariate_delta.png")
-            if result:
-                outputs["bivariate_delta_map"] = result
-            _advance_progress(progress)
-        finally:
-            _close_progress(progress)
+        _set_progress_task(progress, "bivariate delta", step_label="Postprocess Step 7")
+        result = _plot_delta_bivariate(inmap_delta_gdf, net_gdf, output_dir / "bivariate_delta.png")
+        if result:
+            outputs["bivariate_delta_map"] = result
+        _advance_progress(progress)
+    finally:
+        _close_progress(progress)
 
     logger.info("Postprocess Step 7 complete: %d outputs written to %s", len(outputs), output_dir)
     return outputs

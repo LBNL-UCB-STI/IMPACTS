@@ -28,7 +28,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from shapely.geometry import box
-from tqdm import tqdm
+from impacts.common import make_progress
 
 from .rdata_conversion import rdata_to_parquet
 
@@ -316,8 +316,8 @@ def run_pipeline(
 ) -> None:
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     resolved_steps = steps or STEP_ORDER
-    progress = tqdm(resolved_steps, desc="NOx->NO2 preprocessing", unit="step", dynamic_ncols=True)
-    for step_name in progress:
+    progress = make_progress("NOx->NO2 preprocessing", total=len(resolved_steps), unit="step")
+    for step_name in resolved_steps:
         progress.set_postfix_str(step_name)
         if step_name == "convert_cmaq_polygon":
             convert_cmaq_polygon(output_dir=output_dir, ratio_table_path=ratio_table_path)
@@ -327,6 +327,7 @@ def run_pipeline(
             cmaq_ratio_to_grid(output_dir=output_dir, ratio_table_path=ratio_table_path, grid_path=grid_path)
         elif step_name == "nox_to_no2_grid":
             nox_to_no2_grid(output_dir=output_dir, regional_matrix_path=regional_matrix_path)
+        progress.update(1)
     progress.close()
 
 
@@ -363,12 +364,7 @@ def _extract_sparse_triplets(
     receptor_chunks: list[np.ndarray] = []
     value_chunks: list[np.ndarray] = []
 
-    progress = tqdm(
-        total=matrix.shape[0],
-        desc="Extracting sparse NOx->NO2 matrix",
-        unit="row",
-        dynamic_ncols=True,
-    )
+    progress = make_progress("Extracting sparse NOx->NO2 matrix", total=matrix.shape[0], unit="row")
     try:
         for start in range(0, matrix.shape[0], chunk_rows):
             stop = min(start + chunk_rows, matrix.shape[0])

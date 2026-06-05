@@ -50,6 +50,25 @@ def _running_with_real_terminal() -> bool:
     return sys.stdout.isatty() or sys.stderr.isatty()
 
 
+def make_progress(desc: str, *, total: Optional[int] = None, unit: str = "item", leave: bool = True) -> tqdm:
+    return tqdm(
+        total=total,
+        desc=desc,
+        unit=unit,
+        dynamic_ncols=True,
+        file=sys.stdout,
+        leave=leave,
+        disable=not (logger.isEnabledFor(logging.INFO) and _running_with_real_terminal()),
+    )
+
+
+def _set_progress_task(progress: tqdm, label: str, *, step_label: str) -> None:
+    if progress.disable:
+        logger.info("%s progress: %s", step_label, label)
+        return
+    progress.set_postfix_str(label)
+
+
 def _normalized_stage_label(label: str, *, logger: logging.Logger, is_substep: bool = False) -> str:
     text = str(label).strip()
     upper = text.upper()
@@ -113,24 +132,14 @@ def optional_local_path(path: Optional[str]) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def _scan_paths_with_progress(root: Path, desc: str):
-    progress_enabled = logger.isEnabledFor(logging.INFO) and sys.stdout.isatty()
-    progress = None
-    if progress_enabled:
-        progress = tqdm(
-            total=None,
-            desc=desc,
-            unit="dir",
-            dynamic_ncols=True,
-            file=sys.stdout,
-            leave=False,
-        )
+    progress = make_progress(desc, unit="dir", leave=False)
     scan_count = 0
     try:
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames.sort()
             scan_count += 1
             current_label = Path(dirpath).name or dirpath
-            if progress is not None:
+            if not progress.disable:
                 progress.update(1)
                 progress.set_postfix_str(
                     f"dirs={len(dirnames)} files={len(filenames)} current={current_label}",
@@ -146,8 +155,7 @@ def _scan_paths_with_progress(root: Path, desc: str):
                 )
             yield Path(dirpath), dirnames, filenames
     finally:
-        if progress is not None:
-            progress.close()
+        progress.close()
 
 
 def find_first_matching(root: str, pattern: str) -> Optional[str]:
@@ -442,24 +450,14 @@ def generate_fishnet_from_bounds(
     mask_union = mask_gdf.geometry.union_all() if hasattr(mask_gdf.geometry, "union_all") else mask_gdf.geometry.unary_union
     filter_started = time.perf_counter()
     keep_mask = np.zeros(len(fishnet), dtype=bool)
-    progress = None
+    progress = make_progress("Filtering AERMOD fishnet", total=len(fishnet), unit="cell")
     progress_step = max(1, len(fishnet) // 10)
     next_progress_log = progress_step
-    if _running_with_real_terminal():
-        progress = tqdm(
-            total=len(fishnet),
-            desc="Filtering AERMOD fishnet",
-            unit="cell",
-            dynamic_ncols=True,
-            file=sys.stdout,
-            leave=True,
-            mininterval=1.0,
-        )
     try:
         for start in range(0, len(fishnet), default_chunk_size):
             stop = min(start + default_chunk_size, len(fishnet))
             keep_mask[start:stop] = fishnet.geometry.iloc[start:stop].intersects(mask_union).to_numpy()
-            if progress is not None:
+            if not progress.disable:
                 progress.update(stop - start)
             elif stop >= next_progress_log or stop == len(fishnet):
                 logger.info(
@@ -471,8 +469,7 @@ def generate_fishnet_from_bounds(
                 while next_progress_log <= stop:
                     next_progress_log += progress_step
     finally:
-        if progress is not None:
-            progress.close()
+        progress.close()
     fishnet = fishnet.loc[keep_mask]
     logger.info(
         "Preprocess: filtered fishnet candidates to the staged InMAP footprint in %.2fs → %d rows kept",

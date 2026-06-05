@@ -34,7 +34,6 @@ from ._common import (
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import pandas as pd
-from tqdm.contrib.logging import logging_redirect_tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -244,28 +243,27 @@ def run(
     logger.info("  Saved → %s", table_path)
 
     outputs: dict[str, str] = {"delta_table": str(table_path)}
-    with logging_redirect_tqdm():
-        progress = _map_progress(len(_DELTA_SCALAR_LAYERS) + 1, "Postprocess Step 6")
-        try:
-            for column, title in _DELTA_SCALAR_LAYERS:
-                _set_progress_task(progress, f"Delta {column}", step_label="Postprocess Step 6")
-                result = _plot_delta_map(delta_gdf, net_gdf, layout, column, title, output_dir / f"delta_{column.lower()}.png")
-                if result is not None:
-                    outputs[f"delta_{column.lower()}_map"] = result
-                _advance_progress(progress)
-
-            _set_progress_task(progress, "Primary/Secondary PM2.5 delta", step_label="Postprocess Step 6")
-            result = _plot_primary_secondary_delta_comparison(
-                delta_gdf,
-                net_gdf,
-                layout,
-                output_dir / "delta_primary_secondary_pm25.png",
-            )
+    progress = _map_progress(len(_DELTA_SCALAR_LAYERS) + 1, "Postprocess Step 6")
+    try:
+        for column, title in _DELTA_SCALAR_LAYERS:
+            _set_progress_task(progress, f"Delta {column}", step_label="Postprocess Step 6")
+            result = _plot_delta_map(delta_gdf, net_gdf, layout, column, title, output_dir / f"delta_{column.lower()}.png")
             if result is not None:
-                outputs["delta_primary_secondary_pm25_map"] = result
+                outputs[f"delta_{column.lower()}_map"] = result
             _advance_progress(progress)
-        finally:
-            _close_progress(progress)
+
+        _set_progress_task(progress, "Primary/Secondary PM2.5 delta", step_label="Postprocess Step 6")
+        result = _plot_primary_secondary_delta_comparison(
+            delta_gdf,
+            net_gdf,
+            layout,
+            output_dir / "delta_primary_secondary_pm25.png",
+        )
+        if result is not None:
+            outputs["delta_primary_secondary_pm25_map"] = result
+        _advance_progress(progress)
+    finally:
+        _close_progress(progress)
 
     logger.info("Postprocess Step 6 complete: %d outputs written to %s", len(outputs), output_dir)
     return outputs

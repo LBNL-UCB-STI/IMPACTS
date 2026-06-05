@@ -7,7 +7,7 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
-from tqdm import tqdm
+from ..common import make_progress
 
 
 def _parse_scalar(raw: str):
@@ -210,13 +210,7 @@ def is_remote_path(path: str) -> bool:
 
 def _copy_directory_with_progress(src: Path, dst: Path) -> None:
     files = [path for path in src.rglob("*") if path.is_file()]
-    progress = tqdm(
-        total=len(files),
-        desc=f"Staging {src.name}",
-        unit="file",
-        dynamic_ncols=True,
-        leave=True,
-    )
+    progress = make_progress(f"Staging {src.name}", total=len(files), unit="file")
     try:
         for child in src.rglob("*"):
             relative = child.relative_to(src)

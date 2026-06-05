@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-import sys
 import time
 from typing import Any
 from typing import Optional
@@ -11,14 +10,11 @@ from typing import Optional
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
-from tqdm.contrib.logging import logging_redirect_tqdm
-
 from ...common import log_step_banner
 from ...common import log_substep_banner
+from ...common import make_progress
 from ...common import read_table
 from ...common import read_vector
-from ...common import _running_with_real_terminal
 from ...config.defaults import concentrations
 from ...config.defaults import pollutants as default_pollutants
 from ...config.defaults import tons_per_year_to_ug_per_s
@@ -27,9 +23,6 @@ from . import _step_label
 
 logger = logging.getLogger(__name__)
 
-
-def _show_tqdm_progress() -> bool:
-    return logger.isEnabledFor(logging.INFO) and _running_with_real_terminal()
 
 
 def _trace_columns(step: str, label: str, columns: list[str]) -> None:
@@ -91,15 +84,7 @@ def _read_rdata(path: str) -> dict[str, object]:
 
 def _read_sparse_transfer_matrix_npz(path: str) -> dict[str, np.ndarray | int]:
     fields = ["source_ids", "receptor_ids", "values", "source_dim", "receptor_dim"]
-    progress = tqdm(
-        total=len(fields),
-        desc="Loading NOx->NO2 npz",
-        unit="field",
-        dynamic_ncols=True,
-        file=sys.stdout,
-        leave=True,
-        disable=not _show_tqdm_progress(),
-    )
+    progress = make_progress("Loading NOx->NO2 npz", total=len(fields), unit="field")
     try:
         with np.load(path) as data:
             required = set(fields)
@@ -615,16 +600,8 @@ def compute_isrm_concentrations(
             continue
         concentration_plan.append((concentration_name, spec))
 
-    with logging_redirect_tqdm():
-        for concentration_name, spec in tqdm(
-            concentration_plan,
-            desc="Step 2.2 pollutant responses",
-            unit="species",
-            file=sys.stdout,
-            dynamic_ncols=True,
-            leave=True,
-            disable=not _show_tqdm_progress(),
-        ):
+    progress = make_progress("Step 2.2 pollutant responses", total=len(concentration_plan), unit="species")
+    for concentration_name, spec in concentration_plan:
             concentration_output = spec["output"]
             if concentration_output == "NO2":
                 no2_from_zarr = "NO2" in sr
@@ -646,6 +623,7 @@ def compute_isrm_concentrations(
                         # concentration units. Future raw matrices can opt into
                         # the generic factor via the pipeline flag.
                         already_scaled_outputs.add("NO2")
+                progress.update(1)
                 continue
 
             arrays[concentration_output] = _compute_species_response(
@@ -656,6 +634,8 @@ def compute_isrm_concentrations(
                 source_indexed=source_indexed,
                 receptor_cells=receptor_cells,
             )
+            progress.update(1)
+    progress.close()
 
     total_pm_components = ["SOA", "pNO3", "pNH4", "pSO4", "PrimaryPM25"]
     missing_total_pm_components = [component for component in total_pm_components if component not in arrays]

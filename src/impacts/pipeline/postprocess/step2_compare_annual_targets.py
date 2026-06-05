@@ -21,7 +21,6 @@ from ._common import (
 
 import matplotlib.pyplot as plt
 import pandas as pd
-from tqdm.contrib.logging import logging_redirect_tqdm
 
 from ...common import _duckdb_scan_expression
 from ...common import configure_duckdb_connection
@@ -378,62 +377,61 @@ def run(
 ) -> dict[str, str]:
     log_step_banner("Postprocess Step 2", "Compare Annual Targets", logger=logger)
     log_substep_banner("2.1", "compare modeled emissions with configured annual targets", logger=logger)
-    with logging_redirect_tqdm():
-        progress = _step_progress(5, "Postprocess Step 2")
-        try:
-            _set_progress_task(progress, "targets", step_label="Postprocess Step 2")
-            targets_df = _build_targets_table(sector_targets)
-            _advance_progress(progress)
+    progress = _step_progress(5, "Postprocess Step 2")
+    try:
+        _set_progress_task(progress, "targets", step_label="Postprocess Step 2")
+        targets_df = _build_targets_table(sector_targets)
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "modeled emissions", step_label="Postprocess Step 2")
-            modeled_df = _aggregate_modeled_to_targets(
-                modeled_emissions_path,
-                passenger_vehicle_types_path=passenger_vehicle_types_path,
-                freight_vehicle_types_path=freight_vehicle_types_path,
-                vehicle_category_metadata_file=vehicle_category_metadata_file,
-            )
-            _advance_progress(progress)
+        _set_progress_task(progress, "modeled emissions", step_label="Postprocess Step 2")
+        modeled_df = _aggregate_modeled_to_targets(
+            modeled_emissions_path,
+            passenger_vehicle_types_path=passenger_vehicle_types_path,
+            freight_vehicle_types_path=freight_vehicle_types_path,
+            vehicle_category_metadata_file=vehicle_category_metadata_file,
+        )
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "comparison table", step_label="Postprocess Step 2")
-            comparison = _build_comparison_table(
-                modeled_df=modeled_df,
-                targets_df=targets_df,
-            )
-            _advance_progress(progress)
+        _set_progress_task(progress, "comparison table", step_label="Postprocess Step 2")
+        comparison = _build_comparison_table(
+            modeled_df=modeled_df,
+            targets_df=targets_df,
+        )
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "write tables", step_label="Postprocess Step 2")
-            outputs = _write_comparison_table(comparison, output_dir=output_dir)
-            _advance_progress(progress)
+        _set_progress_task(progress, "write tables", step_label="Postprocess Step 2")
+        outputs = _write_comparison_table(comparison, output_dir=output_dir)
+        _advance_progress(progress)
 
-            _set_progress_task(progress, "plots", step_label="Postprocess Step 2")
-            plotted: set[tuple[str, str]] = set()
-            for pollutant in comparison["pollutant"].unique():
-                sources = set(comparison.loc[comparison["pollutant"].eq(pollutant), "source"].tolist())
-                if "mobile_onroad" in sources and "road_dust" in sources:
-                    plot_path = _plot_combined_pollutant_comparison(
-                        comparison,
-                        primary_source="mobile_onroad",
-                        secondary_source="road_dust",
-                        pollutant=str(pollutant),
-                        output_dir=output_dir,
-                    )
-                    if plot_path:
-                        outputs[f"mobile_onroad_{pollutant}_plot"] = plot_path
-                    plotted.update({("mobile_onroad", pollutant), ("road_dust", pollutant)})
-                for source in sorted(sources):
-                    if (source, pollutant) in plotted:
-                        continue
-                    plot_path = _plot_source_pollutant_comparison(
-                        comparison,
-                        source=str(source),
-                        pollutant=str(pollutant),
-                        output_dir=output_dir,
-                    )
-                    if plot_path:
-                        outputs[f"{source}_{pollutant}_plot"] = plot_path
-            _advance_progress(progress)
-        finally:
-            _close_progress(progress)
+        _set_progress_task(progress, "plots", step_label="Postprocess Step 2")
+        plotted: set[tuple[str, str]] = set()
+        for pollutant in comparison["pollutant"].unique():
+            sources = set(comparison.loc[comparison["pollutant"].eq(pollutant), "source"].tolist())
+            if "mobile_onroad" in sources and "road_dust" in sources:
+                plot_path = _plot_combined_pollutant_comparison(
+                    comparison,
+                    primary_source="mobile_onroad",
+                    secondary_source="road_dust",
+                    pollutant=str(pollutant),
+                    output_dir=output_dir,
+                )
+                if plot_path:
+                    outputs[f"mobile_onroad_{pollutant}_plot"] = plot_path
+                plotted.update({("mobile_onroad", pollutant), ("road_dust", pollutant)})
+            for source in sorted(sources):
+                if (source, pollutant) in plotted:
+                    continue
+                plot_path = _plot_source_pollutant_comparison(
+                    comparison,
+                    source=str(source),
+                    pollutant=str(pollutant),
+                    output_dir=output_dir,
+                )
+                if plot_path:
+                    outputs[f"{source}_{pollutant}_plot"] = plot_path
+        _advance_progress(progress)
+    finally:
+        _close_progress(progress)
     logger.info("Postprocess Step 2 complete")
     return outputs
 

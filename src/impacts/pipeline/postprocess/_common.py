@@ -15,7 +15,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
+
+from ...common import make_progress as _make_progress
 
 os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "impacts-matplotlib"))
 
@@ -250,15 +251,7 @@ def _add_network(ax, network_gdf) -> None:
 
 
 def _step_progress(total: int, desc: str, *, unit: str = "task"):
-    return tqdm(
-        total=total,
-        desc=desc,
-        unit=unit,
-        dynamic_ncols=True,
-        leave=True,
-        file=sys.stdout,
-        disable=not (logger.isEnabledFor(logging.INFO) and sys.stdout.isatty()),
-    )
+    return _make_progress(desc, total=total, unit=unit)
 
 
 def _map_progress(total: int, desc: str):
