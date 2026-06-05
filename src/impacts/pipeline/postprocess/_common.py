@@ -522,7 +522,7 @@ def load_postprocess_vehicle_metadata(
 
 
 # ---------------------------------------------------------------------------
-# Manifest-based path helpers (used by run_from_output_dir in all 5 steps)
+# Manifest-based path helpers for standalone postprocess step entry points.
 # ---------------------------------------------------------------------------
 
 def settings_path_from_output_dir(output_dir: Path) -> Path:
