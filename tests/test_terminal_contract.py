@@ -459,6 +459,22 @@ def test_manifest_models_round_trip_current_shape(tmp_path: Path):
     assert postprocess_manifest["postprocess_outputs"] == {}
 
 
+def test_analysis_accepts_delta_baseline_concentration_distribution_file(tmp_path: Path):
+    payload = yaml.safe_load(Path("src/impacts/config/settings.yaml").read_text(encoding="utf-8"))
+    baseline_path = tmp_path / "baseline" / "beam_concentration_distribution.parquet"
+    payload["impacts"]["analysis"]["delta_baseline_concentration_distribution_file"] = str(baseline_path)
+    settings_path = tmp_path / "settings.yaml"
+    settings_path.write_text(yaml.safe_dump(payload), encoding="utf-8")
+
+    config = load_settings_from_yaml(settings_path)
+
+    assert config.impacts.analysis.delta_baseline_concentration_distribution_file == str(baseline_path)
+    assert (
+        config.to_dict()["impacts"]["analysis"]["delta_baseline_concentration_distribution_file"]
+        == str(baseline_path)
+    )
+
+
 def test_pipeline_manifest_allows_disabled_inmap_without_inmap_inputs(tmp_path: Path):
     payload = _pipeline_payload(tmp_path)
     payload["inmap_enabled"] = False
@@ -985,13 +1001,13 @@ def test_postprocess_output_root_override_localizes_stale_manifest_paths(
         *,
         run_manifest_path=None,
         output_root=None,
-        allow_missing_comparison_inputs=False,
+        allow_missing_source_inputs=False,
         input_roots=None,
     ):
         calls["settings_path"] = str(settings_path)
         calls["run_manifest_path"] = str(run_manifest_path)
         calls["output_root"] = str(output_root)
-        calls["allow_missing_comparison_inputs"] = allow_missing_comparison_inputs
+        calls["allow_missing_source_inputs"] = allow_missing_source_inputs
         calls["input_roots"] = tuple(input_roots or ())
         return {"postprocess_output": str(output_root / "postprocess" / "dummy.parquet")}
 
@@ -1007,7 +1023,7 @@ def test_postprocess_output_root_override_localizes_stale_manifest_paths(
     assert calls["settings_path"] == str(local_settings_path.resolve())
     assert calls["run_manifest_path"] == str(run_manifest_path)
     assert calls["output_root"] == str(output_root.resolve())
-    assert calls["allow_missing_comparison_inputs"] is True
+    assert calls["allow_missing_source_inputs"] is True
     assert calls["input_roots"] == ()
 
 
@@ -1060,21 +1076,55 @@ def test_postprocess_input_root_localizes_manifest_source_paths(monkeypatch, tmp
     assert metadata_resolved == metadata.resolve()
 
 
+def test_postprocess_delta_baseline_path_can_be_relative_to_impact_input_dir(tmp_path: Path):
+    import impacts.postprocessor as postprocessor_module
+
+    input_root = tmp_path / "beam-data" / "sfbay"
+    baseline_path = input_root / "baseline" / "beam_concentration_distribution.parquet"
+    baseline_path.parent.mkdir(parents=True)
+    baseline_path.write_text("", encoding="utf-8")
+
+    resolved = postprocessor_module._resolve_delta_baseline_concentration_path(
+        tmp_path / "settings.yaml",
+        "baseline/beam_concentration_distribution.parquet",
+        input_roots=(input_root,),
+    )
+
+    assert resolved == baseline_path.resolve()
+
+
 def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp_path: Path):
     import impacts.postprocessor as postprocessor_module
     import impacts.pipeline.postprocess.step1_compare_fleet as step1_module
     import impacts.pipeline.postprocess.step2_compare_annual_targets as step2_module
     import impacts.pipeline.postprocess.step3_compare_emissions_inventory as step3_module
+    import impacts.pipeline.postprocess.step4_plot_concentrations as step4_module
+    import impacts.pipeline.postprocess.step5_plot_exposure as step5_module
+    import impacts.pipeline.postprocess.step6_plot_delta_concentrations as step6_module
+    import impacts.pipeline.postprocess.step7_plot_delta_exposure as step7_module
 
     output_root = tmp_path / "impacts_output"
     output_root.mkdir()
+    (output_root / "exposure").mkdir()
+    (output_root / "preprocess").mkdir()
+    (output_root / "concentrations").mkdir()
+    (output_root / "exposure" / "beam_concentration_distribution.parquet").touch()
+    (output_root / "exposure" / "beam_population_counts.parquet").touch()
+    (output_root / "preprocess" / "beam_osm_mapped.parquet").touch()
+    (output_root / "concentrations" / "beam_inmap_concentrations.parquet").touch()
+    baseline_path = output_root / "baseline_concentration.parquet"
+    baseline_path.touch()
     output_dirs: dict[str, Path] = {}
+    step4_calls: dict[str, bool] = {}
+    step6_calls: dict[str, str] = {}
+    step7_calls: dict[str, str] = {}
 
     class _Settings:
         class impacts:
             local_output_folder = str(output_root)
 
             class analysis:
+                delta_baseline_concentration_distribution_file = str(baseline_path)
                 sector_targets = [
                     SimpleNamespace(
                         source="mobile_onroad",
@@ -1116,6 +1166,22 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
 
         return _run
 
+    def _fake_step4(*, output_dir: Path, **_kwargs):
+        output_dirs["step4"] = Path(output_dir)
+        step4_calls["called"] = True
+        return {"step4_output": str(Path(output_dir) / "concentration.png")}
+
+    def _fake_step6(*, output_dir: Path, delta_baseline_concentration_path: str, **_kwargs):
+        output_dirs["step6"] = Path(output_dir)
+        step6_calls["delta_baseline_concentration_path"] = delta_baseline_concentration_path
+        delta_table = Path(output_dir) / "concentration_delta.parquet"
+        return {"delta_table": str(delta_table), "step6_output": str(Path(output_dir) / "delta.png")}
+
+    def _fake_step7(*, output_dir: Path, concentration_delta_path: str, **_kwargs):
+        output_dirs["step7"] = Path(output_dir)
+        step7_calls["concentration_delta_path"] = concentration_delta_path
+        return {"step7_output": str(Path(output_dir) / "delta_exposure.png")}
+
     monkeypatch.setattr(postprocessor_module, "load_settings_from_yaml", lambda _: _Settings())
     monkeypatch.setattr(postprocessor_module, "_resolve_modeled_emissions_path", lambda *_args, **_kwargs: output_root / "modeled.parquet")
     monkeypatch.setattr(postprocessor_module, "_resolve_skims_emissions_path", lambda *_args, **_kwargs: output_root / "skims.parquet")
@@ -1128,6 +1194,10 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
     monkeypatch.setattr(step1_module, "run", _fake_step("step1"))
     monkeypatch.setattr(step2_module, "run", _fake_step("step2"))
     monkeypatch.setattr(step3_module, "run", _fake_step("step3"))
+    monkeypatch.setattr(step4_module, "run", _fake_step4)
+    monkeypatch.setattr(step5_module, "run", _fake_step("step5"))
+    monkeypatch.setattr(step6_module, "run", _fake_step6)
+    monkeypatch.setattr(step7_module, "run", _fake_step7)
 
     outputs = postprocessor_module._run_postprocess_steps(
         tmp_path / "settings.yaml",
@@ -1138,10 +1208,28 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
         "step1": output_root / "postprocess" / "fleet",
         "step2": output_root / "postprocess" / "annual_targets",
         "step3": output_root / "postprocess" / "emissions_inventory",
+        "step4": output_root / "postprocess" / "concentrations",
+        "step5": output_root / "postprocess" / "exposure",
+        "step6": output_root / "postprocess" / "delta_concentrations",
+        "step7": output_root / "postprocess" / "delta_exposure",
     }
+    assert step4_calls["called"] is True
+    assert step6_calls["delta_baseline_concentration_path"] == str(baseline_path.resolve())
+    assert step7_calls["concentration_delta_path"] == str(
+        output_root / "postprocess" / "delta_concentrations" / "concentration_delta.parquet"
+    )
     analysis_subdir = Path("postprocess") / "analysis"
     assert all(str(analysis_subdir) not in str(path) for path in output_dirs.values())
-    assert set(outputs) == {"fleet_step1_output", "annual_targets_step2_output", "inventory_step3_output"}
+    assert set(outputs) == {
+        "fleet_step1_output",
+        "annual_targets_step2_output",
+        "inventory_step3_output",
+        "concentration_step4_output",
+        "exposure_step5_output",
+        "delta_concentration_delta_table",
+        "delta_concentration_step6_output",
+        "delta_exposure_step7_output",
+    }
 
 
 def test_hpc_job_prints_successful_stage_completion():

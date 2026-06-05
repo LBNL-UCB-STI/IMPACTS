@@ -66,6 +66,11 @@ def _localize_input_path(raw: str | Path, input_roots: tuple[Path, ...]) -> Path
 
     parts = candidate.parts
     for input_root in input_roots:
+        if not candidate.is_absolute():
+            localized = input_root / candidate
+            if localized.exists():
+                return localized.resolve()
+
         for index, part in enumerate(parts):
             if part == input_root.name:
                 localized = input_root.joinpath(*parts[index + 1:])
@@ -403,16 +408,46 @@ def _resolve_inventory_target_path(
     input_roots: tuple[Path, ...] = (),
 ) -> Path:
     raw_text = str(raw).strip()
-    candidate = _localize_path(
-        resolve_path(raw_text, settings_path) or raw_text,
-        output_root=output_root,
-        input_roots=input_roots,
-    )
+    candidate = _localize_path(raw_text, output_root=output_root, input_roots=input_roots)
+    if candidate.exists():
+        return candidate
+    candidate = _localize_path(resolve_path(raw_text, settings_path) or raw_text, output_root=output_root)
     if candidate.exists():
         return candidate
     raise FileNotFoundError(
         f"Postprocess inventory target file was configured but not found. Expected {candidate}."
     )
+
+
+def _resolve_delta_baseline_concentration_path(
+    settings_path: str | Path,
+    raw: str,
+    *,
+    output_root: Path | None = None,
+    input_roots: tuple[Path, ...] = (),
+) -> Path:
+    raw_text = str(raw).strip()
+    candidate = _localize_path(raw_text, output_root=output_root, input_roots=input_roots)
+    if candidate.exists():
+        return candidate
+    candidate = _localize_path(resolve_path(raw_text, settings_path) or raw_text, output_root=output_root)
+    if candidate.exists():
+        return candidate
+    raise FileNotFoundError(
+        "Postprocess delta baseline concentration distribution was configured but not found. "
+        f"Expected {candidate}."
+    )
+
+
+def _remove_stale_postprocess_delta_outputs(output_dir: Path) -> None:
+    for subdir in ("delta_concentrations", "delta_exposure"):
+        target_dir = output_dir / subdir
+        if not target_dir.exists():
+            continue
+        for path in sorted(target_dir.glob("*")):
+            if path.is_file() and path.suffix.lower() in {".png", ".parquet"}:
+                path.unlink()
+                logger.info("Removed stale postprocess delta output: %s", path)
 
 
 def _resolve_inventory_emfacid_activity_path(
@@ -484,7 +519,7 @@ def _run_postprocess_steps(
     *,
     run_manifest_path: str | Path | None = None,
     output_root: Path | None = None,
-    allow_missing_comparison_inputs: bool = False,
+    allow_missing_source_inputs: bool = False,
     input_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
 ) -> dict[str, str]:
     from .pipeline.postprocess.step1_compare_fleet import run as run_step1
@@ -492,6 +527,8 @@ def _run_postprocess_steps(
     from .pipeline.postprocess.step3_compare_emissions_inventory import run as run_step3
     from .pipeline.postprocess.step4_plot_concentrations import run as run_step4
     from .pipeline.postprocess.step5_plot_exposure import run as run_step5
+    from .pipeline.postprocess.step6_plot_delta_concentrations import run as run_step6
+    from .pipeline.postprocess.step7_plot_delta_exposure import run as run_step7
 
     settings = load_settings_from_yaml(settings_path)
     if output_root is None:
@@ -545,7 +582,7 @@ def _run_postprocess_steps(
             input_roots=input_roots,
         )
     except (FileNotFoundError, ValueError) as exc:
-        if not allow_missing_comparison_inputs:
+        if not allow_missing_source_inputs:
             raise
         logger.warning(
             "Skipping Steps 1-2: comparison source inputs are not available from this output directory: %s",
@@ -576,7 +613,7 @@ def _run_postprocess_steps(
                     input_roots=input_roots,
                 )
             except (FileNotFoundError, ValueError) as exc:
-                if not allow_missing_comparison_inputs:
+                if not allow_missing_source_inputs:
                     raise
                 logger.warning(
                     "Skipping Step 2: annual-target source metadata is not available from this output directory: %s",
@@ -665,6 +702,17 @@ def _run_postprocess_steps(
     inmap_cells_path = output_root / "concentrations" / "beam_inmap_concentrations.parquet"
     if not inmap_cells_path.exists():
         inmap_cells_path = output_root / "preprocess" / "inmap_grid.parquet"
+    delta_baseline_concentration_path = None
+    delta_baseline_raw = getattr(settings.impacts.analysis, "delta_baseline_concentration_distribution_file", None)
+    if delta_baseline_raw:
+        delta_baseline_concentration_path = _resolve_delta_baseline_concentration_path(
+            settings_path,
+            delta_baseline_raw,
+            output_root=output_root,
+            input_roots=input_roots,
+        )
+    else:
+        _remove_stale_postprocess_delta_outputs(output_dir)
     if conc_path.exists() and net_path.exists():
         map_outputs = run_step4(
             concentration_path=str(conc_path),
@@ -687,6 +735,33 @@ def _run_postprocess_steps(
             outputs[f"exposure_{key}"] = value
     else:
         logger.info("Skipping Step 5: exposure outputs not found at %s", output_root)
+    delta_table_path = None
+    if delta_baseline_concentration_path is None:
+        logger.info("Skipping Steps 6-7: no delta baseline concentration distribution configured.")
+    elif conc_path.exists() and net_path.exists():
+        delta_outputs = run_step6(
+            concentration_path=str(conc_path),
+            delta_baseline_concentration_path=str(delta_baseline_concentration_path),
+            network_path=str(net_path),
+            output_dir=output_dir / "delta_concentrations",
+        )
+        delta_table_path = delta_outputs.get("delta_table")
+        for key, value in delta_outputs.items():
+            outputs[f"delta_concentration_{key}"] = value
+    else:
+        logger.info("Skipping Step 6: concentration or network output not found at %s", output_root)
+    if delta_table_path and pop_path.exists() and net_path.exists() and inmap_cells_path.exists():
+        delta_exposure_outputs = run_step7(
+            population_path=str(pop_path),
+            concentration_delta_path=str(delta_table_path),
+            network_path=str(net_path),
+            inmap_cells_path=str(inmap_cells_path),
+            output_dir=output_dir / "delta_exposure",
+        )
+        for key, value in delta_exposure_outputs.items():
+            outputs[f"delta_exposure_{key}"] = value
+    elif delta_baseline_concentration_path is not None:
+        logger.info("Skipping Step 7: delta table, population, network, or InMAP cell output not found at %s", output_root)
 
     logger.info("Postprocess steps complete: output_dir=%s outputs=%d", output_dir, len(outputs))
     return outputs
@@ -717,7 +792,7 @@ def postprocess_from_pipeline_manifest(
             settings_path,
             run_manifest_path=run_manifest_path,
             output_root=output_root,
-            allow_missing_comparison_inputs=True,
+            allow_missing_source_inputs=True,
             input_roots=input_roots_arg,
         )
 

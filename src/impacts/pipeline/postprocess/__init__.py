@@ -6,4 +6,6 @@ __all__ = [
     "step3_compare_emissions_inventory",
     "step4_plot_concentrations",
     "step5_plot_exposure",
+    "step6_plot_delta_concentrations",
+    "step7_plot_delta_exposure",
 ]
