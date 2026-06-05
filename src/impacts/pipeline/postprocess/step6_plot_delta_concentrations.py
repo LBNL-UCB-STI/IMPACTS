@@ -15,7 +15,11 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from ...common import log_step_banner
+from ...common import (
+    log_step_banner,
+    _duckdb_scan_expression,
+    configure_duckdb_connection,
+)
 from ._common import (
     MAP_DPI,
     MAP_FIGSIZE,
@@ -92,53 +96,67 @@ def _shared_delta_norm(delta_gdf, columns: list[str]) -> mcolors.TwoSlopeNorm | 
     return delta_norm(pd.concat(values, ignore_index=True))
 
 
-def _build_concentration_delta(conc_gdf, delta_baseline_concentration_path: str | Path):
+def _build_concentration_delta(conc_gdf, delta_baseline_concentration_path: str | Path, *, output_dir: Path):
+    import duckdb
+    import geopandas as gpd
+
     key = "aermod_cell_id"
     current_required = [key, "inmap_cell_id", *DELTA_COLUMNS]
-    baseline_required = [key, *DELTA_COLUMNS]
-    missing_current = [column for column in current_required if column not in conc_gdf.columns]
+
+    missing_current = [col for col in current_required if col not in conc_gdf.columns]
     if missing_current:
         raise ValueError(
             "Current beam_concentration_distribution is missing columns required for delta baseline comparison: "
             f"{missing_current}"
         )
-    logger.info("  Reading baseline from %s …", Path(delta_baseline_concentration_path).name)
-    baseline = pd.read_parquet(delta_baseline_concentration_path, columns=baseline_required)
-    logger.info("  Baseline: %d rows", len(baseline))
-    if baseline[key].duplicated().any():
-        duplicates = int(baseline[key].duplicated().sum())
-        raise ValueError(
-            "Delta baseline beam_concentration_distribution has duplicate aermod_cell_id values; "
-            f"found {duplicates} duplicate rows."
-        )
-    current = conc_gdf[["geometry", *current_required]].copy()
-    if current[key].duplicated().any():
-        duplicates = int(current[key].duplicated().sum())
+    if conc_gdf[key].duplicated().any():
         raise ValueError(
             "Current beam_concentration_distribution has duplicate aermod_cell_id values; "
-            f"found {duplicates} duplicate rows."
+            f"found {int(conc_gdf[key].duplicated().sum())} duplicate rows."
         )
-    baseline = baseline.rename(columns={column: f"{column}_baseline" for column in DELTA_COLUMNS})
-    current = current.rename(columns={column: f"{column}_current" for column in DELTA_COLUMNS})
-    logger.info("  Merging current (%d rows) vs baseline (%d rows) on %s …", len(current), len(baseline), key)
-    merged = current.merge(baseline, how="left", on=key, validate="one_to_one")
-    logger.info("  Merged: %d rows — computing deltas for: %s", len(merged), ", ".join(DELTA_COLUMNS))
-    missing_baseline = merged[f"{DELTA_COLUMNS[0]}_baseline"].isna().sum()
+
+    logger.info("  Current: %d rows — baseline: %s", len(conc_gdf), Path(delta_baseline_concentration_path).name)
+    current_df = pd.DataFrame(conc_gdf[current_required])
+    baseline_scan = _duckdb_scan_expression(delta_baseline_concentration_path)
+
+    con = duckdb.connect()
+    configure_duckdb_connection(con, working_dir=output_dir)
+
+    dupes = con.execute(f"SELECT COUNT(*) - COUNT(DISTINCT {key}) FROM {baseline_scan}").fetchone()[0]
+    if dupes:
+        raise ValueError(
+            "Delta baseline beam_concentration_distribution has duplicate aermod_cell_id values; "
+            f"found {int(dupes)} duplicate rows."
+        )
+
+    con.register("current_tbl", current_df)
+    delta_exprs = ",\n            ".join(
+        f"c.{col} - b.{col} AS {col}_delta, c.{col} AS {col}_current, b.{col} AS {col}_baseline"
+        for col in DELTA_COLUMNS
+    )
+
+    logger.info("  Joining and computing deltas via DuckDB …")
+    result_df = con.execute(f"""
+        SELECT c.{key}, c.inmap_cell_id,
+            {delta_exprs}
+        FROM current_tbl c
+        LEFT JOIN {baseline_scan} b ON c.{key} = b.{key}
+    """).df()
+    con.close()
+
+    missing_baseline = int(result_df[f"{DELTA_COLUMNS[0]}_baseline"].isna().sum())
     if missing_baseline:
         logger.warning(
             "  Baseline is missing %d current aermod cells; deltas will be null there.",
-            int(missing_baseline),
+            missing_baseline,
         )
 
-    for column in DELTA_COLUMNS:
-        current_col = f"{column}_current"
-        baseline_col = f"{column}_baseline"
-        delta_col = f"{column}_delta"
-        merged[current_col] = pd.to_numeric(merged[current_col], errors="coerce")
-        merged[baseline_col] = pd.to_numeric(merged[baseline_col], errors="coerce")
-        merged[delta_col] = merged[current_col] - merged[baseline_col]
-    logger.info("  Delta table ready.")
-    return merged
+    logger.info("  Delta ready (%d rows) — reattaching geometry …", len(result_df))
+    return gpd.GeoDataFrame(
+        conc_gdf[["aermod_cell_id", "geometry"]].merge(result_df, on=key, how="left"),
+        geometry="geometry",
+        crs=conc_gdf.crs,
+    )
 
 
 def _plot_delta_map(delta_gdf, net_gdf, layout, column: str, title: str, out_path: Path) -> Optional[str]:
@@ -238,7 +256,7 @@ def run(
     logger.info("Loading network …")
     net_gdf = gpd.read_parquet(network_path)[["geometry"]].drop_duplicates()
     logger.info("Building concentration delta table …")
-    delta_gdf = _build_concentration_delta(conc_gdf, delta_baseline_concentration_path)
+    delta_gdf = _build_concentration_delta(conc_gdf, delta_baseline_concentration_path, output_dir=output_dir)
     logger.info("Building native grid raster layout …")
     layout = _grid_raster_layout(delta_gdf)
 
