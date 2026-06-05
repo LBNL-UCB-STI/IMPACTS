@@ -32,6 +32,7 @@ partition_arg="lr7"
 account_arg=""
 high_mem=false
 hours_arg=""
+follow=false
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -59,8 +60,12 @@ while [ $# -gt 0 ]; do
         hours_arg="${2:-}"
         shift 2
         ;;
+    -f|--follow)
+        follow=true
+        shift
+        ;;
     -h|--help)
-        echo "Usage: $0 -c <config> -a <account> [-s stage] [-p partition] [--high-mem|-H] [-t hours]"
+        echo "Usage: $0 -c <config> -a <account> [-s stage] [-p partition] [--high-mem|-H] [-t hours] [-f]"
         echo "  -c             Path to impacts config file (required)"
         echo "  -a, --account  Slurm account name (required)"
         echo "  -s, --stage    Stage to run: pipeline (default), preprocess, presim, activities,"
@@ -68,10 +73,11 @@ while [ $# -gt 0 ]; do
         echo "  -p             Partition: lr4, lr5, lr6, lr7 (default), lr8, lr_bigmem, cm1, cm2"
         echo "  --high-mem     Request high-memory config (lr6: 180G, lr7: 480G)"
         echo "  -t, --hours    Job time limit in hours (default: 24)"
+        echo "  -f, --follow   Stream log output after submission (Ctrl+C detaches, job keeps running)"
         exit 0
         ;;
     *)
-        echo "Usage: $0 -c <config> -a <account> [-s stage] [-p partition] [--high-mem|-H] [-t hours]"
+        echo "Usage: $0 -c <config> -a <account> [-s stage] [-p partition] [--high-mem|-H] [-t hours] [-f]"
         exit 2
         ;;
     esac
@@ -213,7 +219,7 @@ esac
 mkdir -p "$JOB_LOG_DIR"
 JOB_LOG_FILE_PATH="$JOB_LOG_DIR/log_${DATETIME}_${RANDOM_PART}.log"
 
-sbatch \
+SBATCH_OUTPUT="$(sbatch \
     --partition="$PARTITION" \
     --exclusive \
     --cpus-per-task="$NUM_CPUS" \
@@ -226,6 +232,34 @@ sbatch \
     --export="ALL,JOB_LOG_FILE_PATH=$JOB_LOG_FILE_PATH" \
     "$IMPACTS_DIR/hpc/job.sh" \
     "$CONFIG_PATH" \
-    "$stage_arg"
+    "$stage_arg")"
 
+echo "$SBATCH_OUTPUT"
+JOB_ID="$(printf '%s' "$SBATCH_OUTPUT" | sed -n 's/.*Submitted batch job //p' | tr -d '[:space:]')"
 echo "Job submitted. Log: $JOB_LOG_FILE_PATH"
+
+if [ "$follow" = true ]; then
+    printf '\n'
+    [ -n "$JOB_ID" ] && printf '  Job %s queued on %s.\n' "$JOB_ID" "$PARTITION"
+    printf '  Ctrl+C to detach at any time — job will keep running.\n\n'
+
+    _detach() {
+        printf '\n\n  ── Detached ──────────────────────────────────────────\n'
+        printf '  Re-attach : tail -f %s\n' "$JOB_LOG_FILE_PATH"
+        [ -n "$JOB_ID" ] && printf '  Status    : squeue -j %s\n' "$JOB_ID"
+        [ -n "$JOB_ID" ] && printf '  Cancel    : scancel %s\n' "$JOB_ID"
+        printf '  ──────────────────────────────────────────────────────\n\n'
+        exit 0
+    }
+    trap - ERR
+    trap _detach INT
+
+    printf '  Waiting for log'
+    while [ ! -f "$JOB_LOG_FILE_PATH" ]; do
+        printf '.'
+        sleep 2
+    done
+    printf '\n\n'
+
+    tail -f "$JOB_LOG_FILE_PATH" || true
+fi
