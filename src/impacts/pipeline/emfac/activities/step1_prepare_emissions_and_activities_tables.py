@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import re
-import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from functools import lru_cache
