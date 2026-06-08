@@ -120,29 +120,31 @@ def _build_concentration_delta(conc_gdf, delta_baseline_concentration_path: str 
     baseline_scan = _duckdb_scan_expression(delta_baseline_concentration_path)
 
     con = duckdb.connect()
-    configure_duckdb_connection(con, working_dir=output_dir)
+    try:
+        configure_duckdb_connection(con, working_dir=output_dir, show_progress=False, profile="balanced")
 
-    dupes = con.execute(f"SELECT COUNT(*) - COUNT(DISTINCT {key}) FROM {baseline_scan}").fetchone()[0]
-    if dupes:
-        raise ValueError(
-            "Delta baseline beam_concentration_distribution has duplicate aermod_cell_id values; "
-            f"found {int(dupes)} duplicate rows."
+        dupes = con.execute(f"SELECT COUNT(*) - COUNT(DISTINCT {key}) FROM {baseline_scan}").fetchone()[0]
+        if dupes:
+            raise ValueError(
+                "Delta baseline beam_concentration_distribution has duplicate aermod_cell_id values; "
+                f"found {int(dupes)} duplicate rows."
+            )
+
+        con.register("current_tbl", current_df)
+        delta_exprs = ",\n            ".join(
+            f"c.{col} - b.{col} AS {col}_delta, c.{col} AS {col}_current, b.{col} AS {col}_baseline"
+            for col in DELTA_COLUMNS
         )
 
-    con.register("current_tbl", current_df)
-    delta_exprs = ",\n            ".join(
-        f"c.{col} - b.{col} AS {col}_delta, c.{col} AS {col}_current, b.{col} AS {col}_baseline"
-        for col in DELTA_COLUMNS
-    )
-
-    logger.info("  Joining and computing deltas via DuckDB …")
-    result_df = con.execute(f"""
-        SELECT c.{key}, c.inmap_cell_id,
-            {delta_exprs}
-        FROM current_tbl c
-        LEFT JOIN {baseline_scan} b ON c.{key} = b.{key}
-    """).df()
-    con.close()
+        logger.info("  Joining and computing deltas via DuckDB …")
+        result_df = con.execute(f"""
+            SELECT c.{key}, c.inmap_cell_id,
+                {delta_exprs}
+            FROM current_tbl c
+            LEFT JOIN {baseline_scan} b ON c.{key} = b.{key}
+        """).df()
+    finally:
+        con.close()
 
     missing_baseline = int(result_df[f"{DELTA_COLUMNS[0]}_baseline"].isna().sum())
     if missing_baseline:

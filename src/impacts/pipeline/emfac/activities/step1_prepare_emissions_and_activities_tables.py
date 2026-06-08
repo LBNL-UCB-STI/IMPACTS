@@ -261,7 +261,7 @@ def build_road_dust_rows(
         var_name="rate_column",
         value_name="rateGram",
     )
-    long["pollutant"] = long["rate_column"].map({"pm_rate": "PM", "pm10_rate": "PM10", "pm2_5_rate": "PM2_5"})
+    long["pollutant"] = long["rate_column"].map({"pm_rate": "PM", "pm10_rate": "PM10", "pm2_5_rate": "PM25"})
     long["speedMph_timeMin"] = pd.NA
     return long.drop(columns=["rate_column", "rainy_days", "silt_loading"]).reset_index(drop=True)
 

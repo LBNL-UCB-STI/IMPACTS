@@ -292,7 +292,6 @@ def resolve_emissions_skims_local_path(root: str) -> str:
     raise FileNotFoundError(f"No BEAM skims emissions file found under configured BEAM output root: {resolved}")
 
 
-
 def resolve_latest_events_local_path(root: str) -> Optional[str]:
     """Return the latest events file under root, or None if not found."""
     resolved = Path(root)
@@ -736,7 +735,6 @@ def register_managed_input(
     )
 
 
-
 def resolve_manifest_input_path(entry: Dict[str, Any], *, label: str) -> str:
     try:
         return resolve_logged_path(entry)
@@ -911,7 +909,6 @@ def _prepare_skims_for_grid_allocation_duckdb(
     output_path: str,
     prepared_group_cols: list[str],
     required_pollutants: list[str],
-    pollutants_map: Optional[Dict[str, str]],
     allowed_vehicle_type_ids: Optional[set[str]],
     known_vehicle_type_ids: Optional[set[str]],
 ) -> pd.DataFrame:
@@ -921,7 +918,7 @@ def _prepare_skims_for_grid_allocation_duckdb(
     if out.suffix.lower() != ".parquet":
         raise ValueError("Prepared skims output must be .parquet")
     available_columns = _table_available_columns(skims_path)
-    source_pollutants = [pollutants_map.get(p, p) for p in required_pollutants] if pollutants_map else list(required_pollutants)
+    source_pollutants = list(required_pollutants)
     pollutant_mode = _resolve_skims_pollutant_mode(
         available_columns=available_columns,
         source_pollutants=source_pollutants,
@@ -931,7 +928,7 @@ def _prepare_skims_for_grid_allocation_duckdb(
         raise ValueError(f"Prepared skims missing required grouping columns: {missing}")
 
     scan = _duckdb_scan_expression(skims_path)
-    con = duckdb.connect(database=":memory:")
+    con = duckdb.connect()
     show_progress = _should_show_duckdb_progress_bar()
     try:
         configure_duckdb_connection(con, working_dir=out, show_progress=False, profile="memory_heavy")
@@ -1042,24 +1039,21 @@ def prepare_skims_for_grid_allocation(
     *,
     group_cols: Optional[list[str]] = None,
     required_pollutants: Optional[list[str]] = None,
-    pollutants_map: Optional[Dict[str, str]] = None,
     allowed_vehicle_type_ids: Optional[set[str]] = None,
     known_vehicle_type_ids: Optional[set[str]] = None,
 ) -> pd.DataFrame:
     prepared_group_cols = group_cols or ["linkId", "vehicleTypeId", "process"]
     required = required_pollutants or default_prepared_pollutants
     available_columns = _table_available_columns(skims_path)
-    source_pollutants = [pollutants_map.get(p, p) for p in required] if pollutants_map else list(required)
     _resolve_skims_pollutant_mode(
         available_columns=available_columns,
-        source_pollutants=source_pollutants,
+        source_pollutants=list(required),
     )
     return _prepare_skims_for_grid_allocation_duckdb(
         skims_path=skims_path,
         output_path=output_path,
         prepared_group_cols=prepared_group_cols,
         required_pollutants=required,
-        pollutants_map=pollutants_map,
         allowed_vehicle_type_ids=allowed_vehicle_type_ids,
         known_vehicle_type_ids=known_vehicle_type_ids,
     )

@@ -54,7 +54,6 @@ _AERMOD_FREEWAY_CATEGORIES: frozenset[str] = frozenset(
 )
 
 
-
 def _log_step1_elapsed(step_id: str, label: str, started: float, **details: object) -> None:
     detail_parts = [f"{key}={value}" for key, value in details.items()]
     suffix = "" if not detail_parts else ": " + " ".join(detail_parts)
@@ -71,7 +70,6 @@ def _require_columns(df: pd.DataFrame, *, columns: list[str], label: str) -> Non
     missing = [column for column in columns if column not in df.columns]
     if missing:
         raise ValueError(f"{label} is missing required columns: {missing}")
-
 
 
 def _safe_ratio(
@@ -295,7 +293,7 @@ def apply_county_corrections(
         f"THEN NULL ELSE lpad(regexp_extract(CAST(a.\"{county_col}\" AS VARCHAR), '(\\d+)', 1), 3, '0') END"
     )
 
-    con = duckdb.connect(database=":memory:")
+    con = duckdb.connect()
     try:
         configure_duckdb_connection(con, working_dir=scratch_dir, show_progress=True, profile="memory_heavy")
         con.register("allocated_df", allocated_df)
@@ -393,7 +391,7 @@ def _build_corrected_source_totals(
     if missing:
         raise ValueError(f"County-corrected emissions are missing source grouping columns: {missing}")
     value_cols = [col for col in county_corrected_df.columns if col.endswith("_county_allocated")]
-    con = duckdb.connect(database=":memory:")
+    con = duckdb.connect()
     try:
         configure_duckdb_connection(con, working_dir=scratch_dir, show_progress=True, profile="memory_heavy")
         con.register("county_corrected_df", county_corrected_df)
@@ -450,7 +448,7 @@ def _save_grid_emissions(
         grid_gdf = grid_gdf.to_crs(epsg=output_epsg)
     expected_grid_ids = set(pd.to_numeric(df[left_col], errors="coerce").dropna().astype(int).unique().tolist())
     join_started = time.perf_counter()
-    con = duckdb.connect(database=":memory:")
+    con = duckdb.connect()
     try:
         configure_duckdb_connection(con, working_dir=output_stem.parent, show_progress=False, profile="export")
         con.register("emissions_df", df)
@@ -524,7 +522,7 @@ def _aggregate_aermod_emissions_for_export(
     scratch_dir: Path,
 ) -> pd.DataFrame:
     started = time.perf_counter()
-    con = duckdb.connect(database=":memory:")
+    con = duckdb.connect()
     try:
         configure_duckdb_connection(con, working_dir=scratch_dir, show_progress=True, profile="memory_heavy")
         if isinstance(aermod_allocated, str):
@@ -667,7 +665,6 @@ def run(
         beam_length_col=pipeline.beam_length_col,
         prepared_skims_group_cols=list(pipeline.prepared_skims_group_cols),
         pollutants=list(pipeline.pollutants),
-        pollutants_map=dict(pipeline.pollutants_map),
         vehicle_category_metadata_file=str(pipeline.vehicle_category_metadata_file),
         annualization_days=dict(pipeline.annualization_days),
         population_sample=float(pipeline.population_sample),

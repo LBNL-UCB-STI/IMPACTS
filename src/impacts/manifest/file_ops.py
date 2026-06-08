@@ -205,7 +205,6 @@ def is_remote_path(path: str) -> bool:
     return path.startswith(("s3://", "gs://", "http://", "https://"))
 
 
-
 def _copy_directory_with_progress(src: Path, dst: Path) -> None:
     from ..common import make_progress  # deferred to avoid circular import with common.py
     files = [path for path in src.rglob("*") if path.is_file()]

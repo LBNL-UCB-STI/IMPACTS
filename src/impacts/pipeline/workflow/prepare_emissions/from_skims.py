@@ -407,7 +407,7 @@ def _build_zone_grouped_table(
             f"{_step_label('1.1')} requires canonical {zone_label} intersection columns. Missing: {missing}"
         )
 
-    con = duckdb.connect(database=":memory:")
+    con = duckdb.connect()
     try:
         configure_duckdb_connection(
             con,
@@ -473,7 +473,7 @@ def _build_zone_allocated_table(
     has_release_height = "source_release_height" in skims_df.columns
     extra_cols = (["roadCategory"] if has_road_category else []) + (["source_release_height"] if has_release_height else [])
     merge_cols = ["linkId"] + extra_cols + ["vehicleTypeId", "process"] + activity_cols + emission_cols
-    con = duckdb.connect(database=":memory:")
+    con = duckdb.connect()
     try:
         configure_duckdb_connection(
             con,
@@ -540,7 +540,7 @@ def _compute_aermod_source_attributes_parquet(
     in_sql = input_path.replace("'", "''")
     out_sql = output_path.replace("'", "''")
 
-    con = duckdb.connect(database=":memory:")
+    con = duckdb.connect()
     try:
         configure_duckdb_connection(con, working_dir=scratch_dir, show_progress=True, profile="memory_heavy")
         cols = [row[0] for row in con.execute(f"DESCRIBE SELECT * FROM parquet_scan('{in_sql}')").fetchall()]
@@ -605,7 +605,6 @@ def prepare_staged_skims_for_processing(
     beam_length_col: str,
     prepared_skims_group_cols: list[str],
     pollutants: list[str],
-    pollutants_map: Dict[str, str],
     vehicle_category_metadata_file: str,
     annualization_days: dict[str, float],
     population_sample: float,
@@ -643,7 +642,6 @@ def prepare_staged_skims_for_processing(
             output_path=str(prepared_grouped_skims_path),
             group_cols=list(prepared_skims_group_cols),
             required_pollutants=list(pollutants),
-            pollutants_map=dict(pollutants_map),
             allowed_vehicle_type_ids=allowed_vehicle_type_ids,
             known_vehicle_type_ids=known_vehicle_type_ids,
         )
@@ -685,7 +683,6 @@ def load_or_prepare_skims_df(
     beam_length_col: str,
     prepared_skims_group_cols: list[str],
     pollutants: list[str],
-    pollutants_map: Dict[str, str],
     vehicle_category_metadata_file: str,
     annualization_days: dict[str, float],
     population_sample: float,
@@ -722,7 +719,6 @@ def load_or_prepare_skims_df(
             beam_length_col=beam_length_col,
             prepared_skims_group_cols=prepared_skims_group_cols,
             pollutants=pollutants,
-            pollutants_map=pollutants_map,
             vehicle_category_metadata_file=vehicle_category_metadata_file,
             annualization_days=annualization_days,
             population_sample=population_sample,
@@ -758,7 +754,6 @@ def load_or_prepare_skims_df(
         beam_length_col=beam_length_col,
         prepared_skims_group_cols=prepared_skims_group_cols,
         pollutants=pollutants,
-        pollutants_map=pollutants_map,
         vehicle_category_metadata_file=vehicle_category_metadata_file,
         annualization_days=annualization_days,
         population_sample=population_sample,

@@ -119,7 +119,7 @@ def _build_beam_population_breakdown_from_assignments(
             return pd.DataFrame(columns=["assignment_group", "emfacId", "beam_population_weight"])
 
         scan = _duckdb_scan_expression(assignments_path)
-        con = duckdb.connect(database=":memory:")
+        con = duckdb.connect()
         try:
             configure_duckdb_connection(
                 con,
@@ -233,7 +233,7 @@ def _build_beam_vmt_breakdown(
         return pd.DataFrame(columns=["assignment_group", "emfacId", "beam_vmt"])
 
     scan = _duckdb_scan_expression(skims_emissions_path)
-    con = duckdb.connect(database=":memory:")
+    con = duckdb.connect()
     try:
         configure_duckdb_connection(
             con,
@@ -393,7 +393,6 @@ def _write_tables(
         "comparison_parquet": str(comparison_parquet),
         "comparison_csv": str(comparison_csv),
     }
-
 
 
 def _draw_stacked_bars(

@@ -41,7 +41,7 @@ _AERMOD_SUPPORT_COLUMN_SET = set(_AERMOD_SUPPORT_COLUMNS.values())
 # Maps canonical pollutant names (from emissions columns) to output concentration column names.
 # Mirrors the InMAP naming convention used in step 2 so impacts steps work uniformly.
 _POLLUTANT_TO_CONCENTRATION_COLUMN: dict[str, str] = {
-    "PM2_5": "PrimaryPM25",
+    "PM25": "PrimaryPM25",
     "BC": "BC",
     "NOx": "NO2",
     "NH3": "pNH4",
@@ -57,8 +57,6 @@ class _Kernel(TypedDict):
     dix: np.ndarray
     diy: np.ndarray
     response_per_ton: np.ndarray
-
-
 
 
 def _trace_frame(step: str, label: str, df: pd.DataFrame, *, key_cols: Optional[list[str]] = None) -> None:
@@ -148,7 +146,7 @@ def _prepare_source_emissions(
         + ([f"ANY_VALUE({_SOURCE_URBAN_COLUMN}) AS {_SOURCE_URBAN_COLUMN}"] if has_urban else [])
         + [f"SUM({col}) AS {col}" for col in emissions_cols]
     )
-    con = duckdb.connect(database=":memory:")
+    con = duckdb.connect()
     show_progress = _should_show_duckdb_progress_bar()
     try:
         configure_duckdb_connection(con, working_dir=outputs_dir, show_progress=show_progress, profile="balanced")
@@ -275,7 +273,6 @@ def _load_vector_subset(path: str, *, columns: Optional[list[str]] = None) -> gp
     if "geometry" not in keep:
         keep.append("geometry")
     return gdf[keep]
-
 
 
 def _parse_available_pattern_keys(available_pattern_keys: set[str]) -> pd.DataFrame:

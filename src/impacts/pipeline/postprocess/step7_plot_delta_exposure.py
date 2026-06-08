@@ -74,23 +74,25 @@ def _aggregate_delta_exposure_to_inmap(pop_gdf, delta_df, inmap_gdf, *, output_d
     delta_plain = pd.DataFrame(delta_df[["aermod_cell_id", "inmap_cell_id", "TotalPM25_delta"]])
 
     con = duckdb.connect()
-    configure_duckdb_connection(con, working_dir=output_dir)
-    con.register("pop_tbl", pop_df)
-    con.register("delta_tbl", delta_plain)
+    try:
+        configure_duckdb_connection(con, working_dir=output_dir, show_progress=False, profile="balanced")
+        con.register("pop_tbl", pop_df)
+        con.register("delta_tbl", delta_plain)
 
-    result_df = con.execute("""
-        SELECT
-            TRY_CAST(d.inmap_cell_id AS BIGINT) AS inmap_cell_id,
-            SUM(TRY_CAST(p.person_count AS DOUBLE)) AS population,
-            SUM(TRY_CAST(d.TotalPM25_delta AS DOUBLE) * TRY_CAST(p.person_count AS DOUBLE)) AS exposure_burden_delta
-        FROM pop_tbl p
-        INNER JOIN delta_tbl d ON p.aermod_cell_id = d.aermod_cell_id
-        WHERE TRY_CAST(p.person_count AS DOUBLE) > 0
-          AND TRY_CAST(d.TotalPM25_delta AS DOUBLE) IS NOT NULL
-          AND TRY_CAST(d.inmap_cell_id AS BIGINT) IS NOT NULL
-        GROUP BY d.inmap_cell_id
-    """).df()
-    con.close()
+        result_df = con.execute("""
+            SELECT
+                TRY_CAST(d.inmap_cell_id AS BIGINT) AS inmap_cell_id,
+                SUM(TRY_CAST(p.person_count AS DOUBLE)) AS population,
+                SUM(TRY_CAST(d.TotalPM25_delta AS DOUBLE) * TRY_CAST(p.person_count AS DOUBLE)) AS exposure_burden_delta
+            FROM pop_tbl p
+            INNER JOIN delta_tbl d ON p.aermod_cell_id = d.aermod_cell_id
+            WHERE TRY_CAST(p.person_count AS DOUBLE) > 0
+              AND TRY_CAST(d.TotalPM25_delta AS DOUBLE) IS NOT NULL
+              AND TRY_CAST(d.inmap_cell_id AS BIGINT) IS NOT NULL
+            GROUP BY d.inmap_cell_id
+        """).df()
+    finally:
+        con.close()
 
     if result_df.empty:
         empty = inmap_gdf.iloc[0:0][["inmap_cell_id", "geometry"]].copy()

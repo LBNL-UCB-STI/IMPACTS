@@ -12,10 +12,12 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
+import duckdb
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 
+from ...common import configure_duckdb_connection
 from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import read_table
@@ -95,13 +97,17 @@ def _join_population_to_aermod_grid(
     return pd.DataFrame(joined.drop(columns=["index_right", "geometry"], errors="ignore"))
 
 
-def _counts_from_joined(joined: pd.DataFrame) -> pd.DataFrame:
-    counts = (
-        joined.groupby(_AERMOD_CELL_ID, dropna=False)
-        .size()
-        .rename("person_count")
-        .reset_index()
-    )
+def _counts_from_joined(joined: pd.DataFrame, *, working_dir: Path) -> pd.DataFrame:
+    con = duckdb.connect()
+    try:
+        configure_duckdb_connection(con, working_dir=working_dir, show_progress=False, profile="balanced")
+        con.register("_joined", joined)
+        counts = con.execute(
+            f'SELECT "{_AERMOD_CELL_ID}", COUNT(*) AS person_count'
+            f' FROM _joined GROUP BY "{_AERMOD_CELL_ID}"'
+        ).df()
+    finally:
+        con.close()
     counts[_AERMOD_CELL_ID] = pd.to_numeric(counts[_AERMOD_CELL_ID], errors="coerce").astype(int)
     counts["person_count"] = counts["person_count"].astype(int)
     counts["source_urban_class"] = _classify_urban(counts["person_count"]).astype(int)
@@ -146,7 +152,7 @@ def run(
     aermod_grid = aermod_grid.rename(columns={aermod_grid_id: _AERMOD_CELL_ID})
 
     joined = _join_population_to_aermod_grid(population_gdf=population_gdf, aermod_grid=aermod_grid)
-    counts = _counts_from_joined(joined)
+    counts = _counts_from_joined(joined, working_dir=output_root)
     logger.info(
         "Preprocess step 4.2: %d persons assigned across %d AERMOD cells (urban=%d, suburban=%d, rural=%d)",
         counts["person_count"].sum(),

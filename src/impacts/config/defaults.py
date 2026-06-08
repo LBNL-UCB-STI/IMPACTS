@@ -15,7 +15,7 @@ annualization_days_by_vehicle_group: dict[str, float] = {
 """Default annualization-day fallbacks by EMFAC vehicle group when the vehicle
 metadata catalog does not provide operation_days_per_year for a vehicle category."""
 
-pollutants: list = ["NH3", "NOx", "PM2_5", "SOx", "ROG", "BC"]
+pollutants: list = ["NH3", "NOx", "PM25", "SOx", "ROG", "BC"]
 """Pollutants processed by default when no explicit list is configured."""
 
 grams_per_short_ton: float = 907_184.74

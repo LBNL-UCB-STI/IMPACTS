@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Any
 from typing import Optional
 
+import duckdb
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 
+from ...common import configure_duckdb_connection
 from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import read_table
@@ -132,6 +134,7 @@ def _build_full_exposure_grid(
     pipeline: PipelineConfig,
     prepared_inmap: gpd.GeoDataFrame,
     prepared_aermod: Optional[gpd.GeoDataFrame],
+    working_dir: Path,
 ) -> gpd.GeoDataFrame:
     if not pipeline.aermod_full_grid_path:
         raise ValueError("pipeline.aermod_full_grid_path must be configured before building the full exposure grid.")
@@ -142,41 +145,40 @@ def _build_full_exposure_grid(
         raise ValueError(
             f"Full exposure grid is missing required columns {missing_grid_cols} in {pipeline.aermod_full_grid_path}."
         )
-    import duckdb as _duckdb
-    import os as _os
-
     grid_geom = full_grid[[_AERMOD_SOURCE_ID_COLUMN, "geometry"]]
     grid_df = pd.DataFrame(full_grid[required_grid_cols])
 
     inmap_cols = [c for c in prepared_inmap.columns if c != "geometry"]
     inmap_df = pd.DataFrame(prepared_inmap[inmap_cols]).drop_duplicates(subset=[_INMAP_SOURCE_ID_COLUMN])
 
-    _con = _duckdb.connect()
-    _con.execute(f"SET threads = {max(1, min(_os.cpu_count() or 4, 4))}")
-    _con.register("_grid", grid_df)
-    _con.register("_inmap", inmap_df)
+    _con = duckdb.connect()
+    try:
+        configure_duckdb_connection(_con, working_dir=working_dir, show_progress=False, profile="balanced")
+        _con.register("_grid", grid_df)
+        _con.register("_inmap", inmap_df)
 
-    _inmap_sel = ", ".join(f'i."{c}"' for c in inmap_cols if c != _INMAP_SOURCE_ID_COLUMN)
+        _inmap_sel = ", ".join(f'i."{c}"' for c in inmap_cols if c != _INMAP_SOURCE_ID_COLUMN)
 
-    if prepared_aermod is not None:
-        aermod_cols = [c for c in prepared_aermod.columns if c != "geometry"]
-        aermod_df = pd.DataFrame(prepared_aermod[aermod_cols]).drop_duplicates(subset=[_AERMOD_SOURCE_ID_COLUMN])
-        _con.register("_aermod", aermod_df)
-        _aermod_sel = ", ".join(f'a."{c}"' for c in aermod_cols if c != _AERMOD_SOURCE_ID_COLUMN)
-        _joined_df = _con.execute(f"""
-            SELECT g."{_AERMOD_SOURCE_ID_COLUMN}", g."{_INMAP_SOURCE_ID_COLUMN}",
-                   {_inmap_sel}, {_aermod_sel}
-            FROM _grid g
-            LEFT JOIN _inmap i ON g."{_INMAP_SOURCE_ID_COLUMN}" = i."{_INMAP_SOURCE_ID_COLUMN}"
-            LEFT JOIN _aermod a ON g."{_AERMOD_SOURCE_ID_COLUMN}" = a."{_AERMOD_SOURCE_ID_COLUMN}"
-        """).df()
-    else:
-        _joined_df = _con.execute(f"""
-            SELECT g."{_AERMOD_SOURCE_ID_COLUMN}", g."{_INMAP_SOURCE_ID_COLUMN}", {_inmap_sel}
-            FROM _grid g
-            LEFT JOIN _inmap i ON g."{_INMAP_SOURCE_ID_COLUMN}" = i."{_INMAP_SOURCE_ID_COLUMN}"
-        """).df()
-    _con.close()
+        if prepared_aermod is not None:
+            aermod_cols = [c for c in prepared_aermod.columns if c != "geometry"]
+            aermod_df = pd.DataFrame(prepared_aermod[aermod_cols]).drop_duplicates(subset=[_AERMOD_SOURCE_ID_COLUMN])
+            _con.register("_aermod", aermod_df)
+            _aermod_sel = ", ".join(f'a."{c}"' for c in aermod_cols if c != _AERMOD_SOURCE_ID_COLUMN)
+            _joined_df = _con.execute(f"""
+                SELECT g."{_AERMOD_SOURCE_ID_COLUMN}", g."{_INMAP_SOURCE_ID_COLUMN}",
+                       {_inmap_sel}, {_aermod_sel}
+                FROM _grid g
+                LEFT JOIN _inmap i ON g."{_INMAP_SOURCE_ID_COLUMN}" = i."{_INMAP_SOURCE_ID_COLUMN}"
+                LEFT JOIN _aermod a ON g."{_AERMOD_SOURCE_ID_COLUMN}" = a."{_AERMOD_SOURCE_ID_COLUMN}"
+            """).df()
+        else:
+            _joined_df = _con.execute(f"""
+                SELECT g."{_AERMOD_SOURCE_ID_COLUMN}", g."{_INMAP_SOURCE_ID_COLUMN}", {_inmap_sel}
+                FROM _grid g
+                LEFT JOIN _inmap i ON g."{_INMAP_SOURCE_ID_COLUMN}" = i."{_INMAP_SOURCE_ID_COLUMN}"
+            """).df()
+    finally:
+        _con.close()
 
     result = gpd.GeoDataFrame(
         grid_geom.merge(_joined_df, on=_AERMOD_SOURCE_ID_COLUMN, how="left"),
@@ -302,6 +304,7 @@ def run(
         pipeline=pipeline,
         prepared_inmap=prepared_inmap,
         prepared_aermod=prepared_aermod,
+        working_dir=raw_dir,
     )
     _trace_frame("2", "full_exposure_grid", pd.DataFrame(full_exposure_grid.drop(columns="geometry", errors="ignore")))
     output_path = raw_dir / "beam_concentration_distribution.parquet"

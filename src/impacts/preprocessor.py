@@ -25,7 +25,6 @@ def _derive_impacts_tmp_root(output_root: Path) -> Path:
     return output_root / "preprocess"
 
 
-
 def build_preprocess_manifest(
     settings_path: str | Path,
 ) -> Dict[str, Any]:
@@ -136,7 +135,6 @@ def build_preprocess_manifest(
         "mapping_columns": mapping_columns,
         "prepared_skims_group_cols": list(emissions.prepared_skims_group_cols),
         "pollutants": list(emissions.pollutants),
-        "source_pollutants": list(emissions.source_pollutants),
         "passenger_inventory_file": staged_passenger_inventory_file,
         "freight_inventory_file": staged_freight_inventory_file,
         "enable_passenger_inventory_activity_correction": bool(emissions.inventory.enable_passenger_activity_correction),

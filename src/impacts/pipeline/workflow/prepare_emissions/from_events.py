@@ -93,7 +93,6 @@ def _read_events(path: str) -> pd.DataFrame:
     return pd.read_csv(path, usecols=_EVENTS_USECOLS, compression=compression)
 
 
-
 def _build_running_rows(pt: pd.DataFrame) -> List[Dict]:
     rows: List[Dict] = []
     for _, row in pt.iterrows():
@@ -283,7 +282,7 @@ def _calculate_emissions(
     skims: pd.DataFrame,
     *,
     rates_folder: str,
-    pollutants_map: Dict[str, str],
+    pollutants: list[str],
     vehicle_category_metadata_file: str,
     annualization_days: dict[str, float],
     passenger_vehicle_types_path: Optional[str],
@@ -298,7 +297,7 @@ def _calculate_emissions(
         skims: zone-expanded skims with distanceMiles_{zone}, travelTimeInSecond_{zone},
                parkingDurationInSecond_{zone}, and tripCount_{zone} columns.
         rates_folder: directory of emission rate CSV/parquet files.
-        pollutants_map: canonical_pollutant → rate_file_pollutant_name mapping.
+        pollutants: canonical pollutant names to calculate emissions for.
         vehicle_category_metadata_file: vehicle metadata catalog with optional operation_days_per_year.
         population_sample: simulation sample fraction for non-transit rows.
         transit_sample: accepted for configuration parity; transit rows are not sample-expanded.
@@ -307,13 +306,12 @@ def _calculate_emissions(
     from ..tools.beam.events_to_skims_emissions import read_rates_directory
 
     rates = _normalize_rate_dimensions(read_rates_directory(rates_folder))
-    rate_to_canonical = {v: k for k, v in pollutants_map.items()}
-    rates = rates[rates["pollutant"].isin(set(pollutants_map.values()))]
+    rates = rates[rates["pollutant"].isin(set(pollutants))]
     if rates.empty:
         logger.warning("Step 1: no matching rates found in %s for configured pollutants", rates_folder)
         return skims
 
-    rates["canonical_pollutant"] = rates["pollutant"].map(rate_to_canonical)
+    rates["canonical_pollutant"] = rates["pollutant"]
     rates["rate"] = pd.to_numeric(rates["rate"], errors="coerce").fillna(0.0)
     rates["rate_basis"] = rates["rate_basis"].astype(str).str.lower()
 
@@ -360,9 +358,9 @@ def _calculate_emissions(
     result = skims.copy()
     matched_by_pollutant = {
         canonical: pd.Series(False, index=result.index)
-        for canonical in pollutants_map
+        for canonical in pollutants
     }
-    for canonical in pollutants_map:
+    for canonical in pollutants:
         for zone in _ZONES:
             result[f"tons_per_year_{canonical}_{zone}_allocated"] = 0.0
 
@@ -402,7 +400,7 @@ def _calculate_emissions(
 
     logger.info(
         "Step 1: calculated emissions for %d canonical pollutants, %d rate entries",
-        len(pollutants_map),
+        len(pollutants),
         len(rates_agg),
     )
     return result
@@ -459,7 +457,7 @@ def build_skims_from_events(
     network_path: str,
     intersection_path: str,
     rates_folder: Optional[str] = None,
-    pollutants_map: Optional[Dict[str, str]] = None,
+    pollutants: Optional[list[str]] = None,
     vehicle_category_metadata_file: Optional[str] = None,
     annualization_days: Optional[dict[str, float]] = None,
     passenger_vehicle_types_path: Optional[str] = None,
@@ -500,7 +498,7 @@ def build_skims_from_events(
 
     if (
         rates_folder
-        and pollutants_map
+        and pollutants
         and vehicle_category_metadata_file is not None
         and annualization_days is not None
         and population_sample is not None
@@ -509,7 +507,7 @@ def build_skims_from_events(
         skims = _calculate_emissions(
             skims,
             rates_folder=rates_folder,
-            pollutants_map=pollutants_map,
+            pollutants=pollutants,
             vehicle_category_metadata_file=vehicle_category_metadata_file,
             annualization_days=annualization_days,
             passenger_vehicle_types_path=passenger_vehicle_types_path,
@@ -586,7 +584,6 @@ def prepare_events_inputs(
     beam_length_col: str,
     prepared_skims_group_cols: List[str],
     pollutants: List[str],
-    pollutants_map: Dict[str, str],
     vehicle_category_metadata_file: str,
     annualization_days: dict[str, float],
     population_sample: float,
@@ -641,7 +638,6 @@ def prepare_events_inputs(
         beam_length_col=beam_length_col,
         prepared_skims_group_cols=list(prepared_skims_group_cols),
         pollutants=list(pollutants),
-        pollutants_map=dict(pollutants_map),
         vehicle_category_metadata_file=vehicle_category_metadata_file,
         annualization_days=annualization_days,
         population_sample=float(population_sample),

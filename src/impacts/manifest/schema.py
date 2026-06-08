@@ -12,7 +12,6 @@ from typing import Optional
 from impacts.config.defaults import annualization_days_by_vehicle_group as default_annualization_days_by_vehicle_group
 from impacts.config.defaults import primary_pm25_integration_strategies as default_primary_pm25_integration_strategies
 from impacts.config.defaults import primary_pm25_integration_strategy as default_primary_pm25_integration_strategy
-from impacts.config.settings import build_pollutants_map_from_sources
 from ..config._coerce import _required_string, _optional_string, _required_int, _optional_int, _required_float, _optional_float, _required_bool, _coerce_string_list, _reject_unknown_keys
 
 
@@ -57,7 +56,6 @@ class PipelineConfig:
     vehicle_category_metadata_file: Optional[str] = None
     prepared_skims_group_cols: List[str] = field(default_factory=list)
     pollutants: List[str] = field(default_factory=list)
-    source_pollutants: List[str] = field(default_factory=list)
     annualization_days: Dict[str, float] = field(
         default_factory=lambda: dict(default_annualization_days_by_vehicle_group)
     )
@@ -182,7 +180,6 @@ class PipelineConfig:
             vehicle_category_metadata_file=_optional_string(payload.get("vehicle_category_metadata_file")),
             prepared_skims_group_cols=_coerce_string_list(payload.get("prepared_skims_group_cols")),
             pollutants=_coerce_string_list(payload.get("pollutants")),
-            source_pollutants=_coerce_string_list(payload.get("source_pollutants")),
             annualization_days=_required_dict(payload.get("annualization_days"), "pipeline.annualization_days"),
             population_sample=_required_float(payload.get("population_sample"), "pipeline.population_sample"),
             transit_sample=_optional_float(payload.get("transit_sample"), default=1.0),
@@ -201,8 +198,6 @@ class PipelineConfig:
             if key not in result.annualization_days:
                 raise ValueError(f"Missing required value: pipeline.annualization_days.{key}")
             result.annualization_days[key] = float(result.annualization_days[key])
-        if not result.source_pollutants:
-            raise ValueError("Missing required value: pipeline.source_pollutants")
         if not result.pollutants:
             raise ValueError("Missing required value: pipeline.pollutants")
         if result.primary_pm25_integration_strategy not in default_primary_pm25_integration_strategies:
@@ -231,10 +226,6 @@ class PipelineConfig:
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
-
-    @property
-    def pollutants_map(self) -> Dict[str, str]:
-        return build_pollutants_map_from_sources(list(self.source_pollutants))
 
 
 @dataclass(frozen=True)

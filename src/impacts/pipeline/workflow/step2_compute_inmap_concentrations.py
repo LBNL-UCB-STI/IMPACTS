@@ -7,9 +7,11 @@ import time
 from typing import Any
 from typing import Optional
 
+import duckdb
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from ...common import configure_duckdb_connection
 from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import make_progress
@@ -143,9 +145,9 @@ def _canonical_pollutant_from_emissions_column(column_name: str) -> str:
     return pollutant
 
 
-def _expected_emissions_columns(pollutants_map: Optional[dict[str, str]] = None) -> list[str]:
-    canonical_pollutants = list((pollutants_map or {}).keys()) or list(default_pollutants)
-    ordered_pollutants = [pollutant for pollutant in default_pollutants if pollutant in canonical_pollutants]
+def _expected_emissions_columns(pollutants: Optional[list[str]] = None) -> list[str]:
+    active = set(pollutants) if pollutants else set(default_pollutants)
+    ordered_pollutants = [pollutant for pollutant in default_pollutants if pollutant in active]
     return [f"tons_per_year_{pollutant}_inmap_allocated" for pollutant in ordered_pollutants]
 
 
@@ -177,9 +179,9 @@ def _concentration_specs() -> dict[str, dict[str, str]]:
         },
         "PrimaryPM25": {
             "output": "PrimaryPM25",
-            "pollutant": "PM2_5",
+            "pollutant": "PM25",
             "zarr": "PrimaryPM25",
-            "emissions": "tons_per_year_PM2_5_inmap_allocated",
+            "emissions": "tons_per_year_PM25_inmap_allocated",
         },
         "BC": {
             "output": "BC",
@@ -290,14 +292,15 @@ def _compute_custom_receptor_response(
 def _prepare_grid_emissions(
     emissions_df: pd.DataFrame,
     source_id_col: str,
-    pollutants_map: Optional[dict[str, str]] = None,
+    working_dir: Path,
+    pollutants: Optional[list[str]] = None,
 ) -> tuple[pd.DataFrame, set[str]]:
     """Normalize emissions to ISRM input species and aggregate by grid."""
     _trace_frame("0", "raw_emissions", emissions_df, key_cols=[source_id_col])
     if source_id_col not in emissions_df.columns:
         raise ValueError(f"No grid id column found. Expected {source_id_col}")
 
-    emission_cols = _expected_emissions_columns(pollutants_map)
+    emission_cols = _expected_emissions_columns(pollutants)
     source_column_map: dict[str, str] = {}
     for col in emission_cols:
         if col in emissions_df.columns:
@@ -315,16 +318,16 @@ def _prepare_grid_emissions(
         else:
             df[col] = pd.to_numeric(df[source_col], errors="coerce").fillna(0.0)
 
-    import duckdb as _duckdb
-    import os as _os
-    _con = _duckdb.connect()
-    _con.execute(f"SET threads = {max(1, min(_os.cpu_count() or 4, 4))}")
-    _con.register("_emis_tbl", df)
-    _cols_expr = ", ".join(f'SUM("{c}") AS "{c}"' for c in emission_cols)
-    grouped = _con.execute(
-        f'SELECT "{source_id_col}", {_cols_expr} FROM _emis_tbl GROUP BY "{source_id_col}"'
-    ).df()
-    _con.close()
+    _con = duckdb.connect()
+    try:
+        configure_duckdb_connection(_con, working_dir=working_dir, show_progress=False, profile="balanced")
+        _con.register("_emis_tbl", df)
+        _cols_expr = ", ".join(f'SUM("{c}") AS "{c}"' for c in emission_cols)
+        grouped = _con.execute(
+            f'SELECT "{source_id_col}", {_cols_expr} FROM _emis_tbl GROUP BY "{source_id_col}"'
+        ).df()
+    finally:
+        _con.close()
     available_pollutants = {
         _canonical_pollutant_from_emissions_column(col)
         for col, source_col in source_column_map.items()
@@ -546,15 +549,17 @@ def compute_isrm_concentrations(
     factor: float,
     requested_pollutants: list[str],
     receptor_cells: np.ndarray,
+    working_dir: Path,
     source_id_col: str = "inmap_cell_id",
     isrm_nox_to_no2_ratios_file: Optional[str] = None,
     isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s: bool = False,
-    pollutants_map: Optional[dict[str, str]] = None,
+    pollutants: Optional[list[str]] = None,
 ) -> pd.DataFrame:
     emis, available_pollutants = _prepare_grid_emissions(
         grid_emissions_df,
         source_id_col=source_id_col,
-        pollutants_map=pollutants_map,
+        working_dir=working_dir,
+        pollutants=pollutants,
     )
     if emis.empty:
         raise ValueError(f"No emissions rows found after {source_id_col} normalization.")
@@ -720,12 +725,13 @@ def run(
         factor=float(tons_per_year_to_ug_per_s),
         requested_pollutants=pipeline.pollutants,
         receptor_cells=beam_inmap_grid_ids,
+        working_dir=raw_dir,
         source_id_col="inmap_cell_id",
         isrm_nox_to_no2_ratios_file=pipeline.isrm_nox_to_no2_ratios_file,
         isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s=(
             pipeline.isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s
         ),
-        pollutants_map=pipeline.pollutants_map,
+        pollutants=list(pipeline.pollutants),
     )
     output_path = raw_dir / "beam_inmap_concentrations.parquet"
     log_substep_banner("2.3", "build receptor geodataframe", logger=logger)

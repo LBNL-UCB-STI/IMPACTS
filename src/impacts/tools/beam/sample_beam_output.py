@@ -23,7 +23,7 @@ EXPLICIT_SKIMS_POLLUTANTS = [
     "NOx",
     "PM",
     "PM10",
-    "PM2_5",
+    "PM25",
     "ROG",
     "SOx",
     "TOG",

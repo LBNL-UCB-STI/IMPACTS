@@ -18,34 +18,6 @@ from .defaults import primary_pm25_integration_strategy as default_primary_pm25_
 from ._coerce import _required_string, _optional_string, _required_int, _optional_int, _required_float, _optional_float, _required_bool, _coerce_string_list, _reject_unknown_keys
 
 
-
-_POLLUTANT_SOURCE_ALIASES = {
-    "NH3": "NH3",
-    "NOX": "NOx",
-    "PM25": "PM2_5",
-    "PM2_5": "PM2_5",
-    "PM2.5": "PM2_5",
-    "SOX": "SOx",
-    "ROG": "ROG",
-    "BC": "BC",
-    "BCH": "BC",
-    "BCM": "BC",
-}
-
-
-def _canonical_pollutant_from_source(value: str) -> str:
-    token = str(value).strip()
-    if not token:
-        raise ValueError("Configured pollutant names must be non-empty strings.")
-    canonical = _POLLUTANT_SOURCE_ALIASES.get(token.upper())
-    if canonical is None:
-        raise ValueError(
-            f"Unsupported pollutant '{token}' in impacts.emissions.pollutants. "
-            f"Expected one of {sorted(_POLLUTANT_SOURCE_ALIASES)}"
-        )
-    return canonical
-
-
 def normalize_epsg(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -64,20 +36,13 @@ def _build_source_pollutants(value: Any) -> List[str]:
     pollutants = _coerce_string_list(value)
     if not pollutants:
         raise ValueError("Missing required value: impacts.emissions.pollutants")
+    unknown = sorted(set(pollutants) - set(canonical_pollutants))
+    if unknown:
+        raise ValueError(
+            f"Unsupported pollutant(s) in impacts.emissions.pollutants: {unknown}. "
+            f"Expected subset of {sorted(canonical_pollutants)}"
+        )
     return pollutants
-
-
-def build_pollutants_map_from_sources(source_pollutants: List[str]) -> Dict[str, str]:
-    mapping: Dict[str, str] = {}
-    for source_pollutant in source_pollutants:
-        canonical = _canonical_pollutant_from_source(source_pollutant)
-        if canonical in mapping and mapping[canonical] != source_pollutant:
-            raise ValueError(
-                f"Multiple source pollutants map to canonical pollutant '{canonical}': "
-                f"{mapping[canonical]!r}, {source_pollutant!r}"
-            )
-        mapping[canonical] = source_pollutant
-    return mapping
 
 
 def _normalize_settings_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -424,7 +389,6 @@ class Emissions:
             "impacts.emissions",
         )
         source_pollutants = _build_source_pollutants(payload.get("pollutants"))
-        build_pollutants_map_from_sources(source_pollutants)
         inventory_payload = {"inventory_folder": payload.get("inventory_folder")}
         for correction_key in (
             "enable_passenger_activity_correction",
@@ -451,12 +415,8 @@ class Emissions:
 
     @property
     def pollutants(self) -> List[str]:
-        mapping = self.pollutants_map
-        return [pollutant for pollutant in canonical_pollutants if pollutant in self.pollutants_map]
-
-    @property
-    def pollutants_map(self) -> Dict[str, str]:
-        return build_pollutants_map_from_sources(list(self.source_pollutants))
+        source_set = set(self.source_pollutants)
+        return [pollutant for pollutant in canonical_pollutants if pollutant in source_set]
 
     @property
     def beam_osm_id_col(self) -> str:
@@ -836,7 +796,6 @@ class Pipeline:
     @property
     def exposure(self) -> bool:
         return self.postsim.exposure
-
 
 
 @dataclass(frozen=True)
@@ -1645,7 +1604,6 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
             "emissions_store_root": str(outputs_root / "activities" / emissions_store_name / "rates"),
         },
     }
-
 
 
 def _load_model_spec(model_spec_path: str) -> dict:

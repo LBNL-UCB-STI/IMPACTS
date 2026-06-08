@@ -47,7 +47,6 @@ def _required_float(value: Any, label: str) -> float:
         raise ValueError(f"Invalid float for {label}: {value}") from exc
 
 
-
 def _optional_float(value: Any, default: Optional[float] = None) -> Optional[float]:
     if value is None or str(value).strip() == "":
         return default

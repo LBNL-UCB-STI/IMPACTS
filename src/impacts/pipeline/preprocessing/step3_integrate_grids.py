@@ -471,8 +471,6 @@ def _ensure_county_mass_conservation(
     return gpd.GeoDataFrame(combined, geometry="geometry", crs=county_intersection.crs)
 
 
-
-
 def run(
     pipeline: PipelineConfig,
     input_root: Path,

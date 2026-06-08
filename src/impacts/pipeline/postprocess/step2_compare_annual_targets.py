@@ -30,7 +30,7 @@ from ...common import log_substep_banner
 logger = logging.getLogger(__name__)
 
 _MODELED_POLLUTANT_COLUMNS = {
-    "PM2.5": "tons_per_year_PM2_5_county_allocated",
+    "PM2.5": "tons_per_year_PM25_county_allocated",
     "NOx": "tons_per_year_NOx_county_allocated",
     "PM10": "tons_per_year_PM10_county_allocated",
     "TOG": "tons_per_year_TOG_county_allocated",
@@ -112,7 +112,7 @@ def _aggregate_modeled_to_targets(
         .reset_index(drop=True)
     )
     scan = _duckdb_scan_expression(modeled_emissions_path)
-    con = duckdb.connect(database=":memory:")
+    con = duckdb.connect()
     try:
         configure_duckdb_connection(
             con,

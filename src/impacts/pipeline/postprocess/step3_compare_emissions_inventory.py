@@ -30,7 +30,7 @@ from ...common import read_table
 logger = logging.getLogger(__name__)
 
 _MODELED_POLLUTANT_COLUMNS = {
-    "PM2.5": "tons_per_year_PM2_5_county_allocated",
+    "PM2.5": "tons_per_year_PM25_county_allocated",
     "NOx": "tons_per_year_NOx_county_allocated",
     "BC": "tons_per_year_BC_county_allocated",
 }
@@ -56,7 +56,7 @@ def _aggregate_modeled_emissions(
     county_lookup: pd.DataFrame,
 ) -> pd.DataFrame:
     scan = _duckdb_scan_expression(modeled_emissions_path)
-    con = duckdb.connect(database=":memory:")
+    con = duckdb.connect()
     try:
         configure_duckdb_connection(
             con,
@@ -124,7 +124,6 @@ def _aggregate_modeled_emissions(
             )
         )
     return pd.concat(rows, ignore_index=True)
-
 
 
 def _aggregate_inventory_emissions(

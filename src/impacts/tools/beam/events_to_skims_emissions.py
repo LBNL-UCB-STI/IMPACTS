@@ -60,7 +60,6 @@ def _pollutant_cols(df: pd.DataFrame) -> List[str]:
     return [c for c in df.columns if c.startswith("em_")]
 
 
-
 def _read_any_table(path: Path) -> pd.DataFrame:
     p = str(path).lower()
     if p.endswith(".parquet"):

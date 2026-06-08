@@ -181,7 +181,7 @@ def _annualize_prepared_skims_with_duckdb(
         raise ValueError(f"freight_sample must be in the interval (0, 1], got {freight_sample}")
     resolved_freight_sample = float(freight_sample if freight_sample is not None else population_sample)
     scan = _duckdb_scan_expression(prepared_skims_path)
-    con = duckdb.connect(database=":memory:")
+    con = duckdb.connect()
     show_progress = _should_show_duckdb_progress_bar()
     lookup_df = pd.DataFrame(
         {

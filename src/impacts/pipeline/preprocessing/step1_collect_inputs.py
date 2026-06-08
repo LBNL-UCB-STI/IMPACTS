@@ -35,7 +35,6 @@ from ...manifest.file_ops import resolve_required_path
 logger = logging.getLogger(__name__)
 
 
-
 def _register_manifest_input(
     manifest_inputs: Dict[str, Any],
     *,
@@ -64,7 +63,6 @@ def _register_manifest_input(
 def _use_existing_reference(manifest_inputs: Dict[str, Any], key: str, entry: Dict[str, Any]) -> str:
     manifest_inputs[key] = entry
     return resolve_logged_path(entry)
-
 
 
 def _resolve_emfacid_path(inventory_path: str, *, label: str) -> str:
