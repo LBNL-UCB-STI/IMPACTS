@@ -154,22 +154,23 @@ class SettingsPathResolver:
 
 
 def build_registry(settings, config_path: Path) -> PathRegistry:
-    """Build a PathRegistry from an ImpactsSettings object.
+    """Build a PathRegistry for artifact staging/provisioning.
+
+    Uses SettingsPathResolver for the canonical base roots, then adds
+    provisioner-specific region and vehicle-folder subdirectories on top.
 
     Search order:
       1. beam_input, beam_input/region, beam_input/region/vehicle-tech/emissions
       2. beam_input/vehicle_folder/emissions, beam_input/vehicle_folder/dispersions
       3. beam_output
-      4. impacts_inputs
+      4. impacts_input
       5. config_parent, cwd
     """
-    from ..manifest.file_ops import resolve_path
-
+    resolver = SettingsPathResolver.from_settings(settings, config_path)
     roots: list[Path] = []
 
-    beam_input = resolve_path(settings.beam.local_input_folder, config_path)
-    if beam_input:
-        bi = Path(beam_input)
+    if resolver.beam_input:
+        bi = resolver.beam_input
         roots.append(bi)
         region = settings.run.region
         if region:
@@ -180,13 +181,11 @@ def build_registry(settings, config_path: Path) -> PathRegistry:
             roots.append(bi / vehicle_folder / "emissions")
             roots.append(bi / vehicle_folder / "dispersions")
 
-    beam_output = resolve_path(settings.beam.local_output_folder, config_path)
-    if beam_output:
-        roots.append(Path(beam_output))
+    if resolver.beam_output:
+        roots.append(resolver.beam_output)
 
-    impacts_inputs = resolve_path(settings.impacts.local_input_folder, config_path)
-    if impacts_inputs:
-        roots.append(Path(impacts_inputs))
+    if resolver.impacts_input:
+        roots.append(resolver.impacts_input)
 
     config_parent = Path(config_path).resolve().parent
     roots.append(config_parent)

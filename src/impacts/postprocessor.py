@@ -59,45 +59,6 @@ def _normalize_input_roots(input_roots: tuple[str | Path, ...] | list[str | Path
     return tuple(Path(root).expanduser().resolve() for root in (input_roots or ()))
 
 
-def _localize_input_path(raw: str | Path, input_roots: tuple[Path, ...]) -> Path:
-    candidate = Path(str(raw)).expanduser()
-    if candidate.exists() or not input_roots:
-        return candidate.resolve()
-
-    parts = candidate.parts
-    for input_root in input_roots:
-        if not candidate.is_absolute():
-            localized = input_root / candidate
-            if localized.exists():
-                return localized.resolve()
-
-        for index, part in enumerate(parts):
-            if part == input_root.name:
-                localized = input_root.joinpath(*parts[index + 1:])
-                if localized.exists():
-                    return localized.resolve()
-
-        for marker in ("vehicle-tech", "urbansim", "freight", "r5"):
-            if marker not in parts:
-                continue
-            localized = input_root.joinpath(*parts[parts.index(marker):])
-            if localized.exists():
-                return localized.resolve()
-
-    return candidate.resolve()
-
-
-def _localize_path(
-    raw: str | Path,
-    *,
-    output_root: Path | None = None,
-    input_roots: tuple[Path, ...] = (),
-) -> Path:
-    candidate = _localize_output_path(raw, output_root)
-    if candidate.exists():
-        return candidate
-    return _localize_input_path(raw, input_roots)
-
 
 def _localized_pipeline_manifest(
     run_manifest_path: str | Path,
@@ -263,13 +224,13 @@ def _resolve_input_path(
     *,
     key: str,
     output_root: Path | None = None,
-    input_roots: tuple[Path, ...] = (),
+    resolver: "SettingsPathResolver",
 ) -> Path:
-    return _localize_path(
-        resolve_required_manifest_input(inputs, key=key),
-        output_root=output_root,
-        input_roots=input_roots,
-    )
+    raw = resolve_required_manifest_input(inputs, key=key)
+    candidate = _localize_output_path(raw, output_root)
+    if candidate.exists():
+        return candidate
+    return resolver.resolve(raw) or candidate
 
 
 def _resolve_modeled_emissions_path(
@@ -321,7 +282,7 @@ def _resolve_county_boundaries_path(
     *,
     run_manifest_path: str | Path | None = None,
     output_root: Path | None = None,
-    input_roots: tuple[Path, ...] = (),
+    resolver: "SettingsPathResolver",
 ) -> Path:
     _, _, _, inputs = _load_context_for_resolution(
         settings_path,
@@ -332,7 +293,7 @@ def _resolve_county_boundaries_path(
         inputs,
         key="county_boundaries",
         output_root=output_root,
-        input_roots=input_roots,
+        resolver=resolver,
     )
     if not candidate.exists():
         raise FileNotFoundError(
@@ -346,7 +307,7 @@ def _resolve_vehicle_types_paths(
     *,
     run_manifest_path: str | Path | None = None,
     output_root: Path | None = None,
-    input_roots: tuple[Path, ...] = (),
+    resolver: "SettingsPathResolver",
 ) -> tuple[Path, Path]:
     _, _, _, inputs = _load_context_for_resolution(
         settings_path,
@@ -357,13 +318,13 @@ def _resolve_vehicle_types_paths(
         inputs,
         key="passenger_vehicle_types_input",
         output_root=output_root,
-        input_roots=input_roots,
+        resolver=resolver,
     )
     freight_candidate = _resolve_input_path(
         inputs,
         key="freight_vehicle_types_input",
         output_root=output_root,
-        input_roots=input_roots,
+        resolver=resolver,
     )
     if not passenger_candidate.exists():
         raise FileNotFoundError(
@@ -381,13 +342,13 @@ def _resolve_optional_population_assignment_paths(
     *,
     run_manifest_path: str | Path | None = None,
     output_root: Path | None = None,
-    input_roots: tuple[Path, ...] = (),
+    resolver: "SettingsPathResolver",
 ) -> tuple[Path | None, Path | None]:
     passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_vehicle_types_paths(
         settings_path,
         run_manifest_path=run_manifest_path,
         output_root=output_root,
-        input_roots=input_roots,
+        resolver=resolver,
     )
     passenger_candidates = list(
         passenger_vehicle_types_path.parents[1].glob("urbansim/**/vehicles--*--EM.parquet")
@@ -405,17 +366,21 @@ def _resolve_inventory_target_path(
     raw: str,
     *,
     output_root: Path | None = None,
-    input_roots: tuple[Path, ...] = (),
+    resolver: "SettingsPathResolver",
 ) -> Path:
     raw_text = str(raw).strip()
-    candidate = _localize_path(raw_text, output_root=output_root, input_roots=input_roots)
+    candidate = _localize_output_path(raw_text, output_root)
     if candidate.exists():
         return candidate
-    candidate = _localize_path(resolve_path(raw_text, settings_path) or raw_text, output_root=output_root)
-    if candidate.exists():
-        return candidate
+    result = resolver.resolve(raw_text)
+    if result is not None:
+        return result
+    fallback = _localize_output_path(resolve_path(raw_text, settings_path) or raw_text, output_root)
+    if fallback.exists():
+        return fallback
     raise FileNotFoundError(
-        f"Postprocess inventory target file was configured but not found. Expected {candidate}."
+        f"Postprocess inventory target file was configured but not found. "
+        f"Searched: {', '.join(str(r) for r in resolver.all_input_roots)}. Path: {raw}"
     )
 
 
@@ -457,7 +422,7 @@ def _resolve_inventory_emfacid_activity_path(
     manifest_key: str,
     run_manifest_path: str | Path | None = None,
     output_root: Path | None = None,
-    input_roots: tuple[Path, ...] = (),
+    resolver: "SettingsPathResolver",
 ) -> Path:
     _, _, _, inputs = _load_context_for_resolution(
         settings_path,
@@ -468,7 +433,7 @@ def _resolve_inventory_emfacid_activity_path(
         inputs,
         key=manifest_key,
         output_root=output_root,
-        input_roots=input_roots,
+        resolver=resolver,
     )
     if not candidate.exists():
         raise FileNotFoundError(
@@ -484,7 +449,7 @@ def _resolve_vehicle_category_metadata_path(
     *,
     run_manifest_path: str | Path | None = None,
     output_root: Path | None = None,
-    input_roots: tuple[Path, ...] = (),
+    resolver: "SettingsPathResolver",
 ) -> Path:
     _, _, _, inputs = _load_context_for_resolution(
         settings_path,
@@ -496,7 +461,7 @@ def _resolve_vehicle_category_metadata_path(
             inputs,
             key="vehicle_category_metadata_file_input",
             output_root=output_root,
-            input_roots=input_roots,
+            resolver=resolver,
         )
         if resolved.exists():
             return resolved
@@ -511,7 +476,7 @@ def _resolve_vehicle_category_metadata_path(
         settings_path,
         settings.impacts.emissions.vehicle_category_metadata_file,
         output_root=output_root,
-        input_roots=input_roots,
+        resolver=resolver,
     )
 
 
@@ -542,10 +507,11 @@ def _run_postprocess_steps(
         run_manifest_path=run_manifest_path,
         output_root=output_root,
     )
-    input_roots = _normalize_input_roots(input_roots)
     from .config.path_registry import SettingsPathResolver
-    resolver = SettingsPathResolver.from_settings(settings, settings_path, extra_roots=input_roots)
-    input_roots = resolver.all_input_roots
+    resolver = SettingsPathResolver.from_settings(
+        settings, settings_path,
+        extra_roots=_normalize_input_roots(input_roots),
+    )
     output_dir = output_root / "postprocess"
     modeled_emissions_path = _resolve_modeled_emissions_path(
         settings_path,
@@ -563,27 +529,27 @@ def _run_postprocess_steps(
             settings_path,
             run_manifest_path=run_manifest_path,
             output_root=output_root,
-            input_roots=input_roots,
+            resolver=resolver,
         )
         passenger_vehicles_path, freight_carriers_path = _resolve_optional_population_assignment_paths(
             settings_path,
             run_manifest_path=run_manifest_path,
             output_root=output_root,
-            input_roots=input_roots,
+            resolver=resolver,
         )
         passenger_activity_path = _resolve_inventory_emfacid_activity_path(
             settings_path,
             manifest_key="passenger_inventory_emfacid_file",
             run_manifest_path=run_manifest_path,
             output_root=output_root,
-            input_roots=input_roots,
+            resolver=resolver,
         )
         freight_activity_path = _resolve_inventory_emfacid_activity_path(
             settings_path,
             manifest_key="freight_inventory_emfacid_file",
             run_manifest_path=run_manifest_path,
             output_root=output_root,
-            input_roots=input_roots,
+            resolver=resolver,
         )
     except (FileNotFoundError, ValueError) as exc:
         if not allow_missing_source_inputs:
@@ -614,7 +580,7 @@ def _run_postprocess_steps(
                     settings_path,
                     run_manifest_path=run_manifest_path,
                     output_root=output_root,
-                    input_roots=input_roots,
+                    resolver=resolver,
                 )
             except (FileNotFoundError, ValueError) as exc:
                 if not allow_missing_source_inputs:
@@ -654,7 +620,7 @@ def _run_postprocess_steps(
             settings_path,
             run_manifest_path=run_manifest_path,
             output_root=output_root,
-            input_roots=input_roots,
+            resolver=resolver,
         )
         county_order: list[str] = []
         if settings.shared.geography.fips.counties:
@@ -674,7 +640,7 @@ def _run_postprocess_steps(
             settings_path,
             settings.impacts.analysis.inventory_file,
             output_root=output_root,
-            input_roots=input_roots,
+            resolver=resolver,
         )
         for target in settings.impacts.analysis.inventory_targets:
             target_outputs = run_step3(
