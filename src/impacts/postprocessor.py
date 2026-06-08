@@ -208,13 +208,13 @@ def _resolve_input_path(
     *,
     key: str,
     output_root: Path | None = None,
-    resolver: "SettingsPathResolver",
+    registry: "PathRegistry",
 ) -> Path:
     raw = resolve_required_manifest_input(inputs, key=key)
     candidate = _localize_output_path(raw, output_root)
     if candidate.exists():
         return candidate
-    return resolver.resolve(raw) or candidate
+    return registry.locate(raw) or candidate
 
 
 def _resolve_modeled_emissions_path(
@@ -266,7 +266,7 @@ def _resolve_county_boundaries_path(
     *,
     run_manifest_path: str | Path | None = None,
     output_root: Path | None = None,
-    resolver: "SettingsPathResolver",
+    registry: "PathRegistry",
 ) -> Path:
     _, _, _, inputs = _load_context(
         settings_path,
@@ -277,7 +277,7 @@ def _resolve_county_boundaries_path(
         inputs,
         key="county_boundaries",
         output_root=output_root,
-        resolver=resolver,
+        registry=registry,
     )
     if not candidate.exists():
         raise FileNotFoundError(
@@ -291,7 +291,7 @@ def _resolve_vehicle_types_paths(
     *,
     run_manifest_path: str | Path | None = None,
     output_root: Path | None = None,
-    resolver: "SettingsPathResolver",
+    registry: "PathRegistry",
 ) -> tuple[Path, Path]:
     _, _, _, inputs = _load_context(
         settings_path,
@@ -302,13 +302,13 @@ def _resolve_vehicle_types_paths(
         inputs,
         key="passenger_vehicle_types_input",
         output_root=output_root,
-        resolver=resolver,
+        registry=registry,
     )
     freight_candidate = _resolve_input_path(
         inputs,
         key="freight_vehicle_types_input",
         output_root=output_root,
-        resolver=resolver,
+        registry=registry,
     )
     if not passenger_candidate.exists():
         raise FileNotFoundError(
@@ -326,13 +326,13 @@ def _resolve_optional_population_assignment_paths(
     *,
     run_manifest_path: str | Path | None = None,
     output_root: Path | None = None,
-    resolver: "SettingsPathResolver",
+    registry: "PathRegistry",
 ) -> tuple[Path | None, Path | None]:
     passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_vehicle_types_paths(
         settings_path,
         run_manifest_path=run_manifest_path,
         output_root=output_root,
-        resolver=resolver,
+        registry=registry,
     )
     passenger_candidates = list(
         passenger_vehicle_types_path.parents[1].glob("urbansim/**/vehicles--*--EM.parquet")
@@ -350,13 +350,13 @@ def _resolve_inventory_target_path(
     raw: str,
     *,
     output_root: Path | None = None,
-    resolver: "SettingsPathResolver",
+    registry: "PathRegistry",
 ) -> Path:
     raw_text = str(raw).strip()
     candidate = _localize_output_path(raw_text, output_root)
     if candidate.exists():
         return candidate
-    result = resolver.resolve(raw_text)
+    result = registry.locate(raw_text)
     if result is not None:
         return result
     fallback = _localize_output_path(resolve_path(raw_text, settings_path) or raw_text, output_root)
@@ -364,26 +364,23 @@ def _resolve_inventory_target_path(
         return fallback
     raise FileNotFoundError(
         f"Postprocess inventory target file was configured but not found. "
-        f"Searched: {', '.join(str(r) for r in resolver.all_input_roots)}. Path: {raw}"
+        f"Searched: {', '.join(str(r) for r in registry.roots)}. Path: {raw}"
     )
 
 
 def _resolve_delta_baseline_concentration_path(
     raw: str,
     *,
-    resolver: "SettingsPathResolver",
+    registry: "PathRegistry",
 ) -> Path | None:
     raw_text = str(raw).strip()
-    result = resolver.resolve_beam_input(raw_text)
-    if result is not None:
-        return result
-    result = resolver.resolve(raw_text)
+    result = registry.locate(raw_text)
     if result is not None:
         return result
     logger.warning(
         "Delta baseline concentration distribution was configured but not found — "
         "skipping Steps 6-7. Searched: %s. Configured path: %s",
-        ", ".join(str(r) for r in resolver.all_input_roots),
+        ", ".join(str(r) for r in registry.roots),
         raw_text,
     )
     return None
@@ -406,7 +403,7 @@ def _resolve_inventory_emfacid_activity_path(
     manifest_key: str,
     run_manifest_path: str | Path | None = None,
     output_root: Path | None = None,
-    resolver: "SettingsPathResolver",
+    registry: "PathRegistry",
 ) -> Path:
     _, _, _, inputs = _load_context(
         settings_path,
@@ -417,7 +414,7 @@ def _resolve_inventory_emfacid_activity_path(
         inputs,
         key=manifest_key,
         output_root=output_root,
-        resolver=resolver,
+        registry=registry,
     )
     if not candidate.exists():
         raise FileNotFoundError(
@@ -433,7 +430,7 @@ def _resolve_vehicle_category_metadata_path(
     *,
     run_manifest_path: str | Path | None = None,
     output_root: Path | None = None,
-    resolver: "SettingsPathResolver",
+    registry: "PathRegistry",
 ) -> Path:
     _, _, _, inputs = _load_context(
         settings_path,
@@ -445,7 +442,7 @@ def _resolve_vehicle_category_metadata_path(
             inputs,
             key="vehicle_category_metadata_file_input",
             output_root=output_root,
-            resolver=resolver,
+            registry=registry,
         )
         if resolved.exists():
             return resolved
@@ -460,7 +457,7 @@ def _resolve_vehicle_category_metadata_path(
         settings_path,
         settings.impacts.emissions.vehicle_category_metadata_file,
         output_root=output_root,
-        resolver=resolver,
+        registry=registry,
     )
 
 
@@ -481,13 +478,14 @@ def _run_postprocess_steps(
     from .pipeline.postprocess.step7_plot_delta_exposure import run as run_step7
 
     settings = load_settings_from_yaml(settings_path)
+    from .config.path_registry import build_registry
     from .config.path_registry import SettingsPathResolver
-    resolver = SettingsPathResolver.from_settings(
+    registry = build_registry(
         settings, settings_path,
         extra_roots=_normalize_input_roots(input_roots),
     )
     if output_root is None:
-        output_root = resolver.impacts_output
+        output_root = SettingsPathResolver.from_settings(settings, settings_path).impacts_output
     else:
         output_root = Path(output_root).resolve()
     population_sample, transit_sample, freight_sample = _resolve_postprocess_sample_config(
@@ -513,27 +511,27 @@ def _run_postprocess_steps(
             settings_path,
             run_manifest_path=run_manifest_path,
             output_root=output_root,
-            resolver=resolver,
+            registry=registry,
         )
         passenger_vehicles_path, freight_carriers_path = _resolve_optional_population_assignment_paths(
             settings_path,
             run_manifest_path=run_manifest_path,
             output_root=output_root,
-            resolver=resolver,
+            registry=registry,
         )
         passenger_activity_path = _resolve_inventory_emfacid_activity_path(
             settings_path,
             manifest_key="passenger_inventory_emfacid_file",
             run_manifest_path=run_manifest_path,
             output_root=output_root,
-            resolver=resolver,
+            registry=registry,
         )
         freight_activity_path = _resolve_inventory_emfacid_activity_path(
             settings_path,
             manifest_key="freight_inventory_emfacid_file",
             run_manifest_path=run_manifest_path,
             output_root=output_root,
-            resolver=resolver,
+            registry=registry,
         )
     except (FileNotFoundError, ValueError) as exc:
         if not allow_missing_source_inputs:
@@ -564,7 +562,7 @@ def _run_postprocess_steps(
                     settings_path,
                     run_manifest_path=run_manifest_path,
                     output_root=output_root,
-                    resolver=resolver,
+                    registry=registry,
                 )
             except (FileNotFoundError, ValueError) as exc:
                 if not allow_missing_source_inputs:
@@ -604,7 +602,7 @@ def _run_postprocess_steps(
             settings_path,
             run_manifest_path=run_manifest_path,
             output_root=output_root,
-            resolver=resolver,
+            registry=registry,
         )
         county_order: list[str] = []
         if settings.shared.geography.fips.counties:
@@ -624,7 +622,7 @@ def _run_postprocess_steps(
             settings_path,
             settings.impacts.analysis.inventory_file,
             output_root=output_root,
-            resolver=resolver,
+            registry=registry,
         )
         for target in settings.impacts.analysis.inventory_targets:
             target_outputs = run_step3(
@@ -661,7 +659,7 @@ def _run_postprocess_steps(
     if delta_baseline_raw:
         delta_baseline_concentration_path = _resolve_delta_baseline_concentration_path(
             delta_baseline_raw,
-            resolver=resolver,
+            registry=registry,
         )
         if delta_baseline_concentration_path is None:
             _remove_stale_postprocess_delta_outputs(output_dir)
@@ -691,7 +689,10 @@ def _run_postprocess_steps(
         logger.info("Skipping Step 5: exposure outputs not found at %s", output_root)
     delta_table_path = None
     if delta_baseline_concentration_path is None:
-        logger.info("Skipping Steps 6-7: no delta baseline concentration distribution configured.")
+        if delta_baseline_raw:
+            logger.info("Skipping Steps 6-7: delta baseline file was configured but could not be found.")
+        else:
+            logger.info("Skipping Steps 6-7: no delta baseline concentration distribution configured.")
     elif conc_path.exists() and net_path.exists():
         delta_outputs = run_step6(
             concentration_path=str(conc_path),

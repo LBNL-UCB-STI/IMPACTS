@@ -153,7 +153,12 @@ class SettingsPathResolver:
         return result
 
 
-def build_registry(settings, config_path: Path) -> PathRegistry:
+def build_registry(
+    settings,
+    config_path: Path,
+    *,
+    extra_roots: Sequence[Path] = (),
+) -> PathRegistry:
     """Build a PathRegistry for artifact staging/provisioning.
 
     Uses SettingsPathResolver for the canonical base roots, then adds
@@ -192,5 +197,7 @@ def build_registry(settings, config_path: Path) -> PathRegistry:
     cwd = Path.cwd().resolve()
     if cwd != config_parent:
         roots.append(cwd)
+
+    roots.extend(extra_roots)
 
     return PathRegistry(roots)
