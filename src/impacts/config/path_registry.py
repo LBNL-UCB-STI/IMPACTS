@@ -39,18 +39,7 @@ class PathRegistry:
 
 
 class SettingsPathResolver:
-    """Canonical entry point for resolving all IMPACTS + BEAM paths.
-
-    Knows which root owns which namespace so callers declare intent explicitly:
-
-      beam_input    → vehicle-tech/, r5/, urbansim/, freight/, dispersions/
-      beam_output   → BEAM simulation outputs
-      impacts_input → impacts-specific inputs (not shared with beam)
-      impacts_output→ impacts run outputs
-
-    Use the named resolve_* methods when the path namespace is known.
-    Use resolve() for a general search across all input roots in priority order.
-    """
+    """Parses canonical root paths from settings for use by build_registry."""
 
     def __init__(
         self,
@@ -59,23 +48,18 @@ class SettingsPathResolver:
         beam_output: Optional[Path] = None,
         impacts_input: Optional[Path] = None,
         impacts_output: Optional[Path] = None,
-        extra_roots: tuple[Path, ...] = (),
     ) -> None:
         self.beam_input = beam_input
         self.beam_output = beam_output
         self.impacts_input = impacts_input
         self.impacts_output = impacts_output
-        self._extra_roots = extra_roots
 
     @classmethod
     def from_settings(
         cls,
         settings,
         config_path: Path | str,
-        *,
-        extra_roots: tuple[str | Path, ...] = (),
     ) -> "SettingsPathResolver":
-        """Build a resolver from an ImpactsSettings object and the config file path."""
         from ..manifest.file_ops import resolve_path
 
         def _r(raw: Optional[str]) -> Optional[Path]:
@@ -88,69 +72,7 @@ class SettingsPathResolver:
             beam_output=_r(getattr(beam, "local_output_folder", None)),
             impacts_input=_r(getattr(settings.impacts, "local_input_folder", None)),
             impacts_output=_r(getattr(settings.impacts, "local_output_folder", None)),
-            extra_roots=tuple(Path(r).expanduser().resolve() for r in extra_roots if r),
         )
-
-    @property
-    def all_input_roots(self) -> tuple[Path, ...]:
-        """All input search roots in priority order (beam_input first)."""
-        return tuple(
-            r for r in (self.beam_input, self.impacts_input, *self._extra_roots)
-            if r is not None
-        )
-
-    @property
-    def all_roots(self) -> tuple[Path, ...]:
-        """All roots including outputs, in priority order."""
-        return tuple(
-            r for r in (
-                self.beam_input,
-                self.beam_output,
-                self.impacts_input,
-                self.impacts_output,
-                *self._extra_roots,
-            )
-            if r is not None
-        )
-
-    def _lookup(self, raw: str, roots: Sequence[Optional[Path]]) -> Optional[Path]:
-        candidate = Path(str(raw)).expanduser()
-        if candidate.is_absolute():
-            return candidate.resolve() if candidate.exists() else None
-        for root in roots:
-            if root is None:
-                continue
-            localized = (root / candidate).resolve()
-            if localized.exists():
-                return localized
-        return None
-
-    def resolve_beam_input(self, raw: str) -> Optional[Path]:
-        """Resolve a path whose root is beam.local_input_folder."""
-        return self._lookup(raw, [self.beam_input])
-
-    def resolve_impacts_input(self, raw: str) -> Optional[Path]:
-        """Resolve a path whose root is impacts.local_input_folder."""
-        return self._lookup(raw, [self.impacts_input])
-
-    def resolve_output(self, raw: str) -> Optional[Path]:
-        """Resolve a path whose root is beam.local_output_folder or impacts.local_output_folder."""
-        return self._lookup(raw, [self.beam_output, self.impacts_output])
-
-    def resolve(self, raw: str) -> Optional[Path]:
-        """Search all input roots in priority order (beam_input first)."""
-        return self._lookup(raw, list(self.all_input_roots))
-
-    def resolve_required(self, raw: str, *, label: str = "") -> Path:
-        """Like resolve() but raises FileNotFoundError if not found."""
-        result = self.resolve(raw)
-        if result is None:
-            tag = f" '{label}'" if label else ""
-            raise FileNotFoundError(
-                f"Artifact{tag} not found: '{raw}'. "
-                f"Searched: {', '.join(str(r) for r in self.all_input_roots)}"
-            )
-        return result
 
 
 def build_registry(
