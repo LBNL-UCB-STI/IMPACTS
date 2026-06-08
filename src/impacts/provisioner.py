@@ -13,7 +13,6 @@ from .manifest.schema import ActivitiesManifest
 logger = logging.getLogger(__name__)
 
 
-
 def _outputs_exist(workflow: dict[str, Any]) -> bool:
     return Path(str(workflow["paths"]["final_activity_by_emfacid_output_passenger"])).exists()
 
@@ -194,12 +193,12 @@ def _extract_archive(archive: Path, destination: Path) -> None:
 
 
 def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
-    from .manifest.file_ops import resolve_path
-    from .config.path_registry import build_registry
+    from .config.path_registry import build_registry, SettingsPathResolver
 
-    local_input_folder = Path(resolve_path(settings.impacts.local_input_folder, config_path)).resolve()
+    _sr = SettingsPathResolver.from_settings(settings, config_path)
+    local_input_folder = _sr.impacts_input
     local_input_folder.mkdir(parents=True, exist_ok=True)
-    local_output_folder = Path(resolve_path(settings.impacts.local_output_folder, config_path)).resolve()
+    local_output_folder = _sr.impacts_output
     registry = build_registry(settings, config_path)
 
     cfg_activities = settings.impacts.activities if isinstance(settings.impacts.activities, dict) else {}

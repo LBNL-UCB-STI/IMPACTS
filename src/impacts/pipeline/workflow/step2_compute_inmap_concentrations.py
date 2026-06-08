@@ -24,7 +24,6 @@ from . import _step_label
 logger = logging.getLogger(__name__)
 
 
-
 def _trace_columns(step: str, label: str, columns: list[str]) -> None:
     preview = columns[:20]
     suffix = "" if len(columns) <= 20 else " ..."

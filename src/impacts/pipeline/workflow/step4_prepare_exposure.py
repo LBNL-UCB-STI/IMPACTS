@@ -197,15 +197,10 @@ def _build_full_exposure_grid(
             result[col] = default
 
     for col in ("inmap_PrimaryPM25", "inmap_SecondaryPM25", "aermod_PrimaryPM25", "aermod_SecondaryPM25", "aermod_BC", "aermod_NO2"):
-        if col in result.columns:
-            result[col] = pd.to_numeric(result[col], errors="coerce").fillna(0.0)
+        result[col] = pd.to_numeric(result[col], errors="coerce").fillna(0.0)
     for col in ("inmap_BC", "inmap_NO2"):
-        if col not in result.columns:
-            result[col] = 0.0
         result[col] = pd.to_numeric(result[col], errors="coerce").fillna(0.0)
     for col in ("has_aermod_primarypm25", "has_aermod_bc", "has_aermod_no2"):
-        if col not in result.columns:
-            result[col] = False
         result[col] = result[col].fillna(False).astype(bool)
 
     primary_strategy = pipeline.primary_pm25_integration_strategy
@@ -261,9 +256,7 @@ def _build_full_exposure_grid(
         "aermod_SecondaryPM25",
         "has_aermod_primarypm25", "has_aermod_bc", "has_aermod_no2",
     ]
-    for col in ("inmap_BC", "inmap_NO2", "aermod_BC", "aermod_NO2"):
-        if col in result.columns:
-            ordered.append(col)
+    ordered.extend(("inmap_BC", "inmap_NO2", "aermod_BC", "aermod_NO2"))
     ordered.append("geometry")
     return gpd.GeoDataFrame(result[ordered], geometry="geometry", crs=full_grid.crs)
 
@@ -276,8 +269,6 @@ def _write_exposure_grid(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     exposure_grid.to_parquet(output_path, index=False)
     exposure_grid.to_file(output_path.with_suffix(".gpkg"), driver="GPKG")
-
-
 
 
 def run(

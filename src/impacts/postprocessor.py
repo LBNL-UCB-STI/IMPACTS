@@ -59,7 +59,6 @@ def _normalize_input_roots(input_roots: tuple[str | Path, ...] | list[str | Path
     return tuple(Path(root).expanduser().resolve() for root in (input_roots or ()))
 
 
-
 def _localized_pipeline_manifest(
     run_manifest_path: str | Path,
     *,
@@ -204,21 +203,6 @@ def _load_context(
     return run_manifest_path, run_manifest, preprocess_manifest, inputs
 
 
-def _load_context_for_resolution(
-    settings_path: str | Path,
-    *,
-    run_manifest_path: str | Path | None = None,
-    output_root: Path | None = None,
-) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
-    if run_manifest_path is None and output_root is None:
-        return _load_context(settings_path)
-    return _load_context(
-        settings_path,
-        run_manifest_path=run_manifest_path,
-        output_root=output_root,
-    )
-
-
 def _resolve_input_path(
     inputs: dict[str, Any],
     *,
@@ -284,7 +268,7 @@ def _resolve_county_boundaries_path(
     output_root: Path | None = None,
     resolver: "SettingsPathResolver",
 ) -> Path:
-    _, _, _, inputs = _load_context_for_resolution(
+    _, _, _, inputs = _load_context(
         settings_path,
         run_manifest_path=run_manifest_path,
         output_root=output_root,
@@ -309,7 +293,7 @@ def _resolve_vehicle_types_paths(
     output_root: Path | None = None,
     resolver: "SettingsPathResolver",
 ) -> tuple[Path, Path]:
-    _, _, _, inputs = _load_context_for_resolution(
+    _, _, _, inputs = _load_context(
         settings_path,
         run_manifest_path=run_manifest_path,
         output_root=output_root,
@@ -424,7 +408,7 @@ def _resolve_inventory_emfacid_activity_path(
     output_root: Path | None = None,
     resolver: "SettingsPathResolver",
 ) -> Path:
-    _, _, _, inputs = _load_context_for_resolution(
+    _, _, _, inputs = _load_context(
         settings_path,
         run_manifest_path=run_manifest_path,
         output_root=output_root,
@@ -451,7 +435,7 @@ def _resolve_vehicle_category_metadata_path(
     output_root: Path | None = None,
     resolver: "SettingsPathResolver",
 ) -> Path:
-    _, _, _, inputs = _load_context_for_resolution(
+    _, _, _, inputs = _load_context(
         settings_path,
         run_manifest_path=run_manifest_path,
         output_root=output_root,
@@ -497,8 +481,13 @@ def _run_postprocess_steps(
     from .pipeline.postprocess.step7_plot_delta_exposure import run as run_step7
 
     settings = load_settings_from_yaml(settings_path)
+    from .config.path_registry import SettingsPathResolver
+    resolver = SettingsPathResolver.from_settings(
+        settings, settings_path,
+        extra_roots=_normalize_input_roots(input_roots),
+    )
     if output_root is None:
-        output_root = Path(resolve_path(settings.impacts.local_output_folder, settings_path)).resolve()
+        output_root = resolver.impacts_output
     else:
         output_root = Path(output_root).resolve()
     population_sample, transit_sample, freight_sample = _resolve_postprocess_sample_config(
@@ -506,11 +495,6 @@ def _run_postprocess_steps(
         settings_path,
         run_manifest_path=run_manifest_path,
         output_root=output_root,
-    )
-    from .config.path_registry import SettingsPathResolver
-    resolver = SettingsPathResolver.from_settings(
-        settings, settings_path,
-        extra_roots=_normalize_input_roots(input_roots),
     )
     output_dir = output_root / "postprocess"
     modeled_emissions_path = _resolve_modeled_emissions_path(
