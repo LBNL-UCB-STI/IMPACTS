@@ -316,7 +316,16 @@ def _prepare_grid_emissions(
         else:
             df[col] = pd.to_numeric(df[source_col], errors="coerce").fillna(0.0)
 
-    grouped = df.groupby(source_id_col, dropna=False)[emission_cols].sum().reset_index()
+    import duckdb as _duckdb
+    import os as _os
+    _con = _duckdb.connect()
+    _con.execute(f"SET threads = {max(1, min(_os.cpu_count() or 4, 4))}")
+    _con.register("_emis_tbl", df)
+    _cols_expr = ", ".join(f'SUM("{c}") AS "{c}"' for c in emission_cols)
+    grouped = _con.execute(
+        f'SELECT "{source_id_col}", {_cols_expr} FROM _emis_tbl GROUP BY "{source_id_col}"'
+    ).df()
+    _con.close()
     available_pollutants = {
         _canonical_pollutant_from_emissions_column(col)
         for col, source_col in source_column_map.items()

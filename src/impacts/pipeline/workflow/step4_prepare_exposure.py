@@ -142,24 +142,47 @@ def _build_full_exposure_grid(
         raise ValueError(
             f"Full exposure grid is missing required columns {missing_grid_cols} in {pipeline.aermod_full_grid_path}."
         )
-    result = full_grid[required_grid_cols + ["geometry"]]
+    import duckdb as _duckdb
+    import os as _os
+
+    grid_geom = full_grid[[_AERMOD_SOURCE_ID_COLUMN, "geometry"]]
+    grid_df = pd.DataFrame(full_grid[required_grid_cols])
 
     inmap_cols = [c for c in prepared_inmap.columns if c != "geometry"]
-    inmap_lookup = prepared_inmap[inmap_cols].drop_duplicates(subset=[_INMAP_SOURCE_ID_COLUMN])
-    result = result.merge(inmap_lookup, how="left", on=_INMAP_SOURCE_ID_COLUMN)
+    inmap_df = pd.DataFrame(prepared_inmap[inmap_cols]).drop_duplicates(subset=[_INMAP_SOURCE_ID_COLUMN])
+
+    _con = _duckdb.connect()
+    _con.execute(f"SET threads = {max(1, min(_os.cpu_count() or 4, 4))}")
+    _con.register("_grid", grid_df)
+    _con.register("_inmap", inmap_df)
+
+    _inmap_sel = ", ".join(f'i."{c}"' for c in inmap_cols if c != _INMAP_SOURCE_ID_COLUMN)
 
     if prepared_aermod is not None:
         aermod_cols = [c for c in prepared_aermod.columns if c != "geometry"]
-        aermod_lookup = prepared_aermod[aermod_cols].drop_duplicates(subset=[_AERMOD_SOURCE_ID_COLUMN])
-        result = result.merge(aermod_lookup, how="left", on=_AERMOD_SOURCE_ID_COLUMN)
+        aermod_df = pd.DataFrame(prepared_aermod[aermod_cols]).drop_duplicates(subset=[_AERMOD_SOURCE_ID_COLUMN])
+        _con.register("_aermod", aermod_df)
+        _aermod_sel = ", ".join(f'a."{c}"' for c in aermod_cols if c != _AERMOD_SOURCE_ID_COLUMN)
+        _joined_df = _con.execute(f"""
+            SELECT g."{_AERMOD_SOURCE_ID_COLUMN}", g."{_INMAP_SOURCE_ID_COLUMN}",
+                   {_inmap_sel}, {_aermod_sel}
+            FROM _grid g
+            LEFT JOIN _inmap i ON g."{_INMAP_SOURCE_ID_COLUMN}" = i."{_INMAP_SOURCE_ID_COLUMN}"
+            LEFT JOIN _aermod a ON g."{_AERMOD_SOURCE_ID_COLUMN}" = a."{_AERMOD_SOURCE_ID_COLUMN}"
+        """).df()
     else:
-        result["aermod_PrimaryPM25"] = np.nan
-        result["aermod_SecondaryPM25"] = 0.0
-        result["aermod_BC"] = np.nan
-        result["aermod_NO2"] = np.nan
-        result["has_aermod_primarypm25"] = False
-        result["has_aermod_bc"] = False
-        result["has_aermod_no2"] = False
+        _joined_df = _con.execute(f"""
+            SELECT g."{_AERMOD_SOURCE_ID_COLUMN}", g."{_INMAP_SOURCE_ID_COLUMN}", {_inmap_sel}
+            FROM _grid g
+            LEFT JOIN _inmap i ON g."{_INMAP_SOURCE_ID_COLUMN}" = i."{_INMAP_SOURCE_ID_COLUMN}"
+        """).df()
+    _con.close()
+
+    result = gpd.GeoDataFrame(
+        grid_geom.merge(_joined_df, on=_AERMOD_SOURCE_ID_COLUMN, how="left"),
+        geometry="geometry",
+        crs=full_grid.crs,
+    )
 
     for col, default in (
         ("aermod_PrimaryPM25", np.nan),

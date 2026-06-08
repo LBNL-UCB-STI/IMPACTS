@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from ...common import log_step_banner
+from ...common import log_step_banner, configure_duckdb_connection
 from ._common import (
     MAP_DPI,
     MAP_FIGSIZE,
@@ -67,43 +67,43 @@ def _remove_stale_outputs(output_dir: Path) -> None:
             logger.info("  Removed stale Step 7 output → %s", path)
 
 
-def _merge_population_concentration_delta(pop_gdf, delta_df):
-    merged = pop_gdf[["aermod_cell_id", "person_count"]].merge(
-        delta_df[["aermod_cell_id", "inmap_cell_id", "TotalPM25_delta"]],
-        on="aermod_cell_id",
-        how="inner",
-    )
-    merged["person_count"] = pd.to_numeric(merged["person_count"], errors="coerce").fillna(0.0)
-    merged["TotalPM25_delta"] = pd.to_numeric(merged["TotalPM25_delta"], errors="coerce")
-    merged = merged.loc[merged["person_count"].gt(0) & merged["TotalPM25_delta"].notna()].copy()
-    merged["pm25_exposure_burden_delta"] = merged["TotalPM25_delta"] * merged["person_count"]
-    return merged
+def _aggregate_delta_exposure_to_inmap(pop_gdf, delta_df, inmap_gdf, *, output_dir: Path):
+    import duckdb
 
+    pop_df = pd.DataFrame(pop_gdf[["aermod_cell_id", "person_count"]])
+    delta_plain = pd.DataFrame(delta_df[["aermod_cell_id", "inmap_cell_id", "TotalPM25_delta"]])
 
-def _aggregate_delta_exposure_to_inmap(pop_gdf, delta_df, inmap_gdf):
-    merged = _merge_population_concentration_delta(pop_gdf, delta_df)
-    merged["inmap_cell_id"] = pd.to_numeric(merged["inmap_cell_id"], errors="coerce")
-    merged = merged.loc[merged["inmap_cell_id"].notna()].copy()
-    if merged.empty:
+    con = duckdb.connect()
+    configure_duckdb_connection(con, working_dir=output_dir)
+    con.register("pop_tbl", pop_df)
+    con.register("delta_tbl", delta_plain)
+
+    result_df = con.execute("""
+        SELECT
+            TRY_CAST(d.inmap_cell_id AS BIGINT) AS inmap_cell_id,
+            SUM(TRY_CAST(p.person_count AS DOUBLE)) AS population,
+            SUM(TRY_CAST(d.TotalPM25_delta AS DOUBLE) * TRY_CAST(p.person_count AS DOUBLE)) AS exposure_burden_delta
+        FROM pop_tbl p
+        INNER JOIN delta_tbl d ON p.aermod_cell_id = d.aermod_cell_id
+        WHERE TRY_CAST(p.person_count AS DOUBLE) > 0
+          AND TRY_CAST(d.TotalPM25_delta AS DOUBLE) IS NOT NULL
+          AND TRY_CAST(d.inmap_cell_id AS BIGINT) IS NOT NULL
+        GROUP BY d.inmap_cell_id
+    """).df()
+    con.close()
+
+    if result_df.empty:
         empty = inmap_gdf.iloc[0:0][["inmap_cell_id", "geometry"]].copy()
         empty["population"] = pd.Series(dtype="float64")
         empty["exposure_burden_delta"] = pd.Series(dtype="float64")
         empty["pwc_pm25_delta"] = pd.Series(dtype="float64")
         return empty
 
-    grouped = (
-        merged.groupby("inmap_cell_id", dropna=False)
-        .agg(
-            population=("person_count", "sum"),
-            exposure_burden_delta=("pm25_exposure_burden_delta", "sum"),
-        )
-        .reset_index()
-    )
-    grouped["pwc_pm25_delta"] = grouped["exposure_burden_delta"] / grouped["population"]
+    result_df["pwc_pm25_delta"] = result_df["exposure_burden_delta"] / result_df["population"]
 
     inmap = inmap_gdf.copy()
     inmap["inmap_cell_id"] = pd.to_numeric(inmap["inmap_cell_id"], errors="coerce")
-    return inmap[["inmap_cell_id", "geometry"]].merge(grouped, on="inmap_cell_id", how="inner")
+    return inmap[["inmap_cell_id", "geometry"]].merge(result_df, on="inmap_cell_id", how="inner")
 
 
 def _plot_inmap_delta_scalar(
@@ -274,7 +274,7 @@ def run(
     if inmap_gdf.crs != pop_gdf.crs:
         inmap_gdf = inmap_gdf.to_crs(pop_gdf.crs)
     logger.info("Aggregating delta exposure metrics to InMAP cells …")
-    inmap_delta_gdf = _aggregate_delta_exposure_to_inmap(pop_gdf, delta_df, inmap_gdf)
+    inmap_delta_gdf = _aggregate_delta_exposure_to_inmap(pop_gdf, delta_df, inmap_gdf, output_dir=output_dir)
     inmap_delta_gdf = inmap_delta_gdf.loc[
         inmap_delta_gdf["population"].gt(0)
         & inmap_delta_gdf["pwc_pm25_delta"].notna()

@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from ...common import log_step_banner
+from ...common import log_step_banner, configure_duckdb_connection
 from ._common import (
     CMAP_PM25,
     CMAP_POP,
@@ -64,43 +64,43 @@ _BV_COLORS: dict[tuple[int, int], str] = {
 # InMAP exposure aggregation
 # ---------------------------------------------------------------------------
 
-def _merge_population_concentration(pop_gdf, conc_gdf):
-    merged = pop_gdf[["aermod_cell_id", "person_count"]].merge(
-        conc_gdf[["aermod_cell_id", "inmap_cell_id", "TotalPM25"]],
-        on="aermod_cell_id",
-        how="inner",
-    )
-    merged["person_count"] = pd.to_numeric(merged["person_count"], errors="coerce").fillna(0.0)
-    merged["TotalPM25"] = pd.to_numeric(merged["TotalPM25"], errors="coerce").fillna(0.0)
-    merged = merged.loc[merged["person_count"].gt(0)].copy()
-    merged["pm25_exposure_burden"] = merged["TotalPM25"] * merged["person_count"]
-    return merged
+def _aggregate_exposure_to_inmap(pop_gdf, conc_gdf, inmap_gdf, *, output_dir: Path):
+    import duckdb
 
+    pop_df = pd.DataFrame(pop_gdf[["aermod_cell_id", "person_count"]])
+    conc_df = pd.DataFrame(conc_gdf[["aermod_cell_id", "inmap_cell_id", "TotalPM25"]])
 
-def _aggregate_exposure_to_inmap(pop_gdf, conc_gdf, inmap_gdf):
-    merged = _merge_population_concentration(pop_gdf, conc_gdf)
-    merged["inmap_cell_id"] = pd.to_numeric(merged["inmap_cell_id"], errors="coerce")
-    merged = merged.loc[merged["inmap_cell_id"].notna()].copy()
-    if merged.empty:
+    con = duckdb.connect()
+    configure_duckdb_connection(con, working_dir=output_dir)
+    con.register("pop_tbl", pop_df)
+    con.register("conc_tbl", conc_df)
+
+    result_df = con.execute("""
+        SELECT
+            TRY_CAST(c.inmap_cell_id AS BIGINT) AS inmap_cell_id,
+            SUM(TRY_CAST(p.person_count AS DOUBLE)) AS population,
+            SUM(TRY_CAST(c.TotalPM25 AS DOUBLE) * TRY_CAST(p.person_count AS DOUBLE)) AS exposure_burden
+        FROM pop_tbl p
+        INNER JOIN conc_tbl c ON p.aermod_cell_id = c.aermod_cell_id
+        WHERE TRY_CAST(p.person_count AS DOUBLE) > 0
+          AND TRY_CAST(c.TotalPM25 AS DOUBLE) IS NOT NULL
+          AND TRY_CAST(c.inmap_cell_id AS BIGINT) IS NOT NULL
+        GROUP BY c.inmap_cell_id
+    """).df()
+    con.close()
+
+    if result_df.empty:
         empty = inmap_gdf.iloc[0:0][["inmap_cell_id", "geometry"]].copy()
         empty["population"] = pd.Series(dtype="float64")
         empty["exposure_burden"] = pd.Series(dtype="float64")
         empty["pwc_pm25"] = pd.Series(dtype="float64")
         return empty
 
-    grouped = (
-        merged.groupby("inmap_cell_id", dropna=False)
-        .agg(
-            population=("person_count", "sum"),
-            exposure_burden=("pm25_exposure_burden", "sum"),
-        )
-        .reset_index()
-    )
-    grouped["pwc_pm25"] = grouped["exposure_burden"] / grouped["population"]
+    result_df["pwc_pm25"] = result_df["exposure_burden"] / result_df["population"]
 
     inmap = inmap_gdf.copy()
     inmap["inmap_cell_id"] = pd.to_numeric(inmap["inmap_cell_id"], errors="coerce")
-    return inmap[["inmap_cell_id", "geometry"]].merge(grouped, on="inmap_cell_id", how="inner")
+    return inmap[["inmap_cell_id", "geometry"]].merge(result_df, on="inmap_cell_id", how="inner")
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +300,7 @@ def run(
     if inmap_gdf.crs != pop_gdf.crs:
         inmap_gdf = inmap_gdf.to_crs(pop_gdf.crs)
     logger.info("Aggregating exposure metrics to InMAP cells …")
-    inmap_exposure_gdf = _aggregate_exposure_to_inmap(pop_gdf, conc_gdf, inmap_gdf)
+    inmap_exposure_gdf = _aggregate_exposure_to_inmap(pop_gdf, conc_gdf, inmap_gdf, output_dir=output_dir)
     inmap_exposure_gdf = inmap_exposure_gdf.loc[
         inmap_exposure_gdf["population"].gt(0)
         & inmap_exposure_gdf["pwc_pm25"].notna()
