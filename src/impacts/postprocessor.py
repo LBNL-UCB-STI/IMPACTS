@@ -420,23 +420,24 @@ def _resolve_inventory_target_path(
 
 
 def _resolve_delta_baseline_concentration_path(
-    settings_path: str | Path,
     raw: str,
     *,
-    output_root: Path | None = None,
-    input_roots: tuple[Path, ...] = (),
-) -> Path:
+    resolver: "SettingsPathResolver",
+) -> Path | None:
     raw_text = str(raw).strip()
-    candidate = _localize_path(raw_text, output_root=output_root, input_roots=input_roots)
-    if candidate.exists():
-        return candidate
-    candidate = _localize_path(resolve_path(raw_text, settings_path) or raw_text, output_root=output_root)
-    if candidate.exists():
-        return candidate
-    raise FileNotFoundError(
-        "Postprocess delta baseline concentration distribution was configured but not found. "
-        f"Expected {candidate}."
+    result = resolver.resolve_beam_input(raw_text)
+    if result is not None:
+        return result
+    result = resolver.resolve(raw_text)
+    if result is not None:
+        return result
+    logger.warning(
+        "Delta baseline concentration distribution was configured but not found — "
+        "skipping Steps 6-7. Searched: %s. Configured path: %s",
+        ", ".join(str(r) for r in resolver.all_input_roots),
+        raw_text,
     )
+    return None
 
 
 def _remove_stale_postprocess_delta_outputs(output_dir: Path) -> None:
@@ -542,6 +543,9 @@ def _run_postprocess_steps(
         output_root=output_root,
     )
     input_roots = _normalize_input_roots(input_roots)
+    from .config.path_registry import SettingsPathResolver
+    resolver = SettingsPathResolver.from_settings(settings, settings_path, extra_roots=input_roots)
+    input_roots = resolver.all_input_roots
     output_dir = output_root / "postprocess"
     modeled_emissions_path = _resolve_modeled_emissions_path(
         settings_path,
@@ -706,11 +710,11 @@ def _run_postprocess_steps(
     delta_baseline_raw = getattr(settings.impacts.analysis, "delta_baseline_concentration_distribution_file", None)
     if delta_baseline_raw:
         delta_baseline_concentration_path = _resolve_delta_baseline_concentration_path(
-            settings_path,
             delta_baseline_raw,
-            output_root=output_root,
-            input_roots=input_roots,
+            resolver=resolver,
         )
+        if delta_baseline_concentration_path is None:
+            _remove_stale_postprocess_delta_outputs(output_dir)
     else:
         _remove_stale_postprocess_delta_outputs(output_dir)
     if conc_path.exists() and net_path.exists():

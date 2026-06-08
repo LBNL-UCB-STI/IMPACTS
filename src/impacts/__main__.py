@@ -101,8 +101,11 @@ def _run_postsim_from_settings(
             pipeline_manifest_path = Path(run_manifest["pipeline_manifest_path"]).resolve()
     else:
         pipeline_manifest_path = _resolve_pipeline_manifest_path(settings_path, "pipeline_manifest.yaml")
+    from impacts.config.path_registry import SettingsPathResolver
+    resolver = SettingsPathResolver.from_settings(settings, settings_path)
     postprocess_from_pipeline_manifest(
         run_manifest_path=pipeline_manifest_path,
+        input_roots=resolver.all_input_roots,
     )
     logger.info("Postsim stage complete: pipeline_manifest=%s", pipeline_manifest_path)
 
