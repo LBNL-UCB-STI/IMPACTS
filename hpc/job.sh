@@ -60,7 +60,15 @@ configure_python_geospatial_data_paths() {
     local pyproj_data_dir
     local gdal_data_dir
 
-    pyproj_data_dir="$("$VENV_PATH/bin/python3" -c 'from pathlib import Path; import pyproj; print(Path(pyproj.__file__).resolve().parent / "proj_dir" / "share" / "proj")')"
+    # Use sys.prefix (venv root) to build paths — avoids .resolve() following
+    # symlinks into a different venv and producing PROJ database version mismatches.
+    pyproj_data_dir="$("$VENV_PATH/bin/python3" -c '
+import sys
+from pathlib import Path
+py_ver = "python{}.{}".format(*sys.version_info[:2])
+p = Path(sys.prefix) / "lib" / py_ver / "site-packages" / "pyproj" / "proj_dir" / "share" / "proj"
+print(str(p))
+')"
     if [ ! -f "$pyproj_data_dir/proj.db" ]; then
         echo "ERROR: pyproj PROJ database not found: $pyproj_data_dir/proj.db" >&2
         exit 1
@@ -69,7 +77,13 @@ configure_python_geospatial_data_paths() {
     export PROJ_DATA="$pyproj_data_dir"
     export PROJ_LIB="$pyproj_data_dir"
 
-    gdal_data_dir="$("$VENV_PATH/bin/python3" -c 'from pathlib import Path; import rasterio; print(Path(rasterio.__file__).resolve().parent / "gdal_data")')"
+    gdal_data_dir="$("$VENV_PATH/bin/python3" -c '
+import sys
+from pathlib import Path
+py_ver = "python{}.{}".format(*sys.version_info[:2])
+p = Path(sys.prefix) / "lib" / py_ver / "site-packages" / "rasterio" / "gdal_data"
+print(str(p) if p.is_dir() else "")
+')"
     if [ -d "$gdal_data_dir" ]; then
         export GDAL_DATA="$gdal_data_dir"
         echo "GDAL data: $GDAL_DATA"
