@@ -119,7 +119,7 @@ impacts:
     pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
     include_non_osm_car_links: true
     include_passenger: true
-    include_freight: false
+    include_freight: true
     enable_passenger_activity_correction: false
     enable_freight_activity_correction: false
     default_annualization_days:
@@ -150,7 +150,7 @@ impacts:
   analysis:
     # Optional baseline beam_concentration_distribution.parquet used by postprocess Step 6.
     # Relative paths are resolved from --impact-input-dir. Deltas are current run minus baseline.
-    delta_baseline_concentration_distribution_file: vehicle-tech/dispersions/beam_concentration_distribution.parquet
+    #delta_baseline_concentration_distribution_file: vehicle-tech/dispersions/beam_concentration_distribution.parquet
 
     targets: # 2018 year: https://www.baaqmd.gov/en/about-air-quality/emission-inventory/emissions-lookup-tool
       pm25_annual_short_tons:
