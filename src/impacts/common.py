@@ -46,10 +46,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _running_with_real_terminal() -> bool:
-    return sys.stdout.isatty() or sys.stderr.isatty()
-
-
 def make_progress(desc: str, *, total: Optional[int] = None, unit: str = "item", leave: bool = True) -> tqdm:
     return tqdm(
         total=total,
@@ -58,7 +54,7 @@ def make_progress(desc: str, *, total: Optional[int] = None, unit: str = "item",
         dynamic_ncols=True,
         file=sys.stdout,
         leave=leave,
-        disable=not (logger.isEnabledFor(logging.INFO) and _running_with_real_terminal()),
+        disable=not logger.isEnabledFor(logging.INFO),
     )
 
 
@@ -829,7 +825,7 @@ def _duckdb_scan_expression(path: str | Path) -> str:
 
 
 def _should_show_duckdb_progress_bar() -> bool:
-    return sys.stderr.isatty()
+    return True
 
 
 def _configure_duckdb_progress_bar(con: duckdb.DuckDBPyConnection, *, enabled: bool) -> None:

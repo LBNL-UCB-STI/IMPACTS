@@ -20,7 +20,6 @@ from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import read_vector
 from ...common import resolve_required_manifest_input
-from ...common import _running_with_real_terminal
 from ...manifest.schema import PipelineConfig
 
 logger = logging.getLogger(__name__)
@@ -60,10 +59,6 @@ def _osm_chordify_tqdm_ncols() -> int:
 
 @contextmanager
 def _log_safe_osm_chordify_progress() -> Iterator[None]:
-    if _running_with_real_terminal():
-        yield
-        return
-
     import osm_chordify.osm.intersect as osm_intersect
 
     original_tqdm = osm_intersect.tqdm
