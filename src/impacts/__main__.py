@@ -220,6 +220,14 @@ def build_parser() -> argparse.ArgumentParser:
             "/path/to/beam-data/sfbay. Can be supplied more than once."
         ),
     )
+    postprocess.add_argument(
+        "--baseline-concentration-parquet",
+        default=None,
+        help=(
+            "Path to a baseline beam_concentration_distribution.parquet for delta concentration "
+            "and delta exposure analysis (steps 6-7). Overrides delta_baseline_concentration_distribution_file in settings."
+        ),
+    )
 
     pipeline = subparsers.add_parser("pipeline", help="Run the maintained stage sequence from settings, honoring impacts.pipeline flags")
     pipeline.add_argument("--config", required=True)
@@ -377,17 +385,20 @@ def main(argv: list[str] | None = None) -> int:
         from impacts.postprocessor import postprocess_from_pipeline_manifest
         from impacts.postprocessor import postprocess_from_settings
 
+        baseline = args.baseline_concentration_parquet
         if args.run_manifest:
             postprocess_from_pipeline_manifest(
                 run_manifest_path=args.run_manifest,
                 manifest_path=args.postprocess_manifest,
                 input_roots=args.impact_input_dir,
+                baseline_concentration_override=baseline,
             )
         elif args.config:
             postprocess_from_settings(
                 settings_path=args.config,
                 manifest_path=args.postprocess_manifest,
                 input_roots=args.impact_input_dir,
+                baseline_concentration_override=baseline,
             )
         else:
             pipeline_manifest = Path(args.impact_output_dir) / "pipeline_manifest.yaml"
@@ -398,6 +409,7 @@ def main(argv: list[str] | None = None) -> int:
                 manifest_path=args.postprocess_manifest,
                 output_root_override=args.impact_output_dir,
                 input_roots=args.impact_input_dir,
+                baseline_concentration_override=baseline,
             )
         return 0
 

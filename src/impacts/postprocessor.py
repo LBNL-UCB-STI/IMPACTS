@@ -468,6 +468,7 @@ def _run_postprocess_steps(
     output_root: Path | None = None,
     allow_missing_source_inputs: bool = False,
     input_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
+    baseline_concentration_override: str | Path | None = None,
 ) -> dict[str, str]:
     from .pipeline.postprocess.step1_compare_fleet import run as run_step1
     from .pipeline.postprocess.step2_compare_annual_targets import run as run_step2
@@ -655,16 +656,28 @@ def _run_postprocess_steps(
     if not inmap_cells_path.exists():
         inmap_cells_path = output_root / "preprocess" / "inmap_grid.parquet"
     delta_baseline_concentration_path = None
-    delta_baseline_raw = getattr(settings.impacts.analysis, "delta_baseline_concentration_distribution_file", None)
-    if delta_baseline_raw:
-        delta_baseline_concentration_path = _resolve_delta_baseline_concentration_path(
-            delta_baseline_raw,
-            registry=registry,
-        )
-        if delta_baseline_concentration_path is None:
+    if baseline_concentration_override is not None:
+        p = Path(baseline_concentration_override).expanduser().resolve()
+        if p.exists():
+            delta_baseline_concentration_path = p
+        else:
+            logger.warning(
+                "Delta baseline concentration distribution was configured but not found — "
+                "skipping Steps 6-7. Path: %s",
+                baseline_concentration_override,
+            )
             _remove_stale_postprocess_delta_outputs(output_dir)
     else:
-        _remove_stale_postprocess_delta_outputs(output_dir)
+        delta_baseline_raw = getattr(settings.impacts.analysis, "delta_baseline_concentration_distribution_file", None)
+        if delta_baseline_raw:
+            delta_baseline_concentration_path = _resolve_delta_baseline_concentration_path(
+                delta_baseline_raw,
+                registry=registry,
+            )
+            if delta_baseline_concentration_path is None:
+                _remove_stale_postprocess_delta_outputs(output_dir)
+        else:
+            _remove_stale_postprocess_delta_outputs(output_dir)
     if conc_path.exists() and net_path.exists():
         map_outputs = run_step4(
             concentration_path=str(conc_path),
@@ -727,6 +740,7 @@ def postprocess_from_pipeline_manifest(
     manifest_path: str | Path | None = None,
     output_root_override: str | Path | None = None,
     input_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
+    baseline_concentration_override: str | Path | None = None,
 ) -> dict[str, Any]:
     output_root_arg = Path(output_root_override).resolve() if output_root_override is not None else None
     input_roots_arg = _normalize_input_roots(input_roots)
@@ -741,6 +755,7 @@ def postprocess_from_pipeline_manifest(
             settings_path,
             run_manifest_path=run_manifest_path,
             input_roots=input_roots_arg,
+            baseline_concentration_override=baseline_concentration_override,
         )
     else:
         postprocess_outputs = _run_postprocess_steps(
@@ -749,6 +764,7 @@ def postprocess_from_pipeline_manifest(
             output_root=output_root,
             allow_missing_source_inputs=True,
             input_roots=input_roots_arg,
+            baseline_concentration_override=baseline_concentration_override,
         )
 
     postprocess_manifest = {
@@ -779,6 +795,7 @@ def postprocess_from_settings(
     settings_path: str | Path,
     manifest_path: str | Path | None = None,
     input_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
+    baseline_concentration_override: str | Path | None = None,
 ) -> dict[str, Any]:
     from impacts.preprocessor import preprocess_workflow
     from impacts.runner import run_aermod_from_pipeline_manifest
@@ -815,4 +832,5 @@ def postprocess_from_settings(
         run_manifest_path=run_manifest_path,
         manifest_path=manifest_path,
         input_roots=input_roots,
+        baseline_concentration_override=baseline_concentration_override,
     )
