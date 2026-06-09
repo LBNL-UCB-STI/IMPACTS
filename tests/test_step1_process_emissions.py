@@ -279,24 +279,32 @@ def test_build_county_corrected_table_skips_when_inventory_corrections_disabled(
     pd.testing.assert_frame_equal(corrected, county_allocated)
 
 
-def test_aggregate_aermod_emissions_for_export_collapses_to_source_cells(tmp_path: Path) -> None:
+def test_aggregate_aermod_emissions_for_export_preserves_source_classes(tmp_path: Path) -> None:
     aermod_allocated = pd.DataFrame(
         [
             {
                 "aermod_cell_id": 101,
-                "source_temporal_class": "FREEWAY",
-                "source_release_height": 3.0,
+                "source_temporal_class": "CITYSTREET",
+                "source_release_height": 1.0,
                 "source_urban_class": 1000,
                 "tons_per_year_NOx_aermod_allocated": 1.25,
-                "tons_per_year_PM2_5_aermod_allocated": 0.25,
+                "tons_per_year_PM25_aermod_allocated": 0.25,
             },
             {
                 "aermod_cell_id": 101,
                 "source_temporal_class": "FREEWAY",
-                "source_release_height": 3.0,
+                "source_release_height": 3.5,
+                "source_urban_class": 1000,
+                "tons_per_year_NOx_aermod_allocated": 1.25,
+                "tons_per_year_PM25_aermod_allocated": 0.25,
+            },
+            {
+                "aermod_cell_id": 101,
+                "source_temporal_class": "FREEWAY",
+                "source_release_height": 3.5,
                 "source_urban_class": 1000,
                 "tons_per_year_NOx_aermod_allocated": 2.75,
-                "tons_per_year_PM2_5_aermod_allocated": 0.75,
+                "tons_per_year_PM25_aermod_allocated": 0.75,
             },
             {
                 "aermod_cell_id": 202,
@@ -304,7 +312,7 @@ def test_aggregate_aermod_emissions_for_export_collapses_to_source_cells(tmp_pat
                 "source_release_height": 1.0,
                 "source_urban_class": 0,
                 "tons_per_year_NOx_aermod_allocated": 5.0,
-                "tons_per_year_PM2_5_aermod_allocated": 1.5,
+                "tons_per_year_PM25_aermod_allocated": 1.5,
             },
         ]
     )
@@ -312,16 +320,24 @@ def test_aggregate_aermod_emissions_for_export_collapses_to_source_cells(tmp_pat
     aggregated = _aggregate_aermod_emissions_for_export(
         aermod_allocated,
         scratch_dir=tmp_path,
-    ).sort_values("aermod_cell_id").reset_index(drop=True)
+    ).sort_values(["aermod_cell_id", "source_release_height"]).reset_index(drop=True)
 
     assert aggregated.to_dict("records") == [
         {
             "aermod_cell_id": 101,
+            "source_temporal_class": "CITYSTREET",
+            "source_release_height": 1.0,
+            "source_urban_class": 1000,
+            "tons_per_year_NOx_aermod_allocated": 1.25,
+            "tons_per_year_PM25_aermod_allocated": 0.25,
+        },
+        {
+            "aermod_cell_id": 101,
             "source_temporal_class": "FREEWAY",
-            "source_release_height": 3.0,
+            "source_release_height": 3.5,
             "source_urban_class": 1000,
             "tons_per_year_NOx_aermod_allocated": 4.0,
-            "tons_per_year_PM2_5_aermod_allocated": 1.0,
+            "tons_per_year_PM25_aermod_allocated": 1.0,
         },
         {
             "aermod_cell_id": 202,
@@ -329,7 +345,7 @@ def test_aggregate_aermod_emissions_for_export_collapses_to_source_cells(tmp_pat
             "source_release_height": 1.0,
             "source_urban_class": 0,
             "tons_per_year_NOx_aermod_allocated": 5.0,
-            "tons_per_year_PM2_5_aermod_allocated": 1.5,
+            "tons_per_year_PM25_aermod_allocated": 1.5,
         },
     ]
 
@@ -399,6 +415,53 @@ def test_build_corrected_source_totals_preserves_aermod_source_attributes(tmp_pa
             "totVMT": 15.0,
             "totTrips": 3.0,
             "tons_per_year_NOx": 2.0,
+        },
+    ]
+
+
+def test_build_corrected_source_totals_keeps_distinct_release_heights(tmp_path: Path) -> None:
+    county_corrected = pd.DataFrame(
+        [
+            {
+                "linkId": 101,
+                "vehicleTypeId": "mixed-source",
+                "process": "RUNEX",
+                "roadCategory": "motorway",
+                "source_release_height": 1.0,
+                "tons_per_year_NOx_county_allocated": 1.25,
+            },
+            {
+                "linkId": 101,
+                "vehicleTypeId": "mixed-source",
+                "process": "RUNEX",
+                "roadCategory": "motorway",
+                "source_release_height": 3.5,
+                "tons_per_year_NOx_county_allocated": 0.75,
+            },
+        ]
+    )
+
+    corrected = _build_corrected_source_totals(
+        county_corrected,
+        scratch_dir=tmp_path,
+    ).sort_values("source_release_height").reset_index(drop=True)
+
+    assert corrected.to_dict("records") == [
+        {
+            "linkId": 101,
+            "vehicleTypeId": "mixed-source",
+            "process": "RUNEX",
+            "roadCategory": "motorway",
+            "source_release_height": 1.0,
+            "tons_per_year_NOx": 1.25,
+        },
+        {
+            "linkId": 101,
+            "vehicleTypeId": "mixed-source",
+            "process": "RUNEX",
+            "roadCategory": "motorway",
+            "source_release_height": 3.5,
+            "tons_per_year_NOx": 0.75,
         },
     ]
 

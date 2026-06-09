@@ -16,6 +16,7 @@ from scipy.signal import fftconvolve
 
 from ...common import log_step_banner
 from ...common import log_substep_banner
+from ...common import _table_available_columns
 from ...common import _should_show_duckdb_progress_bar
 from ...common import configure_duckdb_connection
 from ...common import read_table
@@ -126,26 +127,47 @@ def _prepare_source_emissions(
     source = emissions_gdf
     if source.geometry.isna().any():
         raise ValueError("AERMOD emissions input contains missing geometry.")
+    required_source_class_cols = [_SOURCE_TEMPORAL_COLUMN, _SOURCE_HEIGHT_COLUMN, _SOURCE_URBAN_COLUMN]
+    missing_source_class_cols = [col for col in required_source_class_cols if col not in source.columns]
+    if missing_source_class_cols:
+        raise ValueError(
+            "AERMOD emissions input is missing required source class columns: "
+            f"{missing_source_class_cols}"
+        )
+    temporal = source[_SOURCE_TEMPORAL_COLUMN].astype("string").str.strip()
+    heights = pd.to_numeric(source[_SOURCE_HEIGHT_COLUMN], errors="coerce")
+    urban = pd.to_numeric(source[_SOURCE_URBAN_COLUMN], errors="coerce")
+    invalid_source_class = (
+        temporal.isna()
+        | temporal.eq("")
+        | heights.isna()
+        | ~np.isfinite(heights)
+        | heights.le(0.0)
+        | urban.isna()
+    )
+    if invalid_source_class.any():
+        sample = source.loc[
+            invalid_source_class,
+            [source_id_col, _SOURCE_TEMPORAL_COLUMN, _SOURCE_HEIGHT_COLUMN, _SOURCE_URBAN_COLUMN],
+        ].head(10).to_dict(orient="records")
+        raise ValueError(
+            "AERMOD emissions input contains invalid source class values. "
+            f"sample={sample}"
+        )
     source_xm, source_ym = _geometry_midpoints(source.geometry)
-    has_temporal = _SOURCE_TEMPORAL_COLUMN in source.columns
-    has_height = _SOURCE_HEIGHT_COLUMN in source.columns
-    has_urban = _SOURCE_URBAN_COLUMN in source.columns
     source_frame = pd.DataFrame({source_id_col: source[source_id_col].to_numpy(), "source_xm": source_xm, "source_ym": source_ym})
-    if has_temporal:
-        source_frame[_SOURCE_TEMPORAL_COLUMN] = source[_SOURCE_TEMPORAL_COLUMN].astype("string").to_numpy()
-    if has_height:
-        source_frame[_SOURCE_HEIGHT_COLUMN] = pd.to_numeric(source[_SOURCE_HEIGHT_COLUMN], errors="coerce").fillna(1.0).to_numpy(dtype=np.float64)
-    if has_urban:
-        source_frame[_SOURCE_URBAN_COLUMN] = pd.to_numeric(source[_SOURCE_URBAN_COLUMN], errors="coerce").fillna(0).to_numpy(dtype=np.int64)
+    source_frame[_SOURCE_TEMPORAL_COLUMN] = temporal.to_numpy()
+    source_frame[_SOURCE_HEIGHT_COLUMN] = heights.to_numpy(dtype=np.float64)
+    source_frame[_SOURCE_URBAN_COLUMN] = urban.to_numpy(dtype=np.int64)
     for col in emissions_cols:
         source_frame[col] = pd.to_numeric(source[col], errors="coerce").fillna(0.0).to_numpy(dtype=np.float64)
+    source_class_cols = required_source_class_cols
     aggregation_select = ", ".join(
         ["AVG(source_xm) AS source_xm", "AVG(source_ym) AS source_ym"]
-        + ([f"ANY_VALUE({_SOURCE_TEMPORAL_COLUMN}) AS {_SOURCE_TEMPORAL_COLUMN}"] if has_temporal else [])
-        + ([f"ANY_VALUE({_SOURCE_HEIGHT_COLUMN}) AS {_SOURCE_HEIGHT_COLUMN}"] if has_height else [])
-        + ([f"ANY_VALUE({_SOURCE_URBAN_COLUMN}) AS {_SOURCE_URBAN_COLUMN}"] if has_urban else [])
+        + [f'"{col}" AS "{col}"' for col in source_class_cols]
         + [f"SUM({col}) AS {col}" for col in emissions_cols]
     )
+    group_by_cols = ", ".join([f'"{source_id_col}"'] + [f'"{col}"' for col in source_class_cols])
     con = duckdb.connect()
     show_progress = _should_show_duckdb_progress_bar()
     try:
@@ -157,7 +179,7 @@ def _prepare_source_emissions(
                 "{source_id_col}" AS "{source_id_col}",
                 {aggregation_select}
             FROM source_frame
-            GROUP BY 1
+            GROUP BY {group_by_cols}
             """
         ).df()
     finally:
@@ -224,7 +246,12 @@ def _prepare_target_grid(
 def _load_asrv_patterns(path: str) -> gpd.GeoDataFrame:
     candidate = Path(path)
     if candidate.suffix.lower() == ".parquet":
-        try:
+        available = set(_table_available_columns(str(candidate)))
+        required = {"Concentration", "Distance", "DataSet_ID", "Emissions", "Height", "Urban_Rural"}
+        missing = sorted(required - available)
+        if missing:
+            raise ValueError(f"AERMOD ASRV patterns parquet is missing required columns: {missing}")
+        if "geometry" in available:
             return gpd.read_parquet(
                 candidate,
                 columns=[
@@ -237,27 +264,37 @@ def _load_asrv_patterns(path: str) -> gpd.GeoDataFrame:
                     "geometry",
                 ],
             )
-        except Exception:
+        if {"Longitude", "Latitude"}.issubset(available):
             frame = read_table(str(candidate))
-            if {"Longitude", "Latitude"}.issubset(frame.columns):
-                return gpd.GeoDataFrame(
-                    frame,
-                    geometry=gpd.points_from_xy(frame["Longitude"], frame["Latitude"]),
-                    crs="EPSG:4326",
-                )
-            raise
+            return gpd.GeoDataFrame(
+                frame,
+                geometry=gpd.points_from_xy(frame["Longitude"], frame["Latitude"]),
+                crs="EPSG:4326",
+            )
+        raise ValueError(
+            "AERMOD ASRV patterns parquet must include either geometry or Longitude/Latitude columns."
+        )
     return read_vector(str(candidate))
 
 
 def _load_emissions_input(path: str, *, pipeline: PipelineConfig) -> gpd.GeoDataFrame:
     candidate = Path(path)
     if candidate.suffix.lower() == ".parquet":
-        emissions_cols = [f"tons_per_year_{pollutant}_aermod_allocated" for pollutant in list(pipeline.pollutants)]
+        available = set(_table_available_columns(str(candidate)))
+        required = {_AERMOD_SOURCE_ID_COLUMN, _SOURCE_TEMPORAL_COLUMN, _SOURCE_HEIGHT_COLUMN, _SOURCE_URBAN_COLUMN, "geometry"}
+        missing = sorted(required - available)
+        if missing:
+            raise ValueError(
+                "AERMOD emissions input parquet is missing required source columns: "
+                f"{missing}"
+            )
+        emissions_cols = [
+            f"tons_per_year_{pollutant}_aermod_allocated"
+            for pollutant in list(pipeline.pollutants)
+            if f"tons_per_year_{pollutant}_aermod_allocated" in available
+        ]
         requested = list(dict.fromkeys([_AERMOD_SOURCE_ID_COLUMN, *emissions_cols, _SOURCE_TEMPORAL_COLUMN, _SOURCE_HEIGHT_COLUMN, _SOURCE_URBAN_COLUMN, "geometry"]))
-        try:
-            return gpd.read_parquet(candidate, columns=requested)
-        except Exception:
-            return gpd.read_parquet(candidate)
+        return gpd.read_parquet(candidate, columns=requested)
     return read_vector(str(candidate))
 
 
@@ -273,38 +310,6 @@ def _load_vector_subset(path: str, *, columns: Optional[list[str]] = None) -> gp
     if "geometry" not in keep:
         keep.append("geometry")
     return gdf[keep]
-
-
-def _parse_available_pattern_keys(available_pattern_keys: set[str]) -> pd.DataFrame:
-    rows = []
-    for key in available_pattern_keys:
-        parts = key.split("__")
-        if len(parts) != 4:
-            continue
-        site, urban_str, temporal, height_str = parts
-        try:
-            rows.append({"pattern_key": key, "site": site, "urban": int(urban_str), "temporal": temporal, "height": float(height_str)})
-        except (ValueError, TypeError):
-            continue
-    return pd.DataFrame(rows, columns=["pattern_key", "site", "urban", "temporal", "height"])
-
-
-def _find_nearest_pattern(
-    site: str,
-    urban: Optional[int],
-    temporal: Optional[str],
-    height: Optional[float],
-    parsed_patterns: pd.DataFrame,
-) -> Optional[str]:
-    site_patterns = parsed_patterns[parsed_patterns["site"] == site]
-    if site_patterns.empty:
-        return None
-    candidates = site_patterns.copy()
-    candidates["temporal_mismatch"] = 0 if temporal is None else (candidates["temporal"] != temporal).astype(int)
-    candidates["height_diff"] = 0.0 if height is None else (candidates["height"] - height).abs()
-    candidates["urban_diff"] = 0 if urban is None else (candidates["urban"] - urban).abs()
-    best = candidates.sort_values(["temporal_mismatch", "height_diff", "urban_diff"]).iloc[0]
-    return str(best["pattern_key"])
 
 
 def _pattern_keys_from_raw_frame(patterns_df: pd.DataFrame) -> pd.Series:
@@ -447,51 +452,44 @@ def _assign_source_pattern_keys(
     nearest_idx = np.argmin((source_x - site_x[None, :]) ** 2 + (source_y - site_y[None, :]) ** 2, axis=1)
     result["nearest_site"] = site_reference["DataSet_ID"].to_numpy()[nearest_idx]
 
-    has_urban = _SOURCE_URBAN_COLUMN in result.columns
-    has_temporal = _SOURCE_TEMPORAL_COLUMN in result.columns
-    has_height = _SOURCE_HEIGHT_COLUMN in result.columns
-
-    if has_urban and has_temporal and has_height:
-        urban_series = pd.to_numeric(result[_SOURCE_URBAN_COLUMN], errors="coerce")
-        temporal_series = result[_SOURCE_TEMPORAL_COLUMN].astype("string").str.strip().replace("", pd.NA)
-        height_series = pd.to_numeric(result[_SOURCE_HEIGHT_COLUMN], errors="coerce")
-        result["pattern_key_raw"] = (
-            result["nearest_site"].astype(str)
-            + "__"
-            + urban_series.astype("Int64").astype(str)
-            + "__"
-            + temporal_series.astype(str)
-            + "__"
-            + height_series.map(lambda v: f"{float(v):g}" if pd.notna(v) else "nan")
-        )
-        result["pattern_key"] = result["pattern_key_raw"]
-    else:
-        result["pattern_key"] = pd.NA
-        urban_series = pd.to_numeric(result[_SOURCE_URBAN_COLUMN], errors="coerce") if has_urban else None
-        temporal_series = result[_SOURCE_TEMPORAL_COLUMN].astype("string").str.strip().replace("", pd.NA) if has_temporal else None
-        height_series = pd.to_numeric(result[_SOURCE_HEIGHT_COLUMN], errors="coerce") if has_height else None
-
-    missing_mask = result["pattern_key"].isna() | ~result["pattern_key"].isin(available_pattern_keys)
+    required = [_SOURCE_URBAN_COLUMN, _SOURCE_TEMPORAL_COLUMN, _SOURCE_HEIGHT_COLUMN]
+    missing = [col for col in required if col not in result.columns]
+    if missing:
+        raise ValueError(f"AERMOD source rows are missing required source class columns: {missing}")
+    urban_series = pd.to_numeric(result[_SOURCE_URBAN_COLUMN], errors="coerce")
+    temporal_series = result[_SOURCE_TEMPORAL_COLUMN].astype("string").str.strip()
+    height_series = pd.to_numeric(result[_SOURCE_HEIGHT_COLUMN], errors="coerce")
+    invalid = (
+        urban_series.isna()
+        | temporal_series.isna()
+        | temporal_series.eq("")
+        | height_series.isna()
+        | ~np.isfinite(height_series)
+        | height_series.le(0.0)
+    )
+    if invalid.any():
+        sample = result.loc[
+            invalid,
+            ["nearest_site", _SOURCE_URBAN_COLUMN, _SOURCE_TEMPORAL_COLUMN, _SOURCE_HEIGHT_COLUMN],
+        ].head(10).to_dict(orient="records")
+        raise ValueError(f"AERMOD source rows have invalid source class values: sample={sample}")
+    result["pattern_key_raw"] = (
+        result["nearest_site"].astype(str)
+        + "__"
+        + urban_series.astype("Int64").astype(str)
+        + "__"
+        + temporal_series.astype(str)
+        + "__"
+        + height_series.map(lambda v: f"{float(v):g}")
+    )
+    result["pattern_key"] = result["pattern_key_raw"]
+    missing_mask = ~result["pattern_key"].isin(available_pattern_keys)
     if missing_mask.any():
-        parsed_patterns = _parse_available_pattern_keys(available_pattern_keys)
-        for idx in result.index[missing_mask]:
-            row = result.loc[idx]
-            urban = int(urban_series.loc[idx]) if urban_series is not None and pd.notna(urban_series.loc[idx]) else None
-            temporal = str(temporal_series.loc[idx]) if temporal_series is not None and pd.notna(temporal_series.loc[idx]) else None
-            height = float(height_series.loc[idx]) if height_series is not None and pd.notna(height_series.loc[idx]) else None
-            nearest = _find_nearest_pattern(
-                site=str(row["nearest_site"]),
-                urban=urban,
-                temporal=temporal,
-                height=height,
-                parsed_patterns=parsed_patterns,
-            )
-            if nearest is None:
-                raise ValueError(
-                    f"No ASRV patterns found for nearest site '{row['nearest_site']}'. "
-                    "Ensure the pattern library covers the study area."
-                )
-            result.at[idx, "pattern_key"] = nearest
+        missing_keys = sorted(result.loc[missing_mask, "pattern_key"].astype(str).unique().tolist())
+        raise ValueError(
+            "AERMOD ASRV pattern library is missing exact source class patterns. "
+            f"Missing keys: {missing_keys[:10]}"
+        )
 
     return result
 
@@ -764,6 +762,13 @@ def _validate_aermod_concentrations_schema(
             "AERMOD concentrations table is missing its target id column. "
             f"Expected '{target_id_col}'."
         )
+    target_ids = pd.Series(concentrations_df[target_id_col])
+    duplicate_ids = target_ids.loc[target_ids.notna() & target_ids.duplicated(keep=False)].drop_duplicates().tolist()
+    if duplicate_ids:
+        raise ValueError(
+            "AERMOD concentrations table must contain at most one row per "
+            f"{target_id_col}; duplicate ids: {duplicate_ids[:10]}"
+        )
 
     concentration_cols = [
         col for col in concentrations_df.columns
@@ -848,7 +853,12 @@ def run(
     target_id_col = _resolve_target_grid_id_column(pipeline, target_grid)
     emissions_cols = _emissions_columns(emissions_gdf, pipeline)
     if emissions_input_gdf is None:
-        keep_cols = [source_id_col] + emissions_cols
+        source_class_cols = [
+            col
+            for col in (_SOURCE_TEMPORAL_COLUMN, _SOURCE_HEIGHT_COLUMN, _SOURCE_URBAN_COLUMN)
+            if col in emissions_gdf.columns
+        ]
+        keep_cols = [source_id_col] + source_class_cols + emissions_cols
         emissions_gdf = emissions_gdf[keep_cols + ["geometry"]]
     _trace_frame("0", "aermod_source_emissions", pd.DataFrame(emissions_gdf.drop(columns="geometry")), key_cols=[source_id_col])
 

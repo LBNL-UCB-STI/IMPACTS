@@ -4,6 +4,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
+import pytest
 from shapely.geometry import Polygon
 
 from impacts.manifest.schema import PipelineConfig
@@ -50,8 +51,8 @@ def _pipeline(
             "passenger_vehicle_types_file": str(tmp_path / "vehicleTypes--atlas.csv"),
             "freight_vehicle_types_file": str(tmp_path / "vehicleTypes--frism.csv"),
             "prepared_skims_group_cols": ["hour", "linkId"],
-            "pollutants": ["NOx", "PM2_5", "BC"],
-            "source_pollutants": ["NOx", "PM2_5", "BC"],
+            "pollutants": ["NOx", "PM25", "BC"],
+            "source_pollutants": ["NOx", "PM25", "BC"],
             "vehicle_category_metadata_file": str(tmp_path / "vehicle_category_metadata.csv"),
             "annualization_days": {"light_duty": 327.0, "medium_heavy_duty": 312.0},
             "population_sample": 0.1,
@@ -106,6 +107,7 @@ def test_build_full_exposure_grid_uses_inmap_secondary_and_aermod_primary(tmp_pa
         pipeline=_pipeline(tmp_path, grid_path),
         prepared_inmap=prepared_inmap,
         prepared_aermod=prepared_aermod,
+        working_dir=tmp_path,
     ).drop(columns="geometry")
 
     by_id = result.set_index("aermod_cell_id")
@@ -171,6 +173,7 @@ def test_build_full_exposure_grid_can_scale_aermod_primary_to_inmap_domain_budge
         ),
         prepared_inmap=prepared_inmap,
         prepared_aermod=prepared_aermod,
+        working_dir=tmp_path,
     )
 
     by_id = result.drop(columns="geometry").set_index("aermod_cell_id")
@@ -234,6 +237,7 @@ def test_build_full_exposure_grid_can_ignore_aermod_primary_with_inmap_only_stra
         ),
         prepared_inmap=prepared_inmap,
         prepared_aermod=prepared_aermod,
+        working_dir=tmp_path,
     ).drop(columns="geometry")
 
     by_id = result.set_index("aermod_cell_id")
@@ -317,6 +321,7 @@ def test_build_full_exposure_grid_handles_missing_aermod_bc_and_no2_columns(tmp_
         pipeline=_pipeline(tmp_path, grid_path),
         prepared_inmap=prepared_inmap,
         prepared_aermod=prepared_aermod,
+        working_dir=tmp_path,
     ).drop(columns="geometry")
 
     by_id = result.set_index("aermod_cell_id")
@@ -376,6 +381,7 @@ def test_build_full_exposure_grid_uses_per_pollutant_aermod_increment_masks(tmp_
         pipeline=_pipeline(tmp_path, grid_path),
         prepared_inmap=prepared_inmap,
         prepared_aermod=prepared_aermod,
+        working_dir=tmp_path,
     ).drop(columns="geometry")
 
     by_id = result.set_index("aermod_cell_id")
@@ -389,3 +395,79 @@ def test_build_full_exposure_grid_uses_per_pollutant_aermod_increment_masks(tmp_
     assert by_id.loc[22, "TotalPM25"] == 2.2
     assert by_id.loc[22, "BC"] == 0.4
     assert by_id.loc[22, "NO2"] == 6.0
+
+
+def test_build_full_exposure_grid_rejects_duplicate_inmap_rows(tmp_path: Path) -> None:
+    full_grid = gpd.GeoDataFrame(
+        {
+            "aermod_cell_id": [11],
+            "inmap_cell_id": [101],
+            "geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])],
+        },
+        geometry="geometry",
+        crs="EPSG:26910",
+    )
+    grid_path = tmp_path / "full_grid.parquet"
+    full_grid.to_parquet(grid_path, index=False)
+
+    prepared_inmap = gpd.GeoDataFrame(
+        {
+            "inmap_cell_id": [101, 101],
+            "inmap_PrimaryPM25": [0.1, 9.9],
+            "inmap_SecondaryPM25": [1.0, 9.9],
+            "geometry": [full_grid.geometry.iloc[0], full_grid.geometry.iloc[0]],
+        },
+        geometry="geometry",
+        crs=full_grid.crs,
+    )
+
+    with pytest.raises(ValueError, match="Prepared InMAP concentrations.*one row per inmap_cell_id"):
+        _build_full_exposure_grid(
+            pipeline=_pipeline(tmp_path, grid_path),
+            prepared_inmap=prepared_inmap,
+            prepared_aermod=None,
+            working_dir=tmp_path,
+        )
+
+
+def test_build_full_exposure_grid_rejects_duplicate_aermod_rows(tmp_path: Path) -> None:
+    full_grid = gpd.GeoDataFrame(
+        {
+            "aermod_cell_id": [11],
+            "inmap_cell_id": [101],
+            "geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])],
+        },
+        geometry="geometry",
+        crs="EPSG:26910",
+    )
+    grid_path = tmp_path / "full_grid.parquet"
+    full_grid.to_parquet(grid_path, index=False)
+
+    prepared_inmap = gpd.GeoDataFrame(
+        {
+            "inmap_cell_id": [101],
+            "inmap_PrimaryPM25": [0.1],
+            "inmap_SecondaryPM25": [1.0],
+            "geometry": [full_grid.geometry.iloc[0]],
+        },
+        geometry="geometry",
+        crs=full_grid.crs,
+    )
+    prepared_aermod = gpd.GeoDataFrame(
+        {
+            "aermod_cell_id": [11, 11],
+            "aermod_PrimaryPM25": [0.9, 9.9],
+            "aermod_SecondaryPM25": [0.0, 0.0],
+            "geometry": [full_grid.geometry.iloc[0], full_grid.geometry.iloc[0]],
+        },
+        geometry="geometry",
+        crs=full_grid.crs,
+    )
+
+    with pytest.raises(ValueError, match="Prepared AERMOD concentrations.*one row per aermod_cell_id"):
+        _build_full_exposure_grid(
+            pipeline=_pipeline(tmp_path, grid_path),
+            prepared_inmap=prepared_inmap,
+            prepared_aermod=prepared_aermod,
+            working_dir=tmp_path,
+        )

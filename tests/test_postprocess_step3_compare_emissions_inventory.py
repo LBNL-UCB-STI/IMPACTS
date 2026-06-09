@@ -15,7 +15,7 @@ def test_postprocess_step3_writes_comparison_table_and_plots(tmp_path: Path) -> 
             "county_COUNTYFP": ["001", "001", "013"],
             "vehicleTypeId": ["vt-1", "vt-2", "vt-3"],
             "process": ["RUNEX", "PMBW", "RUNEX"],
-            "tons_per_year_PM2_5_county_allocated": [1.0, 2.0, 4.0],
+            "tons_per_year_PM25_county_allocated": [1.0, 2.0, 4.0],
             "tons_per_year_NOx_county_allocated": [3.0, 4.0, 5.0],
             "tons_per_year_BC_county_allocated": [0.5, 0.25, 0.75],
         }
@@ -102,7 +102,7 @@ def test_postprocess_step3_can_compare_road_dust_pm25_only(tmp_path: Path) -> No
             "county_COUNTYFP": ["001"],
             "vehicleTypeId": ["vt-1"],
             "process": ["PRDUST"],
-            "tons_per_year_PM2_5_county_allocated": [1.0],
+            "tons_per_year_PM25_county_allocated": [1.0],
         }
     )
     modeled_path = tmp_path / "beam_emissions_by_county_process.parquet"

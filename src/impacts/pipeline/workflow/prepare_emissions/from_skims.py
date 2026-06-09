@@ -12,6 +12,7 @@ from typing import List
 from typing import Optional
 
 import duckdb
+import numpy as np
 import pandas as pd
 
 from ....common import configure_duckdb_connection
@@ -471,6 +472,25 @@ def _build_zone_allocated_table(
 
     has_road_category = "roadCategory" in skims_df.columns
     has_release_height = "source_release_height" in skims_df.columns
+    if zone_label == "aermod":
+        missing = [
+            col
+            for col, present in (("roadCategory", has_road_category), ("source_release_height", has_release_height))
+            if not present
+        ]
+        if missing:
+            raise ValueError(
+                "AERMOD allocation requires prepared skims with explicit source attributes. "
+                f"Missing columns: {missing}"
+            )
+        heights = pd.to_numeric(skims_df["source_release_height"], errors="coerce")
+        invalid_height = heights.isna() | ~np.isfinite(heights) | heights.le(0.0)
+        if invalid_height.any():
+            sample = skims_df.loc[invalid_height, ["linkId", "vehicleTypeId", "process"]].head(10).to_dict(orient="records")
+            raise ValueError(
+                "AERMOD allocation found invalid source_release_height values in prepared skims. "
+                f"sample={sample}"
+            )
     extra_cols = (["roadCategory"] if has_road_category else []) + (["source_release_height"] if has_release_height else [])
     merge_cols = ["linkId"] + extra_cols + ["vehicleTypeId", "process"] + activity_cols + emission_cols
     con = duckdb.connect()
@@ -494,7 +514,7 @@ def _build_zone_allocated_table(
         if has_road_category:
             extra_selects += ',\n                trim(CAST(s."roadCategory" AS VARCHAR)) AS "roadCategory"'
         if has_release_height:
-            extra_selects += ',\n                COALESCE(TRY_CAST(s."source_release_height" AS DOUBLE), 1.0) AS "source_release_height"'
+            extra_selects += ',\n                TRY_CAST(s."source_release_height" AS DOUBLE) AS "source_release_height"'
         query = f"""
             SELECT
                 g."linkId" AS "linkId",
@@ -536,6 +556,16 @@ def _compute_aermod_source_attributes_parquet(
     freeway_road_categories: frozenset[str],
     cell_population_df: Optional[pd.DataFrame] = None,
 ) -> None:
+    if cell_population_df is None:
+        raise ValueError(
+            "AERMOD source attribute preparation requires aermod_cell_population with source_urban_class."
+        )
+    missing_population_cols = sorted({"aermod_cell_id", "source_urban_class"} - set(cell_population_df.columns))
+    if missing_population_cols:
+        raise ValueError(
+            "AERMOD cell population table is missing required columns: "
+            f"{missing_population_cols}"
+        )
     freeway_list = ", ".join(f"'{c}'" for c in sorted(freeway_road_categories))
     in_sql = input_path.replace("'", "''")
     out_sql = output_path.replace("'", "''")
@@ -544,32 +574,47 @@ def _compute_aermod_source_attributes_parquet(
     try:
         configure_duckdb_connection(con, working_dir=scratch_dir, show_progress=True, profile="memory_heavy")
         cols = [row[0] for row in con.execute(f"DESCRIBE SELECT * FROM parquet_scan('{in_sql}')").fetchall()]
-        passthrough = [f'a."{c}"' for c in cols if c != "source_release_height"]
-        if cell_population_df is not None:
-            con.register(
-                "_cell_pop",
-                cell_population_df[["aermod_cell_id", "source_urban_class"]],
+        required_cols = {"aermod_cell_id", "roadCategory", "source_release_height"}
+        missing_cols = sorted(required_cols - set(cols))
+        if missing_cols:
+            raise ValueError(
+                "AERMOD allocated emissions table is missing required source attribute columns: "
+                f"{missing_cols}"
             )
-            urban_class_expr = 'COALESCE(TRY_CAST(p."source_urban_class" AS BIGINT), 0)'
-            join_clause = 'LEFT JOIN _cell_pop AS p ON TRY_CAST(a."aermod_cell_id" AS BIGINT) = TRY_CAST(p."aermod_cell_id" AS BIGINT)'
-        else:
-            urban_class_expr = "0"
-            join_clause = ""
+        generated_cols = {"source_temporal_class", "source_release_height", "source_urban_class"}
+        passthrough = [f'a."{c}"' for c in cols if c not in generated_cols]
+        con.register(
+            "_cell_pop",
+            cell_population_df[["aermod_cell_id", "source_urban_class"]],
+        )
+        invalid_count = con.execute(f"""
+            SELECT COUNT(*)
+            FROM parquet_scan('{in_sql}') AS a
+            LEFT JOIN _cell_pop AS p
+              ON TRY_CAST(a."aermod_cell_id" AS BIGINT) = TRY_CAST(p."aermod_cell_id" AS BIGINT)
+            WHERE TRY_CAST(a."aermod_cell_id" AS BIGINT) IS NULL
+               OR trim(CAST(a."roadCategory" AS VARCHAR)) = ''
+               OR TRY_CAST(a."source_release_height" AS DOUBLE) IS NULL
+               OR TRY_CAST(a."source_release_height" AS DOUBLE) <= 0.0
+               OR TRY_CAST(p."source_urban_class" AS BIGINT) IS NULL
+        """).fetchone()[0]
+        if invalid_count:
+            raise ValueError(
+                "AERMOD source attribute preparation found rows with invalid source attributes "
+                f"or missing aermod_cell_population matches: rows={invalid_count}"
+            )
         con.execute(f"""
             COPY (
                 SELECT
                     {", ".join(passthrough)},
-                    CASE WHEN MAX(
-                            CASE WHEN trim(CAST(a."roadCategory" AS VARCHAR)) IN ({freeway_list})
-                                 THEN 1 ELSE 0 END
-                         ) OVER (PARTITION BY a."aermod_cell_id") = 1
+                    CASE WHEN trim(CAST(a."roadCategory" AS VARCHAR)) IN ({freeway_list})
                          THEN 'FREEWAY' ELSE 'CITYSTREET'
                     END AS "source_temporal_class",
-                    MAX(COALESCE(TRY_CAST(a."source_release_height" AS DOUBLE), 1.0))
-                        OVER (PARTITION BY a."aermod_cell_id") AS "source_release_height",
-                    {urban_class_expr} AS "source_urban_class"
+                    TRY_CAST(a."source_release_height" AS DOUBLE) AS "source_release_height",
+                    TRY_CAST(p."source_urban_class" AS BIGINT) AS "source_urban_class"
                 FROM parquet_scan('{in_sql}') AS a
-                {join_clause}
+                INNER JOIN _cell_pop AS p
+                  ON TRY_CAST(a."aermod_cell_id" AS BIGINT) = TRY_CAST(p."aermod_cell_id" AS BIGINT)
             ) TO '{out_sql}' (FORMAT PARQUET)
         """)
     finally:

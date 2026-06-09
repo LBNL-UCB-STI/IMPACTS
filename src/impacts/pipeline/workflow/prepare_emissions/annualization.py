@@ -190,26 +190,23 @@ def _annualize_prepared_skims_with_duckdb(
         }
     )
     lookup_df["assignment_group"] = lookup_df["vehicleTypeId"].map(assignment_group_lookup).fillna("")
-    has_height_lookup = bool(tailpipe_height_lookup)
     height_lookup_df = pd.DataFrame(
         {
             "vehicleTypeId": list(tailpipe_height_lookup.keys()),
             "tailpipe_height_meters": list(tailpipe_height_lookup.values()),
         }
-    ) if has_height_lookup else None
+    )
     output_columns = list(prepared_group_cols)
     if "attributeOrigType" in link_lengths.columns:
         output_columns.append("roadCategory")
-    if has_height_lookup:
-        output_columns.append("source_release_height")
+    output_columns.append("source_release_height")
     output_columns.extend(["totTrips", "totVMT"])
     output_columns.extend([f"tons_per_year_{pollutant}" for pollutant in required_pollutants])
     try:
         configure_duckdb_connection(con, working_dir=output_path, show_progress=False, profile="balanced")
         con.register("link_lengths", link_lengths)
         con.register("annualization_lookup", lookup_df)
-        if has_height_lookup:
-            con.register("height_lookup", height_lookup_df)
+        con.register("height_lookup", height_lookup_df)
         missing_vehicle_types = [
             row[0]
             for row in con.execute(
@@ -230,6 +227,26 @@ def _annualize_prepared_skims_with_duckdb(
                 "the configured passenger/freight vehicle types files: "
                 f"sample={missing_vehicle_types[:10]}"
             )
+        missing_height_vehicle_types = [
+            row[0]
+            for row in con.execute(
+                f"""
+                SELECT DISTINCT trim(CAST(source.vehicleTypeId AS VARCHAR)) AS vehicleTypeId
+                FROM {scan} AS source
+                LEFT JOIN height_lookup
+                  ON trim(CAST(source.vehicleTypeId AS VARCHAR)) = height_lookup.vehicleTypeId
+                WHERE height_lookup.tailpipe_height_meters IS NULL
+                LIMIT 10
+                """
+            ).fetchall()
+            if row[0]
+        ]
+        if missing_height_vehicle_types:
+            raise ValueError(
+                "Could not resolve tailpipe release height for some skim vehicleTypeId values using "
+                "vehicle_category_metadata_file and passenger/freight vehicle types files: "
+                f"sample={missing_height_vehicle_types[:10]}"
+            )
 
         vehicle_type_expr = "trim(CAST(source.vehicleTypeId AS VARCHAR))"
         scale_expr = (
@@ -249,10 +266,7 @@ def _annualize_prepared_skims_with_duckdb(
                 select_parts.append(f'source."{col}" AS "{col}"')
         if "attributeOrigType" in link_lengths.columns:
             select_parts.append('link_lengths.attributeOrigType AS "roadCategory"')
-        if has_height_lookup:
-            select_parts.append(
-                f'COALESCE(height_lookup.tailpipe_height_meters, {_DEFAULT_TAILPIPE_HEIGHT_METERS}) AS "source_release_height"'
-            )
+        select_parts.append('height_lookup.tailpipe_height_meters AS "source_release_height"')
         select_parts.append(f"{tot_trips_expr} AS totTrips")
         select_parts.append(
             f"({tot_trips_expr} * COALESCE(TRY_CAST(link_lengths.\"{beam_length_col}\" AS DOUBLE), 0.0) / {_METERS_PER_MILE}) AS totVMT"
@@ -266,10 +280,6 @@ def _annualize_prepared_skims_with_duckdb(
                     / {grams_per_short_ton}
                 ) AS "tons_per_year_{pollutant}" """
             )
-        height_join = (
-            f"\n            LEFT JOIN height_lookup ON {vehicle_type_expr} = height_lookup.vehicleTypeId"
-            if has_height_lookup else ""
-        )
         query = f"""
             SELECT
                 {", ".join(select_parts)}
@@ -277,7 +287,9 @@ def _annualize_prepared_skims_with_duckdb(
             LEFT JOIN link_lengths
               ON source.linkId = link_lengths.linkId
             LEFT JOIN annualization_lookup AS lookup
-              ON {vehicle_type_expr} = lookup.vehicleTypeId{height_join}
+              ON {vehicle_type_expr} = lookup.vehicleTypeId
+            INNER JOIN height_lookup
+              ON {vehicle_type_expr} = height_lookup.vehicleTypeId
         """
         output_sql = str(output_path).replace("'", "''")
         if show_progress:
@@ -327,20 +339,34 @@ def _resolve_vehicle_type_annualization_days_lookup(
     return resolved
 
 
-_DEFAULT_TAILPIPE_HEIGHT_METERS = 1.0
-
-
 def _load_vehicle_tailpipe_height_lookup(csv_path: str) -> dict[str, float]:
     frame = read_table(csv_path)
     category_column = "emfac_vehicle_category"
-    if category_column not in frame.columns or "tailpipe_height_meters" not in frame.columns:
-        return {}
+    if category_column not in frame.columns:
+        raise ValueError(
+            "Vehicle category metadata CSV is missing required column 'emfac_vehicle_category'"
+        )
+    if "tailpipe_height_meters" not in frame.columns:
+        raise ValueError(
+            "Vehicle category metadata CSV is missing required column 'tailpipe_height_meters'. "
+            "AERMOD source release heights must be resolved from vehicle type metadata."
+        )
     lookup: dict[str, float] = {}
     for row in frame[[category_column, "tailpipe_height_meters"]].itertuples(index=False):
         category = str(row[0]).strip()
         if not category or pd.isna(row[1]) or str(row[1]).strip() == "":
             continue
-        lookup[category] = float(row[1])
+        height = float(row[1])
+        if not np.isfinite(height) or height <= 0.0:
+            raise ValueError(
+                "Vehicle category metadata has invalid tailpipe_height_meters for "
+                f"emfac_vehicle_category={category!r}: {row[1]!r}"
+            )
+        lookup[category] = height
+    if not lookup:
+        raise ValueError(
+            "Vehicle category metadata did not provide any non-empty tailpipe_height_meters values."
+        )
     return lookup
 
 
@@ -350,14 +376,16 @@ def _resolve_vehicle_type_tailpipe_height_lookup(
     passenger_vehicle_types_path: Optional[str],
     freight_vehicle_types_path: Optional[str],
 ) -> dict[str, float]:
-    if not vehicle_category_metadata_file or not passenger_vehicle_types_path or not freight_vehicle_types_path:
-        return {}
+    if not vehicle_category_metadata_file:
+        raise ValueError("vehicle_category_metadata_file is required to resolve AERMOD source release heights.")
+    if not passenger_vehicle_types_path or not freight_vehicle_types_path:
+        raise ValueError(
+            "Passenger and freight vehicle types inputs are required to resolve AERMOD source release heights."
+        )
     csv_path = str(vehicle_category_metadata_file).strip()
     if not csv_path:
-        return {}
+        raise ValueError("vehicle_category_metadata_file must be non-empty to resolve AERMOD source release heights.")
     height_by_category = _load_vehicle_tailpipe_height_lookup(csv_path)
-    if not height_by_category:
-        return {}
     _, sanitized_categories = _load_vehicle_operation_days_lookup(csv_path)
     vehicle_type_category_lookup = _load_vehicle_type_category_lookup(
         passenger_vehicle_types_path,
@@ -366,7 +394,7 @@ def _resolve_vehicle_type_tailpipe_height_lookup(
         sanitized_categories=sanitized_categories,
     )
     return {
-        vehicle_type_id: float(height_by_category.get(category, _DEFAULT_TAILPIPE_HEIGHT_METERS))
+        vehicle_type_id: float(height_by_category[category])
         for vehicle_type_id, category in vehicle_type_category_lookup.items()
     }
 
@@ -515,6 +543,18 @@ def _load_vehicle_type_category_lookup(
                 raise ValueError(
                     "Vehicle types input contains EMFAC categories not present in the configured annualization CSV: "
                     f"{missing_categories[:10]}"
+                )
+            category_conflicts = (
+                category_rows[["vehicleTypeId", "emfacVehicleCategory"]]
+                .drop_duplicates()
+                .groupby("vehicleTypeId", dropna=False)["emfacVehicleCategory"]
+                .nunique()
+            )
+            conflicting_vehicle_types = category_conflicts.loc[category_conflicts.gt(1)].index.astype(str).tolist()
+            if conflicting_vehicle_types:
+                raise ValueError(
+                    "Vehicle types input has conflicting emfacVehicleCategory rows for vehicleTypeId values: "
+                    f"{conflicting_vehicle_types[:10]}"
                 )
             return (
                 category_rows[["vehicleTypeId", "emfacVehicleCategory"]]

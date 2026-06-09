@@ -171,4 +171,4 @@ def test_build_road_dust_rows_generates_residential_link_rows(tmp_path) -> None:
     residential_link = result[result["roadCategory"].astype(str) == "residential_link"]
     assert not residential_link.empty
     assert set(residential_link["process"].astype(str)) == {"PRDUST"}
-    assert set(residential_link["pollutant"].astype(str)) == {"PM", "PM10", "PM2_5"}
+    assert set(residential_link["pollutant"].astype(str)) == {"PM", "PM10", "PM25"}

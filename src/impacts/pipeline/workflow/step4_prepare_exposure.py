@@ -30,6 +30,18 @@ _AERMOD_SOURCE_ID_COLUMN = "aermod_cell_id"
 _PRIMARY_PM25_MASS_EPSILON = 1e-12
 
 
+def _require_unique_id_rows(frame: pd.DataFrame, *, id_col: str, label: str) -> None:
+    if id_col not in frame.columns:
+        raise ValueError(f"{label} must include '{id_col}'.")
+    ids = pd.Series(frame[id_col])
+    duplicate_ids = ids.loc[ids.notna() & ids.duplicated(keep=False)].drop_duplicates().tolist()
+    if duplicate_ids:
+        raise ValueError(
+            f"{label} must contain at most one row per {id_col}; "
+            f"duplicate ids: {duplicate_ids[:10]}"
+        )
+
+
 def _trace_frame(step: str, label: str, df: pd.DataFrame) -> None:
     logger.info("%s trace %s shape=%s", _step_label(f"4.{step}"), label, df.shape)
     preview = list(df.columns[:20])
@@ -145,11 +157,13 @@ def _build_full_exposure_grid(
         raise ValueError(
             f"Full exposure grid is missing required columns {missing_grid_cols} in {pipeline.aermod_full_grid_path}."
         )
+    _require_unique_id_rows(full_grid, id_col=_AERMOD_SOURCE_ID_COLUMN, label="Full exposure grid")
+    _require_unique_id_rows(prepared_inmap, id_col=_INMAP_SOURCE_ID_COLUMN, label="Prepared InMAP concentrations")
     grid_geom = full_grid[[_AERMOD_SOURCE_ID_COLUMN, "geometry"]]
     grid_df = pd.DataFrame(full_grid[required_grid_cols])
 
     inmap_cols = [c for c in prepared_inmap.columns if c != "geometry"]
-    inmap_df = pd.DataFrame(prepared_inmap[inmap_cols]).drop_duplicates(subset=[_INMAP_SOURCE_ID_COLUMN])
+    inmap_df = pd.DataFrame(prepared_inmap[inmap_cols])
 
     _con = duckdb.connect()
     try:
@@ -160,8 +174,13 @@ def _build_full_exposure_grid(
         _inmap_sel = ", ".join(f'i."{c}"' for c in inmap_cols if c != _INMAP_SOURCE_ID_COLUMN)
 
         if prepared_aermod is not None:
+            _require_unique_id_rows(
+                prepared_aermod,
+                id_col=_AERMOD_SOURCE_ID_COLUMN,
+                label="Prepared AERMOD concentrations",
+            )
             aermod_cols = [c for c in prepared_aermod.columns if c != "geometry"]
-            aermod_df = pd.DataFrame(prepared_aermod[aermod_cols]).drop_duplicates(subset=[_AERMOD_SOURCE_ID_COLUMN])
+            aermod_df = pd.DataFrame(prepared_aermod[aermod_cols])
             _con.register("_aermod", aermod_df)
             _aermod_sel = ", ".join(f'a."{c}"' for c in aermod_cols if c != _AERMOD_SOURCE_ID_COLUMN)
             _joined_df = _con.execute(f"""
@@ -187,6 +206,8 @@ def _build_full_exposure_grid(
     )
 
     for col, default in (
+        ("inmap_BC", 0.0),
+        ("inmap_NO2", 0.0),
         ("aermod_PrimaryPM25", np.nan),
         ("aermod_SecondaryPM25", 0.0),
         ("aermod_BC", np.nan),

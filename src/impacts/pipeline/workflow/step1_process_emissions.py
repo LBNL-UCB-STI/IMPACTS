@@ -390,18 +390,40 @@ def _build_corrected_source_totals(
     missing = sorted(required - set(county_corrected_df.columns))
     if missing:
         raise ValueError(f"County-corrected emissions are missing source grouping columns: {missing}")
+    if "source_release_height" in passthrough_cols:
+        heights = pd.to_numeric(county_corrected_df["source_release_height"], errors="coerce")
+        invalid_height = heights.isna() | ~np.isfinite(heights) | heights.le(0.0)
+        if invalid_height.any():
+            sample = county_corrected_df.loc[
+                invalid_height,
+                ["linkId", "vehicleTypeId", "process"],
+            ].head(10).to_dict(orient="records")
+            raise ValueError(
+                "County-corrected emissions contain invalid source_release_height values. "
+                f"sample={sample}"
+            )
     value_cols = [col for col in county_corrected_df.columns if col.endswith("_county_allocated")]
     con = duckdb.connect()
     try:
         configure_duckdb_connection(con, working_dir=scratch_dir, show_progress=True, profile="memory_heavy")
         con.register("county_corrected_df", county_corrected_df)
-        select_parts = [f'"{col}"' for col in group_cols]
+        output_group_cols = group_cols + passthrough_cols
+        normalized_select_parts = [
+            '"linkId"',
+            'trim(CAST("vehicleTypeId" AS VARCHAR)) AS "vehicleTypeId"',
+            'trim(CAST("process" AS VARCHAR)) AS "process"',
+        ]
         if "roadCategory" in passthrough_cols:
-            select_parts.append('ANY_VALUE("roadCategory") AS "roadCategory"')
+            normalized_select_parts.append('trim(CAST("roadCategory" AS VARCHAR)) AS "roadCategory"')
         if "source_release_height" in passthrough_cols:
-            select_parts.append(
-                'MAX(COALESCE(TRY_CAST("source_release_height" AS DOUBLE), 1.0)) AS "source_release_height"'
+            normalized_select_parts.append(
+                'TRY_CAST("source_release_height" AS DOUBLE) AS "source_release_height"'
             )
+        normalized_select_parts.extend(
+            f'COALESCE(TRY_CAST("{col}" AS DOUBLE), 0.0) AS "{col}"'
+            for col in value_cols
+        )
+        select_parts = [f'"{col}"' for col in output_group_cols]
         select_parts.extend(
             f'SUM(COALESCE(TRY_CAST("{col}" AS DOUBLE), 0.0)) AS "{col}"'
             for col in value_cols
@@ -410,8 +432,11 @@ def _build_corrected_source_totals(
             f"""
             SELECT
                 {", ".join(select_parts)}
-            FROM county_corrected_df
-            GROUP BY 1, 2, 3
+            FROM (
+                SELECT {", ".join(normalized_select_parts)}
+                FROM county_corrected_df
+            ) AS normalized
+            GROUP BY {", ".join(str(index) for index in range(1, len(output_group_cols) + 1))}
             """
         ).fetchdf()
     finally:
@@ -538,27 +563,69 @@ def _aggregate_aermod_emissions_for_export(
             con.register("_aermod_allocated", aermod_allocated)
             source = "_aermod_allocated"
             all_cols = list(aermod_allocated.columns)
+        required_source_cols = {"aermod_cell_id", "source_temporal_class", "source_release_height", "source_urban_class"}
+        missing_source_cols = sorted(required_source_cols - set(all_cols))
+        if missing_source_cols:
+            raise ValueError(
+                "AERMOD allocated emissions table is missing required source class columns: "
+                f"{missing_source_cols}"
+            )
         emission_cols = [c for c in all_cols if c.startswith("tons_per_year_") and c.endswith("_aermod_allocated")]
         if not emission_cols:
             raise ValueError("AERMOD allocated emissions table is missing tons_per_year_*_aermod_allocated columns.")
-        select_parts = [
-            '"aermod_cell_id" AS "aermod_cell_id"',
-            'ANY_VALUE("source_temporal_class") AS "source_temporal_class"',
-            'MAX(COALESCE(TRY_CAST("source_release_height" AS DOUBLE), 1.0)) AS "source_release_height"',
-            'MAX(COALESCE(TRY_CAST("source_urban_class" AS BIGINT), 0)) AS "source_urban_class"',
+        invalid_count = con.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM {source}
+            WHERE TRY_CAST("aermod_cell_id" AS BIGINT) IS NULL
+               OR trim(CAST("source_temporal_class" AS VARCHAR)) = ''
+               OR TRY_CAST("source_release_height" AS DOUBLE) IS NULL
+               OR TRY_CAST("source_release_height" AS DOUBLE) <= 0.0
+               OR TRY_CAST("source_urban_class" AS BIGINT) IS NULL
+            """
+        ).fetchone()[0]
+        if invalid_count:
+            raise ValueError(
+                "AERMOD allocated emissions table contains invalid source class values: "
+                f"rows={invalid_count}"
+            )
+        normalized_select_parts = [
+            'TRY_CAST("aermod_cell_id" AS BIGINT) AS "aermod_cell_id"',
+            'trim(CAST("source_temporal_class" AS VARCHAR)) AS "source_temporal_class"',
+            'TRY_CAST("source_release_height" AS DOUBLE) AS "source_release_height"',
+            'TRY_CAST("source_urban_class" AS BIGINT) AS "source_urban_class"',
+            *[
+                f'COALESCE(TRY_CAST("{col}" AS DOUBLE), 0.0) AS "{col}"'
+                for col in emission_cols
+            ],
+        ]
+        normalized_source = f"""
+            SELECT {", ".join(normalized_select_parts)}
+            FROM {source}
+            WHERE TRY_CAST("aermod_cell_id" AS BIGINT) IS NOT NULL
+        """
+        aggregate_select_parts = [
+            '"aermod_cell_id"',
+            '"source_temporal_class"',
+            '"source_release_height"',
+            '"source_urban_class"',
             *[f'SUM(COALESCE(TRY_CAST("{col}" AS DOUBLE), 0.0)) AS "{col}"' for col in emission_cols],
         ]
         aggregated = con.execute(
-            f"SELECT {', '.join(select_parts)} FROM {source} GROUP BY 1"
+            f"""
+            SELECT {", ".join(aggregate_select_parts)}
+            FROM ({normalized_source}) AS normalized
+            GROUP BY 1, 2, 3, 4
+            """
         ).fetchdf()
     finally:
         con.close()
     logger.info(
-        "%s aggregated AERMOD export to %d source cells",
+        "%s aggregated AERMOD export to %d source class rows",
         _step_label("1.6", "aermod"),
         len(aggregated),
     )
-    _log_step1_elapsed("1.6", "AERMOD export aggregation complete", started, source_cells=len(aggregated))
+    _log_step1_elapsed("1.6", "AERMOD export aggregation complete", started, source_class_rows=len(aggregated))
     return aggregated
 
 

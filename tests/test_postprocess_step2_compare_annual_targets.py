@@ -13,7 +13,7 @@ def test_postprocess_step2_compares_modeled_totals_to_annual_targets(tmp_path: P
             "countyfp": ["001", "001", "001", "001"],
             "vehicleTypeId": ["pax-car", "ft-light", "ft-heavy", "ft-heavy"],
             "process": ["RUNEX", "RUNEX", "RUNEX", "PRDUST"],
-            "tons_per_year_PM2_5_county_allocated": [10.0, 20.0, 30.0, 40.0],
+            "tons_per_year_PM25_county_allocated": [10.0, 20.0, 30.0, 40.0],
             "tons_per_year_NOx_county_allocated": [100.0, 200.0, 300.0, 0.0],
             "tons_per_year_ROG_county_allocated": [1.0, 2.0, 3.0, 0.0],
         }

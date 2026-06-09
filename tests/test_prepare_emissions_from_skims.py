@@ -13,6 +13,7 @@ import impacts.pipeline.workflow.prepare_emissions.from_skims as prepare_skims_m
 from impacts.pipeline.workflow.prepare_emissions.annualization import _build_skims_scale_factors
 from impacts.pipeline.workflow.prepare_emissions.annualization import annualize_prepared_skims_for_grid_allocation
 from impacts.pipeline.workflow.prepare_emissions.from_skims import _build_zone_allocated_table
+from impacts.pipeline.workflow.prepare_emissions.from_skims import _compute_aermod_source_attributes_parquet
 
 
 def test_configure_duckdb_progress_bar_toggles_settings() -> None:
@@ -109,15 +110,60 @@ def test_build_skims_scale_factors_uses_freight_sample_for_freight_vehicle_types
     assert factors.tolist() == [10.0, 101.0, 1.0]
 
 
+def test_compute_aermod_source_attributes_preserves_row_release_heights(tmp_path: Path) -> None:
+    allocated = pd.DataFrame(
+        [
+            {
+                "linkId": 1,
+                "vehicleTypeId": "pax-car",
+                "process": "RUNEX",
+                "aermod_cell_id": 101,
+                "roadCategory": "residential",
+                "source_release_height": 1.0,
+                "tons_per_year_PM25_aermod_allocated": 0.25,
+            },
+            {
+                "linkId": 2,
+                "vehicleTypeId": "freight-truck",
+                "process": "RUNEX",
+                "aermod_cell_id": 101,
+                "roadCategory": "motorway",
+                "source_release_height": 3.5,
+                "tons_per_year_PM25_aermod_allocated": 0.75,
+            },
+        ]
+    )
+    input_path = tmp_path / "aermod_raw.parquet"
+    output_path = tmp_path / "aermod_attrs.parquet"
+    allocated.to_parquet(input_path, index=False)
+
+    _compute_aermod_source_attributes_parquet(
+        str(input_path),
+        str(output_path),
+        scratch_dir=tmp_path,
+        freeway_road_categories=frozenset({"motorway"}),
+        cell_population_df=pd.DataFrame(
+            {"aermod_cell_id": [101], "source_urban_class": [1000]}
+        ),
+    )
+
+    result = pd.read_parquet(output_path).sort_values("source_release_height").reset_index(drop=True)
+
+    assert result["vehicleTypeId"].tolist() == ["pax-car", "freight-truck"]
+    assert result["source_temporal_class"].tolist() == ["CITYSTREET", "FREEWAY"]
+    assert result["source_release_height"].tolist() == [1.0, 3.5]
+    assert result["source_urban_class"].tolist() == [1000, 1000]
+
+
 def test_prepare_skims_for_grid_allocation_aggregates_parquet_without_eager_raw_read(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     raw_skims = pd.DataFrame(
         [
-            {"hour": 7, "linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "NOx": 1.25, "PM2_5": 0.10, "observations": 2.0},
-            {"hour": 8, "linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "NOx": 0.75, "PM2_5": 0.20, "observations": 3.0},
-            {"hour": 9, "linkId": 202, "vehicleTypeId": "ft-md", "process": "PMBW", "NOx": 4.00, "PM2_5": 0.50, "observations": 1.0},
+            {"hour": 7, "linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "NOx": 1.25, "PM25": 0.10, "observations": 2.0},
+            {"hour": 8, "linkId": 101, "vehicleTypeId": "pax-car", "process": "RUNEX", "NOx": 0.75, "PM25": 0.20, "observations": 3.0},
+            {"hour": 9, "linkId": 202, "vehicleTypeId": "ft-md", "process": "PMBW", "NOx": 4.00, "PM25": 0.50, "observations": 1.0},
         ]
     )
     raw_path = tmp_path / "skimsEmissions.parquet"
@@ -137,7 +183,7 @@ def test_prepare_skims_for_grid_allocation_aggregates_parquet_without_eager_raw_
         str(raw_path),
         str(output_path),
         group_cols=["linkId", "vehicleTypeId", "process"],
-        required_pollutants=["NOx", "PM2_5"],
+        required_pollutants=["NOx", "PM25"],
     ).sort_values(["linkId", "vehicleTypeId", "process"]).reset_index(drop=True)
 
     assert aggregated.to_dict("records") == [
@@ -147,7 +193,7 @@ def test_prepare_skims_for_grid_allocation_aggregates_parquet_without_eager_raw_
             "process": "RUNEX",
             "observations": 5.0,
             "NOx": 2.0,
-            "PM2_5": 0.30000000000000004,
+            "PM25": 0.30000000000000004,
         },
         {
             "linkId": 202,
@@ -155,7 +201,7 @@ def test_prepare_skims_for_grid_allocation_aggregates_parquet_without_eager_raw_
             "process": "PMBW",
             "observations": 1.0,
             "NOx": 4.0,
-            "PM2_5": 0.5,
+            "PM25": 0.5,
         },
     ]
 
@@ -202,7 +248,7 @@ def test_prepare_skims_for_grid_allocation_parses_compact_emissions_schema(tmp_p
                 "linkId": 101,
                 "vehicleTypeId": "pax-car",
                 "process": "RUNEX",
-                "emissions": "NOx:1.25;PM2_5:0.10;SOx:0.01",
+                "emissions": "NOx:1.25;PM25:0.10;SOx:0.01",
                 "observations": 2.0,
             },
             {
@@ -210,7 +256,7 @@ def test_prepare_skims_for_grid_allocation_parses_compact_emissions_schema(tmp_p
                 "linkId": 101,
                 "vehicleTypeId": "pax-car",
                 "process": "RUNEX",
-                "emissions": "NOx:0.75;PM2_5:0.20",
+                "emissions": "NOx:0.75;PM25:0.20",
                 "observations": 3.0,
             },
             {
@@ -218,7 +264,7 @@ def test_prepare_skims_for_grid_allocation_parses_compact_emissions_schema(tmp_p
                 "linkId": 202,
                 "vehicleTypeId": "ft-md",
                 "process": "PMBW",
-                "emissions": "NOx:4.00;PM2_5:0.50",
+                "emissions": "NOx:4.00;PM25:0.50",
                 "observations": 1.0,
             },
         ]
@@ -231,7 +277,7 @@ def test_prepare_skims_for_grid_allocation_parses_compact_emissions_schema(tmp_p
         str(raw_path),
         str(output_path),
         group_cols=["linkId", "vehicleTypeId", "process"],
-        required_pollutants=["NOx", "PM2_5"],
+        required_pollutants=["NOx", "PM25"],
     ).sort_values(["linkId", "vehicleTypeId", "process"]).reset_index(drop=True)
 
     assert aggregated.to_dict("records") == [
@@ -241,7 +287,7 @@ def test_prepare_skims_for_grid_allocation_parses_compact_emissions_schema(tmp_p
             "process": "RUNEX",
             "observations": 5.0,
             "NOx": 4.75,
-            "PM2_5": 0.8,
+            "PM25": 0.8,
         },
         {
             "linkId": 202,
@@ -249,12 +295,12 @@ def test_prepare_skims_for_grid_allocation_parses_compact_emissions_schema(tmp_p
             "process": "PMBW",
             "observations": 1.0,
             "NOx": 4.0,
-            "PM2_5": 0.5,
+            "PM25": 0.5,
         },
     ]
 
 
-def test_prepare_skims_for_grid_allocation_parses_compact_emissions_with_pollutant_mapping(tmp_path: Path) -> None:
+def test_prepare_skims_for_grid_allocation_parses_compact_emissions_with_pm25_and_rog(tmp_path: Path) -> None:
     raw_skims = pd.DataFrame(
         [
             {
@@ -275,8 +321,7 @@ def test_prepare_skims_for_grid_allocation_parses_compact_emissions_with_polluta
         str(raw_path),
         str(output_path),
         group_cols=["linkId", "vehicleTypeId", "process"],
-        required_pollutants=["PM2_5", "ROG"],
-        pollutants_map={"PM2_5": "PM25", "ROG": "ROG"},
+        required_pollutants=["PM25", "ROG"],
     ).reset_index(drop=True)
 
     assert aggregated.to_dict("records") == [
@@ -285,7 +330,7 @@ def test_prepare_skims_for_grid_allocation_parses_compact_emissions_with_polluta
             "vehicleTypeId": "pax-car",
             "process": "RUNEX",
             "observations": 4.0,
-            "PM2_5": 2.0,
+            "PM25": 2.0,
             "ROG": 1.0,
         }
     ]
@@ -465,7 +510,6 @@ def test_prepare_staged_skims_for_processing_reuses_grouped_intermediate(tmp_pat
         beam_length_col="length",
         prepared_skims_group_cols=["linkId", "vehicleTypeId", "process"],
         pollutants=["NOx"],
-        pollutants_map={},
         vehicle_category_metadata_file=str(tmp_path / "vehicle_categories.csv"),
         annualization_days={"light_duty": 327.0, "medium_heavy_duty": 312.0},
         population_sample=1.0,
@@ -497,7 +541,6 @@ def test_load_or_prepare_skims_df_rejects_stale_prepared_cache_for_aermod(tmp_pa
             beam_length_col="length",
             prepared_skims_group_cols=["linkId", "vehicleTypeId", "process"],
             pollutants=["NOx"],
-            pollutants_map={},
             vehicle_category_metadata_file=str(tmp_path / "vehicle_categories.csv"),
             annualization_days={"light_duty": 327.0},
             population_sample=1.0,
@@ -546,7 +589,6 @@ def test_prepare_staged_skims_for_processing_rebuilds_invalid_grouped_intermedia
         beam_length_col="length",
         prepared_skims_group_cols=["linkId", "vehicleTypeId", "process"],
         pollutants=["NOx"],
-        pollutants_map={},
         vehicle_category_metadata_file=str(tmp_path / "vehicle_categories.csv"),
         annualization_days={"light_duty": 327.0, "medium_heavy_duty": 312.0},
         population_sample=1.0,
@@ -594,8 +636,8 @@ def test_annualize_prepared_skims_uses_grouped_input_without_eager_read(tmp_path
 
     metadata = pd.DataFrame(
         [
-            {"emfac_vehicle_category": "LDA", "operation_days_per_year": 327.0},
-            {"emfac_vehicle_category": "Class 4-6 Vocational", "operation_days_per_year": 312.0},
+            {"emfac_vehicle_category": "LDA", "operation_days_per_year": 327.0, "tailpipe_height_meters": 1.0},
+            {"emfac_vehicle_category": "Class 4-6 Vocational", "operation_days_per_year": 312.0, "tailpipe_height_meters": 3.5},
         ]
     )
     metadata_path = tmp_path / "vehicle_categories.csv"
@@ -626,15 +668,72 @@ def test_annualize_prepared_skims_uses_grouped_input_without_eager_read(tmp_path
         freight_sample=0.5,
     )
 
-    assert list(result.columns) == ["linkId", "vehicleTypeId", "process", "roadCategory", "totTrips", "totVMT", "tons_per_year_NOx"]
+    assert list(result.columns) == [
+        "linkId",
+        "vehicleTypeId",
+        "process",
+        "roadCategory",
+        "source_release_height",
+        "totTrips",
+        "totVMT",
+        "tons_per_year_NOx",
+    ]
 
     written = original_read_parquet(output_path).sort_values(["linkId"]).reset_index(drop=True)
     assert written["linkId"].tolist() == [101, 102]
     assert written["vehicleTypeId"].tolist() == ["pax-car", "ft-md"]
     assert written["process"].tolist() == ["RUNEX", "RUNEX"]
     assert written["roadCategory"].tolist() == ["local", "arterial"]
+    assert written["source_release_height"].tolist() == [1.0, 3.5]
     assert written["totTrips"].tolist() == [654.0, 1872.0]
     assert written["totVMT"].tolist() == pytest.approx([654.0, 3744.0])
     assert written["tons_per_year_NOx"].tolist() == pytest.approx(
         [10.0 * 327.0 / 907184.74, 30.0 * 2.0 * 312.0 / 907184.74]
     )
+
+
+def test_tailpipe_height_lookup_requires_metadata_height_column(tmp_path: Path) -> None:
+    passenger_path = tmp_path / "vehicleTypes--atlas.csv"
+    freight_path = tmp_path / "vehicleTypes--frism.csv"
+    pd.DataFrame(
+        [{"vehicleTypeId": "pax-car", "emfacVehicleCategory": "LDA"}]
+    ).to_csv(passenger_path, index=False)
+    pd.DataFrame(
+        [{"vehicleTypeId": "ft-md", "emfacVehicleCategory": "T7 Tractor"}]
+    ).to_csv(freight_path, index=False)
+    metadata_path = tmp_path / "vehicle_categories.csv"
+    pd.DataFrame(
+        [{"emfac_vehicle_category": "LDA", "operation_days_per_year": 327.0}]
+    ).to_csv(metadata_path, index=False)
+
+    with pytest.raises(ValueError, match="tailpipe_height_meters"):
+        annualization_module._resolve_vehicle_type_tailpipe_height_lookup(
+            vehicle_category_metadata_file=str(metadata_path),
+            passenger_vehicle_types_path=str(passenger_path),
+            freight_vehicle_types_path=str(freight_path),
+        )
+
+
+def test_tailpipe_height_lookup_rejects_conflicting_vehicle_type_categories(tmp_path: Path) -> None:
+    passenger_path = tmp_path / "vehicleTypes--atlas.csv"
+    freight_path = tmp_path / "vehicleTypes--frism.csv"
+    pd.DataFrame(
+        [{"vehicleTypeId": "dup-type", "emfacVehicleCategory": "LDA"}]
+    ).to_csv(passenger_path, index=False)
+    pd.DataFrame(
+        [{"vehicleTypeId": "dup-type", "emfacVehicleCategory": "T7 Tractor"}]
+    ).to_csv(freight_path, index=False)
+    metadata_path = tmp_path / "vehicle_categories.csv"
+    pd.DataFrame(
+        [
+            {"emfac_vehicle_category": "LDA", "tailpipe_height_meters": 1.0},
+            {"emfac_vehicle_category": "T7 Tractor", "tailpipe_height_meters": 3.5},
+        ]
+    ).to_csv(metadata_path, index=False)
+
+    with pytest.raises(ValueError, match="conflicting emfacVehicleCategory"):
+        annualization_module._resolve_vehicle_type_tailpipe_height_lookup(
+            vehicle_category_metadata_file=str(metadata_path),
+            passenger_vehicle_types_path=str(passenger_path),
+            freight_vehicle_types_path=str(freight_path),
+        )

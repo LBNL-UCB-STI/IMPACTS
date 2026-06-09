@@ -106,7 +106,7 @@ def test_sample_skims_compacts_explicit_pollutant_schema(tmp_path: Path):
                 "NOx": 0.0,
                 "PM": 0.00055,
                 "PM10": 0.00055,
-                "PM2_5": 0.00013,
+                "PM25": 0.00013,
                 "ROG": 0.0,
                 "SOx": 0.0,
                 "TOG": 0.0,
@@ -134,7 +134,7 @@ def test_sample_skims_compacts_explicit_pollutant_schema(tmp_path: Path):
         "iterations",
     ]
     assert sampled.loc[0, "process"] == "PMTW"
-    assert sampled.loc[0, "emissions"] == "PM:0.00055;PM10:0.00055;PM2_5:0.00013"
+    assert sampled.loc[0, "emissions"] == "PM:0.00055;PM10:0.00055;PM25:0.00013"
 
 
 def test_sample_skims_compact_schema_is_preserved(tmp_path: Path):
@@ -146,7 +146,7 @@ def test_sample_skims_compact_schema_is_preserved(tmp_path: Path):
                 "linkId": 1,
                 "vehicleTypeId": "car",
                 "process": "RUNEX",
-                "emissions": "NOx:1.5;PM2_5:0.2",
+                "emissions": "NOx:1.5;PM25:0.2",
                 "travelTimeInSecond": 10.0,
                 "parkingDurationInSecond": 0.0,
                 "observations": 2,
@@ -174,15 +174,15 @@ def test_sample_skims_compact_schema_is_preserved(tmp_path: Path):
         "observations",
         "iterations",
     ]
-    assert sampled.loc[0, "emissions"] == "NOx:1.5;PM2_5:0.2"
+    assert sampled.loc[0, "emissions"] == "NOx:1.5;PM25:0.2"
 
 
 def test_sample_skims_totals_schema_is_sampled_as_is(tmp_path: Path):
     source = tmp_path / "skims_totals.parquet"
     pd.DataFrame(
         [
-            {"linkId": 1, "vehicleTypeId": "car", "process": "RUNEX", "NOx": 10.0, "PM2_5": 2.0},
-            {"linkId": 2, "vehicleTypeId": "car", "process": "RUNEX", "NOx": 4.0, "PM2_5": 1.0},
+            {"linkId": 1, "vehicleTypeId": "car", "process": "RUNEX", "NOx": 10.0, "PM25": 2.0},
+            {"linkId": 2, "vehicleTypeId": "car", "process": "RUNEX", "NOx": 4.0, "PM25": 1.0},
         ]
     ).to_parquet(source, index=False)
 
@@ -194,6 +194,6 @@ def test_sample_skims_totals_schema_is_sampled_as_is(tmp_path: Path):
     )
 
     sampled = pd.read_csv(tmp_path / "skims_totals_sample.csv.gz", compression="gzip")
-    assert list(sampled.columns) == ["linkId", "vehicleTypeId", "process", "NOx", "PM2_5"]
+    assert list(sampled.columns) == ["linkId", "vehicleTypeId", "process", "NOx", "PM25"]
     assert sampled["NOx"].tolist() == [10.0, 4.0]
-    assert sampled["PM2_5"].tolist() == [2.0, 1.0]
+    assert sampled["PM25"].tolist() == [2.0, 1.0]
