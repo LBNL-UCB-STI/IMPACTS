@@ -590,18 +590,15 @@ def _compute_aermod_source_attributes_parquet(
         invalid_count = con.execute(f"""
             SELECT COUNT(*)
             FROM parquet_scan('{in_sql}') AS a
-            LEFT JOIN _cell_pop AS p
-              ON TRY_CAST(a."aermod_cell_id" AS BIGINT) = TRY_CAST(p."aermod_cell_id" AS BIGINT)
             WHERE TRY_CAST(a."aermod_cell_id" AS BIGINT) IS NULL
                OR trim(CAST(a."roadCategory" AS VARCHAR)) = ''
                OR TRY_CAST(a."source_release_height" AS DOUBLE) IS NULL
                OR TRY_CAST(a."source_release_height" AS DOUBLE) <= 0.0
-               OR TRY_CAST(p."source_urban_class" AS BIGINT) IS NULL
         """).fetchone()[0]
         if invalid_count:
             raise ValueError(
                 "AERMOD source attribute preparation found rows with invalid source attributes "
-                f"or missing aermod_cell_population matches: rows={invalid_count}"
+                f"rows={invalid_count}"
             )
         con.execute(f"""
             COPY (
@@ -611,9 +608,9 @@ def _compute_aermod_source_attributes_parquet(
                          THEN 'FREEWAY' ELSE 'CITYSTREET'
                     END AS "source_temporal_class",
                     TRY_CAST(a."source_release_height" AS DOUBLE) AS "source_release_height",
-                    TRY_CAST(p."source_urban_class" AS BIGINT) AS "source_urban_class"
+                    COALESCE(TRY_CAST(p."source_urban_class" AS BIGINT), 0) AS "source_urban_class"
                 FROM parquet_scan('{in_sql}') AS a
-                INNER JOIN _cell_pop AS p
+                LEFT JOIN _cell_pop AS p
                   ON TRY_CAST(a."aermod_cell_id" AS BIGINT) = TRY_CAST(p."aermod_cell_id" AS BIGINT)
             ) TO '{out_sql}' (FORMAT PARQUET)
         """)
