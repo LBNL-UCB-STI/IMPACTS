@@ -11,7 +11,6 @@ python -m impacts activities --config /path/settings.yaml
 python -m impacts fleet --activities-manifest /path/activities_manifest.yaml
 python -m impacts preprocess --config /path/settings.yaml
 python -m impacts postsim --config /path/settings.yaml
-python -m impacts analysis --config /path/settings.yaml
 python -m impacts emissions --run-manifest /path/impacts_output/pipeline_manifest.yaml
 python -m impacts inmap --run-manifest /path/impacts_output/pipeline_manifest.yaml
 python -m impacts aermod --run-manifest /path/impacts_output/pipeline_manifest.yaml

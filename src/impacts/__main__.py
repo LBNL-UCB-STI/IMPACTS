@@ -5,13 +5,16 @@ from datetime import datetime
 import logging
 import os
 from pathlib import Path
+import pstats
 import subprocess
 import sys
 
 from impacts.config.settings_builder import load_settings_from_yaml
+from impacts.manifest.file_ops import load_structured_file
 from impacts.manifest.file_ops import resolve_path
 
 logger = logging.getLogger(__name__)
+PROFILE_CHOICES = ("none", "time", "cpu", "memray", "all")
 
 
 def _print_pipeline_banner() -> None:
@@ -139,27 +142,141 @@ def _resolve_profile_output(*, output_root: Path, stem: str) -> Path:
     return candidate
 
 
-def _resolve_profile_target(args: argparse.Namespace) -> tuple[Path, list[str], str] | None:
-    if args.profile == "none":
-        return None
+def _run_output_root_from_manifest(manifest_path: str | Path) -> Path:
+    manifest = load_structured_file(manifest_path)
+    output_dir = manifest.get("output_dir")
+    if not output_dir:
+        raise ValueError(f"Manifest is missing output_dir: {manifest_path}")
+    return Path(str(output_dir)).expanduser().resolve()
+
+
+def _presim_output_root(settings_path: str | Path) -> Path:
+    from impacts.config.settings import presim_run_root
+
+    settings = load_settings_from_yaml(settings_path)
+    base_output_root = _resolve_pipeline_output_root(str(settings_path))
+    return presim_run_root(
+        base_output_root,
+        region=settings.run.region,
+        output_run_name=settings.run.output_run_name,
+        run_scenario=settings.run.scenario,
+    ).resolve()
+
+
+def _fleet_profile_output_root(activities_manifest_path: str | Path) -> Path:
+    manifest = load_structured_file(activities_manifest_path)
+    output_dir = manifest.get("output_dir")
+    if output_dir:
+        return Path(str(output_dir)).expanduser().resolve()
+    outputs = manifest.get("outputs", {}) if isinstance(manifest.get("outputs"), dict) else {}
+    outputs_root = outputs.get("outputs_root")
+    if outputs_root:
+        return Path(str(outputs_root)).expanduser().resolve()
+    return Path(activities_manifest_path).expanduser().resolve().parent
+
+
+def _postprocess_profile_output_root(args: argparse.Namespace) -> Path:
+    if args.impact_output_dir:
+        return Path(args.impact_output_dir).expanduser().resolve()
+    if args.run_manifest:
+        return _run_output_root_from_manifest(args.run_manifest)
+    if args.config:
+        return _resolve_pipeline_output_root(args.config)
+    raise ValueError("Cannot resolve postprocess profile output root")
+
+
+def _profile_forwarded_args(raw_argv: list[str]) -> list[str]:
+    forwarded: list[str] = []
+    skip_next = False
+    for token in raw_argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if token == "--profile":
+            skip_next = True
+            continue
+        if token.startswith("--profile="):
+            continue
+        forwarded.append(token)
+    return [*forwarded, "--profile", "none"]
+
+
+def _resolve_profile_target(
+    args: argparse.Namespace,
+    raw_argv: list[str],
+) -> tuple[Path, list[str], str, dict[str, str]]:
+    forwarded_args = _profile_forwarded_args(raw_argv)
+    extra_env: dict[str, str] = {}
     if args.command == "pipeline":
         output_root = _resolve_pipeline_output_root(args.config)
-        forwarded_args = ["pipeline", "--config", args.config, "--profile", "none"]
-        default_name = "pipeline"
-        return output_root, forwarded_args, default_name
+    elif args.command == "preprocess":
+        output_root = _resolve_pipeline_output_root(args.config)
+    elif args.command in {"presim", "activities"}:
+        output_root = _presim_output_root(args.config)
+    elif args.command == "postsim":
+        output_root = _resolve_postsim_output_root(args.config)
+        extra_env["IMPACTS_POSTSIM_OUTPUT_DIR"] = str(output_root)
+    elif args.command == "fleet":
+        output_root = _fleet_profile_output_root(args.activities_manifest)
+    elif args.command in {"emissions", "inmap", "aermod", "exposure"}:
+        output_root = _run_output_root_from_manifest(args.run_manifest)
+    elif args.command == "postprocess":
+        output_root = _postprocess_profile_output_root(args)
+    else:
+        raise ValueError(f"Profiling is not supported for command: {args.command}")
+    return output_root, forwarded_args, str(args.command), extra_env
 
 
-def _maybe_relaunch_with_profiler(args: argparse.Namespace) -> int | None:
+def _write_cpu_profile_report(profile_output: Path, report_output: Path) -> None:
+    if not profile_output.exists():
+        logger.warning("CPU profile output was not created: %s", profile_output)
+        return
+    with report_output.open("w", encoding="utf-8") as stream:
+        stream.write("Top cumulative-time functions\n")
+        stream.write("=============================\n\n")
+        stats = pstats.Stats(str(profile_output), stream=stream)
+        stats.strip_dirs().sort_stats("cumulative").print_stats(120)
+        stream.write("\n\nTop internal-time functions\n")
+        stream.write("===========================\n\n")
+        stats.sort_stats("tottime").print_stats(120)
+
+
+def _write_memray_summary(profile_output: Path, report_output: Path) -> None:
+    if not profile_output.exists():
+        logger.warning("Memray profile output was not created: %s", profile_output)
+        return
+    with report_output.open("w", encoding="utf-8") as stream:
+        subprocess.run(
+            [sys.executable, "-m", "memray", "summary", str(profile_output)],
+            stdout=stream,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+
+def _profile_artifacts(output_root: Path, profile_name: str) -> dict[str, Path]:
+    return {
+        "time": _resolve_profile_output(output_root=output_root, stem=f"{profile_name}.time.txt"),
+        "cpu_pstats": _resolve_profile_output(output_root=output_root, stem=f"{profile_name}.cpu.pstats"),
+        "cpu_report": _resolve_profile_output(output_root=output_root, stem=f"{profile_name}.cpu.txt"),
+        "memray": _resolve_profile_output(output_root=output_root, stem=f"{profile_name}.memray.bin"),
+        "memray_report": _resolve_profile_output(output_root=output_root, stem=f"{profile_name}.memray.txt"),
+    }
+
+
+def _time_prefix(output_path: Path) -> list[str]:
+    time_verbose_flag = "-l" if sys.platform == "darwin" else "-v"
+    return ["/usr/bin/time", time_verbose_flag, "-o", str(output_path)]
+
+
+def _maybe_relaunch_with_profiler(args: argparse.Namespace, raw_argv: list[str]) -> int | None:
     if getattr(args, "profile", "none") == "none":
         return None
     if os.environ.get("IMPACTS_PROFILE_ACTIVE") == "1":
         return None
-    resolved = _resolve_profile_target(args)
-    if resolved is None:
-        return None
-    output_root, forwarded_args, default_name = resolved
-    default_stem = f"{default_name}.memray" if args.profile == "memray" else f"{default_name}.time.txt"
-    profile_output = _resolve_profile_output(output_root=output_root, stem=default_stem)
+    resolved = _resolve_profile_target(args, raw_argv)
+    output_root, forwarded_args, profile_name, extra_env = resolved
+    artifacts = _profile_artifacts(output_root, profile_name)
     if args.profile == "memray":
         command = [
             sys.executable,
@@ -167,18 +284,40 @@ def _maybe_relaunch_with_profiler(args: argparse.Namespace) -> int | None:
             "memray",
             "run",
             "-o",
-            str(profile_output),
+            str(artifacts["memray"]),
             "-m",
             "impacts",
             *forwarded_args,
         ]
-    else:
-        time_verbose_flag = "-l" if sys.platform == "darwin" else "-v"
+    elif args.profile == "cpu":
         command = [
-            "/usr/bin/time",
-            time_verbose_flag,
+            sys.executable,
+            "-m",
+            "impacts.profile_runner",
+            "--pstats",
+            str(artifacts["cpu_pstats"]),
+            "--",
+            *forwarded_args,
+        ]
+    elif args.profile == "all":
+        command = [
+            *_time_prefix(artifacts["time"]),
+            sys.executable,
+            "-m",
+            "memray",
+            "run",
             "-o",
-            str(profile_output),
+            str(artifacts["memray"]),
+            "-m",
+            "impacts.profile_runner",
+            "--pstats",
+            str(artifacts["cpu_pstats"]),
+            "--",
+            *forwarded_args,
+        ]
+    else:
+        command = [
+            *_time_prefix(artifacts["time"]),
             sys.executable,
             "-m",
             "impacts",
@@ -186,8 +325,29 @@ def _maybe_relaunch_with_profiler(args: argparse.Namespace) -> int | None:
         ]
     env = os.environ.copy()
     env["IMPACTS_PROFILE_ACTIVE"] = "1"
+    env.update(extra_env)
+    logger.info("Profiling enabled: mode=%s output_dir=%s", args.profile, output_root / "profiling")
     completed = subprocess.run(command, env=env, check=False)
+    if args.profile in {"cpu", "all"}:
+        _write_cpu_profile_report(artifacts["cpu_pstats"], artifacts["cpu_report"])
+        logger.info("CPU profile written: %s", artifacts["cpu_report"])
+    if args.profile in {"memray", "all"}:
+        _write_memray_summary(artifacts["memray"], artifacts["memray_report"])
+        logger.info("Memray profile written: %s", artifacts["memray"])
     return int(completed.returncode)
+
+
+def _add_profile_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--profile",
+        choices=PROFILE_CHOICES,
+        default="none",
+        help=(
+            "Optional profiler: none disables profiling; time records wall/resource usage; "
+            "cpu writes cProfile pstats and text reports; memray records memory allocations; "
+            "all records time, CPU, and memray outputs."
+        ),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -200,30 +360,39 @@ def build_parser() -> argparse.ArgumentParser:
     preprocess = subparsers.add_parser("preprocess", help="Stage explicit inputs and write preprocess_manifest.yaml")
     preprocess.add_argument("--config", required=True)
     preprocess.add_argument("--manifest-path")
+    _add_profile_argument(preprocess)
 
     presim = subparsers.add_parser("presim", help="Run the pre-simulation group from settings")
     presim.add_argument("--config", required=True)
+    _add_profile_argument(presim)
 
     activities = subparsers.add_parser("activities", help="Run only the EMFAC activities stage from settings")
     activities.add_argument("--config", required=True)
+    _add_profile_argument(activities)
 
     fleet = subparsers.add_parser("fleet", help="Run only the EMFAC fleet stage from an activities manifest")
     fleet.add_argument("--activities-manifest", required=True)
+    _add_profile_argument(fleet)
 
     emissions = subparsers.add_parser("emissions", help="Run only the emissions stage from a run manifest")
     emissions.add_argument("--run-manifest", required=True)
+    _add_profile_argument(emissions)
 
     inmap = subparsers.add_parser("inmap", help="Run only the InMAP concentration stage from a run manifest")
     inmap.add_argument("--run-manifest", required=True)
+    _add_profile_argument(inmap)
 
     aermod = subparsers.add_parser("aermod", help="Run only the AERMOD concentration stage from a run manifest")
     aermod.add_argument("--run-manifest", required=True)
+    _add_profile_argument(aermod)
 
     exposure = subparsers.add_parser("exposure", help="Run only the exposure preparation stage from a run manifest")
     exposure.add_argument("--run-manifest", required=True)
+    _add_profile_argument(exposure)
 
     postsim = subparsers.add_parser("postsim", help="Run the post-simulation group from settings")
     postsim.add_argument("--config", required=True)
+    _add_profile_argument(postsim)
 
     postprocess = subparsers.add_parser("postprocess", help="Run postprocess comparisons and map plots")
     postprocess_group = postprocess.add_mutually_exclusive_group(required=True)
@@ -252,10 +421,11 @@ def build_parser() -> argparse.ArgumentParser:
             "and delta exposure analysis (steps 6-7). Overrides delta_baseline_concentration_distribution_file in settings."
         ),
     )
+    _add_profile_argument(postprocess)
 
     pipeline = subparsers.add_parser("pipeline", help="Run the maintained stage sequence from settings, honoring impacts.pipeline flags")
     pipeline.add_argument("--config", required=True)
-    pipeline.add_argument("--profile", choices=("none", "memray", "time"), default="none")
+    _add_profile_argument(pipeline)
     derive_settings = subparsers.add_parser(
         "derive_settings_from_pilates",
         help="Generate an impacts settings file from main PILATES settings and the built-in impacts template.",
@@ -340,10 +510,9 @@ def main(argv: list[str] | None = None) -> int:
         force=True,
     )
     parser = build_parser()
-    args = parser.parse_args(argv)
-    if args.command == "pipeline" and args.profile == "memray":
-        parser.error("--profile memray is not supported for 'pipeline'; use --profile time for full runs.")
-    profiling_exit_code = _maybe_relaunch_with_profiler(args)
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    args = parser.parse_args(raw_argv)
+    profiling_exit_code = _maybe_relaunch_with_profiler(args, raw_argv)
     if profiling_exit_code is not None:
         return profiling_exit_code
 

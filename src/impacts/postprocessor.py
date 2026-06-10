@@ -214,7 +214,20 @@ def _resolve_input_path(
     candidate = _localize_output_path(raw, output_root)
     if candidate.exists():
         return candidate
-    return registry.locate(raw) or candidate
+    return _locate_registry_path(registry, raw) or candidate
+
+
+def _locate_registry_path(registry: "PathRegistry", raw: str | Path) -> Path | None:
+    result = registry.locate(str(raw))
+    if result is not None:
+        return result
+    raw_path = Path(str(raw)).expanduser()
+    for index in range(1, len(raw_path.parts)):
+        suffix = Path(*raw_path.parts[index:])
+        result = registry.locate(str(suffix))
+        if result is not None:
+            return result
+    return None
 
 
 def _resolve_modeled_emissions_path(
@@ -356,12 +369,12 @@ def _resolve_inventory_target_path(
     candidate = _localize_output_path(raw_text, output_root)
     if candidate.exists():
         return candidate
-    result = registry.locate(raw_text)
+    result = _locate_registry_path(registry, raw_text)
     if result is not None:
         return result
-    fallback = _localize_output_path(resolve_path(raw_text, settings_path) or raw_text, output_root)
-    if fallback.exists():
-        return fallback
+    settings_candidate = _localize_output_path(resolve_path(raw_text, settings_path) or raw_text, output_root)
+    if settings_candidate.exists():
+        return settings_candidate
     raise FileNotFoundError(
         f"Postprocess inventory target file was configured but not found. "
         f"Searched: {', '.join(str(r) for r in registry.roots)}. Path: {raw}"
@@ -374,7 +387,7 @@ def _resolve_delta_baseline_concentration_path(
     registry: "PathRegistry",
 ) -> Path | None:
     raw_text = str(raw).strip()
-    result = registry.locate(raw_text)
+    result = _locate_registry_path(registry, raw_text)
     if result is not None:
         return result
     logger.warning(

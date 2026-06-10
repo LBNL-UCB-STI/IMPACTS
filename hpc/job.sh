@@ -93,7 +93,7 @@ print(str(p) if p.is_dir() else "")
 }
 
 if [ "${1:-}" = "" ]; then
-    echo "Usage: $0 <config> [stage]"
+    echo "Usage: $0 <settings-or-manifest> [stage]"
     exit 2
 fi
 
@@ -101,7 +101,7 @@ CONFIG_FILE="$1"
 STAGE="${2:-pipeline}"
 
 if [ ! -f "$CONFIG_FILE" ]; then
-    echo "ERROR: config file not found: $CONFIG_FILE"
+    echo "ERROR: settings or manifest file not found: $CONFIG_FILE"
     exit 1
 fi
 
@@ -148,23 +148,30 @@ export BLIS_NUM_THREADS="$THREADS"
 export VECLIB_MAXIMUM_THREADS="$THREADS"
 echo "Thread caps: $THREADS (OMP/MKL/OPENBLAS/NUMEXPR/BLIS/VECLIB)"
 
+PROFILE_MODE="${IMPACTS_PROFILE:-none}"
+PROFILE_ARGS=()
+if [ "$PROFILE_MODE" != "none" ]; then
+    PROFILE_ARGS=(--profile "$PROFILE_MODE")
+fi
+echo "Profile: $PROFILE_MODE"
+
 echo "Stage: $STAGE"
 case "$STAGE" in
     pipeline)
-        "$VENV_PATH/bin/python3" -u -m impacts pipeline --config "$CONFIG_FILE" --profile time
+        "$VENV_PATH/bin/python3" -u -m impacts pipeline --config "$CONFIG_FILE" "${PROFILE_ARGS[@]}"
         ;;
-    preprocess|presim|activities|postsim|analysis)
-        "$VENV_PATH/bin/python3" -u -m impacts "$STAGE" --config "$CONFIG_FILE"
+    preprocess|presim|activities|postsim)
+        "$VENV_PATH/bin/python3" -u -m impacts "$STAGE" --config "$CONFIG_FILE" "${PROFILE_ARGS[@]}"
         ;;
     fleet)
-        "$VENV_PATH/bin/python3" -u -m impacts fleet --activities-manifest "$CONFIG_FILE"
+        "$VENV_PATH/bin/python3" -u -m impacts fleet --activities-manifest "$CONFIG_FILE" "${PROFILE_ARGS[@]}"
         ;;
     emissions|inmap|aermod|exposure|postprocess)
-        "$VENV_PATH/bin/python3" -u -m impacts "$STAGE" --run-manifest "$CONFIG_FILE"
+        "$VENV_PATH/bin/python3" -u -m impacts "$STAGE" --run-manifest "$CONFIG_FILE" "${PROFILE_ARGS[@]}"
         ;;
     *)
         echo "ERROR: unsupported stage '$STAGE'"
-        echo "Supported: pipeline, preprocess, presim, activities, postsim, fleet, emissions, inmap, aermod, exposure, postprocess, analysis"
+        echo "Supported: pipeline, preprocess, presim, activities, postsim, fleet, emissions, inmap, aermod, exposure, postprocess"
         exit 2
         ;;
 esac

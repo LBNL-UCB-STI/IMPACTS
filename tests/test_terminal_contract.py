@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import sys
 import yaml
@@ -11,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from impacts.__main__ import main
+from impacts.config.path_registry import PathRegistry
 from impacts.config.settings_builder import build_settings_from_pilates
 from impacts.config.settings_builder import load_settings_from_yaml
 from impacts.manifest.schema import PreprocessManifest
@@ -207,12 +209,41 @@ def test_native_settings_loader_normalizes_directly(tmp_path: Path) -> None:
     assert config.impacts.emissions.inventory.enable_freight_activity_correction is True
 
 
-def test_pipeline_profile_memray_is_rejected(tmp_path: Path) -> None:
+def test_pipeline_profile_memray_relaunches_under_impacts_output(monkeypatch, tmp_path: Path) -> None:
     config_path = tmp_path / "settings.yaml"
     config_path.write_text("impacts:\n  local_output_folder: impacts_output\n", encoding="utf-8")
+    captured: dict[str, object] = {}
 
-    with pytest.raises(SystemExit):
-        main(["pipeline", "--config", str(config_path), "--profile", "memray"])
+    monkeypatch.setattr(
+        "impacts.__main__.load_settings_from_yaml",
+        lambda _: SimpleNamespace(impacts=SimpleNamespace(local_output_folder="impacts_output")),
+    )
+    monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
+
+    def _fake_run(command, env=None, check=False, **_kwargs):
+        captured["command"] = command
+        captured["env"] = env
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("impacts.__main__.subprocess.run", _fake_run)
+
+    assert main(["pipeline", "--config", str(config_path), "--profile", "memray"]) == 0
+    assert captured["command"] == [
+        sys.executable,
+        "-m",
+        "memray",
+        "run",
+        "-o",
+        str((tmp_path / "impacts_output" / "profiling" / "pipeline.memray.bin").resolve()),
+        "-m",
+        "impacts",
+        "pipeline",
+        "--config",
+        str(config_path),
+        "--profile",
+        "none",
+    ]
+    assert captured["env"]["IMPACTS_PROFILE_ACTIVE"] == "1"
 
 
 def test_pipeline_profile_time_relaunches_under_impacts_output(monkeypatch, tmp_path: Path) -> None:
@@ -226,7 +257,7 @@ def test_pipeline_profile_time_relaunches_under_impacts_output(monkeypatch, tmp_
     )
     monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
 
-    def _fake_run(command, env=None, check=False):
+    def _fake_run(command, env=None, check=False, **_kwargs):
         captured["command"] = command
         captured["env"] = env
         return subprocess.CompletedProcess(command, 0)
@@ -249,6 +280,127 @@ def test_pipeline_profile_time_relaunches_under_impacts_output(monkeypatch, tmp_
         "none",
     ]
     assert captured["env"]["IMPACTS_PROFILE_ACTIVE"] == "1"
+
+
+def test_pipeline_profile_cpu_relaunches_with_cprofile_runner(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text("impacts:\n  local_output_folder: impacts_output\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "impacts.__main__.load_settings_from_yaml",
+        lambda _: SimpleNamespace(impacts=SimpleNamespace(local_output_folder="impacts_output")),
+    )
+    monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
+
+    def _fake_run(command, env=None, check=False, **_kwargs):
+        captured["command"] = command
+        captured["env"] = env
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("impacts.__main__.subprocess.run", _fake_run)
+
+    assert main(["pipeline", "--config", str(config_path), "--profile", "cpu"]) == 0
+    assert captured["command"] == [
+        sys.executable,
+        "-m",
+        "impacts.profile_runner",
+        "--pstats",
+        str((tmp_path / "impacts_output" / "profiling" / "pipeline.cpu.pstats").resolve()),
+        "--",
+        "pipeline",
+        "--config",
+        str(config_path),
+        "--profile",
+        "none",
+    ]
+    assert captured["env"]["IMPACTS_PROFILE_ACTIVE"] == "1"
+
+
+def test_pipeline_profile_all_relaunches_with_time_memray_and_cpu(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text("impacts:\n  local_output_folder: impacts_output\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "impacts.__main__.load_settings_from_yaml",
+        lambda _: SimpleNamespace(impacts=SimpleNamespace(local_output_folder="impacts_output")),
+    )
+    monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
+
+    def _fake_run(command, env=None, check=False, **_kwargs):
+        captured["command"] = command
+        captured["env"] = env
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("impacts.__main__.subprocess.run", _fake_run)
+
+    assert main(["pipeline", "--config", str(config_path), "--profile", "all"]) == 0
+    assert captured["command"] == [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        str((tmp_path / "impacts_output" / "profiling" / "pipeline.time.txt").resolve()),
+        sys.executable,
+        "-m",
+        "memray",
+        "run",
+        "-o",
+        str((tmp_path / "impacts_output" / "profiling" / "pipeline.memray.bin").resolve()),
+        "-m",
+        "impacts.profile_runner",
+        "--pstats",
+        str((tmp_path / "impacts_output" / "profiling" / "pipeline.cpu.pstats").resolve()),
+        "--",
+        "pipeline",
+        "--config",
+        str(config_path),
+        "--profile",
+        "none",
+    ]
+    assert captured["env"]["IMPACTS_PROFILE_ACTIVE"] == "1"
+
+
+def test_postsim_profile_time_uses_timestamped_output_env(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text("impacts:\n  local_output_folder: impacts_output\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    monkeypatch.delenv("IMPACTS_POSTSIM_OUTPUT_DIR", raising=False)
+    monkeypatch.setattr(
+        "impacts.__main__.load_settings_from_yaml",
+        lambda _: SimpleNamespace(
+            run=SimpleNamespace(region="sfbay", scenario="base", output_run_name=None),
+            impacts=SimpleNamespace(local_output_folder="impacts_output"),
+        ),
+    )
+    monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
+
+    def _fake_run(command, env=None, check=False, **_kwargs):
+        captured["command"] = command
+        captured["env"] = env
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("impacts.__main__.subprocess.run", _fake_run)
+
+    assert main(["postsim", "--config", str(config_path), "--profile", "time"]) == 0
+    postsim_output_root = Path(captured["env"]["IMPACTS_POSTSIM_OUTPUT_DIR"])
+    assert postsim_output_root.parent == (tmp_path / "impacts_output").resolve()
+    assert re.fullmatch(r"impacts-postsim--sfbay--base--\d{8}-\d{6}", postsim_output_root.name)
+    assert captured["command"] == [
+        "/usr/bin/time",
+        "-l",
+        "-o",
+        str(postsim_output_root / "profiling" / "postsim.time.txt"),
+        sys.executable,
+        "-m",
+        "impacts",
+        "postsim",
+        "--config",
+        str(config_path),
+        "--profile",
+        "none",
+    ]
 
 
 def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_defaults(tmp_path: Path):
@@ -769,11 +921,17 @@ def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_pat
         }
         return {"pipeline_manifest_path": str(tmp_path / "workspace" / "pipeline_manifest.yaml")}
 
-    def _fake_postprocess(run_manifest_path, manifest_path=None, input_roots=None):
+    def _fake_postprocess(
+        run_manifest_path,
+        manifest_path=None,
+        input_roots=None,
+        baseline_concentration_override=None,
+    ):
         calls["postprocess"] = {
             "run_manifest_path": str(run_manifest_path),
             "manifest_path": manifest_path,
             "input_roots": tuple(input_roots or ()),
+            "baseline_concentration_override": baseline_concentration_override,
         }
         return {"postprocess_manifest_path": str(tmp_path / "impacts" / "postprocess_manifest.yaml")}
 
@@ -868,11 +1026,13 @@ def test_postprocess_impact_output_dir_cli_passes_output_root_override_and_impac
         manifest_path=None,
         output_root_override=None,
         input_roots=None,
+        baseline_concentration_override=None,
     ):
         calls["run_manifest_path"] = str(run_manifest_path)
         calls["manifest_path"] = manifest_path
         calls["output_root_override"] = str(output_root_override)
         calls["input_roots"] = tuple(input_roots or ())
+        calls["baseline_concentration_override"] = baseline_concentration_override
         return {"postprocess_manifest_path": str(output_root / "postprocess_manifest.yaml")}
 
     monkeypatch.setattr("impacts.postprocessor.postprocess_from_pipeline_manifest", _fake_postprocess)
@@ -1005,12 +1165,14 @@ def test_postprocess_output_root_override_localizes_stale_manifest_paths(
         output_root=None,
         allow_missing_source_inputs=False,
         input_roots=None,
+        baseline_concentration_override=None,
     ):
         calls["settings_path"] = str(settings_path)
         calls["run_manifest_path"] = str(run_manifest_path)
         calls["output_root"] = str(output_root)
         calls["allow_missing_source_inputs"] = allow_missing_source_inputs
         calls["input_roots"] = tuple(input_roots or ())
+        calls["baseline_concentration_override"] = baseline_concentration_override
         return {"postprocess_output": str(output_root / "postprocess" / "dummy.parquet")}
 
     monkeypatch.setattr("impacts.postprocessor._run_postprocess_steps", _fake_postprocess_steps)
@@ -1058,19 +1220,20 @@ def test_postprocess_input_root_localizes_manifest_source_paths(monkeypatch, tmp
 
     monkeypatch.setattr(
         postprocessor_module,
-        "_load_context_for_resolution",
+        "_load_context",
         lambda *_args, **_kwargs: (tmp_path / "pipeline_manifest.yaml", {}, preprocess_manifest, preprocess_manifest["inputs"]),
     )
+    registry = PathRegistry([input_root])
 
     passenger_resolved, freight_resolved = postprocessor_module._resolve_vehicle_types_paths(
         tmp_path / "settings.yaml",
         output_root=output_root,
-        input_roots=(input_root,),
+        registry=registry,
     )
     metadata_resolved = postprocessor_module._resolve_vehicle_category_metadata_path(
         tmp_path / "settings.yaml",
         output_root=output_root,
-        input_roots=(input_root,),
+        registry=registry,
     )
 
     assert passenger_resolved == passenger_vt.resolve()
@@ -1087,9 +1250,8 @@ def test_postprocess_delta_baseline_path_can_be_relative_to_impact_input_dir(tmp
     baseline_path.write_text("", encoding="utf-8")
 
     resolved = postprocessor_module._resolve_delta_baseline_concentration_path(
-        tmp_path / "settings.yaml",
         "baseline/beam_concentration_distribution.parquet",
-        input_roots=(input_root,),
+        registry=PathRegistry([input_root]),
     )
 
     assert resolved == baseline_path.resolve()
@@ -1247,6 +1409,40 @@ def test_hpc_scripts_default_impacts_dir_to_checkout_root():
         assert "/global/scratch/users/$USER/sources/impacts" not in script
         assert 'REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"' in script
         assert 'IMPACTS_DIR="${IMPACTS_DIR:-$REPO_ROOT}"' in script
+
+
+def test_hpc_scripts_do_not_advertise_removed_analysis_stage():
+    for script_path in (Path("hpc/job.sh"), Path("hpc/job_runner.sh")):
+        script = Path(script_path).read_text(encoding="utf-8")
+        assert "python3\" -u -m impacts analysis" not in script
+        assert "analysis)" not in script
+        assert ", analysis" not in script
+
+
+def test_hpc_job_runner_accepts_manifest_inputs_for_stage_runs():
+    job_runner = Path("hpc/job_runner.sh").read_text(encoding="utf-8")
+
+    assert "-c <settings-or-manifest>" in job_runner
+    assert "activities_manifest.yaml for fleet" in job_runner
+    assert "pipeline_manifest.yaml for" in job_runner
+    assert "_stage_uses_run_manifest" in job_runner
+    assert "fleet|emissions|inmap|aermod|exposure|postprocess" in job_runner
+    assert 'MANIFEST_OUTPUT_DIR="$(_top_level_yaml_value output_dir)"' in job_runner
+    assert "requires a manifest with top-level output_dir" in job_runner
+    assert "if ! _stage_uses_run_manifest; then" in job_runner
+
+
+def test_hpc_profile_is_controlled_by_profile_mode():
+    job_runner = Path("hpc/job_runner.sh").read_text(encoding="utf-8")
+    job_script = Path("hpc/job.sh").read_text(encoding="utf-8")
+
+    assert 'profile_arg="${IMPACTS_PROFILE:-none}"' in job_runner
+    assert "--profile      Profiling mode: none (default), time, cpu, memray, all" in job_runner
+    assert "none|time|cpu|memray|all" in job_runner
+    assert "IMPACTS_PROFILE=$profile_arg" in job_runner
+    assert 'PROFILE_MODE="${IMPACTS_PROFILE:-none}"' in job_script
+    assert 'PROFILE_ARGS=(--profile "$PROFILE_MODE")' in job_script
+    assert 'PROFILE_MODE="${IMPACTS_PROFILE:-time}"' not in job_script
 
 
 def test_hpc_dependency_marker_includes_project_metadata():
@@ -1413,7 +1609,11 @@ def test_postprocessor_resolves_county_boundaries_from_input_manifest(monkeypatc
         classmethod(lambda cls, payload: SimpleNamespace(to_dict=lambda: payload)),
     )
 
-    resolved = postprocessor_module._resolve_county_boundaries_path(tmp_path / "settings.yaml")
+    resolved = postprocessor_module._resolve_county_boundaries_path(
+        tmp_path / "settings.yaml",
+        run_manifest_path=run_manifest_path,
+        registry=PathRegistry([input_root]),
+    )
 
     assert resolved == county_path.resolve()
 
