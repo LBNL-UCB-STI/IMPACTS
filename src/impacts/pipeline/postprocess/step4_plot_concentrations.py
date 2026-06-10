@@ -19,6 +19,9 @@ from ._common import (
     CMAP_BC,
     CMAP_NO2,
     CMAP_PM25,
+    MAP_COLORBAR_LABEL_FONTSIZE,
+    MAP_COLORBAR_LABELPAD,
+    MAP_COLORBAR_TICK_FONTSIZE,
     MAP_DPI,
     MAP_FIGSIZE,
     MAP_TITLE_FONTSIZE,
@@ -154,9 +157,15 @@ def _plot_primary_secondary_comparison(conc_gdf, net_gdf, layout, out_path: Path
         ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
         ax.set_axis_off()
 
-    _add_colorbar(fig, axes, CMAP_PM25, vmax, "PM₂.₅ (μg/m³)")
     fig.suptitle("Primary vs Secondary PM₂.₅", fontsize=MAP_TITLE_FONTSIZE + 4, y=0.98)
-    fig.tight_layout(pad=0.5)
+    fig.tight_layout(rect=[0, 0, 0.9, 0.96], pad=0.5)
+    cbar_ax = fig.add_axes([0.91, 0.15, 0.02, 0.7])
+    sm = plt.cm.ScalarMappable(cmap=CMAP_PM25, norm=plt.Normalize(vmin=0, vmax=vmax))
+    sm.set_array([])
+    cbar = fig.colorbar(sm, cax=cbar_ax)
+    cbar.set_label("PM₂.₅ (μg/m³)", fontsize=MAP_COLORBAR_LABEL_FONTSIZE, labelpad=MAP_COLORBAR_LABELPAD)
+    cbar.ax.tick_params(labelsize=MAP_COLORBAR_TICK_FONTSIZE, pad=6)
+    cbar.ax.yaxis.get_offset_text().set_fontsize(MAP_COLORBAR_TICK_FONTSIZE)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=MAP_DPI, bbox_inches="tight")

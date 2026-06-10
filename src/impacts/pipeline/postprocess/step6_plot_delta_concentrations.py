@@ -21,6 +21,9 @@ from ...common import (
     configure_duckdb_connection,
 )
 from ._common import (
+    MAP_COLORBAR_LABEL_FONTSIZE,
+    MAP_COLORBAR_LABELPAD,
+    MAP_COLORBAR_TICK_FONTSIZE,
     MAP_DPI,
     MAP_FIGSIZE,
     MAP_TITLE_FONTSIZE,
@@ -115,8 +118,18 @@ def _build_concentration_delta(conc_gdf, delta_baseline_concentration_path: str 
             f"found {int(conc_gdf[key].duplicated().sum())} duplicate rows."
         )
 
-    logger.info("  Current: %d rows — baseline: %s", len(conc_gdf), Path(delta_baseline_concentration_path).name)
+    logger.info("  Current : %d rows", len(conc_gdf))
+    logger.info("  Baseline: %s", Path(delta_baseline_concentration_path).resolve())
     current_df = pd.DataFrame(conc_gdf[current_required])
+
+    logger.info("  Current column stats (before join):")
+    for col in DELTA_COLUMNS:
+        col_data = current_df[col].dropna()
+        logger.info(
+            "    %-15s mean=%.6f  min=%.6f  max=%.6f  n=%d",
+            col, float(col_data.mean()), float(col_data.min()), float(col_data.max()), len(col_data),
+        )
+
     baseline_scan = _duckdb_scan_expression(delta_baseline_concentration_path)
 
     con = duckdb.connect()
@@ -151,6 +164,22 @@ def _build_concentration_delta(conc_gdf, delta_baseline_concentration_path: str 
         logger.warning(
             "  Baseline is missing %d current aermod cells; deltas will be null there.",
             missing_baseline,
+        )
+
+    logger.info("  Per-column delta stats (current - baseline):")
+    for col in DELTA_COLUMNS:
+        c_data = result_df[f"{col}_current"].dropna()
+        b_data = result_df[f"{col}_baseline"].dropna()
+        d_data = result_df[f"{col}_delta"].dropna()
+        logger.info(
+            "    %-15s current_mean=%.6f  baseline_mean=%.6f  delta_mean=%.6f  delta_min=%.6f  delta_max=%.6f  n_matched=%d",
+            col,
+            float(c_data.mean()) if len(c_data) else float("nan"),
+            float(b_data.mean()) if len(b_data) else float("nan"),
+            float(d_data.mean()) if len(d_data) else float("nan"),
+            float(d_data.min()) if len(d_data) else float("nan"),
+            float(d_data.max()) if len(d_data) else float("nan"),
+            len(b_data),
         )
 
     logger.info("  Delta ready (%d rows) — reattaching geometry …", len(result_df))
@@ -227,9 +256,17 @@ def _plot_primary_secondary_delta_comparison(delta_gdf, net_gdf, layout, out_pat
         ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
         ax.set_axis_off()
 
-    _add_colorbar(fig, axes, DELTA_CMAP, float(norm.vmax), "PM₂.₅ delta (current - baseline, μg/m³)", norm=norm)
     fig.suptitle("Primary vs Secondary PM₂.₅ Delta", fontsize=MAP_TITLE_FONTSIZE + 4, y=0.98)
-    fig.tight_layout(pad=0.5)
+    # Reserve 10% on the right for the colorbar and 4% on top for suptitle, then
+    # place the colorbar in a manually-sized axis to prevent overlap with the right panel.
+    fig.tight_layout(rect=[0, 0, 0.9, 0.96], pad=0.5)
+    cbar_ax = fig.add_axes([0.91, 0.15, 0.02, 0.7])
+    sm = plt.cm.ScalarMappable(cmap=DELTA_CMAP, norm=norm)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, cax=cbar_ax)
+    cbar.set_label("PM₂.₅ delta (current - baseline, μg/m³)", fontsize=MAP_COLORBAR_LABEL_FONTSIZE, labelpad=MAP_COLORBAR_LABELPAD)
+    cbar.ax.tick_params(labelsize=MAP_COLORBAR_TICK_FONTSIZE, pad=6)
+    cbar.ax.yaxis.get_offset_text().set_fontsize(MAP_COLORBAR_TICK_FONTSIZE)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=MAP_DPI, bbox_inches="tight")
@@ -251,6 +288,11 @@ def run(
     log_step_banner("Postprocess Step 6", "Plot Delta Concentrations", logger=logger)
     output_dir = Path(output_dir)
     _remove_stale_outputs(output_dir)
+
+    logger.info("Step 6 paths:")
+    logger.info("  current  (subtracted from): %s", Path(concentration_path).resolve())
+    logger.info("  baseline (subtracted by)  : %s", Path(delta_baseline_concentration_path).resolve())
+    logger.info("  output_dir                : %s", output_dir.resolve())
 
     concentration_columns = ["geometry", "aermod_cell_id", "inmap_cell_id", *DELTA_COLUMNS]
     logger.info("Loading current concentration data …")

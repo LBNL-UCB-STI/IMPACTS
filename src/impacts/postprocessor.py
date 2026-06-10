@@ -720,6 +720,11 @@ def _run_postprocess_steps(
         else:
             logger.info("Skipping Steps 6-7: no delta baseline concentration distribution configured.")
     elif conc_path.exists() and net_path.exists():
+        logger.info(
+            "Step 6 — resolved paths:\n  current (c) : %s\n  baseline (b): %s",
+            conc_path,
+            delta_baseline_concentration_path,
+        )
         delta_outputs = run_step6(
             concentration_path=str(conc_path),
             delta_baseline_concentration_path=str(delta_baseline_concentration_path),
