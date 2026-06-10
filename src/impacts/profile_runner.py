@@ -4,7 +4,6 @@ import argparse
 import cProfile
 from pathlib import Path
 import sys
-import traceback
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,12 +31,6 @@ def main(argv: list[str] | None = None) -> int:
         from impacts.__main__ import main as impacts_main
 
         exit_code = int(impacts_main(command_args))
-    except SystemExit as exc:
-        code = exc.code
-        exit_code = int(code) if isinstance(code, int) else 1
-    except Exception:
-        traceback.print_exc()
-        exit_code = 1
     finally:
         profiler.disable()
         profiler.dump_stats(str(profile_path))

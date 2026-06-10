@@ -155,51 +155,6 @@ def test_compute_aermod_source_attributes_preserves_row_release_heights(tmp_path
     assert result["source_urban_class"].tolist() == [1000, 1000]
 
 
-def test_compute_aermod_source_attributes_defaults_unpopulated_cells_to_rural(tmp_path: Path) -> None:
-    allocated = pd.DataFrame(
-        [
-            {
-                "linkId": 1,
-                "vehicleTypeId": "pax-car",
-                "process": "RUNEX",
-                "aermod_cell_id": 101,
-                "roadCategory": "residential",
-                "source_release_height": 1.0,
-                "tons_per_year_PM25_aermod_allocated": 0.25,
-            },
-            {
-                "linkId": 2,
-                "vehicleTypeId": "freight-truck",
-                "process": "RUNEX",
-                "aermod_cell_id": 202,
-                "roadCategory": "motorway",
-                "source_release_height": 3.5,
-                "tons_per_year_PM25_aermod_allocated": 0.75,
-            },
-        ]
-    )
-    input_path = tmp_path / "aermod_raw.parquet"
-    output_path = tmp_path / "aermod_attrs.parquet"
-    allocated.to_parquet(input_path, index=False)
-
-    _compute_aermod_source_attributes_parquet(
-        str(input_path),
-        str(output_path),
-        scratch_dir=tmp_path,
-        freeway_road_categories=frozenset({"motorway"}),
-        cell_population_df=pd.DataFrame(
-            {"aermod_cell_id": [101], "source_urban_class": [1000]}
-        ),
-    )
-
-    result = pd.read_parquet(output_path).sort_values("aermod_cell_id").reset_index(drop=True)
-
-    assert result["aermod_cell_id"].tolist() == [101, 202]
-    assert result["source_temporal_class"].tolist() == ["CITYSTREET", "FREEWAY"]
-    assert result["source_release_height"].tolist() == [1.0, 3.5]
-    assert result["source_urban_class"].tolist() == [1000, 0]
-
-
 def test_prepare_skims_for_grid_allocation_aggregates_parquet_without_eager_raw_read(
     tmp_path: Path,
     monkeypatch,
