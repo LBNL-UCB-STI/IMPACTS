@@ -481,51 +481,80 @@ def generate_fishnet_from_bounds(
     return target_path, cell_id_col
 
 
-def constrain_grid_to_network(
+def build_network_study_area(
+    *,
+    network_path: str,
+    target_epsg: int,
+    output_path: Optional[str] = None,
+    buffer_meters: float = 0.0,
+) -> gpd.GeoDataFrame:
+    started = time.perf_counter()
+    network = read_network_lines(network_path, target_epsg=int(target_epsg))
+    valid = network.geometry.notna() & ~network.geometry.is_empty & network.geometry.is_valid
+    network = network.loc[valid].copy()
+    if network.empty:
+        raise ValueError(f"Cannot build study-area envelope from an empty network: {network_path}")
+
+    minx, miny, maxx, maxy = (float(v) for v in network.total_bounds)
+    geometry = shapely.box(minx, miny, maxx, maxy)
+    if float(buffer_meters) > 0.0:
+        geometry = geometry.buffer(float(buffer_meters))
+    study_area = gpd.GeoDataFrame(
+        {"study_area_id": [0]},
+        geometry=[geometry],
+        crs=f"EPSG:{int(target_epsg)}",
+    )
+    if output_path:
+        write_vector(study_area, output_path)
+    logger.info(
+        "Preprocess: built transportation study-area envelope from %d network links in %.2fs%s",
+        len(network),
+        time.perf_counter() - started,
+        f" → {output_path}" if output_path else "",
+    )
+    return study_area
+
+
+def select_grid_cells_by_study_area(
     *,
     grid_path: str,
-    network_path: str,
+    study_area_gdf: gpd.GeoDataFrame,
     grid_id_col: str,
     target_epsg: int,
     output_path: str,
 ) -> str:
     started = time.perf_counter()
     target = Path(output_path)
-    if target.exists():
-        logger.info("Preprocess: reusing network-constrained grid %s", target)
-        return str(target)
 
     grid = read_vector(grid_path)
     if grid.crs is None:
-        raise ValueError(f"Grid constraint input is missing CRS: {grid_path}")
+        raise ValueError(f"Study-area grid input is missing CRS: {grid_path}")
     grid = grid.to_crs(epsg=int(target_epsg))
     if grid_id_col not in grid.columns:
         raise ValueError(
             f"Expected grid id column '{grid_id_col}' in {grid_path}. Available columns: {list(grid.columns)}"
         )
 
-    network = read_network_lines(network_path, target_epsg=int(target_epsg))
-    if network.crs is None:
-        raise ValueError(f"Network constraint input is missing CRS: {network_path}")
+    if study_area_gdf.crs is None:
+        raise ValueError("Study-area envelope is missing CRS.")
+    study_area = study_area_gdf.to_crs(epsg=int(target_epsg))
+    study_area_union = (
+        study_area.geometry.union_all()
+        if hasattr(study_area.geometry, "union_all")
+        else study_area.geometry.unary_union
+    )
+    minx, miny, maxx, maxy = (float(v) for v in study_area.total_bounds)
+    envelope = shapely.box(minx, miny, maxx, maxy)
+    candidates = grid.loc[grid.geometry.intersects(envelope)]
+    selected = candidates.loc[candidates.geometry.intersects(study_area_union)].copy()
+    if selected.empty:
+        raise ValueError(f"Study-area envelope did not select any {grid_id_col} cells from {grid_path}")
 
-    joined = gpd.sjoin(
-        grid[[grid_id_col, "geometry"]],
-        network[["geometry"]],
-        how="inner",
-        predicate="intersects",
-    )
-    keep_ids = (
-        pd.to_numeric(joined[grid_id_col], errors="coerce")
-        .dropna()
-        .astype(int)
-        .unique()
-    )
-    constrained = grid[pd.to_numeric(grid[grid_id_col], errors="coerce").isin(keep_ids)]
-    write_vector(constrained, str(target))
+    write_vector(selected, str(target))
     logger.info(
-        "Preprocess: constrained %s to %d network-intersecting cells in %.2fs → %s",
+        "Preprocess: selected %d %s cells intersecting the study-area envelope in %.2fs → %s",
+        len(selected),
         grid_id_col,
-        len(constrained),
         time.perf_counter() - started,
         target,
     )

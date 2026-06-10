@@ -1,4 +1,4 @@
-"""Step 3 (preprocess) — Network mapping and grid intersection helpers."""
+"""Step 3 (preprocess) — Network-to-surface allocation weights."""
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -195,7 +195,7 @@ def _build_synthetic_beam_links(
     candidates = candidates[mapped_network.columns].copy()
     augmented = pd.concat([mapped_network, candidates], ignore_index=True)
     logger.info(
-        "Step 3.1 synthetic link fallback: appended %d BEAM car links without OSM origin to mapped network",
+        "Step 3.1 synthetic BEAM links: appended %d car links without OSM origin to mapped network",
         len(candidates),
     )
     return gpd.GeoDataFrame(augmented, geometry="geometry", crs=mapped_network.crs)
@@ -359,15 +359,15 @@ def _union_county_matches_with_unmatched(
     )
 
 
-def _assign_fallback_counties(
+def _assign_nearest_counties(
     *,
     source_links: gpd.GeoDataFrame,
     county_gdf: gpd.GeoDataFrame,
 ) -> pd.DataFrame:
-    fallback = source_links[["linkId", "geometry"]].copy()
-    fallback["geometry"] = fallback.geometry.representative_point()
+    representative_points = source_links[["linkId", "geometry"]].copy()
+    representative_points["geometry"] = representative_points.geometry.representative_point()
     joined = gpd.sjoin(
-        fallback,
+        representative_points,
         county_gdf[["COUNTYFP", "geometry"]],
         how="left",
         predicate="within",
@@ -376,7 +376,7 @@ def _assign_fallback_counties(
     missing = joined["county_COUNTYFP"].isna()
     if missing.any():
         nearest = gpd.sjoin_nearest(
-            fallback.loc[missing, ["linkId", "geometry"]],
+            representative_points.loc[missing, ["linkId", "geometry"]],
             county_gdf[["COUNTYFP", "geometry"]],
             how="left",
         ).drop(columns=["index_right", "distance"], errors="ignore")
@@ -417,12 +417,12 @@ def _ensure_county_mass_conservation(
 
     source = source_links[["linkId", "geometry"]].copy()
     source["source_edge_length_m"] = source.geometry.length
-    fallback_links = source.loc[source["linkId"].isin(affected["linkId"])]
-    fallback_counties = _assign_fallback_counties(source_links=fallback_links, county_gdf=county_gdf)
+    supplemental_links = source.loc[source["linkId"].isin(affected["linkId"])]
+    nearest_counties = _assign_nearest_counties(source_links=supplemental_links, county_gdf=county_gdf)
 
     affected = affected.merge(source[["linkId", "geometry", "source_edge_length_m"]], how="left", on="linkId")
     affected = affected.merge(
-        fallback_counties.rename(columns={"county_COUNTYFP": "nearest_county_COUNTYFP"}),
+        nearest_counties.rename(columns={"county_COUNTYFP": "nearest_county_COUNTYFP"}),
         how="left",
         on="linkId",
     )
@@ -431,10 +431,10 @@ def _ensure_county_mass_conservation(
     affected["missing_zone_length_m"] = (
         affected["source_edge_length_m"] - affected["county_zone_length_sum"]
     ).clip(lower=0.0)
-    use_length_fallback = affected["missing_zone_length_m"].le(0.0) & affected["missing_share"].gt(0.0)
-    affected.loc[use_length_fallback, "missing_zone_length_m"] = (
-        affected.loc[use_length_fallback, "source_edge_length_m"]
-        * affected.loc[use_length_fallback, "missing_share"]
+    use_length_proration = affected["missing_zone_length_m"].le(0.0) & affected["missing_share"].gt(0.0)
+    affected.loc[use_length_proration, "missing_zone_length_m"] = (
+        affected.loc[use_length_proration, "source_edge_length_m"]
+        * affected.loc[use_length_proration, "missing_share"]
     )
 
     synthetic = affected.loc[affected["missing_share"] > 0.0, [
@@ -459,7 +459,7 @@ def _ensure_county_mass_conservation(
     ].copy()
     combined = pd.concat([result, synthetic], ignore_index=True)
     logger.info(
-        "Step 3.6 county conservation: synthesized %d fallback county rows across %d links",
+        "Step 3.6 county conservation: synthesized %d county allocation rows across %d links",
         len(synthetic),
         synthetic["linkId"].nunique(),
     )
@@ -471,10 +471,10 @@ def run(
     input_root: Path,
     manifest_inputs: Optional[dict[str, object]] = None,
 ) -> Tuple[dict[str, Optional[str]], dict[str, Optional[gpd.GeoDataFrame]]]:
-    """Map staged BEAM network to OSM and intersect it with county, InMAP, and AERMOD surfaces separately."""
+    """Map staged BEAM links and build allocation weights for each emission surface."""
     from osm_chordify.osm.intersect import intersect_road_network_with_zones
 
-    log_step_banner("Preprocess Step 3", "Integrate Grids", logger=logger)
+    log_step_banner("Preprocess Step 3", "Build Network Allocation Weights", logger=logger)
     county_intersection_path = input_root / "beam_osm_county_intersection.parquet"
     inmap_intersection_path = input_root / "beam_osm_inmap_intersection.parquet"
     aermod_intersection_path = input_root / "beam_osm_aermod_intersection.parquet"
@@ -488,14 +488,14 @@ def run(
     staged_network = resolve_required_manifest_input(manifest_inputs, key="network")
     if existing_paths["county"] and ((not pipeline.inmap_enabled) or existing_paths["inmap"]) and ((not pipeline.aermod_enabled) or existing_paths["aermod"]):
         logger.info(
-            "Step 3: reusing existing separate intersections county=%s inmap=%s aermod=%s",
+            "Step 3: reusing existing allocation weights county=%s inmap=%s aermod=%s",
             existing_paths["county"],
             existing_paths["inmap"],
             existing_paths["aermod"],
         )
         return existing_paths, {"county": None, "inmap": None, "aermod": None}
     mapped_network_path = str((input_root / "beam_osm_mapped.parquet").resolve())
-    log_substep_banner("3.1", "map BEAM network to OSM", logger=logger)
+    log_substep_banner("3.1", "map BEAM links to allocation geometry", logger=logger)
     if Path(mapped_network_path).exists():
         logger.info("Step 3.1: reusing BEAM/OSM mapping %s", mapped_network_path)
     else:
@@ -520,8 +520,8 @@ def run(
 
     inmap_intersection: Optional[gpd.GeoDataFrame] = None
     if pipeline.inmap_enabled:
-        log_substep_banner("3.2", "intersect with InMAP grid", logger=logger)
-        logger.info("Step 3.2: intersecting with inMAP grid %s", pipeline.inmap_grid_path)
+        log_substep_banner("3.2", "compute InMAP allocation weights", logger=logger)
+        logger.info("Step 3.2: computing network-to-InMAP weights using %s", pipeline.inmap_grid_path)
         with _log_safe_osm_chordify_progress():
             inmap_intersection = intersect_road_network_with_zones(
                 mapped_network,
@@ -544,8 +544,8 @@ def run(
 
     aermod_intersection: Optional[gpd.GeoDataFrame] = None
     if pipeline.aermod_enabled:
-        log_substep_banner("3.3", "intersect with AERMOD grid", logger=logger)
-        logger.info("Step 3.3: intersecting line network with AERMOD grid %s", pipeline.aermod_grid_path)
+        log_substep_banner("3.3", "compute AERMOD allocation weights", logger=logger)
+        logger.info("Step 3.3: computing network-to-AERMOD weights using %s", pipeline.aermod_grid_path)
         with _log_safe_osm_chordify_progress():
             aermod_intersection = intersect_road_network_with_zones(
                 mapped_network,
@@ -563,7 +563,7 @@ def run(
     B = mapped_network.reset_index(drop=True)
     B[_SOURCE_ROW_ID] = range(len(B))
 
-    log_substep_banner("3.4", "intersect with county boundaries", logger=logger)
+    log_substep_banner("3.4", "compute county allocation weights", logger=logger)
     county_setup_started = time.perf_counter()
     county_path = resolve_required_manifest_input(manifest_inputs, key="county_boundaries")
     county_gdf = read_vector(county_path)
@@ -573,7 +573,7 @@ def run(
     if county_gdf.crs is not None:
         county_gdf = county_gdf.to_crs(epsg=epsg)
     logger.info(
-        "Step 3.4: intersecting with county boundaries (%d polygons prepared in %.2fs)",
+        "Step 3.4: computing network-to-county weights (%d polygons prepared in %.2fs)",
         len(county_gdf),
         time.perf_counter() - county_setup_started,
     )
@@ -588,8 +588,8 @@ def run(
         time.perf_counter() - county_match_started,
     )
 
-    log_substep_banner("3.5", "recover unmatched county rows", logger=logger)
-    logger.info("Step 3.5: identifying unmatched rows from county matches")
+    log_substep_banner("3.5", "recover county allocation rows", logger=logger)
+    logger.info("Step 3.5: identifying links without a county allocation row")
     unmatched_started = time.perf_counter()
     matched_source_col = _resolve_source_row_col(C_matched)
     C = _union_county_matches_with_unmatched(B, C_matched)
@@ -600,8 +600,8 @@ def run(
     )
 
     persist_started = time.perf_counter()
-    log_substep_banner("3.6", "write canonical county intersection outputs", logger=logger)
-    logger.info("Step 3.6: canonicalizing and writing county intersection outputs")
+    log_substep_banner("3.6", "write county allocation weights", logger=logger)
+    logger.info("Step 3.6: canonicalizing and writing county allocation weights")
     county_intersection = _normalize_zone_intersection_schema(C, zone_label="county")
     county_intersection = _ensure_county_mass_conservation(
         source_links=B,

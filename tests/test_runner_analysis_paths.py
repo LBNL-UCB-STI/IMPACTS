@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from impacts.config.path_registry import PathRegistry
 from impacts.postprocessor import _resolve_inventory_emfacid_activity_path
 from impacts.postprocessor import _resolve_vehicle_category_metadata_path
 
@@ -18,7 +19,7 @@ def test_resolve_inventory_emfacid_activity_path_uses_colocated_emfacid_file_onl
 
     monkeypatch.setattr(
         "impacts.postprocessor._load_context",
-        lambda _: (
+        lambda *_args, **_kwargs: (
             None,
             None,
             None,
@@ -38,6 +39,7 @@ def test_resolve_inventory_emfacid_activity_path_uses_colocated_emfacid_file_onl
         _resolve_inventory_emfacid_activity_path(
             settings_path,
             manifest_key="passenger_inventory_emfacid_file",
+            registry=PathRegistry([tmp_path]),
         )
 
     assert str(missing_path.resolve()) in str(error.value)
@@ -53,7 +55,7 @@ def test_resolve_vehicle_category_metadata_path_prefers_manifest_input(
     metadata_path.write_text("emfac_vehicle_category,generic_vehicle_category,operation_days_per_year,idle_time_fraction\n")
     monkeypatch.setattr(
         "impacts.postprocessor._load_context",
-        lambda _: (
+        lambda *_args, **_kwargs: (
             None,
             None,
             None,
@@ -69,6 +71,6 @@ def test_resolve_vehicle_category_metadata_path_prefers_manifest_input(
         ),
     )
 
-    resolved = _resolve_vehicle_category_metadata_path(settings_path)
+    resolved = _resolve_vehicle_category_metadata_path(settings_path, registry=PathRegistry([tmp_path]))
 
     assert resolved == metadata_path.resolve()

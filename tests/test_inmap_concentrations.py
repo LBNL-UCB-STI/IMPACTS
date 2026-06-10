@@ -79,21 +79,24 @@ def test_assemble_concentration_results_scales_no2_when_requested() -> None:
     assert result["NO2"].tolist() == [30.0, 40.0]
 
 
-def test_sparse_no2_npz_loader_disables_tqdm_for_batch_logs(monkeypatch, tmp_path: Path) -> None:
+def test_sparse_no2_npz_loader_uses_progress_helper(monkeypatch, tmp_path: Path) -> None:
     import numpy as np
     import impacts.pipeline.workflow.step2_compute_inmap_concentrations as step2_module
 
     calls = []
+    updates = []
 
     class _FakeProgress:
+        disable = True
+
         def update(self, value):
-            pass
+            updates.append(value)
 
         def close(self):
-            pass
+            updates.append("closed")
 
-    def _fake_tqdm(*args, **kwargs):
-        calls.append(kwargs)
+    def _fake_make_progress(*args, **kwargs):
+        calls.append((args, kwargs))
         return _FakeProgress()
 
     npz_path = tmp_path / "matrix.npz"
@@ -105,11 +108,12 @@ def test_sparse_no2_npz_loader_disables_tqdm_for_batch_logs(monkeypatch, tmp_pat
         source_dim=np.array(4),
         receptor_dim=np.array(5),
     )
-    monkeypatch.setattr(step2_module, "_running_with_real_terminal", lambda: False)
-    monkeypatch.setattr(step2_module, "tqdm", _fake_tqdm)
+    monkeypatch.setattr(step2_module, "make_progress", _fake_make_progress)
 
     matrix = _read_sparse_transfer_matrix_npz(str(npz_path))
 
     assert matrix["source_dim"] == 4
     assert calls
-    assert calls[0]["disable"] is True
+    assert calls[0][0][0] == "Loading NOx->NO2 npz"
+    assert calls[0][1]["total"] == 5
+    assert updates == [1, 1, 1, 1, 1, "closed"]

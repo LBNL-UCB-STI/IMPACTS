@@ -10,7 +10,6 @@ from shapely.geometry import box
 from impacts.pipeline.postprocess._common import _grid_raster_layout
 from impacts.pipeline.postprocess._common import _rasterize_grid_values
 from impacts.pipeline.postprocess.step5_plot_exposure import _aggregate_exposure_to_inmap
-from impacts.pipeline.postprocess.step5_plot_exposure import _merge_population_concentration
 from impacts.pipeline.postprocess.step6_plot_delta_concentrations import _build_concentration_delta
 from impacts.pipeline.postprocess.step7_plot_delta_exposure import _aggregate_delta_exposure_to_inmap
 
@@ -65,7 +64,7 @@ def test_concentration_delta_aligns_by_aermod_cell_id_and_subtracts_baseline(tmp
     baseline_path = tmp_path / "beam_concentration_distribution.parquet"
     baseline.to_parquet(baseline_path, index=False)
 
-    delta = _build_concentration_delta(current, baseline_path).set_index("aermod_cell_id")
+    delta = _build_concentration_delta(current, baseline_path, output_dir=tmp_path).set_index("aermod_cell_id")
 
     assert delta.loc[1, "TotalPM25_delta"] == -1.0
     assert delta.loc[2, "TotalPM25_delta"] == 3.0
@@ -77,7 +76,7 @@ def test_concentration_delta_aligns_by_aermod_cell_id_and_subtracts_baseline(tmp
     assert delta.loc[2, "NO2_delta"] == 8.0
 
 
-def test_delta_exposure_aggregates_current_population_weighted_delta_to_inmap() -> None:
+def test_delta_exposure_aggregates_current_population_weighted_delta_to_inmap(tmp_path: Path) -> None:
     pop_gdf = gpd.GeoDataFrame(
         {
             "aermod_cell_id": [1, 2, 3],
@@ -103,7 +102,12 @@ def test_delta_exposure_aggregates_current_population_weighted_delta_to_inmap() 
         crs="EPSG:26910",
     )
 
-    pwc_delta = _aggregate_delta_exposure_to_inmap(pop_gdf, delta_df, inmap_gdf).sort_values("inmap_cell_id")
+    pwc_delta = _aggregate_delta_exposure_to_inmap(
+        pop_gdf,
+        delta_df,
+        inmap_gdf,
+        output_dir=tmp_path,
+    ).sort_values("inmap_cell_id")
 
     assert pwc_delta["inmap_cell_id"].tolist() == [100]
     assert pwc_delta["population"].tolist() == [40]
@@ -111,7 +115,7 @@ def test_delta_exposure_aggregates_current_population_weighted_delta_to_inmap() 
     assert pwc_delta["pwc_pm25_delta"].tolist() == [2.0]
 
 
-def test_exposure_burden_is_computed_before_inmap_aggregation() -> None:
+def test_exposure_burden_is_computed_before_inmap_aggregation(tmp_path: Path) -> None:
     pop_gdf = gpd.GeoDataFrame(
         {
             "aermod_cell_id": [1, 2],
@@ -127,13 +131,24 @@ def test_exposure_burden_is_computed_before_inmap_aggregation() -> None:
             "TotalPM25": [2.0, 4.0],
         }
     )
+    inmap_gdf = gpd.GeoDataFrame(
+        {"inmap_cell_id": [100]},
+        geometry=[box(0, 0, 200, 100)],
+        crs="EPSG:26910",
+    )
 
-    merged = _merge_population_concentration(pop_gdf, conc_df)
+    aggregated = _aggregate_exposure_to_inmap(
+        pop_gdf,
+        conc_df,
+        inmap_gdf,
+        output_dir=tmp_path,
+    )
 
-    assert merged["pm25_exposure_burden"].tolist() == [20.0, 120.0]
+    assert aggregated["exposure_burden"].tolist() == [140.0]
+    assert aggregated["pwc_pm25"].tolist() == [3.5]
 
 
-def test_inmap_exposure_aggregates_population_weighted_cells_not_counties() -> None:
+def test_inmap_exposure_aggregates_population_weighted_cells_not_counties(tmp_path: Path) -> None:
     pop_gdf = gpd.GeoDataFrame(
         {
             "aermod_cell_id": [1, 2, 3],
@@ -159,7 +174,12 @@ def test_inmap_exposure_aggregates_population_weighted_cells_not_counties() -> N
         crs="EPSG:26910",
     )
 
-    pwc = _aggregate_exposure_to_inmap(pop_gdf, conc_df, inmap_gdf).sort_values("inmap_cell_id")
+    pwc = _aggregate_exposure_to_inmap(
+        pop_gdf,
+        conc_df,
+        inmap_gdf,
+        output_dir=tmp_path,
+    ).sort_values("inmap_cell_id")
 
     assert pwc["inmap_cell_id"].tolist() == [100]
     assert pwc["population"].tolist() == [40]

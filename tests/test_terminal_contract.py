@@ -834,6 +834,15 @@ def test_build_preprocess_manifest_runs_step3_and_registers_intersections(monkey
         }
 
     def _fake_step2(**kwargs):
+        import geopandas as gpd
+        from shapely.geometry import box
+
+        aermod_grid = gpd.GeoDataFrame(
+            {"aermod_id": [1]},
+            geometry=[box(0.0, 0.0, 100.0, 100.0)],
+            crs="EPSG:26910",
+        )
+        aermod_grid.to_parquet(tmp_path / "aermod_grid.parquet", index=False)
         return {
             "staged_inmap_grid": str(tmp_path / "inmap_grid.parquet"),
             "staged_aermod_grid": str(tmp_path / "aermod_grid.parquet"),

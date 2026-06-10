@@ -34,7 +34,6 @@ def test_log_safe_osm_chordify_progress_forces_fixed_width_for_logs(monkeypatch)
         calls.append(kwargs)
         return object()
 
-    monkeypatch.setattr(step3_integrate_grids, "_running_with_real_terminal", lambda: False)
     monkeypatch.setenv("IMPACTS_OSM_CHORDIFY_TQDM_NCOLS", "77")
     monkeypatch.setattr(osm_intersect, "tqdm", _fake_tqdm)
 

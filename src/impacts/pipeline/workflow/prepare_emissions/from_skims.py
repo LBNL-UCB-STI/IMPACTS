@@ -601,7 +601,7 @@ def _compute_aermod_source_attributes_parquet(
         if invalid_count:
             raise ValueError(
                 "AERMOD source attribute preparation found rows with invalid source attributes "
-                f"or missing aermod_cell_population matches: rows={invalid_count}"
+                f"or missing AERMOD cell attribute matches: rows={invalid_count}"
             )
         con.execute(f"""
             COPY (

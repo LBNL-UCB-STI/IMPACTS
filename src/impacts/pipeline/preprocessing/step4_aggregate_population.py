@@ -1,8 +1,9 @@
-"""Preprocess Step 4 — Aggregate population counts to AERMOD grid cells.
+"""Preprocess Step 4 — Build AERMOD cell population attributes.
 
-Spatially joins UrbanSim persons/households to the AERMOD grid and writes a
-per-cell person count and urban class (0 / 1000 / 10000) used by the pipeline
-to select AERMOD dispersion patterns.
+Spatially joins UrbanSim persons/households to the AERMOD study-area grid and
+writes one attribute row for every AERMOD cell. Cells without residents remain
+in the table with person_count=0 and source_urban_class=0 so source attributes
+never shrink the dispersion domain to populated cells.
 """
 from __future__ import annotations
 
@@ -97,10 +98,52 @@ def _join_population_to_aermod_grid(
     return pd.DataFrame(joined.drop(columns=["index_right", "geometry"], errors="ignore"))
 
 
-def _counts_from_joined(joined: pd.DataFrame, *, working_dir: Path) -> pd.DataFrame:
+def _complete_cell_attributes(
+    aermod_grid: pd.DataFrame,
+    counts: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    if _AERMOD_CELL_ID not in aermod_grid.columns:
+        raise ValueError(f"AERMOD grid attributes require '{_AERMOD_CELL_ID}'.")
+    cells = pd.DataFrame(
+        {
+            _AERMOD_CELL_ID: (
+                pd.to_numeric(aermod_grid[_AERMOD_CELL_ID], errors="coerce")
+                .dropna()
+                .astype(int)
+            )
+        }
+    ).drop_duplicates(subset=[_AERMOD_CELL_ID], keep="first")
+    cells = cells.sort_values(_AERMOD_CELL_ID).reset_index(drop=True)
+    if counts is None or counts.empty:
+        cells["person_count"] = 0
+    else:
+        counts = counts.copy()
+        counts[_AERMOD_CELL_ID] = pd.to_numeric(counts[_AERMOD_CELL_ID], errors="coerce").astype(int)
+        counts["person_count"] = pd.to_numeric(counts["person_count"], errors="coerce").fillna(0).astype(int)
+        cells = cells.merge(
+            counts[[_AERMOD_CELL_ID, "person_count"]],
+            how="left",
+            on=_AERMOD_CELL_ID,
+        )
+        cells["person_count"] = cells["person_count"].fillna(0).astype(int)
+    cells["source_urban_class"] = _classify_urban(cells["person_count"]).astype(int)
+    return cells[[_AERMOD_CELL_ID, "person_count", "source_urban_class"]]
+
+
+def _counts_from_joined(
+    joined: pd.DataFrame,
+    *,
+    aermod_grid: pd.DataFrame,
+    working_dir: Optional[Path] = None,
+) -> pd.DataFrame:
     con = duckdb.connect()
     try:
-        configure_duckdb_connection(con, working_dir=working_dir, show_progress=False, profile="balanced")
+        configure_duckdb_connection(
+            con,
+            working_dir=working_dir or Path.cwd(),
+            show_progress=False,
+            profile="balanced",
+        )
         con.register("_joined", joined)
         counts = con.execute(
             f'SELECT "{_AERMOD_CELL_ID}", COUNT(*) AS person_count'
@@ -108,38 +151,11 @@ def _counts_from_joined(joined: pd.DataFrame, *, working_dir: Path) -> pd.DataFr
         ).df()
     finally:
         con.close()
-    counts[_AERMOD_CELL_ID] = pd.to_numeric(counts[_AERMOD_CELL_ID], errors="coerce").astype(int)
-    counts["person_count"] = counts["person_count"].astype(int)
-    counts["source_urban_class"] = _classify_urban(counts["person_count"]).astype(int)
-    return counts[[_AERMOD_CELL_ID, "person_count", "source_urban_class"]]
+    return _complete_cell_attributes(aermod_grid, counts)
 
 
-def run(
-    pipeline: PipelineConfig,
-    output_root: Path,
-    *,
-    population_inputs: Optional[Dict[str, Any]] = None,
-) -> tuple[Optional[str], Optional[str]]:
-    log_step_banner("Preprocess Step 4", "Aggregate Population to AERMOD Grid", logger=logger)
-
-    if not population_inputs or not population_inputs.get("persons") or not population_inputs.get("households"):
-        logger.info("Preprocess step 4: no population inputs available — skipping.")
-        return None, None
-
-    if not pipeline.aermod_grid_path:
-        logger.info("Preprocess step 4: no AERMOD grid configured — skipping.")
-        return None, None
-
-    log_substep_banner("4.1", "load and merge persons + households", logger=logger)
-    population_gdf = _load_and_merge_population(
-        persons_entry=population_inputs["persons"],
-        households_entry=population_inputs["households"],
-        target_epsg=int(pipeline.output_epsg),
-    )
-    logger.info("Preprocess step 4.1: loaded %d persons with valid coordinates", len(population_gdf))
-
-    log_substep_banner("4.2", "join population to AERMOD grid", logger=logger)
-    aermod_grid = read_vector(pipeline.aermod_grid_path)
+def _load_aermod_grid(pipeline: PipelineConfig) -> gpd.GeoDataFrame:
+    aermod_grid = read_vector(str(pipeline.aermod_grid_path))
     if aermod_grid.crs is not None:
         aermod_grid = aermod_grid.to_crs(epsg=int(pipeline.output_epsg))
 
@@ -149,27 +165,69 @@ def run(
             f"Preprocess step 4: AERMOD grid missing expected id column '{aermod_grid_id}'. "
             f"Available: {list(aermod_grid.columns)}"
         )
-    aermod_grid = aermod_grid.rename(columns={aermod_grid_id: _AERMOD_CELL_ID})
+    return aermod_grid.rename(columns={aermod_grid_id: _AERMOD_CELL_ID})
 
-    joined = _join_population_to_aermod_grid(population_gdf=population_gdf, aermod_grid=aermod_grid)
-    counts = _counts_from_joined(joined, working_dir=output_root)
-    logger.info(
-        "Preprocess step 4.2: %d persons assigned across %d AERMOD cells (urban=%d, suburban=%d, rural=%d)",
-        counts["person_count"].sum(),
-        len(counts),
-        (counts["source_urban_class"] == 10000).sum(),
-        (counts["source_urban_class"] == 1000).sum(),
-        (counts["source_urban_class"] == 0).sum(),
-    )
 
-    log_substep_banner("4.3", "write staged population and per-cell counts", logger=logger)
+def run(
+    pipeline: PipelineConfig,
+    output_root: Path,
+    *,
+    population_inputs: Optional[Dict[str, Any]] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    log_step_banner("Preprocess Step 4", "Build AERMOD Cell Attributes", logger=logger)
+
+    if not pipeline.aermod_grid_path:
+        logger.info("Preprocess step 4: no AERMOD grid configured — skipping.")
+        return None, None
+
     output_root.mkdir(parents=True, exist_ok=True)
-    staged_population_path = output_root / _STAGED_POPULATION_FILENAME
-    joined.to_parquet(staged_population_path, index=False)
-    logger.info("Preprocess step 4.3: staged population (per-person, with aermod_cell_id) → %s", staged_population_path)
-
     cell_population_path = output_root / _OUTPUT_FILENAME
-    counts.to_parquet(cell_population_path, index=False)
-    logger.info("Preprocess step 4.3: aermod cell population → %s", cell_population_path)
 
-    return str(cell_population_path), str(staged_population_path)
+    log_substep_banner("4.1", "load AERMOD study-area grid", logger=logger)
+    aermod_grid = _load_aermod_grid(pipeline)
+    logger.info("Preprocess step 4.1: loaded %d AERMOD study-area cells", len(aermod_grid))
+
+    joined: Optional[pd.DataFrame] = None
+    if not population_inputs or not population_inputs.get("persons") or not population_inputs.get("households"):
+        log_substep_banner("4.2", "build zero-population cell attributes", logger=logger)
+        counts = _complete_cell_attributes(aermod_grid)
+        logger.info(
+            "Preprocess step 4.2: no population inputs available; writing zero-population attributes for %d AERMOD cells",
+            len(counts),
+        )
+    else:
+        log_substep_banner("4.2", "load, merge, and join population", logger=logger)
+        population_gdf = _load_and_merge_population(
+            persons_entry=population_inputs["persons"],
+            households_entry=population_inputs["households"],
+            target_epsg=int(pipeline.output_epsg),
+        )
+        logger.info("Preprocess step 4.2: loaded %d persons with valid coordinates", len(population_gdf))
+
+        joined = _join_population_to_aermod_grid(population_gdf=population_gdf, aermod_grid=aermod_grid)
+        counts = _counts_from_joined(joined, aermod_grid=aermod_grid, working_dir=output_root)
+        logger.info(
+            "Preprocess step 4.2: %d persons assigned across %d populated AERMOD cells; domain cells=%d "
+            "(urban=%d, suburban=%d, rural=%d)",
+            counts["person_count"].sum(),
+            (counts["person_count"] > 0).sum(),
+            len(counts),
+            (counts["source_urban_class"] == 10000).sum(),
+            (counts["source_urban_class"] == 1000).sum(),
+            (counts["source_urban_class"] == 0).sum(),
+        )
+
+    log_substep_banner("4.3", "write staged population and cell attributes", logger=logger)
+    staged_population_path: Optional[Path] = None
+    if joined is not None:
+        staged_population_path = output_root / _STAGED_POPULATION_FILENAME
+        joined.to_parquet(staged_population_path, index=False)
+        logger.info(
+            "Preprocess step 4.3: staged population (per-person, with aermod_cell_id) → %s",
+            staged_population_path,
+        )
+
+    counts.to_parquet(cell_population_path, index=False)
+    logger.info("Preprocess step 4.3: AERMOD cell attributes → %s", cell_population_path)
+
+    return str(cell_population_path), str(staged_population_path) if staged_population_path else None

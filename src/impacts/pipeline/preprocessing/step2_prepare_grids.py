@@ -6,13 +6,14 @@ from typing import Any
 from typing import Dict
 
 from ...common import assign_grid_cells_to_zones
-from ...common import constrain_grid_to_network
+from ...common import build_network_study_area
 from ...common import ensure_grid_cell_id
 from ...common import generate_fishnet_from_bounds
 from ...common import log_step_banner
 from ...common import log_substep_banner
 from ...common import read_vector
 from ...common import resolve_required_manifest_input
+from ...common import select_grid_cells_by_study_area
 from ...common import stage_county_boundaries
 from ...manifest.file_ops import file_entry
 
@@ -27,11 +28,12 @@ def run(
     inmap,
     local_output_epsg: int,
 ) -> dict[str, str]:
-    log_step_banner("Preprocess Step 2", "Prepare Grids", logger=logger)
+    log_step_banner("Preprocess Step 2", "Prepare Study-Area Grids", logger=logger)
     start_year = settings.run.start_year
     if start_year is None:
         raise ValueError("run.start_year is required for county boundary staging")
 
+    study_area = None
     staged_inmap_grid = None
     resolved_inmap_grid_id = None
     if settings.impacts.pipeline.inmap:
@@ -43,13 +45,19 @@ def run(
             source_col=inmap.grid_id,
             output_path=str((input_root / "inmap_grid.parquet").resolve()),
         )
-        log_substep_banner("2.2", "constrain InMAP grid to network", logger=logger)
-        staged_inmap_grid = constrain_grid_to_network(
-            grid_path=staged_inmap_grid,
+        log_substep_banner("2.2", "build transportation study-area envelope", logger=logger)
+        study_area = build_network_study_area(
             network_path=resolve_required_manifest_input(manifest_inputs, key="network"),
+            target_epsg=int(local_output_epsg),
+            output_path=str((input_root / "study_area_envelope.parquet").resolve()),
+        )
+        log_substep_banner("2.3", "select InMAP study-area cells", logger=logger)
+        staged_inmap_grid = select_grid_cells_by_study_area(
+            grid_path=staged_inmap_grid,
+            study_area_gdf=study_area,
             grid_id_col="inmap_cell_id",
             target_epsg=int(local_output_epsg),
-            output_path=str((input_root / "inmap_network_subset.parquet").resolve()),
+            output_path=str((input_root / "inmap_study_area.parquet").resolve()),
         )
         manifest_inputs["inmap_grid"]["staged_path"] = staged_inmap_grid
 
@@ -57,19 +65,20 @@ def run(
     staged_aermod_full_grid = None
     resolved_aermod_grid_id = None
     if settings.impacts.pipeline.aermod:
-        log_substep_banner("2.3", "generate AERMOD grid", logger=logger)
+        log_substep_banner("2.4", "generate AERMOD study-area grid", logger=logger)
         staged_inmap = read_vector(staged_inmap_grid) if staged_inmap_grid else None
         if staged_inmap is None or staged_inmap.empty:
-            raise ValueError("Preprocess Step 2 requires a network-constrained InMAP grid before generating the AERMOD grid.")
+            raise ValueError("Preprocess Step 2 requires an InMAP study-area grid before generating the AERMOD grid.")
         grid_size_meters = float(settings.impacts.dispersions.aermod.grid_size_meters)
         staged_aermod_full_grid, resolved_aermod_grid_id = generate_fishnet_from_bounds(
             bounds=tuple(float(v) for v in staged_inmap.total_bounds),
             mask_gdf=staged_inmap,
             cell_size=grid_size_meters,
-            target_path=str((input_root / f"aermod_{grid_size_meters:g}m_fishnet.parquet").resolve()),
+            target_path=str((input_root / f"aermod_{grid_size_meters:g}m_study_area.parquet").resolve()),
             target_epsg=int(local_output_epsg),
             cell_id_col="aermod_cell_id",
         )
+        log_substep_banner("2.5", "assign AERMOD cells to InMAP cells", logger=logger)
         staged_aermod_full_grid = assign_grid_cells_to_zones(
             grid_path=staged_aermod_full_grid,
             zone_path=staged_inmap_grid,
@@ -85,7 +94,7 @@ def run(
             optional=False,
         )
     geography = settings.shared.geography
-    log_substep_banner("2.4", "stage county boundaries", logger=logger)
+    log_substep_banner("2.6", "stage county boundaries", logger=logger)
     staged_county_boundaries = stage_county_boundaries(
         manifest_inputs=manifest_inputs,
         input_root=input_root,
