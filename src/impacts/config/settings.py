@@ -18,6 +18,106 @@ from .defaults import primary_pm25_integration_strategy as default_primary_pm25_
 from ._coerce import _required_string, _optional_string, _required_int, _optional_int, _required_float, _optional_float, _required_bool, _coerce_string_list, _reject_unknown_keys
 
 
+def _run_output_label(output_run_name: str | None, run_scenario: str | None) -> str:
+    label = str(output_run_name or "").strip()
+    if label:
+        return label
+    scenario = str(run_scenario or "").strip()
+    if not scenario:
+        raise ValueError("Presim output naming requires run.output_run_name or run.scenario")
+    return scenario
+
+
+def presim_run_root(
+    outputs_root: str | Path,
+    *,
+    region: str,
+    output_run_name: str | None,
+    run_scenario: str,
+) -> Path:
+    return (
+        Path(str(outputs_root)).expanduser()
+        / f"impacts_presim--{region}--{_run_output_label(output_run_name, run_scenario)}"
+    )
+
+
+def presim_activities_root(
+    outputs_root: str | Path,
+    *,
+    region: str,
+    output_run_name: str | None,
+    run_scenario: str,
+) -> Path:
+    return presim_run_root(
+        outputs_root,
+        region=region,
+        output_run_name=output_run_name,
+        run_scenario=run_scenario,
+    ) / "activities"
+
+
+def presim_activities_inventory_root(
+    outputs_root: str | Path,
+    activity_scenario: str,
+    *,
+    region: str,
+    output_run_name: str | None,
+    run_scenario: str,
+) -> Path:
+    return presim_activities_root(
+        outputs_root,
+        region=region,
+        output_run_name=output_run_name,
+        run_scenario=run_scenario,
+    ) / str(activity_scenario) / "inventory"
+
+
+def presim_activities_rates_root(
+    outputs_root: str | Path,
+    activity_scenario: str,
+    *,
+    region: str,
+    output_run_name: str | None,
+    run_scenario: str,
+) -> Path:
+    return presim_activities_root(
+        outputs_root,
+        region=region,
+        output_run_name=output_run_name,
+        run_scenario=run_scenario,
+    ) / str(activity_scenario) / "rates"
+
+
+def presim_activities_tmp_root(
+    outputs_root: str | Path,
+    *,
+    region: str,
+    output_run_name: str | None,
+    run_scenario: str,
+) -> Path:
+    return presim_activities_root(
+        outputs_root,
+        region=region,
+        output_run_name=output_run_name,
+        run_scenario=run_scenario,
+    ) / "_tmp"
+
+
+def presim_activities_manifest_path(
+    outputs_root: str | Path,
+    *,
+    region: str,
+    output_run_name: str | None,
+    run_scenario: str,
+) -> Path:
+    return presim_activities_root(
+        outputs_root,
+        region=region,
+        output_run_name=output_run_name,
+        run_scenario=run_scenario,
+    ) / "activities_manifest.yaml"
+
+
 def normalize_epsg(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -168,14 +268,16 @@ class Run:
     region: str
     scenario: str
     start_year: int
+    output_run_name: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Run":
-        _reject_unknown_keys(payload, {"region", "scenario", "start_year"}, "run")
+        _reject_unknown_keys(payload, {"region", "scenario", "start_year", "output_run_name"}, "run")
         return cls(
             region=_required_string(payload.get("region"), "run.region"),
             scenario=_required_string(payload.get("scenario"), "run.scenario"),
             start_year=_required_int(payload.get("start_year"), "run.start_year"),
+            output_run_name=_optional_string(payload.get("output_run_name")),
         )
 
 
@@ -863,12 +965,15 @@ class ImpactsSettings:
         )
 
     def to_dict(self) -> Dict[str, Any]:
+        run_payload: Dict[str, Any] = {
+            "region": self.run.region,
+            "scenario": self.run.scenario,
+            "start_year": self.run.start_year,
+        }
+        if self.run.output_run_name is not None:
+            run_payload["output_run_name"] = self.run.output_run_name
         return {
-            "run": {
-                "region": self.run.region,
-                "scenario": self.run.scenario,
-                "start_year": self.run.start_year,
-            },
+            "run": run_payload,
             "shared": {
                 "geography": {
                     "FIPS": {
@@ -1163,6 +1268,11 @@ def _build_emfac_root_from_settings_file(path: Path) -> dict[str, object]:
         },
         "seed": settings.impacts.seed,
         "output": str(local_input_folder / "emfac"),
+        "presim": {
+            "region": settings.run.region,
+            "scenario": settings.run.scenario,
+            "output_run_name": settings.run.output_run_name,
+        },
         "activities": dict(activities),
         "fleet": dict(fleet),
     }
@@ -1183,6 +1293,14 @@ def _build_activities_config_from_root(emfac_root: dict[str, object]) -> dict[st
         defaults["scenario"] = deepcopy(root_scenario["name"])
     if "output" in emfac_root:
         defaults["outputs"] = deepcopy(emfac_root["output"])
+    presim = emfac_root.get("presim", {})
+    if isinstance(presim, dict):
+        if "region" in presim:
+            defaults["presim_run_region"] = deepcopy(presim["region"])
+        if "scenario" in presim:
+            defaults["presim_run_scenario"] = deepcopy(presim["scenario"])
+        if "output_run_name" in presim:
+            defaults["presim_output_run_name"] = deepcopy(presim["output_run_name"])
     fleet = emfac_root.get("fleet", {})
     if isinstance(fleet, dict) and "assignment_model" in fleet:
         defaults["assignment_model"] = deepcopy(fleet["assignment_model"])
@@ -1530,8 +1648,22 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
     scenario_id = str(raw["scenario"])
     emissions_store_name = scenario_id
     outputs_root = Path(str(raw["outputs"])).expanduser()
-    activities_output_root = outputs_root / "activities" / emissions_store_name / "inventory"
-    tmp_root = outputs_root / "activities" / "_tmp"
+    presim_region = _required_string(raw.get("presim_run_region"), "presim_run_region")
+    presim_run_scenario = _required_string(raw.get("presim_run_scenario"), "presim_run_scenario")
+    presim_output_run_name = _optional_string(raw.get("presim_output_run_name"))
+    activities_output_root = presim_activities_inventory_root(
+        outputs_root,
+        emissions_store_name,
+        region=presim_region,
+        output_run_name=presim_output_run_name,
+        run_scenario=presim_run_scenario,
+    )
+    tmp_root = presim_activities_tmp_root(
+        outputs_root,
+        region=presim_region,
+        output_run_name=presim_output_run_name,
+        run_scenario=presim_run_scenario,
+    )
     trace_dir = tmp_root / "traces"
     region_slug = region.lower()
     base_name = f"{region_slug}-emfac-{year}"
@@ -1601,7 +1733,15 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
                 activities_output_root / f"{inventory_final_name}-freight-activity-by-emfacid.parquet"
             ),
             "final_fleet_output_freight": str(activities_output_root / f"{inventory_final_name}-freight-fleet.parquet"),
-            "emissions_store_root": str(outputs_root / "activities" / emissions_store_name / "rates"),
+            "emissions_store_root": str(
+                presim_activities_rates_root(
+                    outputs_root,
+                    emissions_store_name,
+                    region=presim_region,
+                    output_run_name=presim_output_run_name,
+                    run_scenario=presim_run_scenario,
+                )
+            ),
         },
     }
 
@@ -2091,22 +2231,63 @@ def _derive_emfac_output_paths(emfac: dict[str, object]) -> dict[str, object]:
     region_label = emfac.get("region_label")
     calendar_year = emfac.get("calendar_year")
     scenario = emfac.get("scenario")
-    if outputs in (None, "") or region_label in (None, "") or calendar_year in (None, "") or scenario in (None, ""):
+    path_inputs = {
+        "outputs": outputs,
+        "region_label": region_label,
+        "calendar_year": calendar_year,
+        "scenario": scenario,
+    }
+    if any(value in (None, "") for value in path_inputs.values()):
         return emfac
+    presim_region = _optional_string(emfac.get("presim_run_region"))
+    presim_run_scenario = _optional_string(emfac.get("presim_run_scenario"))
+    missing_presim_identity = [
+        key
+        for key, value in (
+            ("presim_run_region", presim_region),
+            ("presim_run_scenario", presim_run_scenario),
+        )
+        if value in (None, "")
+    ]
+    if missing_presim_identity:
+        raise ValueError(
+            "EMFAC activity output path derivation requires presim identity fields: "
+            + ", ".join(missing_presim_identity)
+        )
     region_slug = str(region_label).strip().lower()
     project_analysis_name = f"{region_slug}-emfac-{int(calendar_year)}-project-analysis-final"
     inventory_final_name = f"{region_slug}-emfac-{int(calendar_year)}-inventory-final"
     inventory_matching_name = f"{region_slug}-emfac-{int(calendar_year)}-inventory-matching"
     outputs_root = Path(str(outputs))
-    activities_output_root = outputs_root / "activities" / str(scenario) / "inventory"
-    tmp_root = outputs_root / "activities" / "_tmp"
+    presim_output_run_name = _optional_string(emfac.get("presim_output_run_name"))
+    activities_output_root = presim_activities_inventory_root(
+        outputs_root,
+        str(scenario),
+        region=presim_region,
+        output_run_name=presim_output_run_name,
+        run_scenario=presim_run_scenario,
+    )
+    tmp_root = presim_activities_tmp_root(
+        outputs_root,
+        region=presim_region,
+        output_run_name=presim_output_run_name,
+        run_scenario=presim_run_scenario,
+    )
     emfac["passenger_rates_file"] = str((activities_output_root / f"{project_analysis_name}-passenger-rates.parquet").resolve())
     emfac["passenger_activity_file"] = str((tmp_root / f"{inventory_matching_name}-passenger-activity.parquet").resolve())
     emfac["passenger_fleet_file"] = str((activities_output_root / f"{inventory_final_name}-passenger-fleet.parquet").resolve())
     emfac["freight_rates_file"] = str((activities_output_root / f"{project_analysis_name}-freight-rates.parquet").resolve())
     emfac["freight_activity_file"] = str((tmp_root / f"{inventory_matching_name}-freight-activity.parquet").resolve())
     emfac["freight_fleet_file"] = str((activities_output_root / f"{inventory_final_name}-freight-fleet.parquet").resolve())
-    emfac["emissions_store_root"] = str((outputs_root / "activities" / str(scenario) / "rates").resolve())
+    emfac["emissions_store_root"] = str(
+        presim_activities_rates_root(
+            outputs_root,
+            str(scenario),
+            region=presim_region,
+            output_run_name=presim_output_run_name,
+            run_scenario=presim_run_scenario,
+        ).resolve()
+    )
     return emfac
 
 

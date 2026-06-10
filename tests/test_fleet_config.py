@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from impacts.config.settings import _ingest_fleet_sources
+from impacts.config.settings import _derive_emfac_output_paths
 from impacts.config.settings import _normalize_activities_inputs
 from impacts.config.settings import _normalize_alias_mapping
 from impacts.config.settings import _normalize_model_spec_path
@@ -71,6 +72,18 @@ def test_normalize_model_spec_path_requires_expected_model_file(tmp_path: Path) 
 
     with pytest.raises(FileNotFoundError, match="fleet_assignment.yaml"):
         _normalize_model_spec_path(str(model_file), path_label="assignment_model")
+
+
+def test_derive_emfac_output_paths_requires_presim_identity_for_complete_activity_config(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="presim identity fields: presim_run_region, presim_run_scenario"):
+        _derive_emfac_output_paths(
+            {
+                "outputs": str(tmp_path / "impacts_output"),
+                "region_label": "SFBAY",
+                "calendar_year": 2018,
+                "scenario": "2018-Baseline",
+            }
+        )
 
 
 def test_normalize_activities_inputs_preserves_residential_link_road_category_map(tmp_path: Path) -> None:

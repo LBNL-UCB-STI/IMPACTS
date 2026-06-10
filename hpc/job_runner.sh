@@ -18,6 +18,7 @@ trap 'error_exit ${LINENO} "$BASH_COMMAND" $?' ERR
 
 RANDOM_PART="$(head -c 32 /dev/urandom | base64 | tr -dc A-Z0-9 | head -c 8)"
 DATETIME="$(date "+%Y.%m.%d-%H.%M.%S")"
+PILATES_TIMESTAMP="$(date "+%Y%m%d-%H%M%S")"
 JOB_NAME="$RANDOM_PART.$DATETIME"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -197,6 +198,40 @@ if [ -z "$IMPACTS_OUTPUT_FOLDER" ]; then
     exit 1
 fi
 
+_config_run_value() {
+    local key="$1"
+    awk -v want="$key" '
+        function val(s,    v) {
+            v = s; sub(/^[^:]+:[[:space:]]*/, "", v)
+            gsub(/^[[:space:]'\''"]+|[[:space:]'\''"]+$/, "", v)
+            return v
+        }
+        /^run:/ { in_run=1; next }
+        /^[^[:space:]#]/ { in_run=0 }
+        in_run && $0 ~ "^[[:space:]]+" want ":[[:space:]]*" { print val($0); exit }
+    ' "$CONFIG_PATH"
+}
+
+_required_config_run_value() {
+    local key="$1"
+    local value
+    value="$(_config_run_value "$key")"
+    if [ -z "$value" ]; then
+        echo "ERROR: run.$key not found in config: $CONFIG_PATH" >&2
+        exit 1
+    fi
+    printf '%s\n' "$value"
+}
+
+_config_run_label() {
+    local label
+    label="$(_config_run_value output_run_name)"
+    if [ -z "$label" ]; then
+        label="$(_required_config_run_value scenario)"
+    fi
+    printf '%s\n' "$label"
+}
+
 CONFIG_DIR="$(cd "$(dirname "$CONFIG_PATH")" && pwd)"
 case "$IMPACTS_OUTPUT_FOLDER" in
     /*)
@@ -216,8 +251,35 @@ case "$IMPACTS_OUTPUT_FOLDER" in
         ;;
 esac
 
+ACTIVITIES_OUTPUT_DIR=""
+POSTSIM_OUTPUT_DIR=""
+case "$stage_arg" in
+    activities)
+        ACTIVITIES_REGION="$(_required_config_run_value region)"
+        ACTIVITIES_LABEL="$(_config_run_label)"
+        ACTIVITIES_OUTPUT_DIR="$JOB_LOG_DIR/impacts_presim--${ACTIVITIES_REGION}--${ACTIVITIES_LABEL}/activities"
+        JOB_LOG_DIR="$ACTIVITIES_OUTPUT_DIR"
+        ;;
+    postsim)
+        POSTSIM_REGION="$(_required_config_run_value region)"
+        POSTSIM_LABEL="$(_config_run_label)"
+        POSTSIM_OUTPUT_BASENAME="impacts-postsim--${POSTSIM_REGION}--${POSTSIM_LABEL}--${PILATES_TIMESTAMP}"
+        POSTSIM_OUTPUT_DIR="$JOB_LOG_DIR/$POSTSIM_OUTPUT_BASENAME"
+        POSTSIM_SUFFIX=2
+        while [ -e "$POSTSIM_OUTPUT_DIR" ]; do
+            POSTSIM_OUTPUT_DIR="$JOB_LOG_DIR/${POSTSIM_OUTPUT_BASENAME}_$(printf '%02d' "$POSTSIM_SUFFIX")"
+            POSTSIM_SUFFIX=$((POSTSIM_SUFFIX + 1))
+        done
+        JOB_LOG_DIR="$POSTSIM_OUTPUT_DIR"
+        ;;
+esac
+
 mkdir -p "$JOB_LOG_DIR"
 JOB_LOG_FILE_PATH="$JOB_LOG_DIR/log_${DATETIME}_${RANDOM_PART}.log"
+SBATCH_EXPORT="ALL,JOB_LOG_FILE_PATH=$JOB_LOG_FILE_PATH"
+if [ -n "$POSTSIM_OUTPUT_DIR" ]; then
+    SBATCH_EXPORT="$SBATCH_EXPORT,IMPACTS_POSTSIM_OUTPUT_DIR=$POSTSIM_OUTPUT_DIR"
+fi
 
 SBATCH_OUTPUT="$(sbatch \
     --partition="$PARTITION" \
@@ -229,7 +291,7 @@ SBATCH_OUTPUT="$(sbatch \
     --job-name="impacts.$JOB_NAME" \
     --output="$JOB_LOG_FILE_PATH" \
     --time="$TIME_LIMIT" \
-    --export="ALL,JOB_LOG_FILE_PATH=$JOB_LOG_FILE_PATH" \
+    --export="$SBATCH_EXPORT" \
     "$IMPACTS_DIR/hpc/job.sh" \
     "$CONFIG_PATH" \
     "$stage_arg")"
@@ -237,6 +299,12 @@ SBATCH_OUTPUT="$(sbatch \
 echo "$SBATCH_OUTPUT"
 JOB_ID="$(printf '%s' "$SBATCH_OUTPUT" | sed -n 's/.*Submitted batch job //p' | tr -d '[:space:]')"
 echo "Job submitted. Log: $JOB_LOG_FILE_PATH"
+if [ -n "$ACTIVITIES_OUTPUT_DIR" ]; then
+    echo "Activities output: $ACTIVITIES_OUTPUT_DIR"
+fi
+if [ -n "$POSTSIM_OUTPUT_DIR" ]; then
+    echo "Postsim output: $POSTSIM_OUTPUT_DIR"
+fi
 
 # ── parse config fields for run summary ──────────────────────────────
 _IMP_SCENARIO="" _RUN_REGION="" _RUN_SCENARIO="" _RUN_YEAR=""

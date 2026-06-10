@@ -343,6 +343,7 @@ def test_build_settings_from_pilates_template_uses_builtin_impacts_settings(tmp_
                 "  region: sfbay",
                 "  scenario: base",
                 "  start_year: 2017",
+                "  output_run_name: calibration-a",
                 "shared:",
                 "  geography:",
                 "    FIPS:",
@@ -365,6 +366,7 @@ def test_build_settings_from_pilates_template_uses_builtin_impacts_settings(tmp_
     assert config.run.region == "sfbay"
     assert config.run.scenario == "base"
     assert config.run.start_year == 2017
+    assert config.run.output_run_name == "calibration-a"
     assert config.shared.geography.local_crs == "EPSG:26910"
     assert config.beam.local_input_folder == "pilates/beam/production"
     assert config.beam.local_output_folder == "beam/beam_output"

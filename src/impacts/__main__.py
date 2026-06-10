@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import logging
 import os
 from pathlib import Path
@@ -39,6 +40,24 @@ def _resolve_pipeline_manifest_path(settings_path: str, manifest_name: str) -> P
     return candidate
 
 
+def _resolve_postsim_output_root(settings_path: str) -> Path:
+    raw = os.environ.get("IMPACTS_POSTSIM_OUTPUT_DIR", "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    settings = load_settings_from_yaml(settings_path)
+    base_output_root = Path(
+        resolve_path(settings.impacts.local_output_folder, settings_path) or settings.impacts.local_output_folder
+    ).resolve()
+    label = settings.run.output_run_name or settings.run.scenario
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    candidate = base_output_root / f"impacts-postsim--{settings.run.region}--{label}--{stamp}"
+    suffix = 2
+    while candidate.exists():
+        candidate = base_output_root / f"impacts-postsim--{settings.run.region}--{label}--{stamp}_{suffix:02d}"
+        suffix += 1
+    return candidate
+
+
 def _run_presim_from_settings(settings_path: str) -> None:
     from impacts.provisioner import run_fleet
     from impacts.provisioner import ensure_emfac_activities_outputs
@@ -63,9 +82,13 @@ def _run_postsim_from_settings(
     from impacts.preprocessor import preprocess_workflow
 
     settings = load_settings_from_yaml(settings_path)
+    postsim_output_root = _resolve_postsim_output_root(settings_path)
+    postsim_output_root.mkdir(parents=True, exist_ok=True)
+    logger.info("Postsim output directory: %s", postsim_output_root)
     pipeline_manifest_path: Path
     preprocess_manifest = preprocess_workflow(
         settings_path=settings_path,
+        output_root_override=postsim_output_root,
     )
     pipeline_manifest_path = Path(preprocess_manifest["pipeline_manifest_path"]).resolve()
     if (
@@ -104,6 +127,7 @@ def _run_postsim_from_settings(
     from impacts.config.path_registry import build_registry
     postprocess_from_pipeline_manifest(
         run_manifest_path=pipeline_manifest_path,
+        output_root_override=postsim_output_root,
         input_roots=build_registry(settings, settings_path).roots,
     )
     logger.info("Postsim stage complete: pipeline_manifest=%s", pipeline_manifest_path)

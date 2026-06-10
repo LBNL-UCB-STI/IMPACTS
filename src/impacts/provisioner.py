@@ -7,6 +7,10 @@ from typing import Any
 
 from .common import log_step_banner
 from .common import log_substep_banner
+from .config.settings import presim_activities_inventory_root
+from .config.settings import presim_activities_manifest_path
+from .config.settings import presim_activities_rates_root
+from .config.settings import presim_activities_tmp_root
 from .manifest.file_ops import write_structured_file
 from .manifest.schema import ActivitiesManifest
 
@@ -17,14 +21,32 @@ def _outputs_exist(workflow: dict[str, Any]) -> bool:
     return Path(str(workflow["paths"]["final_activity_by_emfacid_output_passenger"])).exists()
 
 
-def _activities_manifest_path(output_root: Path) -> Path:
-    return output_root / "activities_manifest.yaml"
+def _presim_identity_kwargs(cfg: dict[str, Any]) -> dict[str, str | None]:
+    return {
+        "region": str(cfg["run_region"]),
+        "output_run_name": cfg.get("output_run_name"),
+        "run_scenario": str(cfg["run_scenario"]),
+    }
+
+
+def _activities_manifest_path(cfg: dict[str, Any]) -> Path:
+    return presim_activities_manifest_path(
+        Path(str(cfg["output_root"])).resolve(),
+        **_presim_identity_kwargs(cfg),
+    )
 
 
 def _expected_output_path(cfg: dict[str, Any], start_year: int) -> Path:
     region_slug = str(cfg["region_label"]).lower()
     base_name = f"{region_slug}-emfac-{int(start_year)}-inventory-final"
-    return Path(str(cfg["output_root"])) / "activities" / str(cfg["scenario"]) / "inventory" / f"{base_name}-passenger-activity-by-emfacid.parquet"
+    return (
+        presim_activities_inventory_root(
+            cfg["output_root"],
+            str(cfg["scenario"]),
+            **_presim_identity_kwargs(cfg),
+        )
+        / f"{base_name}-passenger-activity-by-emfacid.parquet"
+    )
 
 
 def _build_activities_manifest_payload(
@@ -79,8 +101,13 @@ def _write_activities_manifest_from_cfg(
 ) -> dict[str, Any]:
     region_slug = str(cfg["region_label"]).lower()
     outputs_root = Path(str(cfg["output_root"])).resolve()
-    activities_output_root = outputs_root / "activities" / str(cfg["scenario"]) / "inventory"
-    tmp_root = outputs_root / "activities" / "_tmp"
+    presim_identity = _presim_identity_kwargs(cfg)
+    activities_output_root = presim_activities_inventory_root(
+        outputs_root,
+        str(cfg["scenario"]),
+        **presim_identity,
+    )
+    tmp_root = presim_activities_tmp_root(outputs_root, **presim_identity)
     project_analysis_name = f"{region_slug}-emfac-{int(calendar_year)}-project-analysis-final"
     inventory_final_name = f"{region_slug}-emfac-{int(calendar_year)}-inventory-final"
     inventory_matching_name = f"{region_slug}-emfac-{int(calendar_year)}-inventory-matching"
@@ -98,7 +125,13 @@ def _write_activities_manifest_from_cfg(
                 "outputs_root": str(outputs_root),
                 "activities_output_root": str(activities_output_root.resolve()),
                 "tmp_root": str(tmp_root.resolve()),
-                "emissions_store_root": str((outputs_root / "activities" / str(cfg["scenario"]) / "rates").resolve()),
+                "emissions_store_root": str(
+                    presim_activities_rates_root(
+                        outputs_root,
+                        str(cfg["scenario"]),
+                        **presim_identity,
+                    ).resolve()
+                ),
                 "passenger_rates_file": str((activities_output_root / f"{project_analysis_name}-passenger-rates.parquet").resolve()),
                 "passenger_activity_file": str((tmp_root / f"{inventory_matching_name}-passenger-activity.parquet").resolve()),
                 "passenger_fleet_file": str((activities_output_root / f"{inventory_final_name}-passenger-fleet.parquet").resolve()),
@@ -259,6 +292,9 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
         "region_name": region_name,
         "region_label": cfg_activities.get("region_label", region_name.upper()),
         "scenario": settings.impacts.scenario,
+        "run_region": settings.run.region,
+        "run_scenario": settings.run.scenario,
+        "output_run_name": getattr(settings.run, "output_run_name", None),
         "seed": settings.impacts.seed,
         "output_root": local_output_folder,
         "archive": archive,
@@ -394,6 +430,11 @@ def _build_workflow(settings, config_path: Path) -> dict[str, Any]:
         "scenario": {"year": settings.run.start_year, "name": cfg["scenario"]},
         "seed": cfg["seed"],
         "output": str(cfg["output_root"]),
+        "presim": {
+            "region": cfg["run_region"],
+            "scenario": cfg["run_scenario"],
+            "output_run_name": cfg["output_run_name"],
+        },
         "fleet": fleet,
         "activities": activities_override,
     }
@@ -568,7 +609,7 @@ def run_fleet(
 
 def ensure_emfac_activities_outputs(settings, config_path: Path) -> dict[str, Any]:
     cfg = _resolve_activities_config(settings, config_path)
-    manifest_path = _activities_manifest_path(Path(str(cfg["output_root"])).resolve())
+    manifest_path = _activities_manifest_path(cfg)
 
     log_step_banner("EMFAC Activities", "Ensure inventory outputs", logger=logger)
 

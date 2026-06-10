@@ -135,6 +135,7 @@ def _run_stages_from_preprocess_manifest(
     run_inmap: bool | None = None,
     run_aermod: bool | None = None,
     run_exposure: bool | None = None,
+    output_root_override: str | Path | None = None,
 ) -> Dict[str, Any]:
     manifest = PreprocessManifest.from_dict(load_structured_file(preprocess_manifest_path)).to_dict()
     pipeline = PipelineConfig.from_dict(manifest.get("pipeline", {}) or {})
@@ -142,8 +143,12 @@ def _run_stages_from_preprocess_manifest(
     manifest_inputs = manifest.get("inputs", {}) or {}
     input_root = Path(manifest.get("input_dir", "")).resolve()
 
-    output_root = _resolve_runtime_output_root(
-        input_manifest=manifest,
+    output_root = (
+        Path(output_root_override).expanduser().resolve()
+        if output_root_override is not None
+        else _resolve_runtime_output_root(
+            input_manifest=manifest,
+        )
     )
     output_root.mkdir(parents=True, exist_ok=True)
     (output_root / "emissions").mkdir(parents=True, exist_ok=True)
@@ -377,7 +382,7 @@ def run_emissions_from_pipeline_manifest(
     *,
     run_manifest_path: str | Path,
 ) -> Dict[str, Any]:
-    _, _, preprocess_manifest_path = _load_run_manifest_context(run_manifest_path)
+    _, output_root, preprocess_manifest_path = _load_run_manifest_context(run_manifest_path)
     return _run_stages_from_preprocess_manifest(
         preprocess_manifest_path=preprocess_manifest_path,
         run_manifest_path=run_manifest_path,
@@ -385,6 +390,7 @@ def run_emissions_from_pipeline_manifest(
         run_inmap=False,
         run_aermod=False,
         run_exposure=False,
+        output_root_override=output_root,
     )
 
 
@@ -392,7 +398,7 @@ def run_inmap_from_pipeline_manifest(
     *,
     run_manifest_path: str | Path,
 ) -> Dict[str, Any]:
-    _, _, preprocess_manifest_path = _load_run_manifest_context(run_manifest_path)
+    _, output_root, preprocess_manifest_path = _load_run_manifest_context(run_manifest_path)
     return _run_stages_from_preprocess_manifest(
         preprocess_manifest_path=preprocess_manifest_path,
         run_manifest_path=run_manifest_path,
@@ -400,6 +406,7 @@ def run_inmap_from_pipeline_manifest(
         run_inmap=True,
         run_aermod=False,
         run_exposure=False,
+        output_root_override=output_root,
     )
 
 
@@ -407,7 +414,7 @@ def run_aermod_from_pipeline_manifest(
     *,
     run_manifest_path: str | Path,
 ) -> Dict[str, Any]:
-    _, _, preprocess_manifest_path = _load_run_manifest_context(run_manifest_path)
+    _, output_root, preprocess_manifest_path = _load_run_manifest_context(run_manifest_path)
     return _run_stages_from_preprocess_manifest(
         preprocess_manifest_path=preprocess_manifest_path,
         run_manifest_path=run_manifest_path,
@@ -415,6 +422,7 @@ def run_aermod_from_pipeline_manifest(
         run_inmap=False,
         run_aermod=True,
         run_exposure=False,
+        output_root_override=output_root,
     )
 
 
@@ -422,7 +430,7 @@ def run_exposure_from_pipeline_manifest(
     *,
     run_manifest_path: str | Path,
 ) -> Dict[str, Any]:
-    _, _, preprocess_manifest_path = _load_run_manifest_context(run_manifest_path)
+    _, output_root, preprocess_manifest_path = _load_run_manifest_context(run_manifest_path)
     return _run_stages_from_preprocess_manifest(
         preprocess_manifest_path=preprocess_manifest_path,
         run_manifest_path=run_manifest_path,
@@ -430,4 +438,5 @@ def run_exposure_from_pipeline_manifest(
         run_inmap=False,
         run_aermod=False,
         run_exposure=True,
+        output_root_override=output_root,
     )

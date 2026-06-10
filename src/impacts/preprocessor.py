@@ -27,6 +27,7 @@ def _derive_impacts_tmp_root(output_root: Path) -> Path:
 
 def build_preprocess_manifest(
     settings_path: str | Path,
+    output_root_override: str | Path | None = None,
 ) -> Dict[str, Any]:
     config_path = Path(settings_path).resolve()
     settings = load_settings_from_yaml(config_path)
@@ -37,7 +38,11 @@ def build_preprocess_manifest(
     aermod = settings.impacts.dispersions.aermod
     pipeline = settings.impacts.pipeline
 
-    output_root = Path(resolve_path(settings.impacts.local_output_folder, config_path)).resolve()
+    output_root = (
+        Path(output_root_override).expanduser().resolve()
+        if output_root_override is not None
+        else Path(resolve_path(settings.impacts.local_output_folder, config_path)).resolve()
+    )
     input_root = _derive_impacts_tmp_root(output_root).resolve()
     input_root.mkdir(parents=True, exist_ok=True)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -222,7 +227,7 @@ def build_preprocess_manifest(
             "upstream_dependency_only": True,
             "publishes_final_artifact_only": True,
             "local_input_dir": str(input_root),
-            "local_output_dir": str(Path(resolve_path(settings.impacts.local_output_folder, config_path)).resolve()),
+            "local_output_dir": str(output_root),
             "container_input_dir": "/input",
             "container_output_dir": "/output",
             "entrypoint": "python -m impacts emissions",
@@ -243,8 +248,12 @@ def build_preprocess_manifest(
 def preprocess_workflow(
     settings_path: str | Path,
     manifest_path: str | Path | None = None,
+    output_root_override: str | Path | None = None,
 ) -> Dict[str, Any]:
-    manifest = build_preprocess_manifest(settings_path=settings_path)
+    manifest = build_preprocess_manifest(
+        settings_path=settings_path,
+        output_root_override=output_root_override,
+    )
     output_manifest = Path(manifest_path) if manifest_path else Path(manifest["preprocess_manifest_path"])
     manifest["preprocess_manifest_path"] = str(output_manifest)
     typed_manifest = PreprocessManifest.from_dict(manifest)
