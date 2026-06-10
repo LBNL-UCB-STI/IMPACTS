@@ -306,7 +306,7 @@ def run(
 
     log_step_banner("Step 4", "Prepare Exposure", logger=logger)
 
-    log_substep_banner("4.1", "prepare concentration inputs", logger=logger)
+    log_substep_banner("4.1", "load concentration inputs", logger=logger)
     prepared_inmap: Optional[gpd.GeoDataFrame] = None
     prepared_aermod: Optional[gpd.GeoDataFrame] = None
     if inmap_concentrations_path:
@@ -318,9 +318,9 @@ def run(
         prepared_aermod = _prepare_aermod_exposure_inputs(aermod_gdf)
         _trace_frame("1", "prepared_aermod_concentrations", pd.DataFrame(prepared_aermod.drop(columns="geometry", errors="ignore")))
 
-    log_substep_banner("4.2", "build full exposure grid", logger=logger)
+    log_substep_banner("4.2", "build concentration distribution", logger=logger)
     if prepared_inmap is None:
-        raise ValueError("Step 4.2 requires prepared InMAP concentrations to build the full exposure grid.")
+        raise ValueError("Step 4.2 requires prepared InMAP concentrations to build the concentration distribution.")
     full_exposure_grid = _build_full_exposure_grid(
         pipeline=pipeline,
         prepared_inmap=prepared_inmap,
@@ -336,9 +336,9 @@ def run(
     population_counts_output_path: Optional[Path] = None
 
     manifest = manifest_inputs or {}
-    if "staged_population" not in manifest or "aermod_cell_population" not in manifest:
+    if "staged_population" not in manifest or "aermod_cell_attributes" not in manifest:
         raise ValueError(
-            "Step 4 requires staged_population and aermod_cell_population from preprocessing. "
+            "Step 4 requires staged_population and aermod_cell_attributes from preprocessing. "
             "Ensure preprocessing step 4 ran successfully before running the workflow."
         )
 
@@ -353,9 +353,9 @@ def run(
     population_table.to_parquet(population_distribution_output_path, index=False)
     logger.info("%s population distribution → %s", _step_label("4.3"), population_distribution_output_path)
 
-    log_substep_banner("4.4", "build population counts with geometry", logger=logger)
-    cell_pop_path = resolve_required_manifest_input(manifest, key="aermod_cell_population")
-    cell_counts = read_table(cell_pop_path)[[_AERMOD_SOURCE_ID_COLUMN, "person_count"]]
+    log_substep_banner("4.4", "build population counts geometry", logger=logger)
+    cell_attributes_path = resolve_required_manifest_input(manifest, key="aermod_cell_attributes")
+    cell_counts = read_table(cell_attributes_path)[[_AERMOD_SOURCE_ID_COLUMN, "person_count"]]
     cell_counts[_AERMOD_SOURCE_ID_COLUMN] = pd.to_numeric(cell_counts[_AERMOD_SOURCE_ID_COLUMN], errors="coerce").astype(int)
     grid_lookup = full_exposure_grid[[_AERMOD_SOURCE_ID_COLUMN, "geometry"]].drop_duplicates(subset=[_AERMOD_SOURCE_ID_COLUMN])
     population_counts = gpd.GeoDataFrame(

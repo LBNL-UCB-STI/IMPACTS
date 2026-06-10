@@ -622,10 +622,10 @@ def _aggregate_aermod_emissions_for_export(
         con.close()
     logger.info(
         "%s aggregated AERMOD export to %d source class rows",
-        _step_label("1.6", "aermod"),
+        _step_label("1.9"),
         len(aggregated),
     )
-    _log_step1_elapsed("1.6", "AERMOD export aggregation complete", started, source_class_rows=len(aggregated))
+    _log_step1_elapsed("1.9", "AERMOD export aggregation complete", started, source_class_rows=len(aggregated))
     return aggregated
 
 
@@ -744,7 +744,7 @@ def run(
     )
     _log_step1_elapsed("1.0", "prepare skims inputs complete", skims_started, rows=len(skims_df))
 
-    log_substep_banner("1.1", "group county, inmap, and aermod intersections separately", logger=logger)
+    log_substep_banner("1.1", "group allocation weights by surface", logger=logger)
     grouping_started = time.perf_counter()
     county_grouped_df = _build_zone_grouped_table(
         intersection_path=intersection_paths.get("county"),
@@ -766,14 +766,14 @@ def run(
     )
     _log_step1_elapsed(
         "1.1",
-        "intersection grouping complete",
+        "allocation-weight grouping complete",
         grouping_started,
         county_rows=0 if county_grouped_df is None else len(county_grouped_df),
         inmap_rows=0 if inmap_grouped_df is None else len(inmap_grouped_df),
         aermod_rows=0 if aermod_grouped_df is None else len(aermod_grouped_df),
     )
 
-    log_substep_banner("1.2[county]", "allocate emissions to county surface", logger=logger)
+    log_substep_banner("1.2", "allocate county emissions for corrections", logger=logger)
     county_alloc_started = time.perf_counter()
     county_allocated_df = _build_zone_allocated_table(
         grouped_df=county_grouped_df,
@@ -788,7 +788,7 @@ def run(
         county_alloc_started,
         rows=0 if county_allocated_df is None else len(county_allocated_df),
     )
-    log_substep_banner("1.3", "apply activity corrections", logger=logger)
+    log_substep_banner("1.3", "apply county activity corrections", logger=logger)
     correction_started = time.perf_counter()
     county_corrected_df, beam_activity_totals, county_correction_factors = _build_county_corrected_table(
         county_allocated_df=county_allocated_df,
@@ -806,89 +806,104 @@ def run(
         activity_rows=0 if beam_activity_totals is None else len(beam_activity_totals),
         factor_rows=0 if county_correction_factors is None else len(county_correction_factors),
     )
+    log_substep_banner("1.4", "build corrected source totals", logger=logger)
     corrected_totals_started = time.perf_counter()
     corrected_source_df = _build_corrected_source_totals(
         county_corrected_df,
         scratch_dir=raw_dir,
     )
     _log_step1_elapsed(
-        "1.3",
+        "1.4",
         "corrected source totals complete",
         corrected_totals_started,
         rows=0 if corrected_source_df is None else len(corrected_source_df),
     )
 
-    log_substep_banner("1.4[inmap/aermod]", "allocate corrected totals independently to inmap and aermod surfaces", logger=logger)
-    surface_alloc_started = time.perf_counter()
-    inmap_allocated_df = _build_zone_allocated_table(
-        grouped_df=inmap_grouped_df,
-        skims_df=corrected_source_df if corrected_source_df is not None else skims_df,
-        zone_label="inmap",
-        scratch_dir=raw_dir,
-        step_id="1.4",
-    )
-    aermod_alloc_raw_path = str(raw_dir / "_aermod_allocated_raw.parquet")
-    aermod_allocated_result = _build_zone_allocated_table(
-        grouped_df=aermod_grouped_df,
-        skims_df=corrected_source_df if corrected_source_df is not None else skims_df,
-        zone_label="aermod",
-        scratch_dir=raw_dir,
-        step_id="1.4",
-        output_path=aermod_alloc_raw_path,
-    )
-    _log_step1_elapsed(
-        "1.4",
-        "surface allocations complete",
-        surface_alloc_started,
-        inmap_rows=0 if inmap_allocated_df is None else len(inmap_allocated_df),
-        aermod_rows="parquet" if aermod_allocated_result is not None else 0,
-    )
+    inmap_allocated_df = None
+    if inmap_grouped_df is not None:
+        log_substep_banner("1.5", "allocate corrected totals to InMAP surface", logger=logger)
+        inmap_alloc_started = time.perf_counter()
+        inmap_allocated_df = _build_zone_allocated_table(
+            grouped_df=inmap_grouped_df,
+            skims_df=corrected_source_df if corrected_source_df is not None else skims_df,
+            zone_label="inmap",
+            scratch_dir=raw_dir,
+            step_id="1.5",
+        )
+        _log_step1_elapsed(
+            "1.5",
+            "InMAP allocation complete",
+            inmap_alloc_started,
+            rows=0 if inmap_allocated_df is None else len(inmap_allocated_df),
+        )
+
+    aermod_allocated_result = None
+    if aermod_grouped_df is not None:
+        log_substep_banner("1.6", "allocate corrected totals to AERMOD surface", logger=logger)
+        aermod_alloc_started = time.perf_counter()
+        aermod_alloc_raw_path = str(raw_dir / "_aermod_allocated_raw.parquet")
+        aermod_allocated_result = _build_zone_allocated_table(
+            grouped_df=aermod_grouped_df,
+            skims_df=corrected_source_df if corrected_source_df is not None else skims_df,
+            zone_label="aermod",
+            scratch_dir=raw_dir,
+            step_id="1.6",
+            output_path=aermod_alloc_raw_path,
+        )
+        _log_step1_elapsed(
+            "1.6",
+            "AERMOD allocation complete",
+            aermod_alloc_started,
+            rows="parquet" if aermod_allocated_result is not None else 0,
+        )
 
     if aermod_allocated_result is not None:
+        log_substep_banner("1.7", "attach AERMOD source attributes", logger=logger)
         aermod_attrs_started = time.perf_counter()
         aermod_attrs_path = str(raw_dir / "_aermod_allocated_attrs.parquet")
-        cell_pop_df = None
-        if (manifest_inputs or {}).get("aermod_cell_population"):
-            cell_population_path = resolve_required_manifest_input(manifest_inputs, key="aermod_cell_population")
-            cell_pop_df = read_table(cell_population_path)[["aermod_cell_id", "source_urban_class"]]
+        cell_attributes_path = resolve_required_manifest_input(
+            manifest_inputs or {},
+            key="aermod_cell_attributes",
+        )
+        cell_attributes_df = read_table(cell_attributes_path)[["aermod_cell_id", "source_urban_class"]]
         _compute_aermod_source_attributes_parquet(
             aermod_allocated_result,
             aermod_attrs_path,
             scratch_dir=raw_dir,
             freeway_road_categories=_AERMOD_FREEWAY_CATEGORIES,
-            cell_population_df=cell_pop_df,
+            cell_attributes_df=cell_attributes_df,
         )
         aermod_allocated_result = aermod_attrs_path
-        _log_step1_elapsed("1.4", "AERMOD source attributes prepared", aermod_attrs_started)
+        _log_step1_elapsed("1.7", "AERMOD source attributes prepared", aermod_attrs_started)
 
     beam_activity_totals_path = None
     beam_activity_correction_factors_path = None
     beam_emissions_by_county_process_path = None
-    log_substep_banner("1.5[county]", "write county activity correction artifacts", logger=logger)
+    log_substep_banner("1.8", "write county correction artifacts", logger=logger)
     county_write_started = time.perf_counter()
     if beam_activity_totals is not None and not beam_activity_totals.empty:
         beam_activity_totals_path = str(raw_dir / "beam_activity_totals.parquet")
         beam_activity_totals.to_parquet(beam_activity_totals_path, index=False)
-        logger.info("%s BEAM activity totals → %s", _step_label("1.5", "county"), beam_activity_totals_path)
+        logger.info("%s BEAM activity totals → %s", _step_label("1.8"), beam_activity_totals_path)
     if county_correction_factors is not None and not county_correction_factors.empty:
         beam_activity_correction_factors_path = str(raw_dir / "beam_activity_correction_factors.parquet")
         county_correction_factors.to_parquet(beam_activity_correction_factors_path, index=False)
         logger.info(
             "%s BEAM activity correction factors → %s",
-            _step_label("1.5", "county"),
+            _step_label("1.8"),
             beam_activity_correction_factors_path,
         )
     if county_corrected_df is not None and not county_corrected_df.empty:
         beam_emissions_by_county_process_path = str(raw_dir / "beam_emissions_by_county_process.parquet")
         county_corrected_df.to_parquet(beam_emissions_by_county_process_path, index=False)
         logger.info(
-            "%s county-intersected BEAM emissions → %s",
-            _step_label("1.5", "county"),
+            "%s county-allocated BEAM emissions → %s",
+            _step_label("1.8"),
             beam_emissions_by_county_process_path,
         )
     _log_step1_elapsed(
-        "1.5",
-        "county artifacts write complete",
+        "1.8",
+        "county correction artifacts write complete",
         county_write_started,
         emissions_rows=0 if county_corrected_df is None else len(county_corrected_df),
     )
@@ -898,7 +913,7 @@ def run(
     if pipeline.aermod_grid_path and aermod_allocated_result is not None:
         if not pipeline.aermod_grid_id:
             raise ValueError("pipeline.aermod_grid_id must be configured before writing AERMOD emissions.")
-        log_substep_banner("1.6[aermod]", "write AERMOD emissions table", logger=logger)
+        log_substep_banner("1.9", "write AERMOD emissions table", logger=logger)
         aermod_write_started = time.perf_counter()
         aermod_export_df = _aggregate_aermod_emissions_for_export(
             aermod_allocated_result,
@@ -912,16 +927,16 @@ def run(
             grid_path=pipeline.aermod_grid_path,
             output_epsg=int(pipeline.output_epsg),
             output_stem=beam_emissions_for_aermod_stem,
-            step_id="1.6",
+            step_id="1.9",
         )
         beam_emissions_for_aermod_path = str(beam_emissions_for_aermod_stem) + ".parquet"
         logger.info(
             "%s BEAM emissions for AERMOD → %s",
-            _step_label("1.6", "aermod"),
+            _step_label("1.9"),
             beam_emissions_for_aermod_path,
         )
         _log_step1_elapsed(
-            "1.6",
+            "1.9",
             "AERMOD emissions export complete",
             aermod_write_started,
             source_rows=len(aermod_export_df),
@@ -933,7 +948,7 @@ def run(
     if inmap_allocated_df is not None and not inmap_allocated_df.empty:
         if "grid_id" not in pipeline.mapping_columns or not str(pipeline.mapping_columns["grid_id"]).strip():
             raise ValueError("pipeline.mapping_columns.grid_id must be configured before writing InMAP emissions.")
-        log_substep_banner("1.7[inmap]", "write InMAP emissions table", logger=logger)
+        log_substep_banner("1.10", "write InMAP emissions table", logger=logger)
         inmap_write_started = time.perf_counter()
         beam_emissions_for_inmap_stem = raw_dir / "beam_emissions_for_inmap"
         inmap_study_area_grid = _save_grid_emissions(
@@ -943,19 +958,19 @@ def run(
             grid_path=pipeline.inmap_grid_path,
             output_epsg=int(pipeline.output_epsg),
             output_stem=beam_emissions_for_inmap_stem,
-            step_id="1.7",
+            step_id="1.10",
         )
         beam_inmap_study_area_grid_path = str(raw_dir / "beam_inmap_study_area_grid.gpkg")
         inmap_study_area_grid.to_file(beam_inmap_study_area_grid_path, driver="GPKG")
-        logger.info("%s InMAP study area grid → %s", _step_label("1.7", "inmap"), beam_inmap_study_area_grid_path)
+        logger.info("%s InMAP study area grid → %s", _step_label("1.10"), beam_inmap_study_area_grid_path)
         beam_emissions_for_inmap_path = str(beam_emissions_for_inmap_stem) + ".parquet"
         logger.info(
             "%s BEAM emissions for InMAP → %s",
-            _step_label("1.7", "inmap"),
+            _step_label("1.10"),
             beam_emissions_for_inmap_path,
         )
         _log_step1_elapsed(
-            "1.7",
+            "1.10",
             "InMAP emissions export complete",
             inmap_write_started,
             source_rows=len(inmap_allocated_df),

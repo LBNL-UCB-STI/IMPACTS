@@ -467,7 +467,7 @@ def generate_fishnet_from_bounds(
         progress.close()
     fishnet = fishnet.loc[keep_mask]
     logger.info(
-        "Preprocess: filtered fishnet candidates to the staged InMAP footprint in %.2fs → %d rows kept",
+        "Preprocess: filtered fishnet candidates to the InMAP study-area domain in %.2fs → %d rows kept",
         time.perf_counter() - filter_started,
         len(fishnet),
     )

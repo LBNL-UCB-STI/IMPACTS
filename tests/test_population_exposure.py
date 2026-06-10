@@ -7,9 +7,9 @@ import pandas as pd
 from shapely.geometry import box
 
 from impacts.manifest.schema import PipelineConfig
-from impacts.pipeline.preprocessing.step4_aggregate_population import _classify_urban
-from impacts.pipeline.preprocessing.step4_aggregate_population import _counts_from_joined
-from impacts.pipeline.preprocessing.step4_aggregate_population import run as run_population_step
+from impacts.pipeline.preprocessing.step4_build_cell_attributes import _classify_urban
+from impacts.pipeline.preprocessing.step4_build_cell_attributes import _counts_from_joined
+from impacts.pipeline.preprocessing.step4_build_cell_attributes import run as run_cell_attribute_step
 
 
 def _pipeline(tmp_path: Path, grid_path: Path) -> PipelineConfig:
@@ -73,7 +73,7 @@ def test_population_step_writes_zero_attributes_without_population_inputs(tmp_pa
     )
     grid.to_parquet(grid_path, index=False)
 
-    cell_path, staged_path = run_population_step(
+    cell_path, staged_path = run_cell_attribute_step(
         _pipeline(tmp_path, grid_path),
         tmp_path / "preprocess",
         population_inputs={},

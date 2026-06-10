@@ -184,18 +184,18 @@ def build_preprocess_manifest(
                 source_path=path,
             )
 
-    from .pipeline.preprocessing.step4_aggregate_population import run as preprocess_step4
-    aermod_cell_population_path, staged_population_path = preprocess_step4(
+    from .pipeline.preprocessing.step4_build_cell_attributes import run as preprocess_step4
+    aermod_cell_attributes_path, staged_population_path = preprocess_step4(
         pipeline_config,
         input_root,
         population_inputs=step1_outputs.get("population_inputs"),
     )
-    if aermod_cell_population_path:
+    if aermod_cell_attributes_path:
         register_local_input(
             manifest_inputs=manifest_inputs,
             input_root=input_root,
-            key="aermod_cell_population",
-            source_path=aermod_cell_population_path,
+            key="aermod_cell_attributes",
+            source_path=aermod_cell_attributes_path,
         )
     if staged_population_path:
         register_local_input(

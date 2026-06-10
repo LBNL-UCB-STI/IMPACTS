@@ -142,7 +142,7 @@ def test_compute_aermod_source_attributes_preserves_row_release_heights(tmp_path
         str(output_path),
         scratch_dir=tmp_path,
         freeway_road_categories=frozenset({"motorway"}),
-        cell_population_df=pd.DataFrame(
+        cell_attributes_df=pd.DataFrame(
             {"aermod_cell_id": [101], "source_urban_class": [1000]}
         ),
     )
