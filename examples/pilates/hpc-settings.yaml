@@ -119,7 +119,7 @@ impacts:
     pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
     include_non_osm_car_links: true
     include_passenger: true
-    include_freight: true
+    include_freight: false
     enable_passenger_activity_correction: false
     enable_freight_activity_correction: false
     default_annualization_days:
