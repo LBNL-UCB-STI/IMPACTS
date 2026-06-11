@@ -12,6 +12,16 @@ from impacts.config.settings import ImpactsSettings
 from impacts.config.settings import normalize_epsg
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    result = dict(base)
+    for key, val in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(val, dict):
+            result[key] = _deep_merge(result[key], val)
+        else:
+            result[key] = val
+    return result
+
+
 def _load_mapping(source: Dict[str, Any] | str | Path, *, label: str) -> Dict[str, Any]:
     payload = load_structured_file(source) if isinstance(source, (str, Path)) else dict(source)
     if not isinstance(payload, dict):
@@ -52,8 +62,12 @@ def build_settings_from_pilates(
     run = dict(pilates_payload.get("run", {}) or {})
     shared = dict(pilates_payload.get("shared", {}) or {})
     geography = dict(shared.get("geography", {}) or {})
-    impacts_section = dict(default_payload.get("impacts", {}) or {})
-    if run.get("start_year") is not None:
+    pilates_impacts = dict(pilates_payload.get("impacts", {}) or {})
+    impacts_section = _deep_merge(
+        dict(default_payload.get("impacts", {}) or {}),
+        pilates_impacts,
+    )
+    if run.get("start_year") is not None and "scenario" not in pilates_impacts:
         impacts_section["scenario"] = f"{run.get('start_year')}-Baseline"
     beam_section = dict(pilates_payload.get("beam", {}) or {})
 
