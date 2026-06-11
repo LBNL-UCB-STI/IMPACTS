@@ -1,14 +1,6 @@
-from __future__ import annotations
-
-import pytest
-
 from impacts.config.settings_builder import _deep_merge
 from impacts.config.settings_builder import build_settings_from_pilates
 
-
-# ---------------------------------------------------------------------------
-# _deep_merge unit tests
-# ---------------------------------------------------------------------------
 
 def test_deep_merge_scalar_override():
     result = _deep_merge({"a": 1, "b": 2}, {"b": 99})
@@ -37,10 +29,6 @@ def test_deep_merge_does_not_mutate_base():
     _deep_merge(base, {"a": {"x": 99}})
     assert base["a"]["x"] == 1
 
-
-# ---------------------------------------------------------------------------
-# build_settings_from_pilates: impacts override merge
-# ---------------------------------------------------------------------------
 
 _MINIMAL_BRIDGE = {
     "run": {"region": "sfbay", "scenario": "test", "start_year": 2030},
@@ -73,7 +61,6 @@ def test_impacts_override_does_not_clobber_other_defaults():
         "impacts": {"population": {"passenger_folder": "/some/abs/path"}},
     }
     settings = build_settings_from_pilates(bridge)
-    # emissions/dispersions pipeline flags should still be at their defaults
     assert settings.impacts.pipeline.postsim.emissions is True
     assert settings.impacts.pipeline.presim.fleet is True
 

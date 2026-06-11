@@ -67,15 +67,16 @@ def build_settings_from_pilates(
         dict(default_payload.get("impacts", {}) or {}),
         pilates_impacts,
     )
-    if run.get("start_year") is not None and "scenario" not in pilates_impacts:
-        impacts_section["scenario"] = f"{run.get('start_year')}-Baseline"
+    start_year = run.get("start_year")
+    if start_year is not None and "scenario" not in pilates_impacts:
+        impacts_section["scenario"] = f"{start_year}-Baseline"
     beam_section = dict(pilates_payload.get("beam", {}) or {})
 
     settings_payload = {
         "run": {
             "region": run.get("region"),
             "scenario": run.get("scenario"),
-            "start_year": run.get("start_year"),
+            "start_year": start_year,
             "output_run_name": run.get("output_run_name"),
         },
         "shared": {
