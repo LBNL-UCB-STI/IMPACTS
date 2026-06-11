@@ -192,7 +192,7 @@ def test_assign_source_pattern_keys_requires_exact_source_class_pattern() -> Non
     )
     site_reference = pd.DataFrame({"DataSet_ID": ["site-a"], "site_xm": [0.0], "site_ym": [0.0]})
 
-    with pytest.raises(ValueError, match="missing exact source class patterns"):
+    with pytest.raises(ValueError, match="no available fallback"):
         aermod_step._assign_source_pattern_keys(
             source_df=source_df,
             pipeline=object(),

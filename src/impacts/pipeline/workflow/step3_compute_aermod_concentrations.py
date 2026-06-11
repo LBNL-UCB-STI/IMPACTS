@@ -484,12 +484,72 @@ def _assign_source_pattern_keys(
     )
     result["pattern_key"] = result["pattern_key_raw"]
     missing_mask = ~result["pattern_key"].isin(available_pattern_keys)
+
     if missing_mask.any():
-        missing_keys = sorted(result.loc[missing_mask, "pattern_key"].astype(str).unique().tolist())
-        raise ValueError(
-            "AERMOD ASRV pattern library is missing exact source class patterns. "
-            f"Missing keys: {missing_keys[:10]}"
+        # Build suffix → set of site names that have a pattern for that suffix.
+        # suffix = urban__temporal__height (everything after the site prefix).
+        suffix_to_sites: dict[str, set[str]] = {}
+        for key in available_pattern_keys:
+            parts = key.split("__")
+            if len(parts) == 4:
+                suffix_to_sites.setdefault("__".join(parts[1:]), set()).add(parts[0])
+
+        site_ids = site_reference["DataSet_ID"].to_numpy()
+        site_x_arr = site_reference["site_xm"].to_numpy(dtype=np.float64)
+        site_y_arr = site_reference["site_ym"].to_numpy(dtype=np.float64)
+
+        missing_df = result[missing_mask].copy()
+        missing_df["_suffix"] = (
+            urban_series[missing_mask].astype("Int64").astype(str)
+            + "__"
+            + temporal_series[missing_mask].astype(str)
+            + "__"
+            + height_series[missing_mask].map(lambda v: f"{float(v):g}")
         )
+
+        fallback_keys: dict[int, str] = {}
+        for suffix, group in missing_df.groupby("_suffix"):
+            available_sites = suffix_to_sites.get(str(suffix))
+            if not available_sites:
+                continue
+            site_mask = np.isin(site_ids, list(available_sites))
+            avail_ids = site_ids[site_mask]
+            avail_x = site_x_arr[site_mask]
+            avail_y = site_y_arr[site_mask]
+            src_x = group["source_xm"].to_numpy(dtype=np.float64)[:, None]
+            src_y = group["source_ym"].to_numpy(dtype=np.float64)[:, None]
+            nearest_idx = np.argmin(
+                (src_x - avail_x[None, :]) ** 2 + (src_y - avail_y[None, :]) ** 2, axis=1
+            )
+            for row_idx, site in zip(group.index, avail_ids[nearest_idx]):
+                fallback_keys[row_idx] = f"{site}__{suffix}"
+
+        if fallback_keys:
+            for idx, key in fallback_keys.items():
+                result.at[idx, "pattern_key"] = key
+            # Log one warning line per unique (original site, fallback site, temporal class) triplet.
+            summary = (
+                result.loc[list(fallback_keys), ["nearest_site", "pattern_key", _SOURCE_TEMPORAL_COLUMN]]
+                .assign(fallback_site=lambda df: df["pattern_key"].str.split("__").str[0])
+                .groupby(["nearest_site", "fallback_site", _SOURCE_TEMPORAL_COLUMN])
+                .size()
+                .reset_index(name="n_cells")
+            )
+            for row in summary.itertuples(index=False):
+                logger.warning(
+                    "AERMOD site %s has no pattern for temporal_class=%s — "
+                    "using nearest site with matching class: %s (%d cells)",
+                    row.nearest_site, getattr(row, _SOURCE_TEMPORAL_COLUMN),
+                    row.fallback_site, row.n_cells,
+                )
+
+        still_missing_mask = ~result["pattern_key"].isin(available_pattern_keys)
+        if still_missing_mask.any():
+            missing_keys = sorted(result.loc[still_missing_mask, "pattern_key"].astype(str).unique().tolist())
+            raise ValueError(
+                "AERMOD ASRV pattern library is missing source class patterns with no available fallback. "
+                f"Missing keys: {missing_keys[:10]}"
+            )
 
     return result
 
