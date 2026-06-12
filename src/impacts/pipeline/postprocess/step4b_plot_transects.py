@@ -58,12 +58,16 @@ def _remove_stale_outputs(output_dir: Path) -> None:
 
 
 def _compute_road_distances(conc_gdf, net_gdf) -> pd.Series:
-    from shapely.ops import unary_union
+    import shapely
 
-    logger.info("  Building road union …")
-    road_union = unary_union(net_gdf.geometry.values)
-    logger.info("  Computing centroid-to-road distances …")
-    return conc_gdf.geometry.centroid.distance(road_union)
+    net_geoms = net_gdf.geometry.values
+    centroids = conc_gdf.geometry.centroid.values
+    logger.info("  Building road network STRtree (%d segments) …", len(net_geoms))
+    tree = shapely.STRtree(net_geoms)
+    logger.info("  Querying nearest road segment per cell (%d cells) …", len(centroids))
+    nearest_idx = tree.nearest(centroids)
+    distances = shapely.distance(centroids, net_geoms[nearest_idx])
+    return pd.Series(distances, index=conc_gdf.index)
 
 
 def _assign_distance_bins(distances_m: "np.ndarray") -> "np.ndarray":
