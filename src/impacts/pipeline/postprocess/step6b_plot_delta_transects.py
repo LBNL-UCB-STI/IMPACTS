@@ -119,7 +119,7 @@ def _plot_delta_transects(transect_df: pd.DataFrame, output_dir: Path) -> Option
         ax.set_xlabel("Distance from road (km)", fontsize=CHART_AXIS_LABEL_FONTSIZE)
         ax.set_ylabel(ylabel, fontsize=CHART_AXIS_LABEL_FONTSIZE)
         ax.tick_params(labelsize=CHART_TICK_LABEL_FONTSIZE)
-        ax.legend(fontsize=CHART_LEGEND_FONTSIZE, loc="upper right")
+        ax.legend(fontsize=CHART_LEGEND_FONTSIZE, loc="best")
         ax.set_title(ylabel.split(" (")[0], fontsize=CHART_TITLE_FONTSIZE)
 
     fig.suptitle(
