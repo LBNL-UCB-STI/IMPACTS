@@ -74,7 +74,7 @@ def _compute_road_distances(conc_gdf, net_gdf) -> pd.Series:
     return pd.Series(distances, index=conc_gdf.index)
 
 
-def _assign_distance_bins(distances_m: "np.ndarray") -> "np.ndarray":
+def _assign_distance_bins(distances_m: np.ndarray) -> np.ndarray:
     max_m = _TRANSECT_MAX_KM * 1000.0
     edges = np.arange(0.0, max_m + _TRANSECT_BIN_M, _TRANSECT_BIN_M)
     bin_centers_km = (edges[:-1] + _TRANSECT_BIN_M / 2.0) / 1000.0
@@ -191,8 +191,8 @@ def run(
     file_cols = set(pq.read_schema(concentration_path).names)
     read_cols = [c for c in wanted_cols if c in file_cols]
 
-    _STEPS = ["Load data", "Compute distances", "Build table", "Plot"]
-    progress = _step_progress(len(_STEPS), "Postprocess Step 4b", unit="step")
+    outputs: dict[str, str] = {}
+    progress = _step_progress(4, "Postprocess Step 4b", unit="step")
     try:
         _set_progress_task(progress, "Load data", step_label="Postprocess Step 4b")
         logger.info("Loading concentration data …")
@@ -209,7 +209,6 @@ def run(
         _set_progress_task(progress, "Build table", step_label="Postprocess Step 4b")
         logger.info("Building transect table …")
         transect_df = _build_transect_table(conc_gdf, distances_m)
-        outputs: dict[str, str] = {}
         table_path = output_dir / "concentration_transects_table.parquet"
         table_path.parent.mkdir(parents=True, exist_ok=True)
         transect_df.to_parquet(table_path, index=False)
