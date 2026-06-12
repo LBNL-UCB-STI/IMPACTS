@@ -400,7 +400,7 @@ def _resolve_delta_baseline_concentration_path(
 
 
 def _remove_stale_postprocess_delta_outputs(output_dir: Path) -> None:
-    for subdir in ("delta_concentrations", "delta_exposure"):
+    for subdir in ("delta_concentrations", "delta_exposure", "delta_transects"):
         target_dir = output_dir / subdir
         if not target_dir.exists():
             continue
@@ -487,8 +487,10 @@ def _run_postprocess_steps(
     from .pipeline.postprocess.step2_compare_annual_targets import run as run_step2
     from .pipeline.postprocess.step3_compare_emissions_inventory import run as run_step3
     from .pipeline.postprocess.step4_plot_concentrations import run as run_step4
+    from .pipeline.postprocess.step4b_plot_transects import run as run_step4b
     from .pipeline.postprocess.step5_plot_exposure import run as run_step5
     from .pipeline.postprocess.step6_plot_delta_concentrations import run as run_step6
+    from .pipeline.postprocess.step6b_plot_delta_transects import run as run_step6b
     from .pipeline.postprocess.step7_plot_delta_exposure import run as run_step7
 
     settings = load_settings_from_yaml(settings_path)
@@ -699,8 +701,15 @@ def _run_postprocess_steps(
         )
         for key, value in map_outputs.items():
             outputs[f"concentration_{key}"] = value
+        transect_outputs = run_step4b(
+            concentration_path=str(conc_path),
+            network_path=str(net_path),
+            output_dir=output_dir / "concentration_transects",
+        )
+        for key, value in transect_outputs.items():
+            outputs[f"concentration_transect_{key}"] = value
     else:
-        logger.info("Skipping Step 4: concentration or network output not found at %s", output_root)
+        logger.info("Skipping Steps 4/4b: concentration or network output not found at %s", output_root)
     if pop_path.exists() and conc_path.exists() and net_path.exists():
         exp_outputs = run_step5(
             population_path=str(pop_path),
@@ -716,9 +725,9 @@ def _run_postprocess_steps(
     delta_table_path = None
     if delta_baseline_concentration_path is None:
         if delta_baseline_raw:
-            logger.info("Skipping Steps 6-7: delta baseline file was configured but could not be found.")
+            logger.info("Skipping Steps 6/6b-7: delta baseline file was configured but could not be found.")
         else:
-            logger.info("Skipping Steps 6-7: no delta baseline concentration distribution configured.")
+            logger.info("Skipping Steps 6/6b-7: no delta baseline concentration distribution configured.")
     elif conc_path.exists() and net_path.exists():
         logger.info(
             "Step 6 — resolved paths:\n  current (c) : %s\n  baseline (b): %s",
@@ -734,8 +743,17 @@ def _run_postprocess_steps(
         delta_table_path = delta_outputs.get("delta_table")
         for key, value in delta_outputs.items():
             outputs[f"delta_concentration_{key}"] = value
+        if delta_table_path:
+            delta_transect_outputs = run_step6b(
+                concentration_path=str(conc_path),
+                delta_table_path=str(delta_table_path),
+                network_path=str(net_path),
+                output_dir=output_dir / "delta_transects",
+            )
+            for key, value in delta_transect_outputs.items():
+                outputs[f"delta_transect_{key}"] = value
     else:
-        logger.info("Skipping Step 6: concentration or network output not found at %s", output_root)
+        logger.info("Skipping Steps 6/6b: concentration or network output not found at %s", output_root)
     if delta_table_path and pop_path.exists() and net_path.exists() and inmap_cells_path.exists():
         delta_exposure_outputs = run_step7(
             population_path=str(pop_path),
