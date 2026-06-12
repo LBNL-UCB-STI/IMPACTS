@@ -24,6 +24,10 @@ from ._common import (
     CHART_TICK_LABEL_FONTSIZE,
     CHART_TITLE_FONTSIZE,
     PLOT_DPI,
+    _advance_progress,
+    _close_progress,
+    _set_progress_task,
+    _step_progress,
 )
 
 logger = logging.getLogger(__name__)
@@ -187,27 +191,39 @@ def run(
     file_cols = set(pq.read_schema(concentration_path).names)
     read_cols = [c for c in wanted_cols if c in file_cols]
 
-    logger.info("Loading concentration data …")
-    conc_gdf = gpd.read_parquet(concentration_path, columns=read_cols)
-    logger.info("Loading network …")
-    net_gdf = gpd.read_parquet(network_path)[["geometry"]].drop_duplicates()
+    _STEPS = ["Load data", "Compute distances", "Build table", "Plot"]
+    progress = _step_progress(len(_STEPS), "Postprocess Step 4b", unit="step")
+    try:
+        _set_progress_task(progress, "Load data", step_label="Postprocess Step 4b")
+        logger.info("Loading concentration data …")
+        conc_gdf = gpd.read_parquet(concentration_path, columns=read_cols)
+        logger.info("Loading network …")
+        net_gdf = gpd.read_parquet(network_path)[["geometry"]].drop_duplicates()
+        _advance_progress(progress)
 
-    logger.info("Computing cell distances to road network …")
-    distances_m = _compute_road_distances(conc_gdf, net_gdf)
+        _set_progress_task(progress, "Compute distances", step_label="Postprocess Step 4b")
+        logger.info("Computing cell distances to road network …")
+        distances_m = _compute_road_distances(conc_gdf, net_gdf)
+        _advance_progress(progress)
 
-    logger.info("Building transect table …")
-    transect_df = _build_transect_table(conc_gdf, distances_m)
+        _set_progress_task(progress, "Build table", step_label="Postprocess Step 4b")
+        logger.info("Building transect table …")
+        transect_df = _build_transect_table(conc_gdf, distances_m)
+        outputs: dict[str, str] = {}
+        table_path = output_dir / "concentration_transects_table.parquet"
+        table_path.parent.mkdir(parents=True, exist_ok=True)
+        transect_df.to_parquet(table_path, index=False)
+        logger.info("  Saved transect table → %s", table_path)
+        outputs["transect_table"] = str(table_path)
+        _advance_progress(progress)
 
-    outputs: dict[str, str] = {}
-    table_path = output_dir / "concentration_transects_table.parquet"
-    table_path.parent.mkdir(parents=True, exist_ok=True)
-    transect_df.to_parquet(table_path, index=False)
-    logger.info("  Saved transect table → %s", table_path)
-    outputs["transect_table"] = str(table_path)
-
-    result = _plot_transects(transect_df, output_dir)
-    if result is not None:
-        outputs["concentration_transects"] = result
+        _set_progress_task(progress, "Plot", step_label="Postprocess Step 4b")
+        result = _plot_transects(transect_df, output_dir)
+        if result is not None:
+            outputs["concentration_transects"] = result
+        _advance_progress(progress)
+    finally:
+        _close_progress(progress)
 
     logger.info("Postprocess Step 4b complete: %d outputs written to %s", len(outputs), output_dir)
     return outputs
