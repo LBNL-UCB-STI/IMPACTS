@@ -26,6 +26,7 @@ from ._common import (
     MAP_COLORBAR_TICK_FONTSIZE,
     MAP_DPI,
     MAP_FIGSIZE,
+    MAP_SUPTITLE_FONTSIZE,
     MAP_TITLE_FONTSIZE,
     _advance_progress,
     _add_basemap,
@@ -256,7 +257,7 @@ def _plot_primary_secondary_delta_comparison(delta_gdf, net_gdf, layout, out_pat
         ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
         ax.set_axis_off()
 
-    fig.suptitle("Primary vs Secondary PM₂.₅ Delta", fontsize=MAP_TITLE_FONTSIZE + 4, y=0.98)
+    fig.suptitle("Primary vs Secondary PM₂.₅ Delta", fontsize=MAP_SUPTITLE_FONTSIZE, y=0.98)
     # Reserve 10% on the right for the colorbar and 4% on top for suptitle, then
     # place the colorbar in a manually-sized axis to prevent overlap with the right panel.
     fig.tight_layout(rect=[0, 0, 0.9, 0.96], pad=0.5)

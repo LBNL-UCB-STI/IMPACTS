@@ -22,6 +22,7 @@ from ...common import log_step_banner, configure_duckdb_connection
 from ._common import (
     CMAP_PM25,
     CMAP_POP,
+    MAP_BIVARIATE_LEGEND_FONTSIZE,
     MAP_DPI,
     MAP_FIGSIZE,
     MAP_TITLE_FONTSIZE,
@@ -176,11 +177,11 @@ def _add_bivariate_legend(ax) -> None:
     ax_leg.set_xlim(0, 3)
     ax_leg.set_ylim(0, 3)
     ax_leg.set_xticks([1.5])
-    ax_leg.set_xticklabels(["Population →"], fontsize=18)
+    ax_leg.set_xticklabels(["Population →"], fontsize=MAP_BIVARIATE_LEGEND_FONTSIZE)
     ax_leg.xaxis.set_ticks_position("top")
     ax_leg.xaxis.set_label_position("top")
     ax_leg.set_yticks([1.5])
-    ax_leg.set_yticklabels(["PM₂.₅ →"], fontsize=18, rotation=90, va="center")
+    ax_leg.set_yticklabels(["PM₂.₅ →"], fontsize=MAP_BIVARIATE_LEGEND_FONTSIZE, rotation=90, va="center")
     ax_leg.tick_params(length=0, pad=6)
     ax_leg.set_facecolor("none")
     for spine in ax_leg.spines.values():

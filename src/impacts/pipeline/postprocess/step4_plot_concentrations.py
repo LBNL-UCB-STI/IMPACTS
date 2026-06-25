@@ -24,6 +24,7 @@ from ._common import (
     MAP_COLORBAR_TICK_FONTSIZE,
     MAP_DPI,
     MAP_FIGSIZE,
+    MAP_SUPTITLE_FONTSIZE,
     MAP_TITLE_FONTSIZE,
     _advance_progress,
     _add_basemap,
@@ -157,7 +158,7 @@ def _plot_primary_secondary_comparison(conc_gdf, net_gdf, layout, out_path: Path
         ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
         ax.set_axis_off()
 
-    fig.suptitle("Primary vs Secondary PM₂.₅", fontsize=MAP_TITLE_FONTSIZE + 4, y=0.98)
+    fig.suptitle("Primary vs Secondary PM₂.₅", fontsize=MAP_SUPTITLE_FONTSIZE, y=0.98)
     fig.tight_layout(rect=[0, 0, 0.9, 0.96], pad=0.5)
     cbar_ax = fig.add_axes([0.91, 0.15, 0.02, 0.7])
     sm = plt.cm.ScalarMappable(cmap=CMAP_PM25, norm=plt.Normalize(vmin=0, vmax=vmax))

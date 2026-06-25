@@ -21,6 +21,7 @@ from ...common import log_step_banner
 from ._common import (
     CHART_AXIS_LABEL_FONTSIZE,
     CHART_LEGEND_FONTSIZE,
+    CHART_SUPTITLE_FONTSIZE,
     CHART_TICK_LABEL_FONTSIZE,
     CHART_TITLE_FONTSIZE,
     PLOT_DPI,
@@ -152,7 +153,7 @@ def _plot_transects(transect_df: pd.DataFrame, output_dir: Path) -> Optional[str
     for j in range(len(available), len(axes_flat)):
         axes_flat[j].set_visible(False)
 
-    fig.suptitle("Concentration vs. Distance from Road (median per 100 m bin)", fontsize=CHART_TITLE_FONTSIZE + 2)
+    fig.suptitle("Concentration vs. Distance from Road (median per 100 m bin)", fontsize=CHART_SUPTITLE_FONTSIZE)
     fig.tight_layout()
 
     out_path = output_dir / "concentration_transects.png"
