@@ -67,18 +67,17 @@ def test_postprocess_step3_writes_comparison_table_and_plots(tmp_path: Path) -> 
         inventory_label="BAAQMD Mobile On-Road",
         pollutant_targets={
             "PM2.5": {
-                "columns": (),
-                "prefixes": ("pm25_",),
-                "exclude_columns": ("pm25_prdust_short_tons_per_year",),
-                "exclude_prefixes": (),
+                "columns": (
+                    "pm25_runex_short_tons_per_year",
+                    "pm25_idlex_short_tons_per_year",
+                    "pm25_strex_short_tons_per_year",
+                    "pm25_pmbw_short_tons_per_year",
+                    "pm25_pmtw_short_tons_per_year",
+                    "pm25_diurn_short_tons_per_year",
+                ),
             },
-            "NOx": {"columns": (), "prefixes": ("nox_",), "exclude_columns": (), "exclude_prefixes": ()},
-            "BC": {
-                "columns": ("bc_runex_short_tons_per_year",),
-                "prefixes": (),
-                "exclude_columns": (),
-                "exclude_prefixes": (),
-            },
+            "NOx": {"columns": ("nox_runex_short_tons_per_year",)},
+            "BC": {"columns": ("bc_runex_short_tons_per_year",)},
         },
     )
 
@@ -139,12 +138,7 @@ def test_postprocess_step3_can_compare_road_dust_pm25_only(tmp_path: Path) -> No
         target_name="road_dust_baaqmd",
         inventory_label="BAAQMD Road Dust",
         pollutant_targets={
-            "PM2.5": {
-                "columns": ("pm25_prdust_short_tons_per_year",),
-                "prefixes": (),
-                "exclude_columns": (),
-                "exclude_prefixes": (),
-            }
+            "PM2.5": {"columns": ("pm25_prdust_short_tons_per_year",)},
         },
     )
 

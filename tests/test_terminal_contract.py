@@ -1319,9 +1319,6 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
                         pollutants={
                             "PM25": SimpleNamespace(
                                 columns=("PM25",),
-                                prefixes=(),
-                                exclude_columns=(),
-                                exclude_prefixes=(),
                             )
                         },
                     )
