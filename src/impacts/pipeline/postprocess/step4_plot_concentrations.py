@@ -82,42 +82,70 @@ def _shared_positive_vmax(conc_gdf, columns: list[str], vmax_q: float) -> float 
     return float(max(series.quantile(vmax_q) for series in positive))
 
 
-def _plot_one(conc_gdf, net_gdf, layout, column: str, title: str, cmap, vmax_q: float, out_path: Path) -> Optional[str]:
-    if column not in conc_gdf.columns:
-        logger.warning("  Column %s not in concentration data, skipping.", column)
-        return None
-
-    vals = conc_gdf[column].dropna()
-    nonzero = vals[vals > 0]
-    if nonzero.empty:
-        logger.warning("  Column %s has no positive values, skipping.", column)
-        return None
-
-    vmax = float(nonzero.quantile(vmax_q))
-    logger.info("  %s  vmax=%.4f → %s", column, vmax, out_path.name)
-
+def _render_one(
+    conc_gdf,
+    net_gdf,
+    layout,
+    column: str,
+    title: str,
+    cmap,
+    vmax: float,
+    out_path: Path,
+    zoom_bbox: tuple[float, float, float, float] | None = None,
+) -> str:
     fig, ax = plt.subplots(figsize=MAP_FIGSIZE, dpi=MAP_DPI)
     ax.set_aspect("equal")
-    _plot_raster_layer(
-        ax,
-        conc_gdf,
-        column,
-        cmap,
-        layout=layout,
-        vmax=vmax,
-    )
+    _plot_raster_layer(ax, conc_gdf, column, cmap, layout=layout, vmax=vmax)
     _add_network(ax, net_gdf)
+    if zoom_bbox is not None:
+        xmin, ymin, xmax, ymax = zoom_bbox
+        ax.set_xlim(xmin, xmax)
+        ax.set_ylim(ymin, ymax)
     _add_basemap(ax, crs=conc_gdf.crs)
     _add_colorbar(fig, ax, cmap, vmax, title)
     ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
     ax.set_axis_off()
     fig.tight_layout(pad=0.5)
-
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=MAP_DPI, bbox_inches="tight")
     plt.close(fig)
     logger.info("  Saved → %s", out_path)
     return str(out_path)
+
+
+def _plot_one(
+    conc_gdf,
+    net_gdf,
+    layout,
+    column: str,
+    title: str,
+    cmap,
+    vmax_q: float,
+    out_path: Path,
+    zoom_bbox: tuple[float, float, float, float] | None = None,
+) -> dict[str, str]:
+    if column not in conc_gdf.columns:
+        logger.warning("  Column %s not in concentration data, skipping.", column)
+        return {}
+
+    vals = conc_gdf[column].dropna()
+    nonzero = vals[vals > 0]
+    if nonzero.empty:
+        logger.warning("  Column %s has no positive values, skipping.", column)
+        return {}
+
+    vmax = float(nonzero.quantile(vmax_q))
+    logger.info("  %s  vmax=%.4f → %s", column, vmax, out_path.name)
+
+    key = column.lower()
+    outputs = {f"{key}_map": _render_one(conc_gdf, net_gdf, layout, column, title, cmap, vmax, out_path)}
+    if zoom_bbox is not None:
+        zoom_path = out_path.with_stem(out_path.stem + "_zoom")
+        logger.info("  Rendering zoom → %s", zoom_path.name)
+        outputs[f"{key}_zoom_map"] = _render_one(
+            conc_gdf, net_gdf, layout, column, title, cmap, vmax, zoom_path, zoom_bbox=zoom_bbox
+        )
+    return outputs
 
 
 def _render_primary_secondary(
@@ -250,10 +278,11 @@ def run(
     try:
         for column, title, cmap, vmax_q in _LAYERS:
             _set_progress_task(progress, column, step_label="Postprocess Step 4")
-            result = _plot_one(conc_gdf, net_gdf, layout, column, title, cmap, vmax_q,
-                               output_dir / f"{column.lower()}.png")
-            if result is not None:
-                outputs[f"{column.lower()}_map"] = result
+            outputs.update(_plot_one(
+                conc_gdf, net_gdf, layout, column, title, cmap, vmax_q,
+                output_dir / f"{column.lower()}.png",
+                zoom_bbox=zoom_bbox if column == "TotalPM25" else None,
+            ))
             _advance_progress(progress)
         _set_progress_task(progress, "Primary/Secondary PM2.5", step_label="Postprocess Step 4")
         outputs.update(_plot_primary_secondary_comparison(
