@@ -652,9 +652,6 @@ def _run_postprocess_steps(
                 pollutant_targets={
                     pollutant: {
                         "columns": tuple(selector.columns),
-                        "prefixes": tuple(selector.prefixes),
-                        "exclude_columns": tuple(selector.exclude_columns),
-                        "exclude_prefixes": tuple(selector.exclude_prefixes),
                     }
                     for pollutant, selector in target.pollutants.items()
                 },

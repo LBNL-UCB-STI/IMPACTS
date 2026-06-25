@@ -568,25 +568,14 @@ class ImpactsBeamProcessing:
 @dataclass(frozen=True)
 class AnalysisPollutantTarget:
     columns: List[str] = field(default_factory=list)
-    prefixes: List[str] = field(default_factory=list)
-    exclude_columns: List[str] = field(default_factory=list)
-    exclude_prefixes: List[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any], *, path: str) -> "AnalysisPollutantTarget":
-        _reject_unknown_keys(payload, {"columns", "prefixes", "exclude_columns", "exclude_prefixes"}, path)
+        _reject_unknown_keys(payload, {"columns"}, path)
         columns = _coerce_string_list(payload.get("columns"))
-        prefixes = _coerce_string_list(payload.get("prefixes"))
-        exclude_columns = _coerce_string_list(payload.get("exclude_columns"))
-        exclude_prefixes = _coerce_string_list(payload.get("exclude_prefixes"))
-        if not columns and not prefixes:
-            raise ValueError(f"{path} must define at least one of columns or prefixes")
-        return cls(
-            columns=columns,
-            prefixes=prefixes,
-            exclude_columns=exclude_columns,
-            exclude_prefixes=exclude_prefixes,
-        )
+        if not columns:
+            raise ValueError(f"{path} must define at least one column")
+        return cls(columns=columns)
 
 
 @dataclass(frozen=True)
@@ -1095,9 +1084,6 @@ class ImpactsSettings:
                                     target.name: {
                                         pollutant: {
                                             "columns": list(selector.columns),
-                                            "prefixes": list(selector.prefixes),
-                                            "exclude_columns": list(selector.exclude_columns),
-                                            "exclude_prefixes": list(selector.exclude_prefixes),
                                         }
                                         for pollutant, selector in target.pollutants.items()
                                     }
