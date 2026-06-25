@@ -69,6 +69,7 @@ input/
 output/
 workspace/
 downstream/
+example/
 
 # Virtual environments and local Python config
 .venv/
