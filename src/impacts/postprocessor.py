@@ -364,20 +364,40 @@ def _resolve_emissions_inventory_path(
     run_manifest_path: str | Path | None = None,
     output_root: Path | None = None,
     registry: "PathRegistry",
+    settings=None,
 ) -> Path:
     _, _, _, inputs = _load_context(
         settings_path,
         run_manifest_path=run_manifest_path,
         output_root=output_root,
     )
-    candidate = _resolve_input_path(inputs, key="emissions_inventory_file", output_root=output_root, registry=registry)
-    if not candidate.exists():
-        raise FileNotFoundError(
-            f"Postprocess step 3 requires the EMFAC emissions inventory file registered as "
-            f"'emissions_inventory_file', but it was not found at {candidate}. "
-            f"Re-run the preprocessing workflow: python -m impacts preprocess --config <config>"
+    try:
+        candidate = _resolve_input_path(inputs, key="emissions_inventory_file", output_root=output_root, registry=registry)
+        if candidate.exists():
+            return candidate
+    except ValueError:
+        pass
+    # Fallback for runs where preprocessing pre-dates emissions_inventory_file manifest registration.
+    # The presim activities _tmp dir is a sibling of the postsim output dir under the same parent.
+    if settings is not None and output_root is not None:
+        from .config.settings import presim_activities_tmp_root
+        _acts = settings.impacts.activities if isinstance(settings.impacts.activities, dict) else {}
+        region_slug = str(_acts.get("region_label") or settings.run.region).lower()
+        year = int(settings.run.start_year)
+        fallback_tmp = presim_activities_tmp_root(
+            output_root.parent,
+            region=str(settings.run.region),
+            output_run_name=getattr(settings.run, "output_run_name", None),
+            run_scenario=str(settings.run.scenario),
         )
-    return candidate
+        fallback = fallback_tmp / f"{region_slug}-emfac-{year}-inventory-intermediate-with-activity.parquet"
+        if fallback.exists():
+            logger.info("Resolved emissions inventory via presim fallback: %s", fallback)
+            return fallback
+    raise FileNotFoundError(
+        "Postprocess step 3 requires the EMFAC emissions inventory file. "
+        "Re-run the preprocessing workflow: python -m impacts preprocess --config <config>"
+    )
 
 
 def _resolve_delta_baseline_concentration_path(
@@ -647,6 +667,7 @@ def _run_postprocess_steps(
             run_manifest_path=run_manifest_path,
             output_root=output_root,
             registry=registry,
+            settings=settings,
         )
         _activities = dict(getattr(settings.impacts, "activities", None) or {})
         _model_source = dict(_activities.get("emissions_inventory") or {}).get("model_source") or "EMFAC"

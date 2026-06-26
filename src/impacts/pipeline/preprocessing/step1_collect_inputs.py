@@ -418,7 +418,8 @@ def run(
                 output_run_name=getattr(settings.run, "output_run_name", None),
                 run_scenario=settings.run.scenario,
             )
-            region_slug = str(settings.run.region).lower()
+            _acts = settings.impacts.activities if isinstance(settings.impacts.activities, dict) else {}
+            region_slug = str(_acts.get("region_label") or settings.run.region).lower()
             year = int(settings.run.start_year)
             emissions_inv_path = _tmp_root / f"{region_slug}-emfac-{year}-inventory-intermediate-with-activity.parquet"
             required_local_path(emissions_inv_path, "emissions_inventory_file (inventory-intermediate-with-activity)")

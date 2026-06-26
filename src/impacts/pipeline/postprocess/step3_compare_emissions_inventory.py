@@ -430,6 +430,7 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
         run_manifest_path=run_manifest_path,
         output_root=output_dir,
         registry=registry,
+        settings=settings,
     )
     _activities = dict(getattr(settings.impacts, "activities", None) or {})
     _model_source = dict(_activities.get("emissions_inventory") or {}).get("model_source") or "EMFAC"
