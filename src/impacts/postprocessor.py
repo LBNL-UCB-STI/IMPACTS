@@ -803,6 +803,7 @@ def postprocess_from_pipeline_manifest(
     run_manifest_path: str | Path,
     manifest_path: str | Path | None = None,
     output_root_override: str | Path | None = None,
+    settings_override: str | Path | None = None,
     input_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
     baseline_concentration_override: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -813,7 +814,11 @@ def postprocess_from_pipeline_manifest(
     output_root.mkdir(parents=True, exist_ok=True)
 
     log_step_banner("Postprocess", "Run Postprocess Steps", logger=logger)
-    settings_path = _resolve_settings_path(run_manifest_path, output_root=output_root_arg)
+    settings_path = (
+        Path(settings_override).resolve()
+        if settings_override is not None
+        else _resolve_settings_path(run_manifest_path, output_root=output_root_arg)
+    )
     if output_root_arg is None:
         postprocess_outputs = _run_postprocess_steps(
             settings_path,

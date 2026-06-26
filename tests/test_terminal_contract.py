@@ -934,6 +934,8 @@ def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_pat
     def _fake_postprocess(
         run_manifest_path,
         manifest_path=None,
+        output_root_override=None,
+        settings_override=None,
         input_roots=None,
         baseline_concentration_override=None,
     ):
@@ -1035,6 +1037,7 @@ def test_postprocess_impact_output_dir_cli_passes_output_root_override_and_impac
         run_manifest_path,
         manifest_path=None,
         output_root_override=None,
+        settings_override=None,
         input_roots=None,
         baseline_concentration_override=None,
     ):
