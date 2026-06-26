@@ -380,9 +380,10 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
     from impacts.postprocessor import (
         _humanize_target_name,
         _resolve_county_boundaries_path,
-        _resolve_inventory_target_path,
+        _resolve_emissions_inventory_path,
         _resolve_modeled_emissions_path,
     )
+    from impacts.config.path_registry import build_registry
 
     from ._common import settings_path_from_output_dir
     from ...common import normalize_county_fips
@@ -395,6 +396,7 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
     if not settings.impacts.analysis.inventory_targets:
         logger.info("No inventory targets configured, skipping Step 3.")
         return {}
+    registry = build_registry(settings, settings_path)
     modeled_path = _resolve_modeled_emissions_path(
         settings_path,
         run_manifest_path=run_manifest_path,
@@ -423,9 +425,14 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
             .astype(str)
             .tolist()
         )
-    inventory_path = _resolve_inventory_target_path(
-        settings_path, settings.impacts.analysis.inventory_file
+    inventory_path = _resolve_emissions_inventory_path(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_dir,
+        registry=registry,
     )
+    _activities = dict(getattr(settings.impacts, "activities", None) or {})
+    _model_source = dict(_activities.get("emissions_inventory") or {}).get("model_source") or "EMFAC"
     outputs: dict[str, str] = {}
     for target in settings.impacts.analysis.inventory_targets:
         target_outputs = run(
@@ -435,7 +442,7 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
             output_dir=output_dir / "postprocess" / "emissions_inventory",
             county_order=county_order,
             target_name=target.name,
-            inventory_label=f"{settings.impacts.analysis.inventory_label} {_humanize_target_name(target.name)}".strip(),
+            inventory_label=f"{_model_source} {_humanize_target_name(target.name)}".strip(),
             pollutant_targets={
                 pollutant: {
                     "columns": tuple(selector.columns),

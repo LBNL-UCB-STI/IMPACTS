@@ -83,6 +83,7 @@ def _build_activities_manifest_payload(
             "final_activity_by_emfacid_output_freight": str(
                 Path(str(paths["final_activity_by_emfacid_output_freight"])).resolve()
             ),
+            "emissions_inventory": str(Path(str(paths["emissions_inventory"])).resolve()),
         },
         "notes": [
             "Activities manifest is the contract boundary between EMFAC activities and fleet.",
@@ -143,6 +144,9 @@ def _write_activities_manifest_from_cfg(
                 ),
                 "final_activity_by_emfacid_output_freight": str(
                     (activities_output_root / f"{inventory_final_name}-freight-activity-by-emfacid.parquet").resolve()
+                ),
+                "emissions_inventory": str(
+                    (tmp_root / f"{region_slug}-emfac-{int(calendar_year)}-inventory-intermediate-with-activity.parquet").resolve()
                 ),
             },
             "notes": [

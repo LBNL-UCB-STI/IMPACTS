@@ -1,3 +1,8 @@
+# Ignore all hidden files and directories by default;
+# exceptions for tracked dotfiles are listed at the bottom.
+.*
+.*/
+
 # OS and hidden junk
 .DS_Store
 **/.DS_Store

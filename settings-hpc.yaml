@@ -98,6 +98,7 @@ impacts:
     emissions_inventory:
       folder_in_archive: sfbay-emfac-emissions-inventory
       fallback_folder_in_archive: statewide-emfac-emissions-inventory
+      model_source: EMFAC
       fuel_map:
         Dsl: [Diesel]
         Elec: [Electricity]
@@ -151,6 +152,21 @@ impacts:
     # Optional baseline beam_concentration_distribution.parquet used by postprocess Step 6.
     # Relative paths are resolved from --impact-input-dir. Deltas are current run minus baseline.
     #delta_baseline_concentration_distribution_file: vehicle-tech/dispersions/beam_concentration_distribution.parquet
+
+    inventory_targets:
+      mobile_on_road:
+        PM2.5:
+          columns:
+            - pm25_runex_short_tons_per_year
+            - pm25_idlex_short_tons_per_year
+            - pm25_strex_short_tons_per_year
+            - pm25_pmbw_short_tons_per_year
+            - pm25_pmtw_short_tons_per_year
+        NOx:
+          columns:
+            - nox_runex_short_tons_per_year
+            - nox_idlex_short_tons_per_year
+            - nox_strex_short_tons_per_year
 
     targets: # 2018 year: https://www.baaqmd.gov/en/about-air-quality/emission-inventory/emissions-lookup-tool
       pm25_annual_short_tons:

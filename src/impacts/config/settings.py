@@ -204,7 +204,7 @@ def _validate_activities_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
     _reject_unknown_keys(
         emissions_inventory,
-        {"folder_in_archive", "fallback_folder_in_archive", "fuel_map"},
+        {"folder_in_archive", "fallback_folder_in_archive", "fuel_map", "model_source"},
         "impacts.activities.emissions_inventory",
     )
     return activities
@@ -652,8 +652,6 @@ def _parse_analysis_sector_targets(
 
 @dataclass(frozen=True)
 class Analysis:
-    inventory_file: Optional[str] = None
-    inventory_label: Optional[str] = None
     delta_baseline_concentration_distribution_file: Optional[str] = None
     inventory_targets: List[AnalysisTarget] = field(default_factory=list)
     sector_targets: List[AnalysisSectorTarget] = field(default_factory=list)
@@ -663,8 +661,6 @@ class Analysis:
         _reject_unknown_keys(
             payload,
             {
-                "inventory_file",
-                "inventory_label",
                 "delta_baseline_concentration_distribution_file",
                 "targets",
                 "inventory_targets",
@@ -692,8 +688,6 @@ class Analysis:
             raw_targets is None
             and raw_inventory_targets is None
             and all(v is None for v in raw_pollutant_targets.values())
-            and payload.get("inventory_file") is None
-            and payload.get("inventory_label") is None
             and payload.get("delta_baseline_concentration_distribution_file") is None
         ):
             return cls()
@@ -714,19 +708,10 @@ class Analysis:
             raw_pollutant_targets=raw_pollutant_targets,
             path_prefix="impacts.analysis.targets",
         )
-        inventory_file = _optional_string(payload.get("inventory_file"))
-        inventory_label = _optional_string(payload.get("inventory_label"))
-        delta_baseline_concentration_distribution_file = _optional_string(
-            payload.get("delta_baseline_concentration_distribution_file")
-        )
-        if inventory_targets and (not inventory_file or not inventory_label):
-            raise ValueError(
-                "impacts.analysis.inventory_file and impacts.analysis.inventory_label are required when impacts.analysis.inventory_targets is configured"
-            )
         return cls(
-            inventory_file=inventory_file,
-            inventory_label=inventory_label,
-            delta_baseline_concentration_distribution_file=delta_baseline_concentration_distribution_file,
+            delta_baseline_concentration_distribution_file=_optional_string(
+                payload.get("delta_baseline_concentration_distribution_file")
+            ),
             inventory_targets=inventory_targets,
             sector_targets=sector_targets,
         )
@@ -1078,8 +1063,6 @@ class ImpactsSettings:
                         ),
                         **(
                             {
-                                "inventory_file": self.impacts.analysis.inventory_file,
-                                "inventory_label": self.impacts.analysis.inventory_label,
                                 "inventory_targets": {
                                     target.name: {
                                         pollutant: {

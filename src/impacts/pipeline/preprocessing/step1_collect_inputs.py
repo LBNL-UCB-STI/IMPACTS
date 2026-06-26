@@ -30,6 +30,7 @@ from ...consist_artifacts import find_latest_beam_population_reference
 from ...consist_artifacts import resolve_logged_path
 from ...config.path_registry import build_registry
 from ...config.settings import presim_activities_inventory_root
+from ...config.settings import presim_activities_tmp_root
 from ...manifest.file_ops import resolve_path
 from ...manifest.file_ops import resolve_required_path
 
@@ -353,6 +354,8 @@ def run(
         substep_13_total += 1
     if emissions.inventory.enable_freight_activity_correction:
         substep_13_total += 1
+    if settings.impacts.analysis.inventory_targets:
+        substep_13_total += 1
     progress = make_progress("Preprocess Step 1.3", total=substep_13_total, unit="task", leave=False)
     try:
         if emissions.inventory.enable_passenger_activity_correction:
@@ -406,6 +409,28 @@ def run(
             metadata={"artifact_family": "freight_inventory_emfacid_file"},
         )
         progress.update(1)
+
+        if settings.impacts.analysis.inventory_targets:
+            _set_progress_task(progress, "emissions inventory", step_label="Preprocess Step 1.3")
+            _tmp_root = presim_activities_tmp_root(
+                local_output_folder,
+                region=settings.run.region,
+                output_run_name=getattr(settings.run, "output_run_name", None),
+                run_scenario=settings.run.scenario,
+            )
+            region_slug = str(settings.run.region).lower()
+            year = int(settings.run.start_year)
+            emissions_inv_path = _tmp_root / f"{region_slug}-emfac-{year}-inventory-intermediate-with-activity.parquet"
+            required_local_path(emissions_inv_path, "emissions_inventory_file (inventory-intermediate-with-activity)")
+            _register_manifest_input(
+                manifest_inputs,
+                input_root=input_root,
+                key="emissions_inventory_file",
+                source_path=str(emissions_inv_path),
+                relative_target=emissions_inv_path.name,
+                metadata={"artifact_family": "emissions_inventory_file"},
+            )
+            progress.update(1)
     finally:
         progress.close()
 

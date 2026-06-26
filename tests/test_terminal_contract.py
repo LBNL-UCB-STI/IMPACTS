@@ -97,7 +97,7 @@ def _preprocess_manifest_payload(tmp_path: Path) -> dict:
 
 
 def test_example_settings_yaml_is_current_settings_file():
-    settings_yaml = Path(__file__).resolve().parents[1] / "examples" / "pilates" / "settings.yaml"
+    settings_yaml = Path(__file__).resolve().parents[1] / "settings.yaml"
 
     config = load_settings_from_yaml(settings_yaml)
 
@@ -132,7 +132,8 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.analysis.sector_targets[-1].source == "road_dust"
     assert config.impacts.analysis.sector_targets[-1].annual_pm25_short_tons == 1499.25
     assert config.impacts.analysis.sector_targets[-1].annual_nox_short_tons is None
-    assert config.impacts.analysis.inventory_targets == []
+    assert len(config.impacts.analysis.inventory_targets) == 1
+    assert config.impacts.analysis.inventory_targets[0].name == "mobile_on_road"
 
 
 def test_resolve_region_input_root_accepts_direct_region_root_layout(tmp_path: Path) -> None:
@@ -147,7 +148,7 @@ def test_resolve_region_input_root_accepts_direct_region_root_layout(tmp_path: P
 
 def test_builtin_settings_source_of_truth_is_current() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    example_payload = yaml.safe_load((repo_root / "examples" / "pilates" / "settings.yaml").read_text())
+    example_payload = yaml.safe_load((repo_root / "settings.yaml").read_text())
     default_settings_path = repo_root / "src" / "impacts" / "config" / "settings.yaml"
     default_payload = yaml.safe_load(default_settings_path.read_text())
     default_config = load_settings_from_yaml(default_settings_path)
@@ -1311,8 +1312,6 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
                         annual_sox_short_tons=None,
                     )
                 ]
-                inventory_file = "inventory.parquet"
-                inventory_label = "EMFAC"
                 inventory_targets = [
                     SimpleNamespace(
                         name="inventory",
@@ -1360,7 +1359,7 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
     monkeypatch.setattr(postprocessor_module, "_resolve_inventory_emfacid_activity_path", lambda *_args, **_kwargs: output_root / "activity.parquet")
     monkeypatch.setattr(postprocessor_module, "_resolve_vehicle_category_metadata_path", lambda *_args, **_kwargs: output_root / "metadata.csv")
     monkeypatch.setattr(postprocessor_module, "_resolve_county_boundaries_path", lambda *_args, **_kwargs: output_root / "county.gpkg")
-    monkeypatch.setattr(postprocessor_module, "_resolve_inventory_target_path", lambda *_args, **_kwargs: output_root / "inventory.parquet")
+    monkeypatch.setattr(postprocessor_module, "_resolve_emissions_inventory_path", lambda *_args, **_kwargs: output_root / "inventory.parquet")
     monkeypatch.setattr(step1_module, "run", _fake_step("step1"))
     monkeypatch.setattr(step2_module, "run", _fake_step("step2"))
     monkeypatch.setattr(step3_module, "run", _fake_step("step3"))

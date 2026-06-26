@@ -358,27 +358,26 @@ def _resolve_optional_population_assignment_paths(
     return passenger_vehicles_path, freight_carriers_path
 
 
-def _resolve_inventory_target_path(
+def _resolve_emissions_inventory_path(
     settings_path: str | Path,
-    raw: str,
     *,
+    run_manifest_path: str | Path | None = None,
     output_root: Path | None = None,
     registry: "PathRegistry",
 ) -> Path:
-    raw_text = str(raw).strip()
-    candidate = _localize_output_path(raw_text, output_root)
-    if candidate.exists():
-        return candidate
-    result = _locate_registry_path(registry, raw_text)
-    if result is not None:
-        return result
-    settings_candidate = _localize_output_path(resolve_path(raw_text, settings_path) or raw_text, output_root)
-    if settings_candidate.exists():
-        return settings_candidate
-    raise FileNotFoundError(
-        f"Postprocess inventory target file was configured but not found. "
-        f"Searched: {', '.join(str(r) for r in registry.roots)}. Path: {raw}"
+    _, _, _, inputs = _load_context(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
     )
+    candidate = _resolve_input_path(inputs, key="emissions_inventory_file", output_root=output_root, registry=registry)
+    if not candidate.exists():
+        raise FileNotFoundError(
+            f"Postprocess step 3 requires the EMFAC emissions inventory file registered as "
+            f"'emissions_inventory_file', but it was not found at {candidate}. "
+            f"Re-run the preprocessing workflow: python -m impacts preprocess --config <config>"
+        )
+    return candidate
 
 
 def _resolve_delta_baseline_concentration_path(
@@ -462,15 +461,24 @@ def _resolve_vehicle_category_metadata_path(
     except ValueError:
         pass
     settings = load_settings_from_yaml(settings_path)
-    if not settings.impacts.emissions.vehicle_category_metadata_file:
+    raw = settings.impacts.emissions.vehicle_category_metadata_file
+    if not raw:
         raise ValueError(
             "Postprocess step 2 requires impacts.emissions.vehicle_category_metadata_file when annual sector targets are configured."
         )
-    return _resolve_inventory_target_path(
-        settings_path,
-        settings.impacts.emissions.vehicle_category_metadata_file,
-        output_root=output_root,
-        registry=registry,
+    raw_text = str(raw).strip()
+    candidate = _localize_output_path(raw_text, output_root)
+    if candidate.exists():
+        return candidate
+    result = _locate_registry_path(registry, raw_text)
+    if result is not None:
+        return result
+    settings_candidate = _localize_output_path(resolve_path(raw_text, settings_path) or raw_text, output_root)
+    if settings_candidate.exists():
+        return settings_candidate
+    raise FileNotFoundError(
+        f"Postprocess step 2 vehicle_category_metadata_file not found. "
+        f"Searched: {', '.join(str(r) for r in registry.roots)}. Path: {raw}"
     )
 
 
@@ -634,12 +642,14 @@ def _run_postprocess_steps(
                 .astype(str)
                 .tolist()
             )
-        inventory_path = _resolve_inventory_target_path(
+        inventory_path = _resolve_emissions_inventory_path(
             settings_path,
-            settings.impacts.analysis.inventory_file,
+            run_manifest_path=run_manifest_path,
             output_root=output_root,
             registry=registry,
         )
+        _activities = dict(getattr(settings.impacts, "activities", None) or {})
+        _model_source = dict(_activities.get("emissions_inventory") or {}).get("model_source") or "EMFAC"
         for target in settings.impacts.analysis.inventory_targets:
             target_outputs = run_step3(
                 modeled_emissions_path=str(modeled_emissions_path),
@@ -648,7 +658,7 @@ def _run_postprocess_steps(
                 output_dir=output_dir / "emissions_inventory",
                 county_order=county_order,
                 target_name=target.name,
-                inventory_label=f"{settings.impacts.analysis.inventory_label} {_humanize_target_name(target.name)}".strip(),
+                inventory_label=f"{_model_source} {_humanize_target_name(target.name)}".strip(),
                 pollutant_targets={
                     pollutant: {
                         "columns": tuple(selector.columns),
