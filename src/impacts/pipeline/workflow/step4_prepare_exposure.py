@@ -262,12 +262,12 @@ def _build_full_exposure_grid(
     result["TotalPM25"] = result["SecondaryPM25"] + result["PrimaryPM25"]
     result["BC"] = np.where(
         result["has_aermod_bc"],
-        result["inmap_BC"] + result["aermod_BC"],
+        result["aermod_BC"],
         result["inmap_BC"],
     )
     result["NO2"] = np.where(
         result["has_aermod_no2"],
-        result["inmap_NO2"] + result["aermod_NO2"],
+        result["aermod_NO2"],
         result["inmap_NO2"],
     )
 
