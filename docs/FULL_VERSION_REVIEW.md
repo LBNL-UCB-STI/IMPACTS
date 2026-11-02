@@ -141,7 +141,7 @@ The additive branch does not multiply by an additional AERMOD indicator or renor
 
 Full baseline fields are named `InMAPOnly_*` at the InMAP stage and renamed `inmap_only_*` in the final grid. The explicit `inmap_only` strategy has been corrected to use the full baseline and omit AERMOD from BC/NO2 as well. If power inputs are also supplied, final PM fields still include power while the `inmap_only_*` diagnostics remain traffic-only.
 
-**Configuration item for review:** the inherited example/default YAML still sets `primary_pm25_integration_strategy` to `impute_inmap_primary_in_aermod_domain`. The current research method requires an explicit `additive_inmap_aermod` setting, as used by the validated replay drivers. This documentation review does not change that default.
+**Default corrected on November 2:** Python defaults and shipped YAML configurations now select `additive_inmap_aermod`, matching the validated replay drivers. Explicit legacy strategies remain supported. The effective strategy is serialized under `pipeline.primary_pm25_integration_strategy` in the output manifest. See [HYBRID_DEFAULT_UPDATE.md](HYBRID_DEFAULT_UPDATE.md) for existing-run migration and validation limits.
 
 ## 7. LDV charging: notebook compatibility and historical Home80 sensitivity
 

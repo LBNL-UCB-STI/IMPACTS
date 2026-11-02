@@ -115,7 +115,7 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.dispersions.inmap.isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s is False
     assert config.impacts.pipeline.aermod is True
     assert config.impacts.pipeline.exposure is True
-    assert config.impacts.exposure.primary_pm25_integration_strategy == "impute_inmap_primary_in_aermod_domain"
+    assert config.impacts.exposure.primary_pm25_integration_strategy == "additive_inmap_aermod"
     assert config.impacts.population.passenger_folder == "urbansim/atlas-2019"
     assert config.impacts.emissions.beam.include_passenger is True
     assert config.impacts.emissions.beam.include_freight is True
@@ -157,7 +157,7 @@ def test_builtin_settings_source_of_truth_is_current() -> None:
     assert shared_keys <= set(example_payload["impacts"])
     assert default_config.impacts.activities["project_analysis"]["main"]["folder_in_archive"] == "sfbay-emfac-project-analysis"
     assert default_config.impacts.population.vehicle_folder == "vehicle-tech"
-    assert default_config.impacts.exposure.primary_pm25_integration_strategy == "impute_inmap_primary_in_aermod_domain"
+    assert default_config.impacts.exposure.primary_pm25_integration_strategy == "additive_inmap_aermod"
 
 
 def test_native_settings_loader_normalizes_directly(tmp_path: Path) -> None:
@@ -670,7 +670,8 @@ def test_pipeline_manifest_rejects_unknown_primary_pm25_integration_strategy(tmp
         PipelineConfig.from_dict(payload)
 
 
-def test_run_emissions_from_pipeline_manifest_uses_staged_intersections_from_preprocess(monkeypatch, tmp_path: Path):
+@pytest.mark.parametrize("strategy", [None, "additive_inmap_aermod", "impute_inmap_primary_in_aermod_domain"])
+def test_run_emissions_from_pipeline_manifest_uses_staged_intersections_from_preprocess(monkeypatch, tmp_path: Path, strategy):
     import impacts.pipeline.workflow.prepare_emissions.from_skims as from_skims_module
     import impacts.pipeline.workflow.step1_process_emissions as step1_process_emissions
     import impacts.runner as runner_module
@@ -701,7 +702,12 @@ def test_run_emissions_from_pipeline_manifest_uses_staged_intersections_from_pre
                 "execution": {"dispersion_completed": False, "stopped_after": "preprocess"},
                 "pipeline_manifest_path": str(run_manifest_path),
             }
-        return _preprocess_manifest_payload(tmp_path)
+        payload = _preprocess_manifest_payload(tmp_path)
+        if strategy is None:
+            payload["pipeline"].pop("primary_pm25_integration_strategy")
+        else:
+            payload["pipeline"]["primary_pm25_integration_strategy"] = strategy
+        return payload
 
     monkeypatch.setattr(runner_module, "load_structured_file", _fake_load_structured_file)
     monkeypatch.setattr(
@@ -734,6 +740,10 @@ def test_run_emissions_from_pipeline_manifest_uses_staged_intersections_from_pre
         run_manifest_path=run_manifest_path,
     )
 
+    expected_strategy = strategy or "additive_inmap_aermod"
+    assert result["pipeline"]["primary_pm25_integration_strategy"] == expected_strategy
+    saved = yaml.safe_load(run_manifest_path.read_text(encoding="utf-8"))
+    assert saved["pipeline"]["primary_pm25_integration_strategy"] == expected_strategy
     assert result["execution"]["dispersion_completed"] is False
     assert result["execution"]["stopped_after"] == "step1_process_emissions"
     assert "step1_process_emissions" in result["execution"]["stage_timings_seconds"]

@@ -40,7 +40,7 @@ def dispatch(out):
     from impacts.pipeline.workflow.hourly_power import dispatch_hourly
     dispatch_hourly(Path(out) / 'power_generation',
         hourly_demand_file=DEMAND / 'sfbay_hourly_charging_demand.parquet',
-        charging_summary_file=DEMAND / 'beam_charging_summary.json', breathe_root=BREATHE)
+        charging_summary_file=DEMAND / 'beam_charging_summary.json', breathe_root=BREATHE, electricity_year=2040, balancing_area='p9', cambium_scenario='LowRECost')
 
 
 def power_isrm(out, isrm_store, power_method='matrix', source_layer_index=1):

@@ -134,14 +134,22 @@ impacts:
       asrv_patterns_file: vehicle-tech/dispersions/aermod/aermod_patterns_wgs84.parquet
       asrv_patterns_epsg: 4326
   exposure:
-    # Default fallback: impute_inmap_primary_in_aermod_domain
+    # Default: nonlocal traffic InMAP + local AERMOD (direct addition)
     # Acceptable values:
+    # - additive_inmap_aermod
     # - inmap_only
     # - impute_inmap_primary_in_aermod_domain
     # - scale_aermod_to_inmap_domain_primary
-    primary_pm25_integration_strategy: impute_inmap_primary_in_aermod_domain
+    primary_pm25_integration_strategy: additive_inmap_aermod
   power_generation:
     enabled: false
+    allocation_method: historical_generation_share
+    electricity_year: 2018
+    balancing_area: p9
+    grid_loss_region: Western
+    missing_rate_policy: error
+    # For Cambium 2022 projections, explicitly select cambium_marginal_technology,
+    # a supported electricity_year, cambium_scenario, and egrid_year: 2023.
     hourly_demand_file:
     charging_summary_file:
     breathe_root:

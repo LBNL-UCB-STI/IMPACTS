@@ -23,6 +23,15 @@ def main():
     p.add_argument('--source-layer-index', type=int, choices=[0,1], required=True)
     p.add_argument('--output-dir', type=Path, required=True)
     p.add_argument('--allow-incomplete-charging-scenario', action='store_true')
+    p.add_argument('--emissions-only', action='store_true',
+                   help='Write complete hourly/annual emissions without computing concentrations.')
+    p.add_argument('--allocation-method', choices=['historical_generation_share', 'cambium_marginal_technology'], default='historical_generation_share')
+    p.add_argument('--electricity-year', type=int, default=2018)
+    p.add_argument('--balancing-area', default='p9')
+    p.add_argument('--cambium-scenario', default='LowRECost')
+    p.add_argument('--egrid-year', type=int)
+    p.add_argument('--grid-loss-region', default='Western')
+    p.add_argument('--missing-rate-policy', choices=['error', 'subregion'], default='error')
     args = p.parse_args()
     if args.output_dir.exists():
         raise FileExistsError('Use a new output directory: ' + str(args.output_dir))
@@ -33,10 +42,15 @@ def main():
         breathe_root=str(args.breathe_root.resolve()),
         county_boundaries_file=str(args.baseline_dir.resolve() / 'preprocess/county_boundaries.gpkg'),
         source_layer_index=args.source_layer_index,
+        allocation_method=args.allocation_method, electricity_year=args.electricity_year,
+        balancing_area=args.balancing_area, cambium_scenario=args.cambium_scenario,
+        egrid_year=args.egrid_year, grid_loss_region=args.grid_loss_region,
+        missing_rate_policy=args.missing_rate_policy,
         allow_incomplete_charging_scenario=args.allow_incomplete_charging_scenario),
         isrm_url=args.isrm_store,
         inmap_grid_path=str(args.baseline_dir.resolve() / 'preprocess/inmap_study_area.parquet'),
-        output_dir=args.output_dir.resolve() / 'power_generation')
+        output_dir=args.output_dir.resolve() / 'power_generation',
+        compute_concentrations=not args.emissions_only)
 
 
 if __name__ == '__main__':

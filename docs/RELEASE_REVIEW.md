@@ -94,7 +94,8 @@ without identifying that change.
 
 | Finding | Disposition |
 |---|---|
-| Legacy imputation is still the inherited YAML/default strategy | Retained for compatibility. Current hybrid use must explicitly choose `additive_inmap_aermod`; reproduction drivers do so. |
+| Old power results could survive disabling power or changing inputs | Fixed: automatic runner reuse is disabled; exposure recomputes enabled power, invalidated combined outputs cannot be postprocessed. See `POWER_RESULT_ISOLATION.md`. |
+| Inherited default selected legacy imputation | Fixed on November 2: Python fallback and shipped YAML use `additive_inmap_aermod`. Explicit legacy choices remain available; saved manifests retain their recorded strategy. See `HYBRID_DEFAULT_UPDATE.md`. |
 | Historical scalar power route differed from hourly dispatch | Removed on November 2. Native YAML and `run_hourly_power.py` now use the same implementation; obsolete configuration is rejected. See `HOURLY_POWER_UPDATE.md`. |
 | Compact matrix has missing traffic sources | Existing authorized exclusions retained in representative tests (114 original-skim sources; 103 BF-06EP sources). No claim of complete-source coverage. |
 | Recent power runs use Layer 0 | Preserve documented temporary assumption. Elevated Layer 1 support is tested structurally but not empirically revalidated by a real Layer 1 run here. |
@@ -109,3 +110,5 @@ without identifying that change.
 The regression results establish reproducibility under the recorded inputs and
 dependencies. They do not establish predictive accuracy of EMFAC, charging,
 ISRM, AERMOD, or the power allocation assumptions.
+
+Electricity-year follow-up: [2018 historical allocation, all four charging cases and pending ISRM coverage](HISTORICAL_POWER_2018.md).

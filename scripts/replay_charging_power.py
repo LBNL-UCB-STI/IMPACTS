@@ -89,6 +89,7 @@ def main():
         (demand / 'beam_charging_summary.json').write_text(json.dumps(qa, indent=2), encoding='utf-8')
         print('DISPATCH + ISRM', name, flush=True)
         run_hourly_power(config=dict(enabled=True,
+            allocation_method='cambium_marginal_technology', electricity_year=2040, egrid_year=2023,
             hourly_demand_file=str(demand / 'sfbay_hourly_charging_demand.parquet'),
             charging_summary_file=str(demand / 'beam_charging_summary.json'),
             breathe_root=str(args.breathe_root.resolve()),

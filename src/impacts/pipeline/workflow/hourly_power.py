@@ -37,7 +37,7 @@ def load_hourly_demand(path: str | Path) -> pd.DataFrame:
     return demand
 
 def run_hourly_power(*, config: dict, isrm_url: str, inmap_grid_path: str,
-                     output_dir: Path) -> Path:
+                     output_dir: Path, compute_concentrations: bool = True) -> Path:
     from ...config.settings import PowerGeneration
     settings = PowerGeneration.from_dict(config)
     if not settings.enabled:
@@ -50,11 +50,30 @@ def run_hourly_power(*, config: dict, isrm_url: str, inmap_grid_path: str,
     for value in (settings.hourly_demand_file, settings.county_boundaries_file, inmap_grid_path):
         if not Path(value).exists():
             raise FileNotFoundError(value)
-    if not (Path(settings.breathe_root) / 'scripts/allocate_power_plants_approx.py').is_file():
-        raise FileNotFoundError('External hourly allocator is missing under breathe_root.')
-    dispatch_hourly(output_dir, hourly_demand_file=Path(settings.hourly_demand_file),
-                    charging_summary_file=Path(settings.charging_summary_file),
-                    breathe_root=Path(settings.breathe_root))
+    from dataclasses import asdict
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    save_json(Path(output_dir) / 'power_generation_config.json', dict(
+        power_generation=asdict(settings), isrm_url=isrm_url, inmap_grid_path=inmap_grid_path,
+        compute_concentrations=compute_concentrations))
+    kwargs = dict(hourly_demand_file=Path(settings.hourly_demand_file),
+                  charging_summary_file=Path(settings.charging_summary_file),
+                  breathe_root=Path(settings.breathe_root),
+                  electricity_year=settings.electricity_year, balancing_area=settings.balancing_area)
+    if settings.allocation_method == 'historical_generation_share':
+        from .historical_power import dispatch_historical
+        dispatch_historical(output_dir, **kwargs, grid_loss_region=settings.grid_loss_region,
+                            missing_rate_policy=settings.missing_rate_policy)
+    else:
+        if not (Path(settings.breathe_root) / 'scripts/allocate_power_plants_approx.py').is_file():
+            raise FileNotFoundError('External hourly allocator is missing under breathe_root.')
+        dispatch_hourly(output_dir, **kwargs, cambium_scenario=settings.cambium_scenario)
+    if not compute_concentrations:
+        summary_path = Path(output_dir) / 'power_generation_summary.json'
+        summary = json.loads(summary_path.read_text())
+        summary.update(power_isrm_completed=False, concentration_status='not_requested',
+                       power_source_layer_index=settings.source_layer_index)
+        save_json(summary_path, summary)
+        return Path(output_dir) / 'plant_allocation/plant_emissions_approx.csv'
     return compute_hourly_power_isrm(output_dir, inmap_grid_path=inmap_grid_path,
         counties_path=settings.county_boundaries_file, isrm_store=isrm_url,
         source_layer_index=settings.source_layer_index)
@@ -78,7 +97,7 @@ def select_sfbay_plants(plants, counties):
 
 def dispatch_hourly(
     output_dir: Path, *, hourly_demand_file: Path, charging_summary_file: Path,
-    breathe_root: Path,
+    breathe_root: Path, electricity_year: int, balancing_area: str, cambium_scenario: str,
 ) -> None:
     power = Path(output_dir)
     demand = load_hourly_demand(hourly_demand_file)
@@ -90,24 +109,32 @@ def dispatch_hourly(
     demand = demand.sort_values('hour_of_year')
     load = demand.charging_demand_MWh.to_numpy()
     assert np.isfinite(load).all() and (load >= 0).all()
-    load_path = power / 'grid_yearly_beam_p9.csv'
-    pd.DataFrame([np.r_[load, 9]]).to_csv(load_path, header=False, index=False)
+    load_path = power / f'grid_yearly_beam_{balancing_area}.csv'
+    pd.DataFrame([np.r_[load, int(balancing_area[1:])]]).to_csv(load_path, header=False, index=False)
     cambium_dir = Path(breathe_root) / 'tmp/cambium_check/hourly_balancingArea'
+    selected_cambium = cambium_dir / f'Cambium22_{cambium_scenario}_hourly_{balancing_area}_{electricity_year}.csv'
+    if not selected_cambium.is_file():
+        raise FileNotFoundError(selected_cambium)
+    selected_dir = power / 'cambium_input'
+    selected_dir.mkdir(parents=True, exist_ok=True)
+    # The external allocator uses a fixed filename prefix. This alias contains
+    # exactly the requested scenario bytes; record the original path below.
+    shutil.copy2(selected_cambium, selected_dir / f'Cambium22_LowRECost_hourly_{balancing_area}_{electricity_year}.csv')
     allocation = power / 'plant_allocation'
     command = [sys.executable, str(Path(breathe_root) / 'scripts/allocate_power_plants_approx.py'),
-               '--load-csv', str(load_path), '--cambium-dir', str(cambium_dir),
+               '--load-csv', str(load_path), '--cambium-dir', str(selected_dir),
                '--egrid-xlsx', str(Path(breathe_root) / 'input_Data/egrid2023_data_rev2.xlsx'),
                '--pm25-xlsx', str(Path(breathe_root) / 'input_Data/egrid-draft-pm-emissions.xlsx'),
                '--nh3-xlsx', str(Path(breathe_root) / 'input_Data/egrid2021-draft-nh3-emissions.xlsx'),
                '--voc-xlsx', str(Path(breathe_root) / 'input_Data/egrid2021-draft-voc-emissions.xlsx'),
                '--reeds-shapefile', str(Path(breathe_root) / 'ExternalData/ReEDS_BA/US_PCA/US_PCA.shp'),
-               '--year', '2040', '--output-dir', str(allocation)]
+               '--year', str(electricity_year), '--output-dir', str(allocation)]
     subprocess.run(command, check=True)
-    cambium = pd.read_csv(cambium_dir / 'Cambium22_LowRECost_hourly_p9_2040.csv', skiprows=5)
+    cambium = pd.read_csv(cambium_dir / f'Cambium22_{cambium_scenario}_hourly_{balancing_area}_{electricity_year}.csv', skiprows=5)
     assert pd.to_datetime(cambium.timestamp_local).dt.hour.tolist() == (demand.hour_of_year % 24).tolist()
     hourly = pd.DataFrame({'hour_of_year': demand.hour_of_year.to_numpy(),
                            'timestamp_local': cambium.timestamp_local,
-                           'source_BA': 'p9', 'technology': cambium.marg_gen_tech.fillna('unknown'),
+                           'source_BA': balancing_area, 'technology': cambium.marg_gen_tech.fillna('unknown'),
                            'enduse_MWh': load,
                            'grid_MWh': load * (1 + cambium.distloss_rate_marg.fillna(0).to_numpy())})
     generators = pd.read_csv(allocation / 'generator_allocation_detail.csv')
@@ -138,7 +165,10 @@ def dispatch_hourly(
     for col in ['added_generation_MWh'] + [f'{p}_kg' for p in POLLUTANTS]:
         np.testing.assert_allclose(annual_check.loc[annual.index, col], annual[col], rtol=1e-10, atol=1e-7)
     qa = json.loads((allocation / 'qa_summary.json').read_text())
-    qa.update({'hourly_annual_totals_match': True, 'annual_emissions_kg': {p: float(annual[f'{p}_kg'].sum()) for p in POLLUTANTS},
+    qa.update({'allocation_method': 'cambium_marginal_technology', 'electricity_year': electricity_year,
+               'cambium_input_file': str(selected_cambium),
+               'egrid_year': 2023, 'supplemental_factor_year': 2021, 'cambium_scenario': cambium_scenario,
+               'allocation_region': balancing_area, 'hourly_annual_totals_match': True, 'annual_emissions_kg': {p: float(annual[f'{p}_kg'].sum()) for p in POLLUTANTS},
                'charging_source': str(hourly_demand_file), 'charging_scale_factor': 1.0,
                'time_alignment': 'BEAM hour-of-day matched to Cambium timestamp_local; representative day repeated 365 times',
                'power_source_layer_index': None})
@@ -171,21 +201,30 @@ def compute_hourly_power_isrm(
     mapped['matrix_source_available'] = mapped.isrm_source_cell.isin(source_ids)
     mapped.to_csv(folder / 'selected_plant_source_coverage.csv', index=False)
     if not mapped.matrix_source_available.all():
-        raise ValueError('Some selected SFBAY emitting plants are not covered by the local matrix.')
+        missing = mapped.loc[~mapped.matrix_source_available]
+        summary = json.loads((folder / 'power_generation_summary.json').read_text())
+        summary.update(power_isrm_completed=False, power_source_layer_index=source_layer_index,
+            all_selected_sources_covered=False, missing_source_cells=sorted(missing.isrm_source_cell.unique().astype(int).tolist()),
+            missing_plant_ids=missing.ORISPL.astype(int).tolist(), missing_plant_count=len(missing),
+            missing_annual_emissions_kg={p: float(missing[f'{p}_kg'].sum()) for p in POLLUTANTS})
+        save_json(folder / 'power_generation_summary.json', summary)
+        raise ValueError(f"Selected SFBAY plants lack ISRM source cells {summary['missing_source_cells']}; "
+                         f"plant IDs {summary['missing_plant_ids']}. See selected_plant_source_coverage.csv.")
     receptors = np.sort(grid.inmap_cell_id.unique().astype(np.int64))
     summary = json.loads((folder / 'power_generation_summary.json').read_text())
     charging_qa_path = folder / 'beam_charging_summary.json'
     charging_qa = json.loads(charging_qa_path.read_text(encoding='utf-8')) if charging_qa_path.exists() else {}
     incomplete = charging_qa.get('ready_for_full_electrification_pipeline') is False
     summary.update({'charging_scenario_scope': charging_qa.get('curve_scope', 'hourly charging scenario'),
-                    'unmet_truck_energy_excluded': incomplete,
+                    'incomplete_charging_scenario': incomplete,
+                    'unmet_truck_energy_excluded': bool(charging_qa.get('daily_truck_unmet_MWh', 0) > 0),
                     'daily_truck_unmet_MWh': charging_qa.get('daily_truck_unmet_MWh', 0.),
                     'infeasible_truck_vehicles': charging_qa.get('infeasible_truck_vehicles', 0)})
     result = compute_power_generation_isrm(plants, isrm_url=isrm_store,
                                            receptor_cells=receptors, source_layer_index=source_layer_index)
     summary.update({
-        'concentration_method': 'new_hourly_dispatch_annual_emissions_times_ISRM',
-        'new_hourly_dispatch_used_for_concentration': True,
+        'concentration_method': summary.get('allocation_method', 'hourly_allocation') + '_annual_emissions_times_ISRM',
+        'new_hourly_dispatch_used_for_concentration': summary.get('allocation_method') != 'historical_generation_share',
         'concentration_source_scope': 'Emitting plants located inside the nine SFBAY counties only',
         'concentration_source_counties': str(counties_path),
         'outside_generation_reallocated': False,
@@ -205,7 +244,7 @@ def compute_hourly_power_isrm(
     plot_power_generation_concentration(result, plants, folder / 'power_generation_isrm_total_pm25.png',
                                        source_layer_index=source_layer_index,
                                        method_note=('SFBAY plants; supplied charging load only (unmet energy excluded)' if incomplete
-                                                    else 'SFBAY-located plants only; new hourly charging demand'))
+                                                    else f"SFBAY plants; {summary.get('electricity_year', 'unspecified')} electricity; {summary.get('allocation_method', 'hourly allocation')}"))
     summary.update({'power_isrm_source': isrm_store, 'power_isrm_completed': True,
                     'power_source_layer_index': source_layer_index,
                     'power_local_local_removal_applied': False})

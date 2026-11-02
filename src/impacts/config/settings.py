@@ -400,6 +400,13 @@ class PowerGeneration:
     source_layer_index: Optional[int] = None
     allow_incomplete_charging_scenario: bool = False
     plant_markers_file: Optional[str] = None
+    allocation_method: str = "historical_generation_share"
+    electricity_year: int = 2018
+    balancing_area: str = "p9"
+    cambium_scenario: str = "LowRECost"
+    egrid_year: Optional[int] = None
+    grid_loss_region: str = "Western"
+    missing_rate_policy: str = "error"
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PowerGeneration":
@@ -417,7 +424,8 @@ class PowerGeneration:
         _reject_unknown_keys(payload, {
             "enabled", "hourly_demand_file", "charging_summary_file", "breathe_root",
             "county_boundaries_file", "source_layer_index", "allow_incomplete_charging_scenario",
-            "plant_markers_file",
+            "plant_markers_file", "allocation_method", "electricity_year", "balancing_area",
+            "cambium_scenario", "egrid_year", "grid_loss_region", "missing_rate_policy",
         }, "impacts.power_generation")
         result = cls(
             enabled=_required_bool(payload.get("enabled", False), "impacts.power_generation.enabled"),
@@ -430,9 +438,30 @@ class PowerGeneration:
                 payload.get("allow_incomplete_charging_scenario", False),
                 "impacts.power_generation.allow_incomplete_charging_scenario"),
             plant_markers_file=_optional_string(payload.get("plant_markers_file")),
+            allocation_method=str(payload.get("allocation_method", "historical_generation_share")),
+            electricity_year=_required_int(payload.get("electricity_year", 2018), "electricity_year"),
+            balancing_area=str(payload.get("balancing_area", "p9")),
+            cambium_scenario=str(payload.get("cambium_scenario", "LowRECost")),
+            egrid_year=_optional_int(payload.get("egrid_year")),
+            grid_loss_region=str(payload.get("grid_loss_region", "Western")),
+            missing_rate_policy=str(payload.get("missing_rate_policy", "error")),
         )
         if result.source_layer_index is not None and result.source_layer_index not in (0, 1):
             raise ValueError("impacts.power_generation.source_layer_index must be 0 or 1.")
+        if result.allocation_method not in {"historical_generation_share", "cambium_marginal_technology"}:
+            raise ValueError("Unknown power allocation_method.")
+        if result.missing_rate_policy not in {"error", "subregion"}:
+            raise ValueError("missing_rate_policy must be error or subregion.")
+        if not result.balancing_area.startswith("p") or not result.balancing_area[1:].isdigit():
+            raise ValueError("balancing_area must be a ReEDS identifier such as p9.")
+        if result.allocation_method == "historical_generation_share":
+            if result.egrid_year not in (None, result.electricity_year):
+                raise ValueError("Historical allocation requires eGRID and electricity years to agree.")
+        elif result.enabled:
+            if result.electricity_year not in {2024, 2026, 2028, 2030, 2035, 2040, 2045, 2050}:
+                raise ValueError("The Cambium 2022 release does not supply that electricity year.")
+            if result.egrid_year != 2023:
+                raise ValueError("The external Cambium allocator currently requires explicit egrid_year=2023; supplemental factors are 2021.")
         if result.enabled:
             missing = [k for k in ("hourly_demand_file", "charging_summary_file", "breathe_root",
                                   "county_boundaries_file", "source_layer_index")

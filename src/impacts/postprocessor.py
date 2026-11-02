@@ -802,6 +802,16 @@ def postprocess_from_pipeline_manifest(
     output_root_arg = Path(output_root_override).resolve() if output_root_override is not None else None
     input_roots_arg = _normalize_input_roots(input_roots)
     pipeline_manifest = _localized_pipeline_manifest(run_manifest_path, output_root=output_root_arg)
+    power_state = (pipeline_manifest.get("execution", {}).get("power_generation") or {})
+    if (
+        "beam_concentration_distribution" in power_state.get("invalidated_output_references", [])
+        and not pipeline_manifest.get("outputs", {}).get("beam_concentration_distribution")
+    ):
+        raise ValueError(
+            "Combined concentration was invalidated by the current power-stage policy. "
+            "Run exposure before postprocessing; old on-disk concentrations are not current results."
+        )
+
     output_root = Path(str(pipeline_manifest.get("output_dir"))).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
 

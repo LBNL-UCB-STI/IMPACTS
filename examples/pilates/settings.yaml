@@ -140,12 +140,13 @@ impacts:
       asrv_patterns_epsg: 4326
 
   exposure:
-    # Default fallback: impute_inmap_primary_in_aermod_domain
+    # Default: nonlocal traffic InMAP + local AERMOD (direct addition)
     # Acceptable values:
+    # - additive_inmap_aermod
     # - inmap_only
     # - impute_inmap_primary_in_aermod_domain
     # - scale_aermod_to_inmap_domain_primary (this doesn't work properly)
-    primary_pm25_integration_strategy: impute_inmap_primary_in_aermod_domain
+    primary_pm25_integration_strategy: additive_inmap_aermod
 
   analysis:
     # Optional baseline beam_concentration_distribution.parquet used by postprocess Step 6.

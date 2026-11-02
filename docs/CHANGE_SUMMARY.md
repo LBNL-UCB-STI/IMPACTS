@@ -44,8 +44,8 @@ are local additions or modifications.
 
 ## Required distinctions
 
-- Explicitly choose `additive_inmap_aermod` for the current hybrid method. The
-  inherited example default is a different imputation strategy.
+- The current hybrid default is `additive_inmap_aermod` in Python and shipped
+  YAML configurations. Explicit legacy settings remain supported for reproduction.
 - Only traffic primary PM2.5, BC, and NO2 undergo near-source removal. Secondary
   PM2.5 and power responses do not. The full InMAP-only reference retains all responses.
 - Power uses a single hourly algorithm shared by YAML and

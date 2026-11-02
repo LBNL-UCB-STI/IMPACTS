@@ -64,7 +64,7 @@ inconsistency before assigning a distribution license.
 
 For the current hybrid method, explicitly set
 `impacts.exposure.primary_pm25_integration_strategy: additive_inmap_aermod`.
-The inherited example/default uses a different legacy imputation strategy.
+The built-in YAML, example configurations and Python fallback now default to this strategy.
 Traffic primary PM2.5, BC and NO2 use the 3 km near-source removal policy;
 secondary PM2.5 and power-sector responses do not. Full `inmap_only_*` fields
 preserve the baseline without removal. Concentration units are micrograms/m3.
@@ -85,3 +85,5 @@ See [the hourly-only update](docs/HOURLY_POWER_UPDATE.md) for changes and valida
 
 See [charging modules and migration](docs/CHARGING_MODULES.md) for model selection,
 entry points, and the old-to-new module mapping.
+
+Historical electricity: see [the 2018 configuration, data years and validation limits](docs/HISTORICAL_POWER_2018.md).

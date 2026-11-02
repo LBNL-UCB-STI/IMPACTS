@@ -139,6 +139,7 @@ def _run_stages_from_preprocess_manifest(
 ) -> Dict[str, Any]:
     manifest = PreprocessManifest.from_dict(load_structured_file(preprocess_manifest_path)).to_dict()
     pipeline = PipelineConfig.from_dict(manifest.get("pipeline", {}) or {})
+    logger.info("Primary PM2.5 integration strategy: %s", pipeline.primary_pm25_integration_strategy)
     population_inputs = manifest.get("population_inputs", {}) or {}
     manifest_inputs = manifest.get("inputs", {}) or {}
     input_root = Path(manifest.get("input_dir", "")).resolve()
@@ -168,6 +169,29 @@ def _run_stages_from_preprocess_manifest(
         run_manifest_path=run_manifest_path,
     )
     existing_outputs = dict(existing_run_manifest.get("outputs", {}) or {})
+    power_enabled = bool(pipeline.power_generation.get("enabled"))
+    old_power_enabled = bool((existing_run_manifest.get("pipeline", {}).get("power_generation") or {}).get("enabled"))
+    old_power_keys = [key for key in existing_outputs if key.startswith("power_generation_")]
+    power_context = power_enabled or old_power_enabled or any(existing_outputs[key] for key in old_power_keys)
+    # Power results have no validated input/content fingerprint. Never reuse
+    # them automatically, including when only exposure is being regenerated.
+    invalidated_outputs = list(old_power_keys)
+    if power_context:
+        # These may contain power from the prior run. Do not publish them as
+        # current when exposure is skipped; recomputation below supplies new paths.
+        invalidated_outputs.extend((
+            "beam_concentration_distribution", "beam_concentration_distribution_gpkg",
+            "beam_population_distribution", "beam_population_counts", "beam_population_counts_gpkg",
+        ))
+    for key in invalidated_outputs:
+        existing_outputs[key] = None
+    power_execution = {
+        "enabled": power_enabled,
+        "status": "not_run" if power_enabled else "disabled",
+        "reuse_policy": "no_automatic_reuse; recompute_for_inmap_or_exposure",
+        "invalidated_output_references": sorted(invalidated_outputs),
+    }
+
 
     execute_emissions = pipeline.emissions_enabled if run_emissions is None else bool(run_emissions)
     execute_inmap = pipeline.inmap_enabled if run_inmap is None else bool(run_inmap)
@@ -235,16 +259,12 @@ def _run_stages_from_preprocess_manifest(
         if existing_outputs.get("beam_population_counts")
         else None
     )
-    power_generation_concentration_path = (
-        Path(existing_outputs["power_generation_isrm_concentrations"]).resolve()
-        if existing_outputs.get("power_generation_isrm_concentrations")
-        else None
-    )
+    power_generation_concentration_path = None
     if execute_inmap or execute_aermod or execute_exposure:
         from .pipeline.workflow.step2_compute_inmap_concentrations import run as run_inmap_dispersion
         from .pipeline.workflow.step3_compute_aermod_concentrations import run as run_aermod_dispersion
         from .pipeline.workflow.step4_prepare_exposure import run as run_prepare_exposure
-        if pipeline.power_generation.get("enabled") and execute_inmap:
+        if power_enabled and (execute_inmap or execute_exposure):
             from .pipeline.workflow.hourly_power import run_hourly_power
 
             _log_step_banner("STEP 2P", "hourly power emissions and ISRM concentrations")
@@ -255,6 +275,10 @@ def _run_stages_from_preprocess_manifest(
                 inmap_grid_path=str(pipeline.inmap_grid_path),
                 output_dir=output_root / "power_generation",
             )
+            if power_generation_concentration_path is None or not Path(power_generation_concentration_path).is_file():
+                raise RuntimeError("The current power stage did not produce a concentration file; refusing stale fallback.")
+            power_generation_concentration_path = Path(power_generation_concentration_path).resolve()
+            power_execution["status"] = "computed"
             _record_stage_timing(stage_timings, "step2p_power_generation", stage_started)
         if execute_inmap and emissions_outputs.get("beam_emissions_for_inmap"):
             _log_step_banner("STEP 2", "inmap concentrations")
@@ -378,6 +402,7 @@ def _run_stages_from_preprocess_manifest(
             "uses_baked_work_data": False,
         },
         "execution": {
+            "power_generation": power_execution,
             "dispersion_completed": bool(execute_inmap or execute_aermod),
             "stage_timings_seconds": stage_timings,
             "stopped_after": (

@@ -1,11 +1,11 @@
 {
   "upstream_commit": "159a5598210905471a0412609d8414ccf97f355f",
   "file_counts": {
-    "unchanged": 87,
-    "modified": 31,
-    "added": 129
+    "unchanged": 85,
+    "modified": 33,
+    "added": 136
   },
-  "total_bytes": 2905445,
+  "total_bytes": 2956520,
   "exclusions": "raw data, matrices, external notebooks/allocator, results, environments, caches, git history",
   "inventory_self_excluded": true,
   "files": [
@@ -54,8 +54,8 @@
     {
       "path": "README.md",
       "status": "modified",
-      "bytes": 4702,
-      "sha256": "ecf15d29e3802e7ca5ef48090bfab922659a12b0ce7cbf95bdcc8862363d9552"
+      "bytes": 4928,
+      "sha256": "3c17ec3aaf42712a3421e2c7c189bd65c25c290be34ed92015e87e80ecfe7c5f"
     },
     {
       "path": "docker/env.yml",
@@ -72,8 +72,8 @@
     {
       "path": "docs/CHANGE_SUMMARY.md",
       "status": "added",
-      "bytes": 5033,
-      "sha256": "7c6b18c99e7d8d0ef458d449f939f046cff61d3feeda9753df57b9f4b98fb0d5"
+      "bytes": 5051,
+      "sha256": "74b15c5929b3f6077f6bc6513b75a858406c9bc2405e49023cb0f63b3bea3dde"
     },
     {
       "path": "docs/CHARGING_MODULES.md",
@@ -90,8 +90,14 @@
     {
       "path": "docs/FULL_VERSION_REVIEW.md",
       "status": "added",
-      "bytes": 29710,
-      "sha256": "85eb58ca41bc0144ab27d69b706c52a51096985226f88d097191297a530db527"
+      "bytes": 29794,
+      "sha256": "bd2fbf2487a64bb7ebe2c126a5705fff863b22a2e471076fd0c50099e1787528"
+    },
+    {
+      "path": "docs/HISTORICAL_POWER_2018.md",
+      "status": "added",
+      "bytes": 9972,
+      "sha256": "6e65c09bfc7f0b454604c2114be6c1a3c7fd2b85d7e1ca77a645de53c58f40e6"
     },
     {
       "path": "docs/HOURLY_POWER_UPDATE.md",
@@ -100,10 +106,22 @@
       "sha256": "fdc130eefcbbe7945f77bb615096ccab039d711baf7ce3e54c36ad97b7fde304"
     },
     {
+      "path": "docs/HYBRID_DEFAULT_UPDATE.md",
+      "status": "added",
+      "bytes": 3056,
+      "sha256": "6641110ca848cdef4aeecdfe8f61cdff1f14e1988a2c97eabdf2034d671a87ff"
+    },
+    {
+      "path": "docs/POWER_RESULT_ISOLATION.md",
+      "status": "added",
+      "bytes": 3337,
+      "sha256": "444d1a856d2310d02e914b1425d1ab207a6d924212da7b34c215bff0bb36692c"
+    },
+    {
       "path": "docs/RELEASE_REVIEW.md",
       "status": "added",
-      "bytes": 12260,
-      "sha256": "a689de47b663414a933218a40c6c4b7cf8f38ca9d9f5bbe02e61e1b636df95d8"
+      "bytes": 12812,
+      "sha256": "48f8959c0514ce81008f2002b82cea6492f1ffb5166fcdb1098de2fed9e6377c"
     },
     {
       "path": "docs/REPRODUCING.md",
@@ -185,15 +203,15 @@
     },
     {
       "path": "examples/pilates/hpc-settings.yaml",
-      "status": "unchanged",
-      "bytes": 6552,
-      "sha256": "c463e95a2745171a4dd571609479ff112aa08d45c5428c370ac7bd8506b75ee9"
+      "status": "modified",
+      "bytes": 6359,
+      "sha256": "2427000f722376d68fa902389ae624f47c7c20737b938b00689e2273a171dbe7"
     },
     {
       "path": "examples/pilates/settings.yaml",
-      "status": "unchanged",
-      "bytes": 6499,
-      "sha256": "ac5968ef03aca39a62442e38603db476298b44fc614e016286bfa997e832e16d"
+      "status": "modified",
+      "bytes": 6306,
+      "sha256": "6fefd9f04af16d21f099caf38c5bcfa8f2a08d5e6bc3e1de6440f259f7765914"
     },
     {
       "path": "hpc/job.sh",
@@ -354,8 +372,8 @@
     {
       "path": "scripts/continue_beam_charging_pipeline.py",
       "status": "added",
-      "bytes": 16603,
-      "sha256": "a1fec9bf6f9cf9673834223992a28ac218c8e5d9530e6844234a2d7b710917d2"
+      "bytes": 16677,
+      "sha256": "93d20f9fdacca98e479cbce0fc521afa56d2a6a12d877ac13cae99619d020901"
     },
     {
       "path": "scripts/continue_events_partial_isrm.py",
@@ -498,8 +516,8 @@
     {
       "path": "scripts/replay_charging_power.py",
       "status": "added",
-      "bytes": 7908,
-      "sha256": "a16255913bcec21558a7a41cb4a4b1ec3572ab3e9f11bf04673c7052adfd771b"
+      "bytes": 8142,
+      "sha256": "d29660a6cdb216bbd43899d3884545a76dc555a373deb8dd84fd245a6cc1df43"
     },
     {
       "path": "scripts/replay_human_exposure.py",
@@ -576,8 +594,8 @@
     {
       "path": "scripts/run_hourly_power.py",
       "status": "added",
-      "bytes": 2093,
-      "sha256": "ab3aca751d2778cddda8d91b60f458b49a6e335fd22dff764458f131bb149dbd"
+      "bytes": 3201,
+      "sha256": "a454c8b6dc278ba9fb82fa09e392068b35558e0eaaa7a91df2bf8d8b885a50c7"
     },
     {
       "path": "scripts/run_ldv_charging.py",
@@ -666,8 +684,8 @@
     {
       "path": "src/impacts/config/defaults.py",
       "status": "modified",
-      "bytes": 3895,
-      "sha256": "4b7dd4c69ee3ea642b0915fa9d10c6ecfdd3b11972dfbd20bad29e616a8f1e96"
+      "bytes": 3806,
+      "sha256": "451a541c76a59385ece48d52c6875b18a68016345dbb5ed283e6df0bcd93d9f6"
     },
     {
       "path": "src/impacts/config/path_registry.py",
@@ -678,14 +696,14 @@
     {
       "path": "src/impacts/config/settings.py",
       "status": "modified",
-      "bytes": 122615,
-      "sha256": "a708bf2a5b4c057191fa1e768e9ccf290f8439c44a3aa6172d1b3701c5e33dcf"
+      "bytes": 124808,
+      "sha256": "bcc16031481d0864211d4345fbb29d746cf9386ce894cbee334d6609f5d635db"
     },
     {
       "path": "src/impacts/config/settings.yaml",
       "status": "modified",
-      "bytes": 5403,
-      "sha256": "6ab96be42b06a3c3ffc4d74037f4e5429be47de377b86b26811dcbfe1a95876e"
+      "bytes": 5759,
+      "sha256": "5487ee67867b121f2d921d42fdb83d4efb52fe703d71f0866e2a12d75ff24677"
     },
     {
       "path": "src/impacts/config/settings_builder.py",
@@ -940,10 +958,16 @@
       "sha256": "769cad0d5af70f32be1b315954cbe5b5dd469a4a492523aad152982e9581d1d2"
     },
     {
+      "path": "src/impacts/pipeline/workflow/historical_power.py",
+      "status": "added",
+      "bytes": 11098,
+      "sha256": "fde0a0178b54c0c4ff66a7954f1e38e75d70a2e40285ca0a571cd83e3908e4f1"
+    },
+    {
       "path": "src/impacts/pipeline/workflow/hourly_power.py",
       "status": "added",
-      "bytes": 14061,
-      "sha256": "c66923c2be08ba5f70d3e80d8aaabefe67e1fc998016a05593b28ef683606c22"
+      "bytes": 17491,
+      "sha256": "460b6024c0c93a6560b60bec78e3020f843334276ee99004b2e62505f9097745"
     },
     {
       "path": "src/impacts/pipeline/workflow/isrm_near_source.py",
@@ -1014,8 +1038,8 @@
     {
       "path": "src/impacts/postprocessor.py",
       "status": "modified",
-      "bytes": 37580,
-      "sha256": "781681be7f5ecd1ac451ffa4d7497d5b88f5f7efaedfd5ac9dd822afb020e7a3"
+      "bytes": 37269,
+      "sha256": "295cd5d78e774abf4d17554f3fceccfbaac0170e7dc819cf7d060fa6a68366b0"
     },
     {
       "path": "src/impacts/preprocessor.py",
@@ -1038,8 +1062,8 @@
     {
       "path": "src/impacts/runner.py",
       "status": "modified",
-      "bytes": 20948,
-      "sha256": "0d86d1437c6c6b1dd9eed48ae932397aa755640c517e5189a449acd2d644c9f7"
+      "bytes": 22244,
+      "sha256": "844483e61b39cb155a3f977942116d492dfafc3796ae069f359f26b614914cd0"
     },
     {
       "path": "src/impacts/tools/__init__.py",
@@ -1270,6 +1294,12 @@
       "sha256": "e40f5a966db36cea2d92ef6e17864541259b08fde83a7dfc902bbeebb5037824"
     },
     {
+      "path": "tests/test_historical_power.py",
+      "status": "added",
+      "bytes": 5081,
+      "sha256": "d724e9fdafd179496b5bc54f6ff8f3bda56de9564c39586bcc675ab266759969"
+    },
+    {
       "path": "tests/test_home80_soc_snapshots.py",
       "status": "added",
       "bytes": 2309,
@@ -1284,14 +1314,20 @@
     {
       "path": "tests/test_hourly_power.py",
       "status": "added",
-      "bytes": 5739,
-      "sha256": "385b86e6790dc7f8f2edc0e9fdbaef4f4b31147e5fa2df47fd1731cbc9592ef4"
+      "bytes": 6141,
+      "sha256": "a9e7e32b49617df1221dcc591324a2fa8710c67538582b76e7bdf6924e6db583"
     },
     {
       "path": "tests/test_human_exposure_webmap.py",
       "status": "added",
       "bytes": 1907,
       "sha256": "e14840d16fb0589cd8ef6540a3252daf2b8546c52ddafcb316bdf8336e88e292"
+    },
+    {
+      "path": "tests/test_hybrid_defaults.py",
+      "status": "added",
+      "bytes": 2772,
+      "sha256": "510a2bef4314ac3ce20478e9ddb22609086a861eb619262d8e463af41e94e9e2"
     },
     {
       "path": "tests/test_inmap_concentrations.py",
@@ -1438,6 +1474,12 @@
       "sha256": "1602243cce9aa0013985a33ca0e2417fbd1d01533d9a47e4d5120b9f1c47ac45"
     },
     {
+      "path": "tests/test_runner_power_isolation.py",
+      "status": "added",
+      "bytes": 7598,
+      "sha256": "505a8b8bb287ad33c41416777711cee0dbfa2406bbbb49abe0e898e4620105da"
+    },
+    {
       "path": "tests/test_sample_freight.py",
       "status": "unchanged",
       "bytes": 2268,
@@ -1470,8 +1512,8 @@
     {
       "path": "tests/test_terminal_contract.py",
       "status": "modified",
-      "bytes": 74967,
-      "sha256": "1be0792b8aae36f7ee5e3e83cec4c60e6042a7d74de12635957627c33705a0a5"
+      "bytes": 73941,
+      "sha256": "109609ae0280e009d838a56ec5030831617cfc5f34b59b569bd9f56176a5e6de"
     },
     {
       "path": "tests/test_traffic_expansion.py",
@@ -1492,5 +1534,5 @@
       "sha256": "ebee8e8e2cfc980df9364e607748e4f7dff9317952e7394512ca24be369cfb99"
     }
   ],
-  "inventory_note": "Refreshed after charging consolidation and functional LDV naming; exported ZIP snapshots are unchanged."
+  "inventory_note": "Refreshed after stale-power runner/postprocessor fix; exported ZIP snapshots unchanged."
 }

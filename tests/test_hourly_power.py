@@ -2,6 +2,7 @@
 import json
 
 import numpy as np
+import numpy.testing  # Initialize before mocking the allocator subprocess.
 import pandas as pd
 import pytest
 
@@ -49,6 +50,7 @@ def test_native_orchestrator_uses_hourly_input_without_scaling(tmp_path, monkeyp
     (tmp_path / 'scripts').mkdir()
     (tmp_path / 'scripts/allocate_power_plants_approx.py').touch()
     config = dict(enabled=True, hourly_demand_file=str(demand), charging_summary_file=str(summary),
+                  allocation_method='cambium_marginal_technology', electricity_year=2040, egrid_year=2023,
                   breathe_root=str(tmp_path), county_boundaries_file=str(counties), source_layer_index=0)
     calls = []
     def dispatch(output, **kwargs):
@@ -108,7 +110,8 @@ def test_dispatch_depends_on_hourly_shape_not_annual_energy(tmp_path, monkeypatc
         demand = tmp_path / f'demand{hour}.parquet'
         pd.DataFrame(dict(hour_of_year=np.arange(8760), charging_demand_MWh=load)).to_parquet(demand)
         output = tmp_path / f'result{hour}'
-        hp.dispatch_hourly(output, hourly_demand_file=demand, charging_summary_file=summary, breathe_root=tmp_path)
+        hp.dispatch_hourly(output, hourly_demand_file=demand, charging_summary_file=summary, breathe_root=tmp_path,
+                           electricity_year=2040, balancing_area='p9', cambium_scenario='LowRECost')
         annual = pd.read_csv(output / 'plant_allocation/plant_emissions_approx.csv')
         assert annual.added_generation_MWh.sum() == 10
         emissions.append(annual.NOx_kg.sum())

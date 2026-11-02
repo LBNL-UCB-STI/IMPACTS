@@ -58,7 +58,7 @@ primary_pm25_integration_strategies: tuple[str, ...] = (
 )
 """Allowed strategies for integrating primary PM2.5 into the exposure concentration surface."""
 
-primary_pm25_integration_strategy: str = primary_pm25_strategy_impute_inmap_primary_in_aermod_domain
+primary_pm25_integration_strategy: str = primary_pm25_strategy_additive_inmap_aermod
 """Default primary PM2.5 integration strategy."""
 
 # ---------------------------------------------------------------------------
