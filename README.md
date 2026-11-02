@@ -1,5 +1,13 @@
 # IMPACTS
 
+Current release review: [Complete version review](docs/FULL_VERSION_REVIEW.md)
+and [file-by-file change index](docs/CHANGE_INDEX.md).
+
+For LDV charging, use [run_cristian_charging.py](scripts/run_cristian_charging.py):
+the original collaborator algorithm and notebook parameters are preserved.
+See [charging compatibility](docs/CRISTIAN_COMPATIBILITY.md) for inputs, checks,
+and the distinction from archived designed Home80 sensitivity cases.
+
 `impacts` converts transportation emissions outputs into gridded air-quality concentration outputs and downstream exposure artifacts using InMAP/AERMOD-style workflows.
 
 ## Main commands
@@ -39,3 +47,36 @@ For `examples/pilates/settings.yaml`, `impacts.local_output_folder: impacts/impa
 ## PILATES
 
 PILATES-specific workflow details, example layout, settings shape, and example commands are in [docs/pilates.md](docs/pilates.md).
+
+## Reviewed research extensions (2026-11-01)
+
+This checkout preserves the upstream CLI and adds events-to-EMFAC emissions,
+near-source ISRM removal/AERMOD truncation, charging and power-sector workflows,
+and human-exposure tables, figures and an interactive map.
+
+Start with the [change and code map](docs/RELEASE_REVIEW.md),
+[reproduction guide](docs/REPRODUCING.md), and
+[validation results](docs/VALIDATION.md). Input data, ISRM/ASRV matrices,
+collaborator notebooks, external power allocator, and generated results are
+not bundled. The source archive is a review candidate; the upstream
+`LICENSE.txt` contains `TBD` despite MIT package metadata. Resolve that
+inconsistency before assigning a distribution license.
+
+For the current hybrid method, explicitly set
+`impacts.exposure.primary_pm25_integration_strategy: additive_inmap_aermod`.
+The inherited example/default uses a different legacy imputation strategy.
+Traffic primary PM2.5, BC and NO2 use the 3 km near-source removal policy;
+secondary PM2.5 and power-sector responses do not. Full `inmap_only_*` fields
+preserve the baseline without removal. Concentration units are micrograms/m3.
+
+The latest power workflow uses a new hourly charging curve, hourly
+Cambium/eGRID allocation, annual plant emissions and an explicit ISRM layer.
+Use [run_hourly_power.py](scripts/run_hourly_power.py) with externally supplied
+assets. Recent reference cases used the explicitly authorized **Layer 0
+approximation**, not elevated Layer 1; this limitation remains in their audit.
+
+The native `impacts.power_generation` YAML route and command-line entry point
+both call `pipeline/workflow/hourly_power.py`. The former WA/annual-energy
+scaling method has been removed; old settings produce a migration error.
+EVI profiles are comparison inputs, not event or power-demand replacements.
+See [the hourly-only update](docs/HOURLY_POWER_UPDATE.md) for changes and validation.

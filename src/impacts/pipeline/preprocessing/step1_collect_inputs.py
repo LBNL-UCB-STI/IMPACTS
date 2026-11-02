@@ -149,6 +149,7 @@ def run(
     )
     registry = build_registry(settings, config_path)
     input_root.mkdir(parents=True, exist_ok=True)
+    staged_skims = None
     staged_events = None
     staged_inmap_grid = None
     staged_isrm = None
@@ -176,16 +177,20 @@ def run(
         progress.update(1)
 
         _set_progress_task(progress, "skims", step_label="Preprocess Step 1.1")
-        skims_source = resolve_emissions_skims_local_path(beam_output_root)
-        staged_skims = _register_manifest_input(
-            manifest_inputs,
-            input_root=input_root,
-            key="emissions_skims_input",
-            source_path=skims_source,
-            relative_target=Path(skims_source).name,
-            metadata={"artifact_family": "emissions_skims_input"},
-            optional=True,
-        )
+        try:
+            skims_source = resolve_emissions_skims_local_path(beam_output_root)
+        except FileNotFoundError:
+            logger.info('No skimsEmissions file; events + EMFAC will be required for Step 1.')
+        else:
+            staged_skims = _register_manifest_input(
+                manifest_inputs,
+                input_root=input_root,
+                key="emissions_skims_input",
+                source_path=skims_source,
+                relative_target=Path(skims_source).name,
+                metadata={"artifact_family": "emissions_skims_input"},
+                optional=True,
+            )
         progress.update(1)
 
         _set_progress_task(progress, "events", step_label="Preprocess Step 1.1")
@@ -208,6 +213,9 @@ def run(
         progress.update(1)
     finally:
         progress.close()
+
+    if not staged_skims and not staged_events:
+        raise FileNotFoundError(f'Neither skimsEmissions nor events were found under {beam_output_root}')
 
     log_substep_banner("1.2", "register emissions processing inputs", logger=logger)
     substep_12_total = 4  # osm, rates, passenger vehicle types, freight vehicle types
@@ -449,9 +457,12 @@ def run(
                 progress.update(1)
 
                 _set_progress_task(progress, "isrm store", step_label="Preprocess Step 1.4")
-                isrm_source = str(registry.locate_required(
-                    inmap.isrm_zarr, label="impacts.dispersions.inmap.isrm_zarr"
-                ))
+                if "://" in str(inmap.isrm_zarr):
+                    isrm_source = str(inmap.isrm_zarr)
+                else:
+                    isrm_source = str(registry.locate_required(
+                        inmap.isrm_zarr, label="impacts.dispersions.inmap.isrm_zarr"
+                    ))
                 staged_isrm = _register_manifest_input(
                     manifest_inputs,
                     input_root=input_root,

@@ -140,6 +140,15 @@ impacts:
     # - impute_inmap_primary_in_aermod_domain
     # - scale_aermod_to_inmap_domain_primary
     primary_pm25_integration_strategy: impute_inmap_primary_in_aermod_domain
+  power_generation:
+    enabled: false
+    hourly_demand_file:
+    charging_summary_file:
+    breathe_root:
+    county_boundaries_file:
+    source_layer_index: # Explicitly choose 0 (ground approximation) or 1 (elevated).
+    allow_incomplete_charging_scenario: false
+    plant_markers_file: # Optional plotting override; generated plant locations are used by default.
   analysis:
     # Optional baseline beam_concentration_distribution.parquet used by postprocess Step 6.
     # Relative paths are resolved from --impact-input-dir. Deltas are current run minus baseline.

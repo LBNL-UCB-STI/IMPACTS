@@ -1,0 +1,1495 @@
+{
+  "upstream_commit": "159a5598210905471a0412609d8414ccf97f355f",
+  "file_counts": {
+    "added": 129,
+    "modified": 31,
+    "unchanged": 87
+  },
+  "total_bytes": 2899367,
+  "exclusions": "raw data, matrices, external notebooks/allocator, results, environments, caches, git history",
+  "inventory_self_excluded": true,
+  "files": [
+    {
+      "path": ".coveragerc",
+      "status": "unchanged",
+      "bytes": 480,
+      "sha256": "7f3637b3af9806f5f2353f7feec9ba4f36143a9c7e99c913ffc30d98289b6807"
+    },
+    {
+      "path": ".gitattributes",
+      "status": "unchanged",
+      "bytes": 894,
+      "sha256": "d48cb9714aa7037318bde6625b79a6d53da3cf52f8d20dde5921760d200c0c10"
+    },
+    {
+      "path": ".gitignore",
+      "status": "modified",
+      "bytes": 1375,
+      "sha256": "f666130c5b79f27fa843bfb10921dbbbda719b0d74b0c080a56c975c053ca109"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "status": "unchanged",
+      "bytes": 1862,
+      "sha256": "d90b260a736fa8df0fce149718a46dcfb8f633b3375c8988bddfbc9389438878"
+    },
+    {
+      "path": "Dockerfile",
+      "status": "unchanged",
+      "bytes": 697,
+      "sha256": "e61a10af0985145954a4082f52492b6c11c7840e10f9df135b8cd35747177a38"
+    },
+    {
+      "path": "LICENSE.txt",
+      "status": "unchanged",
+      "bytes": 3,
+      "sha256": "03626549a59abf648ee59163b3b8acbf66c36513cb1e76d6e277bc044c926e30"
+    },
+    {
+      "path": "NOAI",
+      "status": "unchanged",
+      "bytes": 61,
+      "sha256": "78e734f76210a73d50eacb58529d827514b6840f6f312a8e3c163d7c6dfa49fe"
+    },
+    {
+      "path": "README.md",
+      "status": "modified",
+      "bytes": 4629,
+      "sha256": "5ee33f4a67e09cb6bd9e79af50f050874876f3d1ba9370cafe25d9c561959c70"
+    },
+    {
+      "path": "docker/env.yml",
+      "status": "unchanged",
+      "bytes": 115,
+      "sha256": "00ede8b0a348a4ed1d41c66f2e8b1f1871a3a64a86cbaa136cb1d5ee9faf59a7"
+    },
+    {
+      "path": "docs/CHANGE_INDEX.md",
+      "status": "added",
+      "bytes": 16261,
+      "sha256": "7eef5ca0fbec48a2e8ab1336e59050617fe1aa9602acebcd47dda6bdf44fc398"
+    },
+    {
+      "path": "docs/CHANGE_SUMMARY.md",
+      "status": "added",
+      "bytes": 5074,
+      "sha256": "fc4cb18b55dc8c94053cc3c6240e43d6cb7e3e583987f2a4bc9bfdf5aceb13cc"
+    },
+    {
+      "path": "docs/CRISTIAN_COMPATIBILITY.md",
+      "status": "added",
+      "bytes": 5350,
+      "sha256": "3ff5d93f7cf6c5c26d9113cb3c28fd0c51596742619fe8b86f2d109028f8fb1a"
+    },
+    {
+      "path": "docs/FULL_VERSION_REVIEW.md",
+      "status": "added",
+      "bytes": 29680,
+      "sha256": "bfac337cc5a1c8576dbfadadf9909cd428ff68731b01b76af7f20be78d4b5015"
+    },
+    {
+      "path": "docs/HOURLY_POWER_UPDATE.md",
+      "status": "added",
+      "bytes": 4605,
+      "sha256": "fdc130eefcbbe7945f77bb615096ccab039d711baf7ce3e54c36ad97b7fde304"
+    },
+    {
+      "path": "docs/RELEASE_REVIEW.md",
+      "status": "added",
+      "bytes": 12290,
+      "sha256": "8534fb5f7633a2d366acc7749887a7047192e05982b1c24d031012df676d53ae"
+    },
+    {
+      "path": "docs/REPRODUCING.md",
+      "status": "added",
+      "bytes": 9666,
+      "sha256": "3e1c56096f151b1ca869a6ab1aeebde55274a131afac481122cb7402f1f03f4b"
+    },
+    {
+      "path": "docs/VALIDATION.md",
+      "status": "added",
+      "bytes": 8184,
+      "sha256": "4a1d12e0c8b5d3b814ab9c31b1386fa2f0235bd670cde409551a3e9c4e82f292"
+    },
+    {
+      "path": "docs/consist_for_impacts.md",
+      "status": "unchanged",
+      "bytes": 3717,
+      "sha256": "5703f967e9269e0745b21db5c3c744506922ed29a9708466b50a3f804dff80be"
+    },
+    {
+      "path": "docs/cristian_compatibility_validation.json",
+      "status": "added",
+      "bytes": 650,
+      "sha256": "4535002b30596997ee135a6aa70a00c2f5d02ba06d0da8ca610cf6cd2fb07273"
+    },
+    {
+      "path": "docs/events_emfac.md",
+      "status": "added",
+      "bytes": 6033,
+      "sha256": "1543e85764b7994f5f65dd3489509bb8820f1f415792351e4e2445da3261dc2d"
+    },
+    {
+      "path": "docs/fc07_events_traffic_scenario.md",
+      "status": "added",
+      "bytes": 3245,
+      "sha256": "3cb59558cbca124b2e4fd991f480a76ba4cf9658b9811841d846749b3c7bad1e"
+    },
+    {
+      "path": "docs/hourly_power_validation.json",
+      "status": "added",
+      "bytes": 1662,
+      "sha256": "797d2feeb14be7cc4797d9ee8cfc885dcca2655984ee838995fc5830ab27e600"
+    },
+    {
+      "path": "docs/pilates.md",
+      "status": "unchanged",
+      "bytes": 4980,
+      "sha256": "c70d10461bda03a43c8a4089cad6de38c1d62ce09b061aa08e4abdb02c64a9e1"
+    },
+    {
+      "path": "docs/validation_environment.json",
+      "status": "added",
+      "bytes": 3105,
+      "sha256": "010208fc4de86436d522494786b280817c2e1d9c0465f3e2b9e1cc6cf5897727"
+    },
+    {
+      "path": "docs/validation_results.json",
+      "status": "added",
+      "bytes": 10918,
+      "sha256": "cdff0e7d996340e04f70c9fd85b563151ea66c3c665b4989fa899c1d68a15d08"
+    },
+    {
+      "path": "examples/pilates/.gitignore",
+      "status": "modified",
+      "bytes": 195,
+      "sha256": "4b765f3921c55832e049dafb483849aa24c46e74e37199eb40d4161893f14924"
+    },
+    {
+      "path": "examples/pilates/__init__.py",
+      "status": "unchanged",
+      "bytes": 47,
+      "sha256": "07496786d64300563e4e4597fd0cda5f1c16c37c9e555472e7b424e3e724fbf1"
+    },
+    {
+      "path": "examples/pilates/hpc-settings.yaml",
+      "status": "unchanged",
+      "bytes": 6552,
+      "sha256": "c463e95a2745171a4dd571609479ff112aa08d45c5428c370ac7bd8506b75ee9"
+    },
+    {
+      "path": "examples/pilates/settings.yaml",
+      "status": "unchanged",
+      "bytes": 6499,
+      "sha256": "ac5968ef03aca39a62442e38603db476298b44fc614e016286bfa997e832e16d"
+    },
+    {
+      "path": "hpc/job.sh",
+      "status": "unchanged",
+      "bytes": 6403,
+      "sha256": "c2885746008a2a1e18a0dcc038120513484611b79f060206284ffd6d4728ed08"
+    },
+    {
+      "path": "hpc/job_runner.sh",
+      "status": "unchanged",
+      "bytes": 15513,
+      "sha256": "d5407d623deb0efe463ff42dd23a55d2425a06e6367b31f8a0559507eccd9685"
+    },
+    {
+      "path": "hpc/requirements-hpc.txt",
+      "status": "unchanged",
+      "bytes": 350,
+      "sha256": "aa863e4902d1605348a756f51c5d1dbaaf585bb6c0912a473346f4d31440f9a0"
+    },
+    {
+      "path": "pyproject.toml",
+      "status": "unchanged",
+      "bytes": 355,
+      "sha256": "2ea0a2bc6beaaaf0560e564ba96213e836b8294ef269332ba96f3a96a0c44bdb"
+    },
+    {
+      "path": "scripts/add_evi_bev25_reference.py",
+      "status": "added",
+      "bytes": 8842,
+      "sha256": "e92684619c33a82b771332b10654ff999e978c61078c93a9ea8f8ccf777e6d58"
+    },
+    {
+      "path": "scripts/analyze_collaborator_truck_charging.py",
+      "status": "added",
+      "bytes": 14636,
+      "sha256": "47f942e09f492114f9e73fb78e6440d8b25473458f2c52f5d229d93514d1135c"
+    },
+    {
+      "path": "scripts/analyze_home80_charging_results.py",
+      "status": "added",
+      "bytes": 26346,
+      "sha256": "44ca049a9b6c43ffd1b1ffa6bfbd066841316a3f0a31b64374582577133fdd89"
+    },
+    {
+      "path": "scripts/analyze_power_vs_road.py",
+      "status": "added",
+      "bytes": 13449,
+      "sha256": "753ae263c1c522027b0f6cbe55631a08708c625ea61515732cea5de8456d313a"
+    },
+    {
+      "path": "scripts/audit_baseline_ev_arrivals.py",
+      "status": "added",
+      "bytes": 14478,
+      "sha256": "3e9385a92a232ea37371354c0a540c8b0fa63dc520f93590a128349755dda28f"
+    },
+    {
+      "path": "scripts/audit_future_scenario_inputs.py",
+      "status": "added",
+      "bytes": 8342,
+      "sha256": "cacc00e2f6e50ec7f2a636edea88d7dd80f21eb7b4f6d695392eff00a31cf7a7"
+    },
+    {
+      "path": "scripts/audit_original_skims_3km_test.py",
+      "status": "added",
+      "bytes": 3049,
+      "sha256": "4cbc29b57c565bec8c9fa21291e8b75eb35d5a21c8b1f9c7f16c9487bfc76bdb"
+    },
+    {
+      "path": "scripts/audit_power_source_coverage.py",
+      "status": "added",
+      "bytes": 1987,
+      "sha256": "7a4cb833ac1a54f04fc5d1063fc0e40372eb6f0236be75a01a811e9bb1ad7e4d"
+    },
+    {
+      "path": "scripts/audit_reuse_charging_code.py",
+      "status": "added",
+      "bytes": 14398,
+      "sha256": "cde63b28a1198381ec8ffc64208ff19146a6b2d10a443cdabc28552b09da0367"
+    },
+    {
+      "path": "scripts/build_original_style_exposure_webmap.py",
+      "status": "added",
+      "bytes": 10096,
+      "sha256": "f0341ec87c357bf8beaa94d28df7e40d5120c4ebf01b21823a0bed20fe7b796c"
+    },
+    {
+      "path": "scripts/combine_ldv_freight_power.py",
+      "status": "added",
+      "bytes": 9800,
+      "sha256": "bd7434a9cd1fe33b3707fefac9302af6d2a8ffee43184e24bb772654469af3a9"
+    },
+    {
+      "path": "scripts/compare_both_home80_evi20c.py",
+      "status": "added",
+      "bytes": 12237,
+      "sha256": "32f4ba4f4972dd90910771c4e76f6e71bb3ea9494725760fef5536f870753ef3"
+    },
+    {
+      "path": "scripts/compare_charging_0224_evi20c.py",
+      "status": "added",
+      "bytes": 12728,
+      "sha256": "be693ef62e825aed7401c8a1e1026493307656830644a26c6c295a087b0a6b53"
+    },
+    {
+      "path": "scripts/compare_charging_code_evi_15k.py",
+      "status": "added",
+      "bytes": 7719,
+      "sha256": "ca92f184c825e3a162efb95582f5e9f26eccf6f87977aedbf8fd634b0a354ec4"
+    },
+    {
+      "path": "scripts/compare_collaborator_truck_charging_rmi.py",
+      "status": "added",
+      "bytes": 10074,
+      "sha256": "e8e2446924947d608ddca84706ffba432e3a3959282432b6125e6447cdd453bf"
+    },
+    {
+      "path": "scripts/compare_evi_home_charger_mix.py",
+      "status": "added",
+      "bytes": 12329,
+      "sha256": "5f571f322a169620c87b1f540ebea3b595df55f8698cebe3949fb49914cac2d2"
+    },
+    {
+      "path": "scripts/compare_home_priority_fleet20x.py",
+      "status": "added",
+      "bytes": 6658,
+      "sha256": "c6f731fe4f77b77ed7f9a132db037ac68da663a93ab998ada0a36c254c1cab34"
+    },
+    {
+      "path": "scripts/compare_native_evi_15k_weekday.py",
+      "status": "added",
+      "bytes": 10847,
+      "sha256": "72aadbbcb2a4d0dfab2ad80be596a3e13b882240a6b0c2b3bc9b31731b4b758b"
+    },
+    {
+      "path": "scripts/compare_phev_home90_evi_equal.py",
+      "status": "added",
+      "bytes": 10984,
+      "sha256": "12ba804a0b4de4b9486c1064cc67b67697fe982b061876502b1c96e7a379ead1"
+    },
+    {
+      "path": "scripts/compare_phev_home_soc_evi20c.py",
+      "status": "added",
+      "bytes": 12285,
+      "sha256": "4603cf7a49b47b14e64777a2d73eb290eb25f72fe949aac1838b4165099f42ff"
+    },
+    {
+      "path": "scripts/compare_sf_evi_410k.py",
+      "status": "added",
+      "bytes": 11088,
+      "sha256": "1fb7690a42e250a3d2a88f7a31923b121efe4dcb2bb85306a92706c49bc39a4c"
+    },
+    {
+      "path": "scripts/compare_unified_ev_energy_evi20c.py",
+      "status": "added",
+      "bytes": 13159,
+      "sha256": "1e21e6a5c31dd5a508c73436e81dfe93c08ca0e9edb88924e6d52d324c87c6dd"
+    },
+    {
+      "path": "scripts/continue_beam_charging_pipeline.py",
+      "status": "added",
+      "bytes": 16603,
+      "sha256": "a1fec9bf6f9cf9673834223992a28ac218c8e5d9530e6844234a2d7b710917d2"
+    },
+    {
+      "path": "scripts/continue_events_partial_isrm.py",
+      "status": "added",
+      "bytes": 13990,
+      "sha256": "5707b083101f075af617d712b242dba7c020d81a6fc69144e79318f3f7c75b3c"
+    },
+    {
+      "path": "scripts/download_rmi_bay_area_forecast.py",
+      "status": "added",
+      "bytes": 10240,
+      "sha256": "6d514c8d1513ba29758fcb9874458ed0fe9be43dccb778ac6a330499284e3d7c"
+    },
+    {
+      "path": "scripts/exclude_hf1ep_invalid_trips.py",
+      "status": "added",
+      "bytes": 4280,
+      "sha256": "839f728ddd12694b0c55c6e57278dcd61b935e6c71098531b4919c865492f8f7"
+    },
+    {
+      "path": "scripts/export_original_style_human_exposure_tables.py",
+      "status": "added",
+      "bytes": 7547,
+      "sha256": "69594db77683cde49fb7f99f47cace1c0418a7055900136a6744db4ac809001a"
+    },
+    {
+      "path": "scripts/gateway_aermod_crop.py",
+      "status": "added",
+      "bytes": 2669,
+      "sha256": "3da186ebfc2f6a43309b6114b28d1e328b815210116995edb043ae536daa7de0"
+    },
+    {
+      "path": "scripts/inspect_baseline_event_difference.py",
+      "status": "added",
+      "bytes": 6675,
+      "sha256": "9cb498559b1f5c6b887d4885e5fc31a5d65ef7686407ba13a4827f22d564200f"
+    },
+    {
+      "path": "scripts/inspect_existing_emission_skims.py",
+      "status": "added",
+      "bytes": 4273,
+      "sha256": "cb91ae93e0d6a2acdcb2b05ca3c7a9e5101eb7828cd674047748c8a67698ef80"
+    },
+    {
+      "path": "scripts/match_baseline_evi_profiles.py",
+      "status": "added",
+      "bytes": 15871,
+      "sha256": "fd1ada84a94429dec03f27f6039c3b2883cb0912ca7d8318d2c293f96573f123"
+    },
+    {
+      "path": "scripts/plot_charging_load_closed_day.py",
+      "status": "added",
+      "bytes": 4609,
+      "sha256": "ac02214f98ec7170e34185a9205a031b0b1639831b0d6c755c75f2aab2e6a1cb"
+    },
+    {
+      "path": "scripts/plot_freight_power_bay_outline.py",
+      "status": "added",
+      "bytes": 2868,
+      "sha256": "f3da2454699d76bbb4dec27e1aa72fe0b025cfaadf4a485ef2bdab1b5de77b2f"
+    },
+    {
+      "path": "scripts/plot_future_fixed_factor_scenarios.py",
+      "status": "added",
+      "bytes": 8882,
+      "sha256": "2aa32de3724e979c9ce5a9b7eff54a872693ec6cc6facec988fa800f072a863c"
+    },
+    {
+      "path": "scripts/plot_gateway_products.py",
+      "status": "added",
+      "bytes": 18700,
+      "sha256": "23296a98112dc61c8cf6d81717f86f8c2baa31091aa9a6c53f8e84078cab6af2"
+    },
+    {
+      "path": "scripts/plot_grouped_charging_curve.py",
+      "status": "added",
+      "bytes": 942,
+      "sha256": "21cb32f7f3cfa20a7e1cb931d0f1cf767465b0e48c20709ed7d695b0a6832516"
+    },
+    {
+      "path": "scripts/plot_home80_soc_snapshots.py",
+      "status": "added",
+      "bytes": 14602,
+      "sha256": "4e49352607ce12a895ce933f6ab5a24ac1a3712483900755ed373c22487537b9"
+    },
+    {
+      "path": "scripts/plot_initial_ev_soc.py",
+      "status": "added",
+      "bytes": 4002,
+      "sha256": "b3076d8834f02310db77f3649416508f6bdc8cc5685a7b277f045a1bb8225ed7"
+    },
+    {
+      "path": "scripts/plot_latest_home_charging_starts.py",
+      "status": "added",
+      "bytes": 4710,
+      "sha256": "eaab9f579cc1812bea6425c38c00a1f3eb3b78e48a1131ebe2b7a519a660f426"
+    },
+    {
+      "path": "scripts/plot_native_ev_ldv_truck_evi.py",
+      "status": "added",
+      "bytes": 9965,
+      "sha256": "02e949722096ca2dbbe503f9db46ea5c299f1a28b0aa95c91c69f25e47bff333"
+    },
+    {
+      "path": "scripts/plot_native_evi_equal_home80.py",
+      "status": "added",
+      "bytes": 6283,
+      "sha256": "3946d6da1205a5ffe4079abac71c92c1c4766ae2a3b15eeee0b094ff023445a7"
+    },
+    {
+      "path": "scripts/plot_original_baseline_bc_no2_components.py",
+      "status": "added",
+      "bytes": 4044,
+      "sha256": "4da2db75e8a8c01d62db4f717866e911cd0ac4fa6d99342b405bed6e91a33114"
+    },
+    {
+      "path": "scripts/plot_original_vs_current_home_starts.py",
+      "status": "added",
+      "bytes": 5363,
+      "sha256": "71bb2cf9d704cf1a96765c5abf7653cc9afbfa428951904f33f6ba378f457241"
+    },
+    {
+      "path": "scripts/plot_separate_charging_curves.py",
+      "status": "added",
+      "bytes": 1318,
+      "sha256": "6a599d5df6990829387cec8c4137257872344443e9a0e98e2ed568167a2490f8"
+    },
+    {
+      "path": "scripts/rebuild_truck_charging.py",
+      "status": "added",
+      "bytes": 7436,
+      "sha256": "b9068d991d0415a15f44c1c24e404952ba48e04e7050f1f1d6243a357ef2709d"
+    },
+    {
+      "path": "scripts/render_ces_pwc_manuscript_table.py",
+      "status": "added",
+      "bytes": 4672,
+      "sha256": "e2569f41a9de0c5ae2c8a93b28970a7d33604d9f9bbee73cabc81e4d3c1058bf"
+    },
+    {
+      "path": "scripts/replay_charging_power.py",
+      "status": "added",
+      "bytes": 7890,
+      "sha256": "d13ffa24d00d4a5dbe6e898c8d057edac7de7e74ba80b1b8aa35aa5038aa1b3a"
+    },
+    {
+      "path": "scripts/replay_human_exposure.py",
+      "status": "added",
+      "bytes": 2713,
+      "sha256": "6d16d0c67ac9e194986c889643f567007de8d7872c1bd85f364254f29570ed4d"
+    },
+    {
+      "path": "scripts/replay_reference_case.py",
+      "status": "added",
+      "bytes": 7003,
+      "sha256": "43d484a67d19673ef0106144be92c3121f1bbfc08a580be76b5cbf68c9a83f45"
+    },
+    {
+      "path": "scripts/replay_skims_emissions.py",
+      "status": "added",
+      "bytes": 3405,
+      "sha256": "69b5d0d6986e75f2e1d0bc4babc6b3257d20e1f29724372b6a482d2501c34561"
+    },
+    {
+      "path": "scripts/replot_collaborator_truck_charging_lines.py",
+      "status": "added",
+      "bytes": 6450,
+      "sha256": "7a1bfe9967bfb441d456e829279c360ca62565dfe1fdcd6990b6c568cfab852f"
+    },
+    {
+      "path": "scripts/replot_ldv_figures_24h.py",
+      "status": "added",
+      "bytes": 5958,
+      "sha256": "1c10251b894dc5eca4faf5dc2141aafabc92af05f67a1440821aa6ceb33314b7"
+    },
+    {
+      "path": "scripts/research_paths.py",
+      "status": "added",
+      "bytes": 741,
+      "sha256": "8c721b80cf3509a09e175bba8a61068c350c73f0e030f9c0e5d234e1473c5e1e"
+    },
+    {
+      "path": "scripts/run_baseline0_collaborator_pipeline.py",
+      "status": "added",
+      "bytes": 11677,
+      "sha256": "c8a08d40c45878cab698cbfe9e59ca879ca517beec229efe7bcbaa050374461f"
+    },
+    {
+      "path": "scripts/run_cristian_charging.py",
+      "status": "added",
+      "bytes": 5439,
+      "sha256": "6238a12c3169ff1bae1691d401a64a01a4257a2f39852c589191d0906ddc6e1a"
+    },
+    {
+      "path": "scripts/run_events_traffic_pipeline.py",
+      "status": "added",
+      "bytes": 28582,
+      "sha256": "26ae5d6fad650a4e850dc17aae38ad71aadad79bba4dee5cc575a25b323caf35"
+    },
+    {
+      "path": "scripts/run_existing_ev_charging_code.py",
+      "status": "added",
+      "bytes": 15886,
+      "sha256": "3629faacf5108bc6a973e0c1ce9f4ab25d8af24f31cba6fdf25a04347814a408"
+    },
+    {
+      "path": "scripts/run_future_detailed_products.py",
+      "status": "added",
+      "bytes": 35218,
+      "sha256": "bba979506a574829523296e870ce16b39ee970e9e931832f133f8c76ac4c563c"
+    },
+    {
+      "path": "scripts/run_future_fixed_factor_scenarios.py",
+      "status": "added",
+      "bytes": 34941,
+      "sha256": "f2beaa6db54ae408dbff4864469cc8a48c78d14c4e780d0aaaa1eea35d359e2d"
+    },
+    {
+      "path": "scripts/run_gateway_freight_products.py",
+      "status": "added",
+      "bytes": 18638,
+      "sha256": "bc457a8bd78c6b26cf699879782e440e1fbd57a3c5100820c5f9847efcc251e0"
+    },
+    {
+      "path": "scripts/run_hourly_power.py",
+      "status": "added",
+      "bytes": 2093,
+      "sha256": "ab3aca751d2778cddda8d91b60f458b49a6e335fd22dff764458f131bb149dbd"
+    },
+    {
+      "path": "scripts/run_ldv_freight_products.py",
+      "status": "added",
+      "bytes": 18622,
+      "sha256": "7e861564254c40e4c1105fa5e4a81f736010513a4e47e15db937b56783070d8e"
+    },
+    {
+      "path": "scripts/run_native_ev_baseline.py",
+      "status": "added",
+      "bytes": 29414,
+      "sha256": "1999502c1e676deeed8858778280fc109c32a5d2f7f4d53d13ff74ddc754060f"
+    },
+    {
+      "path": "scripts/run_original_skims_3km_test.py",
+      "status": "added",
+      "bytes": 14701,
+      "sha256": "3b6ea6940866f4fedbea5c8ad03bd6400cab50d38516c9190ee692b53b29bae4"
+    },
+    {
+      "path": "scripts/run_phev20_sensitivity.py",
+      "status": "added",
+      "bytes": 8959,
+      "sha256": "3347589c20b4e728cbf7014798c7dfeafb6fd2bb32869610300d8553aac9f1b6"
+    },
+    {
+      "path": "scripts/run_port_freight_products.py",
+      "status": "added",
+      "bytes": 22755,
+      "sha256": "f674b35a36a971cfcf771f747012f6462c2cf3affbc2f1ff6e6ed7c00d5ff3b6"
+    },
+    {
+      "path": "scripts/scale_events_traffic.py",
+      "status": "added",
+      "bytes": 10841,
+      "sha256": "2febed69d76d617af46666a1a20591226f4488529f6c2ad8d24c8b73f7b55aab"
+    },
+    {
+      "path": "scripts/test_home_priority_scenarios.py",
+      "status": "added",
+      "bytes": 12926,
+      "sha256": "4c413e59cbcbaacc5fd8be8cf1c495d8d75a640c0a54200f0066c8ee70134d48"
+    },
+    {
+      "path": "setup.cfg",
+      "status": "modified",
+      "bytes": 2381,
+      "sha256": "79bbbf7b93cc529b4f338ed672e9ff85832e0ce3447a57bf5aab72f3b2f20880"
+    },
+    {
+      "path": "src/impacts/__init__.py",
+      "status": "unchanged",
+      "bytes": 947,
+      "sha256": "40efb02634042ef44582335d1e278745b2cd7e1592c090725147ddcd21281ccc"
+    },
+    {
+      "path": "src/impacts/__main__.py",
+      "status": "unchanged",
+      "bytes": 28770,
+      "sha256": "15ebc1f41f5a626f556f74bb1957cb06d831b39fb5c967c5ff8df51ce926f119"
+    },
+    {
+      "path": "src/impacts/common.py",
+      "status": "modified",
+      "bytes": 42829,
+      "sha256": "b836b6671f39ef51e6c7a18e1c79b80989f6b34bf88a236bd12c5b55ea7dfd93"
+    },
+    {
+      "path": "src/impacts/config/__init__.py",
+      "status": "unchanged",
+      "bytes": 930,
+      "sha256": "11d2cf28e27caa516dab93df5274995268fdb0e29ae9ef3e73c4ddad34d2e1e8"
+    },
+    {
+      "path": "src/impacts/config/_coerce.py",
+      "status": "unchanged",
+      "bytes": 2607,
+      "sha256": "cd84b60da63b270e42dcdeb28f90fad39c238d871eb22e333d5a161ef6472cf0"
+    },
+    {
+      "path": "src/impacts/config/defaults.py",
+      "status": "modified",
+      "bytes": 3895,
+      "sha256": "4b7dd4c69ee3ea642b0915fa9d10c6ecfdd3b11972dfbd20bad29e616a8f1e96"
+    },
+    {
+      "path": "src/impacts/config/path_registry.py",
+      "status": "unchanged",
+      "bytes": 4230,
+      "sha256": "c4b69c21dfa6fcf4da6b04d6694cf5139ec2fb39eb167fdb16229067b06e365a"
+    },
+    {
+      "path": "src/impacts/config/settings.py",
+      "status": "modified",
+      "bytes": 122615,
+      "sha256": "a708bf2a5b4c057191fa1e768e9ccf290f8439c44a3aa6172d1b3701c5e33dcf"
+    },
+    {
+      "path": "src/impacts/config/settings.yaml",
+      "status": "modified",
+      "bytes": 5403,
+      "sha256": "6ab96be42b06a3c3ffc4d74037f4e5429be47de377b86b26811dcbfe1a95876e"
+    },
+    {
+      "path": "src/impacts/config/settings_builder.py",
+      "status": "unchanged",
+      "bytes": 3839,
+      "sha256": "c7fab61ce8967d3c26ca16caf9d795905de6ffb5bfc622a3e9b97733ded4a28f"
+    },
+    {
+      "path": "src/impacts/consist_artifacts.py",
+      "status": "unchanged",
+      "bytes": 13459,
+      "sha256": "e1126d39fdf21e135c64d8cc52fd3289a179e99923f569999481c486223d55f9"
+    },
+    {
+      "path": "src/impacts/manifest/__init__.py",
+      "status": "unchanged",
+      "bytes": 629,
+      "sha256": "d96ea4cde17fd8b8587531b3162829e17db330f6fd3065649edeb2c640673fe1"
+    },
+    {
+      "path": "src/impacts/manifest/file_ops.py",
+      "status": "modified",
+      "bytes": 8996,
+      "sha256": "e93c0e62fc68bf05003a5049d1f80e6e2170b168d5e7c4c1eebd6a13dd88b527"
+    },
+    {
+      "path": "src/impacts/manifest/schema.py",
+      "status": "modified",
+      "bytes": 21899,
+      "sha256": "e1fc688caa19c7adbdf9f41aecd04e4964882dce5ab77738c6095c5068f4ae99"
+    },
+    {
+      "path": "src/impacts/pipeline/__init__.py",
+      "status": "unchanged",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "src/impacts/pipeline/emfac/__init__.py",
+      "status": "unchanged",
+      "bytes": 85,
+      "sha256": "0d10c27806a8d0fcfab130fd00a8fecf6ef1c1c6c5f709990ff9ec74be12025e"
+    },
+    {
+      "path": "src/impacts/pipeline/emfac/_common.py",
+      "status": "modified",
+      "bytes": 19550,
+      "sha256": "e4ad0f2bbd8561e4642944c754165c8ba4d2aba9cdbfe2ef64a7e8c51ad3f4ed"
+    },
+    {
+      "path": "src/impacts/pipeline/emfac/activities/__init__.py",
+      "status": "unchanged",
+      "bytes": 52,
+      "sha256": "1763cbc81c4dc255604980e2322a7e6d82ebdad440a5a06613c2100fc4bf74dc"
+    },
+    {
+      "path": "src/impacts/pipeline/emfac/activities/step1_prepare_emissions_and_activities_tables.py",
+      "status": "unchanged",
+      "bytes": 50046,
+      "sha256": "17e9177b89259d2bce1c19a6dcf9ac9882e17010432cc75afbde5aace06a0bd0"
+    },
+    {
+      "path": "src/impacts/pipeline/emfac/activities/step2_build_comprehensive_project_analysis.py",
+      "status": "unchanged",
+      "bytes": 11863,
+      "sha256": "3adeea30e21cd95566076194feca495118153986228e854333d0c28fe099bfc9"
+    },
+    {
+      "path": "src/impacts/pipeline/emfac/activities/step3_fill_project_analysis_rates.py",
+      "status": "unchanged",
+      "bytes": 37225,
+      "sha256": "cb6ff084bf6d8d441f1272c6a1e73f0b42aa0c006d3d8ee78bbfb66553f10a7f"
+    },
+    {
+      "path": "src/impacts/pipeline/emfac/activities/step4_finalize_output.py",
+      "status": "unchanged",
+      "bytes": 29126,
+      "sha256": "c03cfeff1d7efa22315b8a5afb6c480dcd750a193fc21801285c1b7e63e8b42b"
+    },
+    {
+      "path": "src/impacts/pipeline/emfac/fleet/__init__.py",
+      "status": "unchanged",
+      "bytes": 36,
+      "sha256": "df342945e8ca12af755d5568e971ecc8fbacf186ff6f168cec0986afc8ce2c07"
+    },
+    {
+      "path": "src/impacts/pipeline/emfac/fleet/step1_build_vehicle_types.py",
+      "status": "unchanged",
+      "bytes": 45539,
+      "sha256": "cd3fc6e5015ef28c965c22cb03b957d40d4ea9a1f10dae6cd4a420d96d7960c5"
+    },
+    {
+      "path": "src/impacts/pipeline/emfac/fleet/step2_map_emfac_bus_bike.py",
+      "status": "unchanged",
+      "bytes": 17364,
+      "sha256": "ea630c9f246091c4802f2de4ce6b3ae2493546986c924b0de7b2db5802b60338"
+    },
+    {
+      "path": "src/impacts/pipeline/emfac/fleet/step3_map_emfac_atlas.py",
+      "status": "modified",
+      "bytes": 56621,
+      "sha256": "ae84cfd56e096071b6affa54cb5df1f9dc354595343b5897dcdf688a282e910c"
+    },
+    {
+      "path": "src/impacts/pipeline/emfac/fleet/step4_map_emfac_frism.py",
+      "status": "unchanged",
+      "bytes": 67419,
+      "sha256": "8fe7a1bfdd5c9eb8591b68efe4d837b4e25f4ff5067bcf39f70220f11479a906"
+    },
+    {
+      "path": "src/impacts/pipeline/postprocess/__init__.py",
+      "status": "modified",
+      "bytes": 325,
+      "sha256": "1a2124f8719aa914e58b21155ff85e3ecc24135c3d3e12ffc675f3e11423253b"
+    },
+    {
+      "path": "src/impacts/pipeline/postprocess/_common.py",
+      "status": "modified",
+      "bytes": 18904,
+      "sha256": "0bf003b7d480f4f4772d527c3854fb95376693573a1ecf048613e58ef94334e2"
+    },
+    {
+      "path": "src/impacts/pipeline/postprocess/assets/human_exposure_webmap.html",
+      "status": "added",
+      "bytes": 109646,
+      "sha256": "98b21fd8d384f17e488aa7ceb08de6c738863df3281331ad2f52ab373d412296"
+    },
+    {
+      "path": "src/impacts/pipeline/postprocess/step1_compare_fleet.py",
+      "status": "unchanged",
+      "bytes": 33050,
+      "sha256": "924e4845418c992cfc90639a19915ef89005a407409b91d02739d3c79a9c1b17"
+    },
+    {
+      "path": "src/impacts/pipeline/postprocess/step2_compare_annual_targets.py",
+      "status": "unchanged",
+      "bytes": 19948,
+      "sha256": "807c66e51b7f1e63168a54fa60694c7441f6eda798b1d4dea65d717f970b712c"
+    },
+    {
+      "path": "src/impacts/pipeline/postprocess/step3_compare_emissions_inventory.py",
+      "status": "unchanged",
+      "bytes": 16305,
+      "sha256": "45fc79b9d9e4f75d2b7e8d29bc6b4fe22a9fc4c42979b9cfe078c9a78910d2d2"
+    },
+    {
+      "path": "src/impacts/pipeline/postprocess/step4_plot_concentrations.py",
+      "status": "modified",
+      "bytes": 16861,
+      "sha256": "0d7b986022f57c302df5b382b81d67152bffc0397b02b661581a8c49be151b43"
+    },
+    {
+      "path": "src/impacts/pipeline/postprocess/step5_plot_exposure.py",
+      "status": "unchanged",
+      "bytes": 15583,
+      "sha256": "8d664fdfbc4e714d63ea71e52bde9b1af63363d277a3609bc0b54790c6644526"
+    },
+    {
+      "path": "src/impacts/pipeline/postprocess/step6_plot_delta_concentrations.py",
+      "status": "unchanged",
+      "bytes": 14813,
+      "sha256": "bb582fcd4b87cfef89c3bea59cb220cc7118fada8d195f7987c384356c95694b"
+    },
+    {
+      "path": "src/impacts/pipeline/postprocess/step7_plot_delta_exposure.py",
+      "status": "unchanged",
+      "bytes": 14626,
+      "sha256": "0fbd45749bad73e6043b3d8894a6383d1ca903d3fdb5b56eeb52f4c9e85491d7"
+    },
+    {
+      "path": "src/impacts/pipeline/postprocess/step8_human_exposure.py",
+      "status": "added",
+      "bytes": 19849,
+      "sha256": "7577ea445cfa14e22c6cdbe33ab6a15baecdf76bf903350d9d088163d1ade591"
+    },
+    {
+      "path": "src/impacts/pipeline/postprocess/step9_human_exposure_webmap.py",
+      "status": "added",
+      "bytes": 14865,
+      "sha256": "dfeb7f587b97f648069af424d54ed558626ba29966ed4fdee7087b81c9d4f1ac"
+    },
+    {
+      "path": "src/impacts/pipeline/preprocessing/__init__.py",
+      "status": "unchanged",
+      "bytes": 182,
+      "sha256": "a6931ec4186b787c87a89dc49170e8fdcad093e3842bc742d6d5024aabae03f5"
+    },
+    {
+      "path": "src/impacts/pipeline/preprocessing/step1_collect_inputs.py",
+      "status": "modified",
+      "bytes": 24655,
+      "sha256": "451cbbc95602cd4646ad9877967855c1fbb758dd9e84305049a4647fb40fef1e"
+    },
+    {
+      "path": "src/impacts/pipeline/preprocessing/step2_prepare_grids.py",
+      "status": "unchanged",
+      "bytes": 5076,
+      "sha256": "59bc651ede8e09c660c420b25da5c05156b28f2a55ca28be23987b7884516f1f"
+    },
+    {
+      "path": "src/impacts/pipeline/preprocessing/step3_integrate_grids.py",
+      "status": "unchanged",
+      "bytes": 26543,
+      "sha256": "5119c116ee7aa3162841c84b8e2d10cd2e612e09f36c7349f71c10c2df77632c"
+    },
+    {
+      "path": "src/impacts/pipeline/preprocessing/step4_build_cell_attributes.py",
+      "status": "unchanged",
+      "bytes": 9743,
+      "sha256": "c611941dd96fe9c87c62b3c2e2bc488cb4fabe4611b82aef5a590ea278e402af"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/__init__.py",
+      "status": "unchanged",
+      "bytes": 458,
+      "sha256": "bf501ddb97d56f3e48e7ab2f633e72c4641c146885ad2591c06e688b1ab28dc1"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/charging_plots.py",
+      "status": "added",
+      "bytes": 10222,
+      "sha256": "769cad0d5af70f32be1b315954cbe5b5dd469a4a492523aad152982e9581d1d2"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/cristian_charging.py",
+      "status": "added",
+      "bytes": 9042,
+      "sha256": "584ea9eb68f4b43439b0d38fdb71920386f6711055c0388e3543fa48a31b3d9c"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/existing_ev_charging.py",
+      "status": "added",
+      "bytes": 4918,
+      "sha256": "45a689f27b8e480c9363efc85c91581f2fd3d0be67e779327524cda059ba9353"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/home_priority_charging.py",
+      "status": "added",
+      "bytes": 11514,
+      "sha256": "78410a200ca9f8baa6d9840f917c9cf4ebaef2fd3521d72401b9c2c2e2193fb5"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/hourly_power.py",
+      "status": "added",
+      "bytes": 14061,
+      "sha256": "c66923c2be08ba5f70d3e80d8aaabefe67e1fc998016a05593b28ef683606c22"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/isrm_near_source.py",
+      "status": "added",
+      "bytes": 5158,
+      "sha256": "68daacabb0e62aa0940daeccef1247e03c6988422e2892fad1db7b5223d33c7a"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/native_ev_charging.py",
+      "status": "added",
+      "bytes": 4286,
+      "sha256": "b56e7df3cba80fc19126384ecb94b0dca0a1325f652e116736813afb239362f5"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/notebook_charging.py",
+      "status": "added",
+      "bytes": 11720,
+      "sha256": "95c117d3914b1eb39da8ebb5cc83fa65b7194b3b689a24ee88755c62b4341427"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/phev_home_charging.py",
+      "status": "added",
+      "bytes": 7753,
+      "sha256": "401d468d2a37b778b7e84db0dc486a4bb4888f57b7505ff5bfb7ac76547a74e1"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/power_generation.py",
+      "status": "added",
+      "bytes": 28628,
+      "sha256": "534e98dda29fdb0809823d9bb561ad7df12988defdbc5959607f1860ff53ab24"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/prepare_emissions/__init__.py",
+      "status": "unchanged",
+      "bytes": 148,
+      "sha256": "64f0eeb85c1e5af43b09bff9f40ef7366bbf1baeb55da830e5223767292e776d"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/prepare_emissions/annualization.py",
+      "status": "modified",
+      "bytes": 26630,
+      "sha256": "ba8f87df8861b2962374c6765ea3b9db0ba34c62b94df914f79b27ec5213eca3"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/prepare_emissions/event_emfac.py",
+      "status": "added",
+      "bytes": 18796,
+      "sha256": "ce29acf654510a510203c6f34f6ddaa50dc18cd48a782b801bee6bcd48a22535"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/prepare_emissions/from_events.py",
+      "status": "modified",
+      "bytes": 27806,
+      "sha256": "7ef08f25a90365bd7568364fa5aa76c64b762c282b656726ff032d924d2be9b7"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/prepare_emissions/from_skims.py",
+      "status": "modified",
+      "bytes": 33940,
+      "sha256": "b0d544908dc6534936c722a11c0937b0f1d3d8e0f625b408f4173746542740f6"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/step1_process_emissions.py",
+      "status": "unchanged",
+      "bytes": 43799,
+      "sha256": "4708dfc9f9d11b1c22053a00b384332a2eaee4990ab00cb6fb85d04a9d0f7c20"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/step2_compute_inmap_concentrations.py",
+      "status": "modified",
+      "bytes": 35291,
+      "sha256": "29d77cfc5a20ae198d9eb893608bbf5f97e56b0ee50d826772646138e25105d6"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/step3_compute_aermod_concentrations.py",
+      "status": "modified",
+      "bytes": 45858,
+      "sha256": "a88f67c6b25cd72f25eb403ac2825c15726bdaa57bbbd1415832a234151d495b"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/step4_prepare_exposure.py",
+      "status": "modified",
+      "bytes": 21718,
+      "sha256": "95ae98ac59cf7e33d4f5e81102490b1161d07d135620edf72891b10e71aad627"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/truck_charging.py",
+      "status": "added",
+      "bytes": 11256,
+      "sha256": "c131bcc988689777971edc26a7f69864ea6125b15e5f444d9226359c84203054"
+    },
+    {
+      "path": "src/impacts/postprocessor.py",
+      "status": "modified",
+      "bytes": 37580,
+      "sha256": "781681be7f5ecd1ac451ffa4d7497d5b88f5f7efaedfd5ac9dd822afb020e7a3"
+    },
+    {
+      "path": "src/impacts/preprocessor.py",
+      "status": "modified",
+      "bytes": 16228,
+      "sha256": "ed41978ff3853ca85f5ca6808fcb3063117d01c05febd1207021f47b3847f36a"
+    },
+    {
+      "path": "src/impacts/profile_runner.py",
+      "status": "unchanged",
+      "bytes": 1240,
+      "sha256": "094d0670a0eec21aa2fa9aa15144cc72d75536bda54c3e166903fac34690bff1"
+    },
+    {
+      "path": "src/impacts/provisioner.py",
+      "status": "unchanged",
+      "bytes": 30270,
+      "sha256": "243f3aad35aa5b8ef026206d78ce652aa2c1dcb342a6489d9e8dfe60b17a8a6c"
+    },
+    {
+      "path": "src/impacts/runner.py",
+      "status": "modified",
+      "bytes": 20948,
+      "sha256": "0d86d1437c6c6b1dd9eed48ae932397aa755640c517e5189a449acd2d644c9f7"
+    },
+    {
+      "path": "src/impacts/tools/__init__.py",
+      "status": "unchanged",
+      "bytes": 168,
+      "sha256": "73cb965c14b837c2adb9ebe826e1d9a914cac742bb693c376be493a54490d2d4"
+    },
+    {
+      "path": "src/impacts/tools/beam/__init__.py",
+      "status": "unchanged",
+      "bytes": 220,
+      "sha256": "6b4f37d8ed9d56733b7b82d660b759c717508b8d8928c4fddc9b6717034bd9d2"
+    },
+    {
+      "path": "src/impacts/tools/beam/analyze_pax_urbansim_consistency.py",
+      "status": "unchanged",
+      "bytes": 12332,
+      "sha256": "8fc8cffdc0d269e3d9374da31d49e4d5aa583bb506aa7a31ce08f2535aef516c"
+    },
+    {
+      "path": "src/impacts/tools/beam/events_to_skims_emissions.py",
+      "status": "unchanged",
+      "bytes": 14234,
+      "sha256": "d2facffdf9e16f71b6225fa4583c10c3e405caaaf20c21b8a3d1e1402931fa42"
+    },
+    {
+      "path": "src/impacts/tools/beam/sample_beam_output.py",
+      "status": "unchanged",
+      "bytes": 19010,
+      "sha256": "99e38a99709f36784a2180abd730d13d834d5eef7c0cabf501be535af85d2ff6"
+    },
+    {
+      "path": "src/impacts/tools/beam/sample_freight.py",
+      "status": "unchanged",
+      "bytes": 8005,
+      "sha256": "04d8594885c119ce7ccf8b9ef7a76f59aff751c3443a5c43648ddb796871a416"
+    },
+    {
+      "path": "src/impacts/tools/beam/sample_passenger.py",
+      "status": "unchanged",
+      "bytes": 15953,
+      "sha256": "c3f15f94e39b820f0486d9b1a00309ad7e297693e6bb0ea5212e0d1712413471"
+    },
+    {
+      "path": "src/impacts/tools/emfac/__init__.py",
+      "status": "unchanged",
+      "bytes": 104,
+      "sha256": "5f6dca0aa16bb2fb1d35524341e36145f792f9929ed4faad12dbb73912372c8f"
+    },
+    {
+      "path": "src/impacts/tools/emfac/aggregate_emfac_activity.py",
+      "status": "unchanged",
+      "bytes": 8969,
+      "sha256": "3bf2ce0684f4debe8c03b3e43c823d2e2e50bab5f307df1355d0e406fcefbdee"
+    },
+    {
+      "path": "src/impacts/tools/inmap/__init__.py",
+      "status": "unchanged",
+      "bytes": 140,
+      "sha256": "bb612bdc27f4e77fbe17ef1587f0b56143fda16728ef728b26c2dcd9f74fe105"
+    },
+    {
+      "path": "src/impacts/tools/inmap/build_complete_nox_to_no2_matrix.py",
+      "status": "unchanged",
+      "bytes": 19455,
+      "sha256": "a65a40bad0e7a8db79c288edaa291988603092be0dd770db0cf5f96d6b1842ad"
+    },
+    {
+      "path": "src/impacts/tools/inmap/rdata_conversion.py",
+      "status": "unchanged",
+      "bytes": 3467,
+      "sha256": "5502c3dd2fcdf28a63e6d247b639659ef39484ddf18c330602c2e707f3d119cf"
+    },
+    {
+      "path": "src/impacts/tools/prepare_sample_data.py",
+      "status": "unchanged",
+      "bytes": 3128,
+      "sha256": "b6012674c593364b56115d35af15c78d044313e76f8e455343ac77a43cd401eb"
+    },
+    {
+      "path": "tests/conftest.py",
+      "status": "modified",
+      "bytes": 748,
+      "sha256": "fe50716289122fc92bb381b97b6764e479d415f15f65f6b6c8e1bcc338b70265"
+    },
+    {
+      "path": "tests/test_aermod_concentrations.py",
+      "status": "modified",
+      "bytes": 11261,
+      "sha256": "5d606a8eb2ed4f71a900085a12852a7968b3f26b043811b69abc8c3f5d14a588"
+    },
+    {
+      "path": "tests/test_analyze_pax_urbansim_consistency.py",
+      "status": "unchanged",
+      "bytes": 3414,
+      "sha256": "ced0e4c7c1df941b439492157e8aaadda33ce732a3a9398178b5b803ab2bc84c"
+    },
+    {
+      "path": "tests/test_charging_continuation.py",
+      "status": "added",
+      "bytes": 3413,
+      "sha256": "c8529c6e41055ca7c23fcebb8afa9fff6d6a6eaee41fba5825a8495db0bbb173"
+    },
+    {
+      "path": "tests/test_charging_plots.py",
+      "status": "added",
+      "bytes": 2114,
+      "sha256": "5988bd072a47d3aea60b011c7cda5badb9a7a80db80f98e07f1621b08fbcf4b7"
+    },
+    {
+      "path": "tests/test_consist_artifacts.py",
+      "status": "unchanged",
+      "bytes": 5103,
+      "sha256": "cdb0563888cac6adcb8121f4e719e3727e898db6fd83115ec92a6b51f3c21948"
+    },
+    {
+      "path": "tests/test_cristian_charging.py",
+      "status": "added",
+      "bytes": 4315,
+      "sha256": "ac739f62ad97811544b524b921010fad012a45f7c34126fd3d73ed11a0f78bc8"
+    },
+    {
+      "path": "tests/test_emfac_activities_step1.py",
+      "status": "unchanged",
+      "bytes": 6371,
+      "sha256": "085b47d92eb4b944ae177991fd427dda96d0e105c807ebe21c17dc181ce5d4ac"
+    },
+    {
+      "path": "tests/test_emfac_activities_step2.py",
+      "status": "unchanged",
+      "bytes": 2103,
+      "sha256": "41f1102c2a4a0bba45260ea00daa347d97c7dfff25f8afd75dd6e5428db0c229"
+    },
+    {
+      "path": "tests/test_emfac_activities_step4.py",
+      "status": "unchanged",
+      "bytes": 1830,
+      "sha256": "eebb27db8ab078b3c3f750f9af81fae851dc36da876fea8b2c47896fd619679c"
+    },
+    {
+      "path": "tests/test_emfac_rates_store.py",
+      "status": "unchanged",
+      "bytes": 1339,
+      "sha256": "f33b27787622a85189ec3da997e7434cc0880afc8147614ed02eb89a3c996bf7"
+    },
+    {
+      "path": "tests/test_events_emfac.py",
+      "status": "added",
+      "bytes": 11294,
+      "sha256": "0214f29288686729b7fdedbc1081ccc2982a0252f7dae6c22339981f05c75569"
+    },
+    {
+      "path": "tests/test_evi_15k_comparison.py",
+      "status": "added",
+      "bytes": 1059,
+      "sha256": "f255d5029051cb4249141340ccbc333bd468f83e75edf3999045711a9e7a2b77"
+    },
+    {
+      "path": "tests/test_evi_fleet_matching.py",
+      "status": "added",
+      "bytes": 2111,
+      "sha256": "06613c1e0bef4b32a7a18d8ce018e63eb398b501f636bce6e2be7eac8c5ffb77"
+    },
+    {
+      "path": "tests/test_evi_profile_comparison.py",
+      "status": "added",
+      "bytes": 1457,
+      "sha256": "c8b3f70d54ead8e634b574e31f8d3618c2ee9dcbcb08e75e5b10b3484fa5d48f"
+    },
+    {
+      "path": "tests/test_existing_ev_charging.py",
+      "status": "added",
+      "bytes": 4944,
+      "sha256": "0ff4a7b93604ecb5780c142ab779d97ce97e6213e9383ea2d32860881e29da95"
+    },
+    {
+      "path": "tests/test_fleet_config.py",
+      "status": "unchanged",
+      "bytes": 24075,
+      "sha256": "fce51d734236fd43f90252f5e5cdafa098b4f2a60486cfe41c45730654cd8e1e"
+    },
+    {
+      "path": "tests/test_fleet_step1.py",
+      "status": "unchanged",
+      "bytes": 1828,
+      "sha256": "4c8b453b4492841ee62fc24735dafc24393c0a3989f9d5fbf705b8d637a023d2"
+    },
+    {
+      "path": "tests/test_fleet_step2.py",
+      "status": "unchanged",
+      "bytes": 11541,
+      "sha256": "7bdcaa449010f3107b962a7ce7c30cb53b1aaa3747cfce49c544aaaa453f213b"
+    },
+    {
+      "path": "tests/test_fleet_step3.py",
+      "status": "unchanged",
+      "bytes": 38945,
+      "sha256": "048992114d2b21a83884785b1555745d2175ef303de59132ab6e0dc79e60cd44"
+    },
+    {
+      "path": "tests/test_fleet_step4.py",
+      "status": "unchanged",
+      "bytes": 28557,
+      "sha256": "0010e67ccc38d5c42ed8fd27236ae898462b2cc9305949007d21ddcbd2d7870c"
+    },
+    {
+      "path": "tests/test_future_detailed_products.py",
+      "status": "added",
+      "bytes": 2671,
+      "sha256": "e42f9d05e7eb7be06a20604439381777a316dc8e008b0888612c8114d6a5c721"
+    },
+    {
+      "path": "tests/test_future_fixed_factor_scenarios.py",
+      "status": "added",
+      "bytes": 2604,
+      "sha256": "d2642abd8bc804c619e596443734f64f05e672e164dc36872e515b94e0ff7145"
+    },
+    {
+      "path": "tests/test_gateway_figures.py",
+      "status": "added",
+      "bytes": 1995,
+      "sha256": "e2fd6bda94cd4bed52961e96e7d8c5c147ae8a68b77703fca29117352e869946"
+    },
+    {
+      "path": "tests/test_gateway_freight_products.py",
+      "status": "added",
+      "bytes": 2178,
+      "sha256": "5961f2ccb7238d387044fc93baa19633cbe317e134d9199df26df0c350d33386"
+    },
+    {
+      "path": "tests/test_grid_mapping.py",
+      "status": "unchanged",
+      "bytes": 4911,
+      "sha256": "e40f5a966db36cea2d92ef6e17864541259b08fde83a7dfc902bbeebb5037824"
+    },
+    {
+      "path": "tests/test_home80_soc_snapshots.py",
+      "status": "added",
+      "bytes": 2309,
+      "sha256": "b6dc44cf479019156ca40d5c965182646a298dea63b857afe6dd8df9d3c0b48e"
+    },
+    {
+      "path": "tests/test_home_priority_charging.py",
+      "status": "added",
+      "bytes": 3465,
+      "sha256": "dd2a543ef703f38d3892bfa84d8a42489cfa4aea61081a5aed9d6e350edfb2aa"
+    },
+    {
+      "path": "tests/test_hourly_power.py",
+      "status": "added",
+      "bytes": 5739,
+      "sha256": "385b86e6790dc7f8f2edc0e9fdbaef4f4b31147e5fa2df47fd1731cbc9592ef4"
+    },
+    {
+      "path": "tests/test_human_exposure_webmap.py",
+      "status": "added",
+      "bytes": 1907,
+      "sha256": "e14840d16fb0589cd8ef6540a3252daf2b8546c52ddafcb316bdf8336e88e292"
+    },
+    {
+      "path": "tests/test_inmap_concentrations.py",
+      "status": "modified",
+      "bytes": 6961,
+      "sha256": "3715c77fb930b27df42575771203fd31573002bfc34ebec4cff837f9664bafeb"
+    },
+    {
+      "path": "tests/test_isrm_near_source.py",
+      "status": "added",
+      "bytes": 5595,
+      "sha256": "6d47e9831517859d8e8bd136d655c8cdebe33f94680a760bcb955a8e61fb30b9"
+    },
+    {
+      "path": "tests/test_ldv_freight_products.py",
+      "status": "added",
+      "bytes": 1569,
+      "sha256": "5c8c0438c82bd8691d4ce8e5fd3352d0bd739f3c0c3d3da3b4580d617e8d677e"
+    },
+    {
+      "path": "tests/test_native_ev_baseline.py",
+      "status": "added",
+      "bytes": 1471,
+      "sha256": "492399c9548da7950f7985ac760003095588f7ec65ecb06f8830b7d621fa014e"
+    },
+    {
+      "path": "tests/test_native_ev_charging.py",
+      "status": "added",
+      "bytes": 2917,
+      "sha256": "46d748bcd6548342780103fe018ea121f2c658ee1a8781c13e0ac4e24ba2f5e3"
+    },
+    {
+      "path": "tests/test_native_ev_charging_plots.py",
+      "status": "added",
+      "bytes": 1750,
+      "sha256": "eed8dba10a3f0f2ce868e76d4ed1533e7ae4bfdfc492f4bc952f1f213dbc850e"
+    },
+    {
+      "path": "tests/test_notebook_charging.py",
+      "status": "added",
+      "bytes": 6503,
+      "sha256": "dd878e40bfa018e79e9097d0196f139148b40e052dedeb573bcd0d08877a5029"
+    },
+    {
+      "path": "tests/test_original_exposure_tables.py",
+      "status": "added",
+      "bytes": 1323,
+      "sha256": "8c4bce115eb8bb071eb4c6fdf456917b38237fd7318ab3ae103d3f0b94a22d28"
+    },
+    {
+      "path": "tests/test_phev_home80.py",
+      "status": "added",
+      "bytes": 3288,
+      "sha256": "61885d22076107b60a37e6c830cbbda69842a3a2f2f95215acff4efcda2e2ce0"
+    },
+    {
+      "path": "tests/test_phev_home_charging.py",
+      "status": "added",
+      "bytes": 2871,
+      "sha256": "328cdcafbe9b598b8377da0746fa796f8c390f8fd809c153801f59232daa5208"
+    },
+    {
+      "path": "tests/test_plot_concentration_components.py",
+      "status": "added",
+      "bytes": 4113,
+      "sha256": "e55ee00ed470b2729d0827527160e9d5a4985c252bc2cce65623c753b22ed682"
+    },
+    {
+      "path": "tests/test_population_exposure.py",
+      "status": "unchanged",
+      "bytes": 3796,
+      "sha256": "4e37e48e8ff7fc09bc04823e189f00b2302a721a0b2edf1c0cc1fd64786fe6da"
+    },
+    {
+      "path": "tests/test_port_freight_products.py",
+      "status": "added",
+      "bytes": 1640,
+      "sha256": "da31814060b927daaa9e926d10548b39b11919f458fd05ed7410a6f7f223d450"
+    },
+    {
+      "path": "tests/test_postprocess_map_raster.py",
+      "status": "unchanged",
+      "bytes": 6094,
+      "sha256": "b5fe24cbe3f18c69be5fc98043a4fc117c8dee98715faf2f374b2ac40c142d89"
+    },
+    {
+      "path": "tests/test_postprocess_step1_compare_fleet.py",
+      "status": "unchanged",
+      "bytes": 8102,
+      "sha256": "5c0c7011187c91f691c01a66fd354937114c4f095d32c16c81ebf616c5e6c582"
+    },
+    {
+      "path": "tests/test_postprocess_step2_compare_annual_targets.py",
+      "status": "unchanged",
+      "bytes": 4250,
+      "sha256": "69cdddda7fe373716e640a4d76044f0ca560f1c0be92fd76d0e96b079916dc5c"
+    },
+    {
+      "path": "tests/test_postprocess_step3_compare_emissions_inventory.py",
+      "status": "unchanged",
+      "bytes": 5909,
+      "sha256": "4697ae4f4cd4d3c74a546d781b8b5c6f027d78da9cdf9b284da34417f097c5c5"
+    },
+    {
+      "path": "tests/test_postsim_output_root.py",
+      "status": "unchanged",
+      "bytes": 12579,
+      "sha256": "38be611316147a99436debfa99acd4a3904aba389a7da779b2805a847e018fda"
+    },
+    {
+      "path": "tests/test_power_generation.py",
+      "status": "added",
+      "bytes": 5916,
+      "sha256": "9ecf3f2923987448ea3b19e5944a31440f60410138cefd63b0a0bc88633dd763"
+    },
+    {
+      "path": "tests/test_prepare_emissions_from_skims.py",
+      "status": "modified",
+      "bytes": 28682,
+      "sha256": "12b7af1e82b3a8216991e2b851ab86db0d3ce0cba1ce446715d62463e4ed3f38"
+    },
+    {
+      "path": "tests/test_prepare_exposure.py",
+      "status": "modified",
+      "bytes": 17044,
+      "sha256": "dd87a40958d5c94d93dfe40762c4efdcd7e190b0c4498bae06f06e54a917cc7b"
+    },
+    {
+      "path": "tests/test_release_regressions.py",
+      "status": "added",
+      "bytes": 4232,
+      "sha256": "be9c39c29d8595d30d8236a26d6f0c5fc865ad6d4e784d317674153213f60d7f"
+    },
+    {
+      "path": "tests/test_runner_analysis_paths.py",
+      "status": "unchanged",
+      "bytes": 2600,
+      "sha256": "1602243cce9aa0013985a33ca0e2417fbd1d01533d9a47e4d5120b9f1c47ac45"
+    },
+    {
+      "path": "tests/test_sample_freight.py",
+      "status": "unchanged",
+      "bytes": 2268,
+      "sha256": "1714ba6d0b4cc9181f2382792d5fd02653b4835e3c9a85fcfee70b798d7f428f"
+    },
+    {
+      "path": "tests/test_sample_passenger.py",
+      "status": "unchanged",
+      "bytes": 4258,
+      "sha256": "6b097aade1b6ce78eeeae3534bd9e9d593bc6eb2581b2cae5ef2f31b26b55cde"
+    },
+    {
+      "path": "tests/test_sampling.py",
+      "status": "unchanged",
+      "bytes": 6591,
+      "sha256": "6abec52c6434d1fd01b8bca3ac94120c91b4bfe6bc63ff5990490a144cd2fbb3"
+    },
+    {
+      "path": "tests/test_step1_process_emissions.py",
+      "status": "unchanged",
+      "bytes": 16397,
+      "sha256": "5c8d9bbcb6f4322ed041a03dbe929173327dcda34bc91df5604f11a78dddf6e8"
+    },
+    {
+      "path": "tests/test_step3_integrate_grids.py",
+      "status": "unchanged",
+      "bytes": 5846,
+      "sha256": "56e22217040995ac12755023de80663276c96a6c920606e9add645443ebdd32e"
+    },
+    {
+      "path": "tests/test_terminal_contract.py",
+      "status": "modified",
+      "bytes": 74967,
+      "sha256": "1be0792b8aae36f7ee5e3e83cec4c60e6042a7d74de12635957627c33705a0a5"
+    },
+    {
+      "path": "tests/test_traffic_expansion.py",
+      "status": "added",
+      "bytes": 1952,
+      "sha256": "2a35a0b3fcf57140d72e70dfff62e21e3ef306d96fb7c278c1d2ff237d9f76e8"
+    },
+    {
+      "path": "tests/test_truck_charging.py",
+      "status": "added",
+      "bytes": 3805,
+      "sha256": "3c402ade7352914b295ea4659708e294580c8709f21da0de7f941838a36b58ef"
+    },
+    {
+      "path": "tests/test_unified_ev_energy.py",
+      "status": "added",
+      "bytes": 2318,
+      "sha256": "00e0b842b888a9582196b42c15a5cdebff9a41fe49ff60b9a60c40e734acb05f"
+    }
+  ]
+}

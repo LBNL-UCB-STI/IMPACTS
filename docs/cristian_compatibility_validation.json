@@ -1,0 +1,20 @@
+{
+  "energyCharged_kWh": 1.4210854715202004e-14,
+  "timeCharging_s": 2.9103830456733704e-11,
+  "socAfterCharging_kWh": 2.842170943040401e-14,
+  "attemptCharge": 0.0,
+  "chargerPower_kW": 0.0,
+  "hourly_kWh_max_abs_difference": 1.1368683772161603e-12,
+  "retained_agreement": true,
+  "status": "passed",
+  "tests_passed": 402,
+  "tests_failed": 0,
+  "modeled_vehicles": 1543,
+  "retained_vehicles": 1539,
+  "daily_energy_MWh_10x": 87.47684806611898,
+  "peak_MW_10x": 7.060441859078166,
+  "peak_hour": 19,
+  "original_notebook_files_unchanged": true,
+  "annualization_performed": false,
+  "power_concentrations_recomputed": false
+}

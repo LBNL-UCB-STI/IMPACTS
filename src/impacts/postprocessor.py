@@ -490,6 +490,7 @@ def _run_postprocess_steps(
     from .pipeline.postprocess.step5_plot_exposure import run as run_step5
     from .pipeline.postprocess.step6_plot_delta_concentrations import run as run_step6
     from .pipeline.postprocess.step7_plot_delta_exposure import run as run_step7
+    from .pipeline.postprocess.step8_human_exposure import run as run_step8
 
     settings = load_settings_from_yaml(settings_path)
     from .config.path_registry import build_registry
@@ -669,6 +670,7 @@ def _run_postprocess_steps(
     if not inmap_cells_path.exists():
         inmap_cells_path = output_root / "preprocess" / "inmap_grid.parquet"
     delta_baseline_concentration_path = None
+    delta_baseline_raw = None
     if baseline_concentration_override is not None:
         p = Path(baseline_concentration_override).expanduser().resolve()
         if p.exists():
@@ -691,10 +693,27 @@ def _run_postprocess_steps(
                 _remove_stale_postprocess_delta_outputs(output_dir)
         else:
             _remove_stale_postprocess_delta_outputs(output_dir)
+    human_exposure = getattr(settings.impacts.analysis, "human_exposure", None)
+    human_exposure_ces_path = None
+    if human_exposure and human_exposure.enabled and human_exposure.ces_tracts_file:
+        human_exposure_ces_path = (
+            Path(settings_path).resolve().parent / human_exposure.ces_tracts_file
+        ).resolve()
+    power_plants_path = None
+    power_generation = getattr(settings.impacts, "power_generation", None)
+    generated_plants = output_root / "power_generation" / "plant_emissions_used_for_concentration.csv"
+    if generated_plants.exists():
+        power_plants_path = str(generated_plants)
+    if power_generation and power_generation.plant_markers_file:
+        power_plants_path = str((Path(settings_path).resolve().parent / power_generation.plant_markers_file).resolve())
     if conc_path.exists() and net_path.exists():
         map_outputs = run_step4(
             concentration_path=str(conc_path),
             network_path=str(net_path),
+            power_plants_path=power_plants_path,
+            pm25_component_region_path=(
+                str(human_exposure_ces_path) if human_exposure_ces_path is not None else None
+            ),
             output_dir=output_dir / "concentrations",
         )
         for key, value in map_outputs.items():
@@ -713,6 +732,26 @@ def _run_postprocess_steps(
             outputs[f"exposure_{key}"] = value
     else:
         logger.info("Skipping Step 5: exposure outputs not found at %s", output_root)
+
+    if human_exposure and human_exposure.enabled:
+        if not human_exposure.ces_tracts_file or not human_exposure.sensitive_facilities_file:
+            raise ValueError(
+                "impacts.analysis.human_exposure requires ces_tracts_file and sensitive_facilities_file when enabled"
+            )
+        ces_path = human_exposure_ces_path
+        facilities_path = (Path(settings_path).resolve().parent / human_exposure.sensitive_facilities_file).resolve()
+        human_outputs = run_step8(
+            population_path=str(pop_path),
+            concentration_path=str(conc_path),
+            ces_tracts_path=str(ces_path),
+            sensitive_facilities_path=str(facilities_path),
+            schools_layer=human_exposure.schools_layer,
+            ltc_layer=human_exposure.ltc_layer,
+            output_dir=output_dir / "human_exposure",
+            power_plants_path=power_plants_path,
+        )
+        for key, value in human_outputs.items():
+            outputs[f"human_exposure_{key}"] = value
     delta_table_path = None
     if delta_baseline_concentration_path is None:
         if delta_baseline_raw:
@@ -768,22 +807,18 @@ def postprocess_from_pipeline_manifest(
 
     log_step_banner("Postprocess", "Run Postprocess Steps", logger=logger)
     settings_path = _resolve_settings_path(run_manifest_path, output_root=output_root_arg)
-    if output_root_arg is None:
-        postprocess_outputs = _run_postprocess_steps(
-            settings_path,
-            run_manifest_path=run_manifest_path,
-            input_roots=input_roots_arg,
-            baseline_concentration_override=baseline_concentration_override,
-        )
-    else:
-        postprocess_outputs = _run_postprocess_steps(
-            settings_path,
-            run_manifest_path=run_manifest_path,
-            output_root=output_root,
-            allow_missing_source_inputs=True,
-            input_roots=input_roots_arg,
-            baseline_concentration_override=baseline_concentration_override,
-        )
+    # A run manifest owns its output directory.  Always pass that directory to
+    # postprocess so maintained products (including the web map) are generated
+    # from and written beside the selected run, rather than falling back to the
+    # generic output path in settings.yaml.
+    postprocess_outputs = _run_postprocess_steps(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
+        allow_missing_source_inputs=output_root_arg is not None,
+        input_roots=input_roots_arg,
+        baseline_concentration_override=baseline_concentration_override,
+    )
 
     postprocess_manifest = {
         "contract_version": pipeline_manifest.get("contract_version", "1"),

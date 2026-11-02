@@ -235,10 +235,27 @@ def _run_stages_from_preprocess_manifest(
         if existing_outputs.get("beam_population_counts")
         else None
     )
+    power_generation_concentration_path = (
+        Path(existing_outputs["power_generation_isrm_concentrations"]).resolve()
+        if existing_outputs.get("power_generation_isrm_concentrations")
+        else None
+    )
     if execute_inmap or execute_aermod or execute_exposure:
         from .pipeline.workflow.step2_compute_inmap_concentrations import run as run_inmap_dispersion
         from .pipeline.workflow.step3_compute_aermod_concentrations import run as run_aermod_dispersion
         from .pipeline.workflow.step4_prepare_exposure import run as run_prepare_exposure
+        if pipeline.power_generation.get("enabled") and execute_inmap:
+            from .pipeline.workflow.hourly_power import run_hourly_power
+
+            _log_step_banner("STEP 2P", "hourly power emissions and ISRM concentrations")
+            stage_started = time.perf_counter()
+            power_generation_concentration_path = run_hourly_power(
+                config=pipeline.power_generation,
+                isrm_url=str(pipeline.isrm_url),
+                inmap_grid_path=str(pipeline.inmap_grid_path),
+                output_dir=output_root / "power_generation",
+            )
+            _record_stage_timing(stage_timings, "step2p_power_generation", stage_started)
         if execute_inmap and emissions_outputs.get("beam_emissions_for_inmap"):
             _log_step_banner("STEP 2", "inmap concentrations")
             logger.info("Using Step 2 implementation: inmap_concentrations_and_export")
@@ -247,7 +264,10 @@ def _run_stages_from_preprocess_manifest(
                 pipeline=pipeline,
                 raw_dir=output_root / "concentrations",
                 emissions_input_path=emissions_outputs["beam_emissions_for_inmap"],
-                inmap_study_area_grid_path=emissions_outputs.get("beam_inmap_study_area_grid"),
+                # Receptors must come from the complete preprocessing study-area
+                # grid. The Step 1 artifact contains only cells with emissions and
+                # is retained for diagnostics, not as a receptor mask.
+                inmap_study_area_grid_path=pipeline.inmap_grid_path,
             )
             _record_stage_timing(stage_timings, "step2_compute_inmap_concentrations", stage_started)
             logger.info("InMAP concentrations complete: wrote %s", concentration_path)
@@ -285,6 +305,10 @@ def _run_stages_from_preprocess_manifest(
                 raw_dir=output_root / "exposure",
                 inmap_concentrations_path=str(concentration_path),
                 aermod_concentrations_path=str(aermod_concentration_path) if aermod_concentration_path else None,
+                power_generation_concentrations_path=(
+                    str(power_generation_concentration_path)
+                    if power_generation_concentration_path else None
+                ),
                 manifest_inputs=manifest_inputs,
             )
             _record_stage_timing(stage_timings, "step4_prepare_exposure", stage_started)
@@ -325,6 +349,13 @@ def _run_stages_from_preprocess_manifest(
             "beam_aermod_concentrations": str(aermod_concentration_path) if aermod_concentration_path else None,
             "beam_aermod_concentrations_gpkg": (
                 str(aermod_concentration_path.with_suffix(".gpkg")) if aermod_concentration_path else None
+            ),
+            "power_generation_isrm_concentrations": (
+                str(power_generation_concentration_path) if power_generation_concentration_path else None
+            ),
+            "power_generation_isrm_concentrations_gpkg": (
+                str(power_generation_concentration_path.with_suffix(".gpkg"))
+                if power_generation_concentration_path else None
             ),
             "beam_concentration_distribution": str(exposure_grid_path) if exposure_grid_path else None,
             "beam_concentration_distribution_gpkg": (

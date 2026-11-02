@@ -120,7 +120,7 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.emissions.beam.include_passenger is True
     assert config.impacts.emissions.beam.include_freight is True
     assert len(config.impacts.analysis.sector_targets) == 6
-    assert config.impacts.emissions.vehicle_category_metadata_file.endswith(
+    assert Path(config.impacts.emissions.vehicle_category_metadata_file).as_posix().endswith(
         "vehicle-tech/emissions/emissions_vehicle_categories.csv"
     )
     assert config.impacts.emissions.defaults.default_annualization_days.light_duty == 327.0
@@ -267,7 +267,7 @@ def test_pipeline_profile_time_relaunches_under_impacts_output(monkeypatch, tmp_
     assert main(["pipeline", "--config", str(config_path), "--profile", "time"]) == 0
     assert captured["command"] == [
         "/usr/bin/time",
-        "-l",
+        "-l" if sys.platform == "darwin" else "-v",
         "-o",
         str((tmp_path / "impacts_output" / "profiling" / "pipeline.time.txt").resolve()),
         sys.executable,
@@ -338,7 +338,7 @@ def test_pipeline_profile_all_relaunches_with_time_memray_and_cpu(monkeypatch, t
     assert main(["pipeline", "--config", str(config_path), "--profile", "all"]) == 0
     assert captured["command"] == [
         "/usr/bin/time",
-        "-l",
+        "-l" if sys.platform == "darwin" else "-v",
         "-o",
         str((tmp_path / "impacts_output" / "profiling" / "pipeline.time.txt").resolve()),
         sys.executable,
@@ -389,7 +389,7 @@ def test_postsim_profile_time_uses_timestamped_output_env(monkeypatch, tmp_path:
     assert re.fullmatch(r"impacts-postsim--sfbay--base--\d{8}-\d{6}", postsim_output_root.name)
     assert captured["command"] == [
         "/usr/bin/time",
-        "-l",
+        "-l" if sys.platform == "darwin" else "-v",
         "-o",
         str(postsim_output_root / "profiling" / "postsim.time.txt"),
         sys.executable,
@@ -462,9 +462,9 @@ def test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_d
     assert config.impacts.population.freight_sample == 0.009900990099009901
     assert config.impacts.emissions.defaults.default_annualization_days.light_duty == 327.0
     assert config.impacts.emissions.defaults.default_annualization_days.medium_heavy_duty == 312.0
-    assert config.impacts.emissions.vehicle_category_metadata_file == "vehicle-tech/emissions/emissions_vehicle_categories.csv"
-    assert config.impacts.emissions.rates_folder == "vehicle-tech/emissions/activities/2018-Baseline/rates"
-    assert config.impacts.emissions.inventory.inventory_folder == "impacts/impacts_inputs/activities/2018-Baseline/inventory"
+    assert Path(config.impacts.emissions.vehicle_category_metadata_file).as_posix() == "vehicle-tech/emissions/emissions_vehicle_categories.csv"
+    assert Path(config.impacts.emissions.rates_folder).as_posix() == "vehicle-tech/emissions/activities/2018-Baseline/rates"
+    assert Path(config.impacts.emissions.inventory.inventory_folder).as_posix() == "impacts/impacts_inputs/activities/2018-Baseline/inventory"
     assert config.impacts.emissions.inventory.passenger_file is None
     assert config.impacts.emissions.inventory.freight_file is None
     assert config.impacts.emissions.inventory.enable_passenger_activity_correction is True
@@ -537,7 +537,7 @@ def test_build_settings_from_pilates_template_uses_builtin_impacts_settings(tmp_
     assert config.impacts.emissions.beam.freight_vehicle_types_file is None
     assert len(config.impacts.analysis.sector_targets) == 6
     assert (
-        config.impacts.emissions.vehicle_category_metadata_file
+        Path(config.impacts.emissions.vehicle_category_metadata_file).as_posix()
         == "vehicle-tech/emissions/emissions_vehicle_categories.csv"
     )
     assert config.impacts.analysis.inventory_targets == []

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 from typing import Dict
@@ -111,6 +112,18 @@ def build_preprocess_manifest(
             "Set impacts.dispersions.aermod.asrv_patterns_epsg explicitly or provide CRS metadata in the file."
         )
 
+    power_generation = getattr(settings.impacts, "power_generation", None)
+    power_generation_payload = (
+        asdict(power_generation)
+        if power_generation is not None
+        else {"enabled": False}
+    )
+    if power_generation is not None:
+        for field in ("hourly_demand_file", "charging_summary_file", "breathe_root",
+                      "county_boundaries_file", "plant_markers_file"):
+            value = getattr(power_generation, field)
+            power_generation_payload[field] = resolve_path(value, config_path) if value else None
+
     pipeline_payload = {
         "emissions_enabled": bool(pipeline.emissions),
         "inmap_enabled": bool(pipeline.inmap),
@@ -162,6 +175,7 @@ def build_preprocess_manifest(
         "include_non_osm_car_links": bool(beam_processing.include_non_osm_car_links),
         "include_passenger": bool(beam_processing.include_passenger),
         "include_freight": bool(beam_processing.include_freight),
+        "power_generation": power_generation_payload,
     }
     pipeline_config = PipelineConfig.from_dict(pipeline_payload)
 

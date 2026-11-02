@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
 from copy import deepcopy
@@ -389,6 +390,59 @@ class Exposure:
 
 
 @dataclass(frozen=True)
+class PowerGeneration:
+    """Inputs to the single supported hourly charging-to-power workflow."""
+    enabled: bool = False
+    hourly_demand_file: Optional[str] = None
+    charging_summary_file: Optional[str] = None
+    breathe_root: Optional[str] = None
+    county_boundaries_file: Optional[str] = None
+    source_layer_index: Optional[int] = None
+    allow_incomplete_charging_scenario: bool = False
+    plant_markers_file: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "PowerGeneration":
+        retired = {"charging_events_file", "plant_emissions_file", "precomputed_power_isrm_file",
+                   "charging_demand_source", "scenario", "sample_hours", "baseline_fleet_size",
+                   "fallback_fleet_size", "beam_charging_events_file", "force_all_vehicle_types_electric"}
+        obsolete = sorted(k for k in payload if k in retired or k.startswith("beam_"))
+        if obsolete:
+            raise ValueError(
+                "The annual-scaling power method has been removed; obsolete settings: "
+                f"{obsolete}. Supply hourly_demand_file, charging_summary_file, breathe_root, "
+                "county_boundaries_file and an explicit source_layer_index. "
+                "Use plant_markers_file for a plotting-only plant override."
+            )
+        _reject_unknown_keys(payload, {
+            "enabled", "hourly_demand_file", "charging_summary_file", "breathe_root",
+            "county_boundaries_file", "source_layer_index", "allow_incomplete_charging_scenario",
+            "plant_markers_file",
+        }, "impacts.power_generation")
+        result = cls(
+            enabled=_required_bool(payload.get("enabled", False), "impacts.power_generation.enabled"),
+            hourly_demand_file=_optional_string(payload.get("hourly_demand_file")),
+            charging_summary_file=_optional_string(payload.get("charging_summary_file")),
+            breathe_root=_optional_string(payload.get("breathe_root")),
+            county_boundaries_file=_optional_string(payload.get("county_boundaries_file")),
+            source_layer_index=_optional_int(payload.get("source_layer_index")),
+            allow_incomplete_charging_scenario=_required_bool(
+                payload.get("allow_incomplete_charging_scenario", False),
+                "impacts.power_generation.allow_incomplete_charging_scenario"),
+            plant_markers_file=_optional_string(payload.get("plant_markers_file")),
+        )
+        if result.source_layer_index is not None and result.source_layer_index not in (0, 1):
+            raise ValueError("impacts.power_generation.source_layer_index must be 0 or 1.")
+        if result.enabled:
+            missing = [k for k in ("hourly_demand_file", "charging_summary_file", "breathe_root",
+                                  "county_boundaries_file", "source_layer_index")
+                       if getattr(result, k) is None]
+            if missing:
+                raise ValueError(f"Hourly power generation requires settings {missing} when enabled.")
+        return result
+
+
+@dataclass(frozen=True)
 class EmissionsInventory:
     passenger_file: Optional[str]
     freight_file: Optional[str]
@@ -662,12 +716,37 @@ def _parse_analysis_sector_targets(
 
 
 @dataclass(frozen=True)
+class HumanExposure:
+    enabled: bool = False
+    ces_tracts_file: Optional[str] = None
+    sensitive_facilities_file: Optional[str] = None
+    schools_layer: str = "Schools_BayArea"
+    ltc_layer: str = "LTC_BayArea"
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "HumanExposure":
+        _reject_unknown_keys(
+            payload,
+            {"enabled", "ces_tracts_file", "sensitive_facilities_file", "schools_layer", "ltc_layer"},
+            "impacts.analysis.human_exposure",
+        )
+        return cls(
+            enabled=_required_bool(payload.get("enabled", False), "impacts.analysis.human_exposure.enabled"),
+            ces_tracts_file=_optional_string(payload.get("ces_tracts_file")),
+            sensitive_facilities_file=_optional_string(payload.get("sensitive_facilities_file")),
+            schools_layer=str(payload.get("schools_layer", "Schools_BayArea")),
+            ltc_layer=str(payload.get("ltc_layer", "LTC_BayArea")),
+        )
+
+
+@dataclass(frozen=True)
 class Analysis:
     inventory_file: Optional[str] = None
     inventory_label: Optional[str] = None
     delta_baseline_concentration_distribution_file: Optional[str] = None
     inventory_targets: List[AnalysisTarget] = field(default_factory=list)
     sector_targets: List[AnalysisSectorTarget] = field(default_factory=list)
+    human_exposure: HumanExposure = field(default_factory=HumanExposure)
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Analysis":
@@ -679,6 +758,7 @@ class Analysis:
                 "delta_baseline_concentration_distribution_file",
                 "targets",
                 "inventory_targets",
+                "human_exposure",
             },
             "impacts.analysis",
         )
@@ -706,6 +786,7 @@ class Analysis:
             and payload.get("inventory_file") is None
             and payload.get("inventory_label") is None
             and payload.get("delta_baseline_concentration_distribution_file") is None
+            and not payload.get("human_exposure")
         ):
             return cls()
         if raw_inventory_targets is None:
@@ -740,6 +821,7 @@ class Analysis:
             delta_baseline_concentration_distribution_file=delta_baseline_concentration_distribution_file,
             inventory_targets=inventory_targets,
             sector_targets=sector_targets,
+            human_exposure=HumanExposure.from_dict(dict(payload.get("human_exposure", {}) or {})),
         )
 
 @dataclass(frozen=True)
@@ -754,6 +836,7 @@ class Impacts:
     emissions: Emissions
     dispersions: Dispersions
     exposure: Exposure
+    power_generation: PowerGeneration
     population: "Population"
     analysis: Analysis = field(default_factory=Analysis)
 
@@ -764,7 +847,7 @@ class Impacts:
             {
                 "local_output_folder", "local_input_folder", "seed", "scenario",
                 "pipeline", "population",
-                "activities", "fleet", "emissions", "dispersions", "exposure", "analysis",
+                "activities", "fleet", "emissions", "dispersions", "exposure", "power_generation", "analysis",
             },
             "impacts",
         )
@@ -800,6 +883,7 @@ class Impacts:
             emissions=Emissions.from_dict(emissions_payload),
             dispersions=Dispersions.from_dict(dict(impacts_settings.get("dispersions", {}) or {})),
             exposure=Exposure.from_dict(dict(impacts_settings.get("exposure", {}) or {})),
+            power_generation=PowerGeneration.from_dict(dict(impacts_settings.get("power_generation", {}) or {})),
             population=population,
             analysis=Analysis.from_dict(dict(impacts_settings.get("analysis", {}) or {})),
         )
@@ -1010,6 +1094,7 @@ class ImpactsSettings:
                         self.impacts.exposure.primary_pm25_integration_strategy
                     ),
                 },
+                "power_generation": asdict(self.impacts.power_generation),
                 "population": {
                     "passenger_folder": self.impacts.population.passenger_folder,
                     "freight_folder": self.impacts.population.freight_folder,
@@ -2622,7 +2707,8 @@ def load_fleet_workflow_from_activities_manifest(activities_manifest_path: str |
     raw = _build_fleet_config_from_root(_build_emfac_root_from_settings_file(settings_source))
     _validate_fleet(raw, settings_source)
     raw = _ingest_fleet_sources(raw)
-    raw["activities"] = {
+    activities = dict(raw.get("activities", {}))
+    activities.update({
         "outputs": manifest["outputs"]["outputs_root"],
         "passenger_rates_file": manifest["outputs"]["passenger_rates_file"],
         "passenger_activity_file": manifest["outputs"]["passenger_activity_file"],
@@ -2631,7 +2717,8 @@ def load_fleet_workflow_from_activities_manifest(activities_manifest_path: str |
         "freight_activity_file": manifest["outputs"]["freight_activity_file"],
         "freight_fleet_file": manifest["outputs"]["freight_fleet_file"],
         "emissions_store_root": manifest["outputs"]["emissions_store_root"],
-    }
+    })
+    raw["activities"] = activities
     raw["vehicle_category_metadata_file"] = manifest["vehicle_category_metadata_file"]
     return _build_loaded_fleet_workflow(raw)
 

@@ -298,6 +298,11 @@ def resolve_latest_events_local_path(root: str) -> Optional[str]:
         latest_events = find_latest_iteration_events(latest_iters_dir)
         if latest_events:
             return str(latest_events)
+    # A user may supply a single iteration directory directly (e.g. 3.events.parquet).
+    candidates = [p for p in resolved.iterdir() if p.is_file()
+                  and re.fullmatch(r'\d+\.events\.(parquet|csv|csv\.gz)', p.name)]
+    if candidates:
+        return str(max(candidates, key=lambda p: (int(p.name.split('.')[0]), p.suffix == '.parquet')))
     return None
 
 
@@ -718,7 +723,8 @@ def register_local_input(
     source_path: str,
     optional: bool = False,
 ) -> str:
-    source = str(Path(source_path).resolve())
+    raw_source = str(source_path)
+    source = raw_source if "://" in raw_source else str(Path(raw_source).resolve())
     manifest_inputs[key] = file_entry(
         kind="local",
         path=source,

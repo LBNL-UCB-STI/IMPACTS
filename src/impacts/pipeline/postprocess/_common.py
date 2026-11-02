@@ -49,37 +49,11 @@ MAP_COLORBAR_LABELPAD = 18
 # Colormaps — fully opaque, mild low values → saturated high values
 # ---------------------------------------------------------------------------
 
-CMAP_PM25 = mcolors.LinearSegmentedColormap.from_list("pm25", [
-    (1.00, 1.00, 0.82, 1.00),  # mild yellow
-    (1.00, 0.92, 0.36, 1.00),  # yellow
-    (0.98, 0.62, 0.12, 1.00),  # orange
-    (0.86, 0.20, 0.12, 1.00),  # red
-    (0.45, 0.00, 0.05, 1.00),  # dark red
-])
-
-CMAP_BC = mcolors.LinearSegmentedColormap.from_list("bc", [
-    (0.95, 0.93, 0.98, 1.00),
-    (0.82, 0.74, 0.90, 1.00),
-    (0.62, 0.42, 0.80, 1.00),
-    (0.40, 0.12, 0.62, 1.00),
-    (0.12, 0.00, 0.22, 1.00),
-])
-
-CMAP_NO2 = mcolors.LinearSegmentedColormap.from_list("no2", [
-    (0.86, 0.97, 0.99, 1.00),
-    (0.56, 0.86, 0.92, 1.00),
-    (0.18, 0.66, 0.78, 1.00),
-    (0.00, 0.38, 0.56, 1.00),
-    (0.00, 0.12, 0.26, 1.00),
-])
-
-CMAP_POP = mcolors.LinearSegmentedColormap.from_list("population", [
-    (0.91, 0.98, 0.90, 1.00),
-    (0.68, 0.88, 0.62, 1.00),
-    (0.34, 0.68, 0.30, 1.00),
-    (0.04, 0.45, 0.16, 1.00),
-    (0.00, 0.20, 0.05, 1.00),
-])
+CMAP_GREEN_RED = plt.get_cmap("RdYlGn_r")
+CMAP_PM25 = CMAP_GREEN_RED
+CMAP_BC = CMAP_GREEN_RED
+CMAP_NO2 = CMAP_GREEN_RED
+CMAP_POP = CMAP_GREEN_RED
 
 
 # ---------------------------------------------------------------------------
@@ -116,18 +90,37 @@ def _padded_extent_from_bounds(bounds) -> tuple[float, float, float, float]:
 
 
 def _add_basemap(ax, *, crs=None) -> None:
-    try:
-        import contextily as ctx
-        ctx.add_basemap(
-            ax,
-            source=ctx.providers.CartoDB.PositronNoLabels,
-            zoom="auto",
-            zoom_adjust=MAP_BASEMAP_ZOOM_ADJUST,
-            crs=crs,
-            zorder=0,
-        )
-    except Exception as exc:
-        logger.warning("Could not add basemap (offline or contextily missing): %s", exc)
+    """Use a neutral offline background; never request web/API map tiles."""
+    ax.set_facecolor("#f4f2ed")
+
+
+def _load_emitting_power_plants(path: str | None, target_crs):
+    if not path:
+        return None
+    import geopandas as gpd
+    frame = pd.read_csv(path)
+    emission_columns = [c for c in ("PM2_5_kg", "NOx_kg", "SOx_kg", "NH3_kg", "VOC_kg") if c in frame]
+    if emission_columns:
+        emitting = frame[emission_columns].apply(pd.to_numeric, errors="coerce").fillna(0).gt(0).any(axis=1)
+        frame = frame.loc[emitting].copy()
+    frame["LON"] = pd.to_numeric(frame["LON"], errors="coerce")
+    frame["LAT"] = pd.to_numeric(frame["LAT"], errors="coerce")
+    frame = frame.dropna(subset=["LON", "LAT"])
+    plants = gpd.GeoDataFrame(frame, geometry=gpd.points_from_xy(frame["LON"], frame["LAT"]), crs="EPSG:4326")
+    return plants.to_crs(target_crs)
+
+
+def _add_power_plants(ax, plants) -> None:
+    if plants is None or plants.empty:
+        return
+    xmin, xmax = ax.get_xlim()
+    ymin, ymax = ax.get_ylim()
+    visible = plants.cx[xmin:xmax, ymin:ymax]
+    if visible.empty:
+        return
+    visible.plot(ax=ax, marker="^", color="#1976d2", edgecolor="white", linewidth=0.55,
+                 markersize=42, label="Emitting power plant", zorder=5)
+    ax.legend(loc="lower right", fontsize=13, framealpha=0.9)
 
 
 def _add_colorbar(fig, ax, cmap, vmax: float, label: str, *, norm=None) -> None:

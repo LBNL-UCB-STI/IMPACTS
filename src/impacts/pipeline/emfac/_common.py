@@ -133,21 +133,25 @@ def build_hashed_vehicle_type_ids(
         raise ValueError(f"{frame_name} contains null values in required column '{source_column}'")
 
     prepared[mapping_column] = prepared[source_column].astype(str)
-    seen_short_to_long: dict[str, str] = {}
+    mapping_ids = prepared[mapping_column].astype(str).tolist()
+    digests = [hashlib.sha256(value.encode("utf-8")).hexdigest() for value in mapping_ids]
     hashed_ids: list[str] = []
+    for current_length in range(hash_hex_length, 65):
+        candidate_ids = [f"{prefix}-{digest[:current_length]}" for digest in digests]
+        short_to_long: dict[str, str] = {}
+        has_collision = False
+        for candidate_id, mapping_id in zip(candidate_ids, mapping_ids):
+            existing = short_to_long.get(candidate_id)
+            if existing is not None and existing != mapping_id:
+                has_collision = True
+                break
+            short_to_long[candidate_id] = mapping_id
+        if not has_collision:
+            hashed_ids = candidate_ids
+            break
 
-    for mapping_vehicle_type_id in prepared[mapping_column].tolist():
-        mapping_vehicle_type_id = str(mapping_vehicle_type_id)
-        digest = hashlib.sha256(mapping_vehicle_type_id.encode("utf-8")).hexdigest()
-        hashed_vehicle_type_id = f"{prefix}-{digest[:hash_hex_length]}"
-        existing = seen_short_to_long.get(hashed_vehicle_type_id)
-        if existing is not None and existing != mapping_vehicle_type_id:
-            raise ValueError(
-                f"{frame_name} hash collision detected for "
-                f"{mapping_vehicle_type_id} and {existing} using prefix={prefix} length={hash_hex_length}"
-            )
-        seen_short_to_long[hashed_vehicle_type_id] = mapping_vehicle_type_id
-        hashed_ids.append(hashed_vehicle_type_id)
+    if not hashed_ids:
+        raise ValueError(f"{frame_name} could not generate collision-free hashed {source_column} values")
 
     if len(set(hashed_ids)) != len(hashed_ids):
         raise ValueError(f"{frame_name} generated duplicate hashed {source_column} values")
@@ -377,10 +381,15 @@ def load_rates_store_relative_paths(
     required_emfac_ids: list[str],
     require_duckdb: bool = False,
 ) -> dict[str, str]:
-    activities_output_root = Path(str(config["activities"]["outputs"])).expanduser().resolve()
-    frism_year = config["frism"]["year"]
-    scenario_id = str(scenario).strip()
-    store_root = activities_output_root / "emissions" / f"{frism_year}-{scenario_id}"
+    activities = config["activities"]
+    configured_store_root = activities.get("emissions_store_root")
+    if configured_store_root:
+        store_root = Path(str(configured_store_root)).expanduser().resolve()
+    else:
+        activities_output_root = Path(str(activities["outputs"])).expanduser().resolve()
+        frism_year = config["frism"]["year"]
+        scenario_id = str(scenario).strip()
+        store_root = activities_output_root / "emissions" / f"{frism_year}-{scenario_id}"
     parquet_root = store_root / "dataset"
     duckdb_path = store_root / "dataset.duckdb"
     output_root_path = Path(str(output_root)).expanduser().resolve()

@@ -1,0 +1,334 @@
+{
+  "upstream_commit": "159a5598210905471a0412609d8414ccf97f355f",
+  "tests": {
+    "original": {
+      "tests": 389,
+      "failures": 6,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 383
+    },
+    "clean": {
+      "tests": 392,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 392
+    },
+    "without_notebooks": {
+      "tests": 392,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 13,
+      "passed": 379
+    }
+  },
+  "emissions": [
+    {
+      "file": "beam_emissions_for_inmap",
+      "groups": 5405089,
+      "group_keys": [
+        "inmap_cell_id",
+        "vehicleTypeId",
+        "process",
+        "roadCategory",
+        "source_release_height"
+      ],
+      "max_absolute_difference": 2.842170943040401e-14
+    },
+    {
+      "file": "beam_emissions_for_aermod",
+      "groups": 301241,
+      "group_keys": [
+        "aermod_cell_id",
+        "source_release_height",
+        "source_temporal_class",
+        "source_urban_class"
+      ],
+      "max_absolute_difference": 4.263256414560601e-14
+    },
+    {
+      "file": "beam_emissions_by_county_process",
+      "groups": 272538,
+      "group_keys": [
+        "county_COUNTYFP",
+        "vehicleTypeId",
+        "process",
+        "roadCategory",
+        "source_release_height"
+      ],
+      "max_absolute_difference": 5.684341886080801e-13
+    }
+  ],
+  "traffic": {
+    "Original skim / 3km": {
+      "comparisons": [
+        {
+          "file": "concentrations/beam_inmap_concentrations.parquet",
+          "rows": 2559,
+          "max_absolute_difference": {
+            "isrm": 0.0,
+            "SOA": 0.0,
+            "pNO3": 0.0,
+            "pNH4": 0.0,
+            "pSO4": 0.0,
+            "PrimaryPM25": 0.0,
+            "BC": 0.0,
+            "NO2": 0.0,
+            "TotalPM25": 0.0,
+            "InMAPOnly_PrimaryPM25": 0.0,
+            "InMAPOnly_TotalPM25": 0.0,
+            "InMAPOnly_BC": 0.0,
+            "InMAPOnly_NO2": 0.0
+          },
+          "geometry_and_ids_equal": true
+        },
+        {
+          "file": "concentrations/beam_aermod_concentrations.parquet",
+          "rows": 6957973,
+          "max_absolute_difference": {
+            "inmap_cell_id": 0.0,
+            "target_xm": 0.0,
+            "target_ym": 0.0,
+            "target_ix": 0.0,
+            "target_iy": 0.0,
+            "target_key": 0.0,
+            "pNH4": 0.0,
+            "NO2": 0.0,
+            "has_aermod_no2": 0.0,
+            "PrimaryPM25": 1.1102230246251565e-16,
+            "has_aermod_primarypm25": 0.0,
+            "pSO4": 0.0,
+            "SOA": 0.0,
+            "BC": 0.0,
+            "has_aermod_bc": 0.0,
+            "TotalPM25": 1.1102230246251565e-16
+          },
+          "geometry_and_ids_equal": true
+        },
+        {
+          "file": "exposure/beam_concentration_distribution.parquet",
+          "rows": 6957973,
+          "max_absolute_difference": {
+            "inmap_cell_id": 0.0,
+            "TotalPM25": 2.220446049250313e-16,
+            "PrimaryPM25": 1.1102230246251565e-16,
+            "SecondaryPM25": 0.0,
+            "BC": 0.0,
+            "NO2": 0.0,
+            "inmap_PrimaryPM25": 0.0,
+            "inmap_SecondaryPM25": 0.0,
+            "inmap_only_PrimaryPM25": 0.0,
+            "inmap_only_TotalPM25": 0.0,
+            "inmap_only_BC": 0.0,
+            "inmap_only_NO2": 0.0,
+            "aermod_PrimaryPM25": 1.1102230246251565e-16,
+            "aermod_PrimaryPM25_scaled": 1.1102230246251565e-16,
+            "aermod_PrimaryPM25_scale_factor": 0.0,
+            "aermod_SecondaryPM25": 0.0,
+            "has_aermod_primarypm25": 0.0,
+            "has_aermod_bc": 0.0,
+            "has_aermod_no2": 0.0,
+            "inmap_BC": 0.0,
+            "inmap_NO2": 0.0,
+            "aermod_BC": 0.0,
+            "aermod_NO2": 0.0
+          },
+          "geometry_and_ids_equal": true
+        }
+      ],
+      "population_weighted": {
+        "reference": {
+          "population": 6687433.0,
+          "TotalPM25": 1.5235509072732338,
+          "BC": 0.07051355900902836,
+          "NO2": 5.048387359046991,
+          "inmap_only_TotalPM25": 1.1654513229632748,
+          "inmap_only_BC": 0.03484866612376674,
+          "inmap_only_NO2": 4.167605610756946
+        },
+        "clean": {
+          "population": 6687433.0,
+          "TotalPM25": 1.5235509072732338,
+          "BC": 0.07051355900902836,
+          "NO2": 5.048387359046991,
+          "inmap_only_TotalPM25": 1.1654513229632748,
+          "inmap_only_BC": 0.03484866612376674,
+          "inmap_only_NO2": 4.167605610756946
+        }
+      }
+    },
+    "BF-06EP / legacy4500": {
+      "comparisons": [
+        {
+          "file": "concentrations/beam_inmap_concentrations.parquet",
+          "rows": 2559,
+          "max_absolute_difference": {
+            "isrm": 0.0,
+            "SOA": 4.163336342344337e-17,
+            "pNO3": 8.326672684688674e-17,
+            "pNH4": 5.551115123125783e-17,
+            "pSO4": 2.6020852139652106e-18,
+            "PrimaryPM25": 1.6653345369377348e-16,
+            "BC": 5.204170427930421e-18,
+            "NO2": 1.3322676295501878e-15,
+            "TotalPM25": 2.220446049250313e-16,
+            "InMAPOnly_PrimaryPM25": 4.440892098500626e-16,
+            "InMAPOnly_TotalPM25": 3.3306690738754696e-16,
+            "InMAPOnly_BC": 1.3877787807814457e-17,
+            "InMAPOnly_NO2": 1.7763568394002505e-15
+          },
+          "geometry_and_ids_equal": true
+        },
+        {
+          "file": "concentrations/beam_aermod_concentrations.parquet",
+          "rows": 6957973,
+          "max_absolute_difference": {
+            "inmap_cell_id": 0.0,
+            "target_xm": 0.0,
+            "target_ym": 0.0,
+            "target_ix": 0.0,
+            "target_iy": 0.0,
+            "target_key": 0.0,
+            "pNH4": 0.0,
+            "NO2": 0.0,
+            "has_aermod_no2": 0.0,
+            "PrimaryPM25": 0.0,
+            "has_aermod_primarypm25": 0.0,
+            "pSO4": 0.0,
+            "SOA": 8.881784197001252e-16,
+            "BC": 0.0,
+            "has_aermod_bc": 0.0,
+            "TotalPM25": 0.0
+          },
+          "geometry_and_ids_equal": true
+        },
+        {
+          "file": "exposure/beam_concentration_distribution.parquet",
+          "rows": 6957973,
+          "max_absolute_difference": {
+            "inmap_cell_id": 0.0,
+            "TotalPM25": 8.881784197001252e-16,
+            "PrimaryPM25": 4.440892098500626e-16,
+            "SecondaryPM25": 1.1102230246251565e-16,
+            "BC": 1.1102230246251565e-16,
+            "NO2": 7.105427357601002e-15,
+            "inmap_PrimaryPM25": 1.6653345369377348e-16,
+            "inmap_SecondaryPM25": 1.1102230246251565e-16,
+            "inmap_only_PrimaryPM25": 4.440892098500626e-16,
+            "inmap_only_TotalPM25": 3.3306690738754696e-16,
+            "inmap_only_BC": 1.3877787807814457e-17,
+            "inmap_only_NO2": 1.7763568394002505e-15,
+            "aermod_PrimaryPM25": 0.0,
+            "aermod_PrimaryPM25_scaled": 0.0,
+            "aermod_PrimaryPM25_scale_factor": 0.0,
+            "aermod_SecondaryPM25": 0.0,
+            "has_aermod_primarypm25": 0.0,
+            "has_aermod_bc": 0.0,
+            "has_aermod_no2": 0.0,
+            "inmap_BC": 5.204170427930421e-18,
+            "inmap_NO2": 1.3322676295501878e-15,
+            "aermod_BC": 0.0,
+            "aermod_NO2": 0.0
+          },
+          "geometry_and_ids_equal": true
+        }
+      ],
+      "population_weighted": {
+        "reference": {
+          "population": 6687433.0,
+          "TotalPM25": 0.6338991970694506,
+          "BC": 0.026874289537151867,
+          "NO2": 2.6666724123053096,
+          "inmap_only_TotalPM25": 0.44007025094046875,
+          "inmap_only_BC": 0.013821814710386965,
+          "inmap_only_NO2": 2.3886686480396704
+        },
+        "clean": {
+          "population": 6687433.0,
+          "TotalPM25": 0.6338991970694506,
+          "BC": 0.026874289537151867,
+          "NO2": 2.6666724123053096,
+          "inmap_only_TotalPM25": 0.44007025094046875,
+          "inmap_only_BC": 0.013821814710386965,
+          "inmap_only_NO2": 2.3886686480396695
+        }
+      }
+    }
+  },
+  "power": {
+    "status": "passed",
+    "charging_vehicle_session_trip_parity": true,
+    "three_combined_power_cases_match": true,
+    "power_layer": 0,
+    "power_near_source_removal": false,
+    "cases": [
+      {
+        "scenario": "LDV",
+        "status": "passed",
+        "rows": 2559,
+        "daily_MWh": 158.0708890175555,
+        "peak_MW": 15.704301731777774,
+        "peak_hour": 19,
+        "maximum_concentration_absolute_difference": 5.421010862427522e-20,
+        "hourly_dispatch_and_annual_emissions_match": true
+      },
+      {
+        "scenario": "BF-06EP",
+        "status": "passed",
+        "rows": 2559,
+        "daily_MWh": 1409.3404116718082,
+        "peak_MW": 105.12102401419101,
+        "peak_hour": 16,
+        "maximum_concentration_absolute_difference": 1.0842021724855044e-19,
+        "hourly_dispatch_and_annual_emissions_match": true
+      },
+      {
+        "scenario": "BF-1EP",
+        "status": "passed",
+        "rows": 2559,
+        "daily_MWh": 1172.7869602297633,
+        "peak_MW": 92.53344765566374,
+        "peak_hour": 14,
+        "maximum_concentration_absolute_difference": 1.0842021724855044e-19,
+        "hourly_dispatch_and_annual_emissions_match": true
+      },
+      {
+        "scenario": "HF-1EP",
+        "status": "passed",
+        "rows": 2559,
+        "daily_MWh": 1640.1276181191538,
+        "peak_MW": 134.1105597038373,
+        "peak_hour": 13,
+        "maximum_concentration_absolute_difference": 0.0,
+        "hourly_dispatch_and_annual_emissions_match": true
+      }
+    ]
+  },
+  "exposure": {
+    "status": "passed",
+    "compared_files": [
+      "Bivariate_100m_Population_AERMOD_Enhanced_PM25.png",
+      "Bivariate_CES_Tract_AERMOD_PM25_PWC_Population.png",
+      "human_exposure_ces_tracts.parquet",
+      "human_exposure_grid.parquet",
+      "human_exposure_ltc.parquet",
+      "human_exposure_schools.parquet",
+      "Weighted_Scatter_3x3_Indicator_Corrected.png",
+      "tables\\CES25_Direct_Final_Comparison.csv",
+      "tables\\CES25_Direct_Final_Summary.csv",
+      "tables\\CES25_Direct_Final_tracts.csv",
+      "web\\BayArea_Interactive_Direct_Final_PM25_BC_NO2_Power.html"
+    ]
+  },
+  "wheel": {
+    "status": "passed",
+    "wheel": "impacts-0.0.0-py3-none-any.whl",
+    "isolated_import": true,
+    "cli_help": true,
+    "packaged_defaults_and_html": true,
+    "python_requirement": ">=3.11",
+    "memray_optional_nonwindows": true,
+    "entry_count": 86
+  }
+}
