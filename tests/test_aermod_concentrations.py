@@ -4,10 +4,48 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
+from pathlib import Path
 from shapely.geometry import Polygon
 
 from impacts.pipeline.workflow import step3_compute_aermod_concentrations as aermod_step
 from impacts.pipeline.workflow.step3_compute_aermod_concentrations import _attach_concentrations
+
+
+def test_circular_kernel_retains_boundary_and_zeros_diagonal():
+    frame = pd.DataFrame({'Grid_X': [0., 3000., 3000., 1800., 3100.],
+        'Grid_Y': [0., 0., 3000., 2400., 0.], 'Distance': [0.,3.,4.24,3.,3.1],
+        'Concentration': [1.,2.,3.,4.,5.]})
+    kernel = aermod_step._build_kernel_for_pattern(frame, grid_size_meters=100.)
+    values = dict(zip(zip(kernel['dix'],kernel['diy']),kernel['response_per_ton']))
+    assert values[(30,0)] == 2. and values[(18,24)] == 4.
+    assert values[(30,30)] == 0. and values[(31,0)] == 0.
+    assert frame.Concentration.tolist() == [1.,2.,3.,4.,5.]
+
+
+def test_kernel_cache_identity_includes_radius(tmp_path, monkeypatch):
+    path = tmp_path/'patterns'; path.write_bytes(b'test')
+    args = dict(path=str(path),target_epsg=26910,grid_size_meters=100.,pattern_keys=['a'])
+    first = aermod_step._asrv_cache_key(**args)
+    monkeypatch.setattr(aermod_step, '_AERMOD_RESPONSE_RADIUS_METERS', 4500.)
+    assert first != aermod_step._asrv_cache_key(**args)
+
+
+def test_cutoff_is_per_source_and_has_no_outside_fft_leakage():
+    frame = pd.DataFrame({'Grid_X': [0.,3000.,3000.,0.], 'Grid_Y': [0.,0.,3000.,3000.],
+        'Distance': [0.,3.,4.24,3.], 'Concentration': [1.,2.,9.,4.]})
+    kernel = aermod_step._build_kernel_for_pattern(frame, grid_size_meters=100.)
+    target = pd.DataFrame({'aermod_cell_id':[1,2,3], 'target_ix':[0,30,30], 'target_iy':[0,0,30]})
+    source = pd.DataFrame({'pattern_key':['p'], 'source_ix':[0], 'source_iy':[0],
+        'tons_per_year_PM25_aermod_allocated':[1.]})
+    def run(s):
+        return aermod_step._apply_kernels(source_df=s,target_index=target,target_id_col='aermod_cell_id',
+            emissions_cols=['tons_per_year_PM25_aermod_allocated'],kernel_library={'p':kernel})
+    first = run(source)
+    assert first.PrimaryPM25.iloc[2] == 0.
+    assert not first.has_aermod_primarypm25.iloc[2]
+    second = source.copy(); second['source_ix'] = 30
+    both = run(pd.concat([source,second],ignore_index=True))
+    assert both.PrimaryPM25.iloc[2] == pytest.approx(4.)
 
 
 def test_attach_concentrations_preserves_numeric_pollutants_and_boolean_support_masks() -> None:
@@ -180,7 +218,7 @@ def test_prepare_source_emissions_rejects_missing_source_class_columns(tmp_path:
         )
 
 
-def test_assign_source_pattern_keys_requires_exact_source_class_pattern() -> None:
+def test_assign_source_pattern_keys_raises_when_no_fallback_available() -> None:
     source_df = pd.DataFrame(
         {
             "source_xm": [0.0],
@@ -192,7 +230,7 @@ def test_assign_source_pattern_keys_requires_exact_source_class_pattern() -> Non
     )
     site_reference = pd.DataFrame({"DataSet_ID": ["site-a"], "site_xm": [0.0], "site_ym": [0.0]})
 
-    with pytest.raises(ValueError, match="missing exact source class patterns"):
+    with pytest.raises(ValueError, match="no available fallback"):
         aermod_step._assign_source_pattern_keys(
             source_df=source_df,
             pipeline=object(),

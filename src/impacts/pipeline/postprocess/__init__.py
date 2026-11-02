@@ -5,6 +5,7 @@ __all__ = [
     "step2_compare_annual_targets",
     "step3_compare_emissions_inventory",
     "step4_plot_concentrations",
+    "step8_human_exposure",
     "step5_plot_exposure",
     "step6_plot_delta_concentrations",
     "step7_plot_delta_exposure",

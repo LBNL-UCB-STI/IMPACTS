@@ -1,0 +1,54 @@
+{
+  "status": "passed",
+  "charging_vehicle_session_trip_parity": true,
+  "three_combined_power_cases_match": true,
+  "power_layer": 0,
+  "power_near_source_removal": false,
+  "cases": [
+    {
+      "scenario": "LDV",
+      "status": "passed",
+      "rows": 2559,
+      "daily_MWh": 158.0708890175555,
+      "peak_MW": 15.704301731777774,
+      "peak_hour": 19,
+      "maximum_concentration_absolute_difference": 5.421010862427522e-20,
+      "hourly_dispatch_and_annual_emissions_match": true
+    },
+    {
+      "scenario": "BF-06EP",
+      "status": "passed",
+      "rows": 2559,
+      "daily_MWh": 1409.3404116718082,
+      "peak_MW": 105.12102401419101,
+      "peak_hour": 16,
+      "maximum_concentration_absolute_difference": 1.0842021724855044e-19,
+      "hourly_dispatch_and_annual_emissions_match": true
+    },
+    {
+      "scenario": "BF-1EP",
+      "status": "passed",
+      "rows": 2559,
+      "daily_MWh": 1172.7869602297633,
+      "peak_MW": 92.53344765566374,
+      "peak_hour": 14,
+      "maximum_concentration_absolute_difference": 1.0842021724855044e-19,
+      "hourly_dispatch_and_annual_emissions_match": true
+    },
+    {
+      "scenario": "HF-1EP",
+      "status": "passed",
+      "rows": 2559,
+      "daily_MWh": 1640.1276181191538,
+      "peak_MW": 134.1105597038373,
+      "peak_hour": 13,
+      "maximum_concentration_absolute_difference": 0.0,
+      "hourly_dispatch_and_annual_emissions_match": true
+    }
+  ],
+  "date": "2026-11-02",
+  "tests_passed": 397,
+  "tests_failed": 0,
+  "implementation": "src/impacts/pipeline/workflow/hourly_power.py",
+  "legacy_power_removed": true
+}

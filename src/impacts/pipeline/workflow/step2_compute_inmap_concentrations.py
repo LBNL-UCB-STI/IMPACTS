@@ -22,6 +22,8 @@ from ...config.defaults import pollutants as default_pollutants
 from ...config.defaults import tons_per_year_to_ug_per_s
 from ...manifest.schema import PipelineConfig
 from . import _step_label
+from .isrm_near_source import build_near_source_mask
+from .isrm_near_source import zero_near_source_isrm
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +230,7 @@ def _compute_custom_receptor_response(
     source_indexed: pd.DataFrame,
     receptor_cells: np.ndarray,
     result_key: str,
+    near_source_mask: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     started = time.perf_counter()
     source_values = source_indexed[emissions_key].to_numpy()
@@ -244,17 +247,14 @@ def _compute_custom_receptor_response(
     response = np.zeros(n_receptors, dtype=float)
 
     if isinstance(transfer_matrix, pd.DataFrame):
-        aligned = transfer_matrix.reindex(index=source_cells, fill_value=0.0)
-        # keep only columns that are in receptor_cells (which is sorted)
-        cols_in_rc = []
-        for column in aligned.columns:
-            position = np.searchsorted(receptor_cells, column)
-            if position < n_receptors and receptor_cells[position] == column:
-                cols_in_rc.append(column)
-        if cols_in_rc:
-            sub = aligned[cols_in_rc].to_numpy().T.dot(source_values)
-            positions = np.searchsorted(receptor_cells, np.asarray(cols_in_rc, dtype=int))
-            response[positions] = sub
+        aligned = transfer_matrix.reindex(
+            index=source_cells,
+            columns=receptor_cells,
+            fill_value=0.0,
+        ).to_numpy()
+        if near_source_mask is not None:
+            aligned = zero_near_source_isrm(aligned, near_source_mask=near_source_mask)
+        response = aligned.T.dot(source_values)
     else:
         triplet_sources = np.asarray(transfer_matrix["source_ids"], dtype=np.int64)
         triplet_receptors = np.asarray(transfer_matrix["receptor_ids"], dtype=np.int64)
@@ -271,6 +271,12 @@ def _compute_custom_receptor_response(
         if np.any(in_rc_bounds):
             receptor_valid[in_rc_bounds] = receptor_cells[receptor_positions[in_rc_bounds]] == triplet_receptors[in_rc_bounds]
         valid = source_valid & receptor_valid
+        if near_source_mask is not None and np.any(valid):
+            valid_positions = np.flatnonzero(valid)
+            suppressed = near_source_mask[
+                source_positions[valid_positions], receptor_positions[valid_positions]
+            ]
+            valid[valid_positions[suppressed]] = False
         if np.any(valid):
             weights = triplet_values[valid] * source_values[source_positions[valid]]
             response = np.bincount(
@@ -305,7 +311,11 @@ def _prepare_grid_emissions(
     for col in emission_cols:
         if col in emissions_df.columns:
             source_column_map[col] = col
-
+    canonical_pm25 = "tons_per_year_PM25_inmap_allocated"
+    legacy_pm25 = "tons_per_year_PM2_5_inmap_allocated"
+    if canonical_pm25 in emission_cols and canonical_pm25 not in source_column_map:
+        if legacy_pm25 in emissions_df.columns:
+            source_column_map[canonical_pm25] = legacy_pm25
     df = emissions_df.copy()
     df[source_id_col] = pd.to_numeric(df[source_id_col], errors="coerce")
     df = df[df[source_id_col].notna()]
@@ -339,15 +349,31 @@ def _prepare_grid_emissions(
     return grouped, available_pollutants
 
 
+def _isrm_source_positions(sr, source_cells: np.ndarray) -> np.ndarray:
+    """Translate global grid IDs to the source axis of dense or compact stores."""
+    size = int(sr["SOA"].shape[1])
+    ids = np.asarray(sr["source_ids"][:], dtype=np.int64) if "source_ids" in sr else np.arange(size)
+    if len(ids) != size or len(np.unique(ids)) != size:
+        raise ValueError("Invalid ISRM source_ids: length mismatch or duplicate global IDs")
+    positions = pd.Index(ids).get_indexer(source_cells)
+    if np.any(positions < 0):
+        raise ValueError(f"ISRM lacks requested source grid IDs: {np.asarray(source_cells)[positions < 0][:20].tolist()}")
+    return positions
+
+
 def _matrix_response(
     sr,
     species_key: str,
     source_cells: np.ndarray,
     source_values: np.ndarray,
     receptor_cells: np.ndarray,
+    near_source_mask: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    transfer = sr[species_key].oindex[[0], source_cells, receptor_cells]
-    return transfer[0, :, :].T.dot(source_values)
+    transfer = sr[species_key].oindex[[0], _isrm_source_positions(sr, source_cells), receptor_cells]
+    transfer_matrix = np.asarray(transfer[0, :, :])
+    if near_source_mask is not None:
+        transfer_matrix = zero_near_source_isrm(transfer_matrix, near_source_mask=near_source_mask)
+    return transfer_matrix.T.dot(source_values)
 
 
 def _align_emissions_to_isrm_sources(
@@ -358,7 +384,11 @@ def _align_emissions_to_isrm_sources(
     """Step 2.1: align emissions source cells to the ISRM source index."""
     source_dim = int(sr["SOA"].shape[1])
     raw_source_cells = np.sort(emis[source_id_col].unique().astype(int))
-    valid_mask = (raw_source_cells >= 0) & (raw_source_cells < source_dim)
+    available = np.asarray(sr["source_ids"][:]) if "source_ids" in sr else np.arange(source_dim)
+    valid_mask = np.isin(raw_source_cells, available)
+    missing = emis.loc[~emis[source_id_col].isin(available)].drop(columns=[source_id_col])
+    if not missing.empty and missing.select_dtypes(include=[np.number]).abs().sum().sum() > 0:
+        raise ValueError(f"ISRM is missing nonzero-emission sources: {raw_source_cells[~valid_mask][:20].tolist()}")
     source_cells = raw_source_cells[valid_mask]
     dropped = int(raw_source_cells.size - source_cells.size)
     source_indexed = emis.set_index(source_id_col).reindex(source_cells).fillna(0.0)
@@ -377,6 +407,33 @@ def _align_emissions_to_isrm_sources(
     return source_cells, source_indexed
 
 
+def _study_area_receptor_cells(
+    grid: gpd.GeoDataFrame,
+    *,
+    receptor_dim: int,
+    grid_id_col: str = "inmap_cell_id",
+) -> np.ndarray:
+    """Return every valid ISRM receptor in the transportation study area."""
+    if grid_id_col not in grid.columns:
+        raise ValueError(
+            f"InMAP study-area grid is missing receptor id column {grid_id_col!r}; "
+            f"available={list(grid.columns)}"
+        )
+    raw_ids = pd.to_numeric(grid[grid_id_col], errors="coerce")
+    if raw_ids.isna().any():
+        raise ValueError(f"InMAP study-area grid contains invalid {grid_id_col} values.")
+    receptor_cells = np.sort(raw_ids.astype(np.int64).unique())
+    out_of_bounds = receptor_cells[
+        (receptor_cells < 0) | (receptor_cells >= int(receptor_dim))
+    ]
+    if out_of_bounds.size:
+        raise ValueError(
+            "InMAP study-area receptor ids exceed the ISRM receptor dimension: "
+            f"{out_of_bounds[:10].tolist()}"
+        )
+    return receptor_cells
+
+
 def _compute_species_response(
     *,
     sr,
@@ -385,6 +442,7 @@ def _compute_species_response(
     source_cells: np.ndarray,
     source_indexed: pd.DataFrame,
     receptor_cells: np.ndarray,
+    near_source_mask: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     started = time.perf_counter()
     source_values = source_indexed[emissions_key].to_numpy()
@@ -397,7 +455,14 @@ def _compute_species_response(
         int(receptor_cells.size),
     )
     _trace_array("2", f"{species_key}.source_values", source_values)
-    arr = _matrix_response(sr, species_key, source_cells, source_values, receptor_cells)
+    arr = _matrix_response(
+        sr,
+        species_key,
+        source_cells,
+        source_values,
+        receptor_cells,
+        near_source_mask=near_source_mask,
+    )
     logger.info(
         "%s computed %s in %.2fs",
         _step_label("2.2"),
@@ -415,6 +480,7 @@ def _compute_no2_response(
     source_indexed: pd.DataFrame,
     receptor_cells: np.ndarray,
     isrm_nox_to_no2_ratios_file: Optional[str],
+    near_source_mask: Optional[np.ndarray] = None,
 ) -> Optional[np.ndarray]:
     logger.info("%s resolving NO2 source from ISRM zarr or configured NOx->NO2 transfer matrix", _step_label("2.1"))
     if "NO2" in sr:
@@ -426,6 +492,7 @@ def _compute_no2_response(
             source_cells=source_cells,
             source_indexed=source_indexed,
             receptor_cells=receptor_cells,
+            near_source_mask=near_source_mask,
         )
 
     no2_transfer_matrix = _build_no2_transfer_matrix(
@@ -446,6 +513,7 @@ def _compute_no2_response(
         source_indexed=source_indexed,
         receptor_cells=receptor_cells,
         result_key="NO2",
+        near_source_mask=near_source_mask,
     )
 
 
@@ -479,7 +547,13 @@ def _assemble_concentration_results(
         _concentration_specs()[name]["output"]
         for name in concentrations
         if name in _concentration_specs()
-    ] + ["TotalPM25"]
+    ] + [
+        "TotalPM25",
+        "InMAPOnly_PrimaryPM25",
+        "InMAPOnly_TotalPM25",
+        "InMAPOnly_BC",
+        "InMAPOnly_NO2",
+    ]
     for output_key in ordered_output_keys:
         if output_key in arrays:
             scale = 1.0 if output_key in already_scaled_outputs else factor
@@ -554,6 +628,7 @@ def compute_isrm_concentrations(
     isrm_nox_to_no2_ratios_file: Optional[str] = None,
     isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s: bool = False,
     pollutants: Optional[list[str]] = None,
+    isrm_grid_gdf: Optional[gpd.GeoDataFrame] = None,
 ) -> pd.DataFrame:
     emis, available_pollutants = _prepare_grid_emissions(
         grid_emissions_df,
@@ -567,6 +642,15 @@ def compute_isrm_concentrations(
     source_cells, source_indexed = _align_emissions_to_isrm_sources(emis, sr, source_id_col=source_id_col)
     if source_cells.size == 0:
         raise ValueError("No emissions source cells remain after ISRM source alignment.")
+
+    if isrm_grid_gdf is None:
+        raise ValueError("Traffic ISRM near-source suppression requires projected ISRM grid geometry.")
+    near_source_mask = build_near_source_mask(
+        grid_gdf=isrm_grid_gdf,
+        source_cells=source_cells,
+        receptor_cells=receptor_cells,
+        grid_id_col=source_id_col,
+    )
 
     requested_pollutant_set = set(requested_pollutants)
     specs = _concentration_specs()
@@ -618,15 +702,25 @@ def compute_isrm_concentrations(
             concentration_output = spec["output"]
             if concentration_output == "NO2":
                 no2_from_zarr = "NO2" in sr
+                inmap_only_no2_response = _compute_no2_response(
+                    sr=sr,
+                    source_cells=source_cells,
+                    source_indexed=source_indexed,
+                    receptor_cells=receptor_cells,
+                    isrm_nox_to_no2_ratios_file=isrm_nox_to_no2_ratios_file,
+                    near_source_mask=None,
+                )
                 no2_response = _compute_no2_response(
                     sr=sr,
                     source_cells=source_cells,
                     source_indexed=source_indexed,
                     receptor_cells=receptor_cells,
                     isrm_nox_to_no2_ratios_file=isrm_nox_to_no2_ratios_file,
+                    near_source_mask=near_source_mask,
                 )
                 if no2_response is not None:
                     arrays["NO2"] = no2_response
+                    arrays["InMAPOnly_NO2"] = inmap_only_no2_response
                     if (
                         not no2_from_zarr
                         and not isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s
@@ -636,9 +730,21 @@ def compute_isrm_concentrations(
                         # concentration units. Future raw matrices can opt into
                         # the generic factor via the pipeline flag.
                         already_scaled_outputs.add("NO2")
+                        already_scaled_outputs.add("InMAPOnly_NO2")
                 progress.update(1)
                 continue
 
+            near_source_selected = concentration_output in {"PrimaryPM25", "BC"}
+            if near_source_selected:
+                arrays[f"InMAPOnly_{concentration_output}"] = _compute_species_response(
+                    sr=sr,
+                    species_key=spec["zarr"],
+                    emissions_key=spec["emissions"],
+                    source_cells=source_cells,
+                    source_indexed=source_indexed,
+                    receptor_cells=receptor_cells,
+                    near_source_mask=None,
+                )
             arrays[concentration_output] = _compute_species_response(
                 sr=sr,
                 species_key=spec["zarr"],
@@ -646,6 +752,7 @@ def compute_isrm_concentrations(
                 source_cells=source_cells,
                 source_indexed=source_indexed,
                 receptor_cells=receptor_cells,
+                near_source_mask=(near_source_mask if near_source_selected else None),
             )
             progress.update(1)
     progress.close()
@@ -661,6 +768,11 @@ def compute_isrm_concentrations(
     else:
         arrays["TotalPM25"] = sum(arrays[component] for component in total_pm_components)
         _trace_array("2", "TotalPM25", arrays["TotalPM25"])
+        arrays["InMAPOnly_TotalPM25"] = (
+            arrays["InMAPOnly_PrimaryPM25"]
+            + sum(arrays[component] for component in ("SOA", "pNO3", "pNH4", "pSO4"))
+        )
+        _trace_array("2", "InMAPOnly_TotalPM25", arrays["InMAPOnly_TotalPM25"])
 
     return _assemble_concentration_results(
         receptor_cells=receptor_cells,
@@ -708,6 +820,9 @@ def run(
         beam_inmap_grid_ids[:10].tolist(),
     )
 
+    grid_path = inmap_study_area_grid_path or pipeline.inmap_grid_path
+    isrm_grid_gdf = read_vector(grid_path)
+
     log_substep_banner("2.1", "load ISRM source data", logger=logger)
     logger.info("%s loading ISRM store from %s", _step_label("2.1"), pipeline.isrm_url)
     sr = _load_isrm_store(pipeline.isrm_url)
@@ -718,13 +833,23 @@ def run(
         getattr(sr["TotalPop"], "shape", None) if "TotalPop" in sr else None,
         getattr(sr["MortalityRate"], "shape", None) if "MortalityRate" in sr else None,
     )
+    receptor_cells = _study_area_receptor_cells(
+        isrm_grid_gdf,
+        receptor_dim=int(sr["SOA"].shape[2]),
+    )
+    logger.info(
+        "%s source cells with emissions=%d; complete study-area receptors=%d",
+        _step_label("2.1"),
+        int(beam_inmap_grid_ids.size),
+        int(receptor_cells.size),
+    )
     log_substep_banner("2.2", "compute concentration responses", logger=logger)
     concentrations = compute_isrm_concentrations(
         grid_emissions_df=emissions_df,
         sr=sr,
         factor=float(tons_per_year_to_ug_per_s),
         requested_pollutants=pipeline.pollutants,
-        receptor_cells=beam_inmap_grid_ids,
+        receptor_cells=receptor_cells,
         working_dir=raw_dir,
         source_id_col="inmap_cell_id",
         isrm_nox_to_no2_ratios_file=pipeline.isrm_nox_to_no2_ratios_file,
@@ -732,10 +857,10 @@ def run(
             pipeline.isrm_nox_to_no2_ratios_apply_tons_per_year_to_ug_per_s
         ),
         pollutants=list(pipeline.pollutants),
+        isrm_grid_gdf=isrm_grid_gdf,
     )
     output_path = raw_dir / "beam_inmap_concentrations.parquet"
     log_substep_banner("2.3", "build receptor geodataframe", logger=logger)
-    grid_path = inmap_study_area_grid_path or pipeline.inmap_grid_path
     beam_inmap_concentrations_gdf = _build_beam_inmap_concentrations_gdf(
         concentrations=concentrations,
         inmap_grid_path=grid_path,
@@ -744,4 +869,4 @@ def run(
     )
     log_substep_banner("2.5", "write concentration outputs", logger=logger)
     _write_concentration_outputs(beam_inmap_concentrations_gdf, str(output_path))
-    return beam_inmap_concentrations_gdf, beam_inmap_grid_ids, output_path
+    return beam_inmap_concentrations_gdf, receptor_cells, output_path

@@ -43,6 +43,7 @@ _AERMOD_SUPPORT_COLUMN_SET = set(_AERMOD_SUPPORT_COLUMNS.values())
 # Mirrors the InMAP naming convention used in step 2 so impacts steps work uniformly.
 _POLLUTANT_TO_CONCENTRATION_COLUMN: dict[str, str] = {
     "PM25": "PrimaryPM25",
+    "PM2_5": "PrimaryPM25",
     "BC": "BC",
     "NOx": "NO2",
     "NH3": "pNH4",
@@ -52,6 +53,7 @@ _POLLUTANT_TO_CONCENTRATION_COLUMN: dict[str, str] = {
 
 _ASRV_SOURCE_RATE_G_PER_S_M2 = 0.1
 _ASRV_ACTIVE_DAYS_PER_YEAR = default_aermod_active_days_per_year
+_AERMOD_RESPONSE_RADIUS_METERS = 3_000.0
 
 
 class _Kernel(TypedDict):
@@ -343,6 +345,8 @@ def _asrv_cache_key(*, path: str, target_epsg: int, grid_size_meters: float, pat
             "target_epsg": int(target_epsg),
             "grid_size_meters": round(float(grid_size_meters), 6),
             "pattern_keys": pattern_keys,
+            "kernel_policy": "circular-grid-center-cutoff-v1",
+            "response_radius_meters": _AERMOD_RESPONSE_RADIUS_METERS,
         },
         sort_keys=True,
     )
@@ -445,12 +449,13 @@ def _assign_source_pattern_keys(
     available_pattern_keys: set[str],
 ) -> pd.DataFrame:
     result = source_df.copy()
+    site_ids = site_reference["DataSet_ID"].to_numpy()
     site_x = site_reference["site_xm"].to_numpy(dtype=np.float64)
     site_y = site_reference["site_ym"].to_numpy(dtype=np.float64)
     source_x = result["source_xm"].to_numpy(dtype=np.float64)[:, None]
     source_y = result["source_ym"].to_numpy(dtype=np.float64)[:, None]
     nearest_idx = np.argmin((source_x - site_x[None, :]) ** 2 + (source_y - site_y[None, :]) ** 2, axis=1)
-    result["nearest_site"] = site_reference["DataSet_ID"].to_numpy()[nearest_idx]
+    result["nearest_site"] = site_ids[nearest_idx]
 
     required = [_SOURCE_URBAN_COLUMN, _SOURCE_TEMPORAL_COLUMN, _SOURCE_HEIGHT_COLUMN]
     missing = [col for col in required if col not in result.columns]
@@ -484,12 +489,65 @@ def _assign_source_pattern_keys(
     )
     result["pattern_key"] = result["pattern_key_raw"]
     missing_mask = ~result["pattern_key"].isin(available_pattern_keys)
+
     if missing_mask.any():
-        missing_keys = sorted(result.loc[missing_mask, "pattern_key"].astype(str).unique().tolist())
-        raise ValueError(
-            "AERMOD ASRV pattern library is missing exact source class patterns. "
-            f"Missing keys: {missing_keys[:10]}"
+        suffix_to_sites: dict[str, set[str]] = {}
+        for key in available_pattern_keys:
+            parts = key.split("__")
+            if len(parts) == 4:
+                suffix_to_sites.setdefault("__".join(parts[1:]), set()).add(parts[0])
+
+        missing_df = result[missing_mask].copy()
+        missing_df["_suffix"] = (
+            urban_series[missing_mask].astype("Int64").astype(str)
+            + "__"
+            + temporal_series[missing_mask].astype(str)
+            + "__"
+            + height_series[missing_mask].map(lambda v: f"{float(v):g}")
         )
+
+        fallback_keys: dict[int, str] = {}
+        for suffix, group in missing_df.groupby("_suffix"):
+            available_sites = suffix_to_sites.get(str(suffix))
+            if not available_sites:
+                continue
+            site_mask = np.isin(site_ids, list(available_sites))
+            avail_ids = site_ids[site_mask]
+            avail_x = site_x[site_mask]
+            avail_y = site_y[site_mask]
+            src_x = group["source_xm"].to_numpy(dtype=np.float64)[:, None]
+            src_y = group["source_ym"].to_numpy(dtype=np.float64)[:, None]
+            fallback_idx = np.argmin(
+                (src_x - avail_x[None, :]) ** 2 + (src_y - avail_y[None, :]) ** 2, axis=1
+            )
+            for row_idx, site in zip(group.index, avail_ids[fallback_idx]):
+                fallback_keys[row_idx] = f"{site}__{suffix}"
+
+        if fallback_keys:
+            for idx, key in fallback_keys.items():
+                result.at[idx, "pattern_key"] = key
+            summary = (
+                result.loc[list(fallback_keys), ["nearest_site", "pattern_key", _SOURCE_TEMPORAL_COLUMN]]
+                .assign(fallback_site=lambda df: df["pattern_key"].str.split("__").str[0])
+                .groupby(["nearest_site", "fallback_site", _SOURCE_TEMPORAL_COLUMN])
+                .size()
+                .reset_index(name="n_cells")
+            )
+            for row in summary.itertuples(index=False):
+                logger.warning(
+                    "AERMOD site %s has no pattern for temporal_class=%s — "
+                    "using nearest site with matching class: %s (%d cells)",
+                    row.nearest_site, getattr(row, _SOURCE_TEMPORAL_COLUMN),
+                    row.fallback_site, row.n_cells,
+                )
+
+        still_missing_mask = ~result["pattern_key"].isin(available_pattern_keys)
+        if still_missing_mask.any():
+            missing_keys = sorted(result.loc[still_missing_mask, "pattern_key"].astype(str).unique().tolist())
+            raise ValueError(
+                "AERMOD ASRV pattern library is missing source class patterns with no available fallback. "
+                f"Missing keys: {missing_keys[:10]}"
+            )
 
     return result
 
@@ -512,6 +570,10 @@ def _build_kernel_for_pattern(pattern_df: pd.DataFrame, *, grid_size_meters: flo
         .reset_index()
         .rename(columns={"Concentration": "response_per_ton"})
     )
+    # Use the actual model-grid offsets after projection/rounding. Retain
+    # exactly 3 km; zero only source-receptor responses outside the circle.
+    outside = (kernel["dix"] ** 2 + kernel["diy"] ** 2) * float(grid_size_meters) ** 2 > _AERMOD_RESPONSE_RADIUS_METERS ** 2
+    kernel.loc[outside, "response_per_ton"] = 0.0
     return {
         "dix": kernel["dix"].to_numpy(dtype=np.int32),
         "diy": kernel["diy"].to_numpy(dtype=np.int32),
@@ -631,7 +693,7 @@ def _apply_kernels(
         kernel_2d = np.zeros((2 * dix_max + 1, 2 * diy_max + 1), dtype=np.float64)
         kernel_2d[dix + dix_max, diy + diy_max] = kernel["response_per_ton"]
         kernel_support_2d = np.zeros((2 * dix_max + 1, 2 * diy_max + 1), dtype=np.float64)
-        kernel_support_2d[dix + dix_max, diy + diy_max] = 1.0
+        kernel_support_2d[dix + dix_max, diy + diy_max] = (kernel["response_per_ton"] != 0.0).astype(float)
 
         # Source grid positions
         si = source_group["source_ix"].to_numpy(dtype=np.int64) - ix_min

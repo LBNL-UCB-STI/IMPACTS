@@ -65,6 +65,19 @@ docs/api/
 docs/_rst/
 
 # Local runtime artifacts
+data/
+external/
+chargingcode/
+scenarios/
+OUTPUT/
+results/
+audit/
+settings.local.yaml
+*.parquet
+*.parqut
+*.gpkg
+*.zarr/
+*.npz
 input/
 output/
 workspace/

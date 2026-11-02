@@ -345,7 +345,7 @@ def _attach_vehicle_household_income(
     _require_column(households, "household_id", "ATLAS households file")
 
     households_prepared = households.copy()
-    vehicle_income = vehicles.merge(
+    vehicle_income = vehicles.drop(columns=["income_in_thousands"], errors="ignore").merge(
         households_prepared[["household_id", "income_in_thousands"]].drop_duplicates(),
         on="household_id",
         how="left",

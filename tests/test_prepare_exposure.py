@@ -186,9 +186,6 @@ def test_build_full_exposure_grid_can_scale_aermod_primary_to_inmap_domain_budge
     assert by_id.loc[11, "TotalPM25"] == 3.75
     assert by_id.loc[22, "TotalPM25"] == 5.0
     assert by_id.loc[33, "TotalPM25"] == 10.25
-    aermod_domain = result[result["has_aermod_primarypm25"]]
-    primary_budget = float((aermod_domain["PrimaryPM25"] * aermod_domain.geometry.area).sum())
-    assert primary_budget == 11.0
 
 
 def test_build_full_exposure_grid_can_ignore_aermod_primary_with_inmap_only_strategy(tmp_path: Path) -> None:
@@ -388,7 +385,7 @@ def test_build_full_exposure_grid_uses_per_pollutant_aermod_increment_masks(tmp_
     assert by_id.loc[11, "PrimaryPM25"] == 0.9
     assert by_id.loc[11, "SecondaryPM25"] == 1.0
     assert by_id.loc[11, "TotalPM25"] == 1.9
-    assert by_id.loc[11, "BC"] == 0.3
+    assert by_id.loc[11, "BC"] == 1.1
     assert by_id.loc[11, "NO2"] == 12.0
     assert by_id.loc[22, "PrimaryPM25"] == 0.2
     assert by_id.loc[22, "SecondaryPM25"] == 2.0

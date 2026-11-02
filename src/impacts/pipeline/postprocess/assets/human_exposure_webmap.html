@@ -1,0 +1,1911 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Bay Area Direct Final Pm25 Bc No2 Map</title>
+<style>:root {
+  color-scheme: light dark;
+  background-color: var(--background) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: light-dark(rgb(255 255 255), rgb(24 24 24));
+  --foreground: light-dark(rgb(26 28 31), rgb(255 255 255));
+  --card: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --card-foreground: var(--foreground);
+  --popover: light-dark(rgb(255 255 255), rgb(45 45 45));
+  --popover-foreground: var(--foreground);
+  --primary: light-dark(rgb(51 156 255), rgb(131 195 255));
+  --primary-foreground: light-dark(rgb(255 255 255), rgb(13 13 13));
+  --secondary: light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%));
+  --secondary-foreground: var(--foreground);
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: light-dark(
+    rgb(26 28 31 / 49.4%),
+    rgb(255 255 255 / 49.8%)
+  );
+  --accent: light-dark(rgb(229 242 255), rgb(13 39 63));
+  --accent-foreground: var(--primary);
+  --destructive: light-dark(rgb(226 85 7), rgb(255 133 73));
+  --border: light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%));
+  --input: light-dark(
+    rgb(26 28 31 / 11.8%),
+    color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+  );
+  --ring: light-dark(rgb(51 156 255), rgb(131 195 255 / 76%));
+  --font-size-base: 14px;
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, "Segoe UI", sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: 12.5px;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 17 17'%3E%3Cpath d='M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z'/%3E%3C/svg%3E");
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+  --color-background-primary: var(--background);
+  --color-text-primary: var(--foreground);
+  --color-border-secondary: var(--border);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html > body {
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--viz-font-weight-medium);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive > .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align="right"]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align="center"]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: superellipse(1.5);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget > :not(.card) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls > .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls > .form-label > :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type="file"] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type="file"]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type="file"]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type="color"] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: superellipse(1.5);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type="checkbox"] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type="checkbox"]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type="checkbox"]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: "";
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type="radio"] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type="radio"]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: "";
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+    [aria-pressed="true"],
+    [aria-selected="true"],
+    .is-selected
+  ) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed="true"], [aria-selected="true"], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget > svg {
+  width: 100%;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html>body{padding:0}</style>
+</head>
+<body>
+<div id="bay-area-direct-final-map">
+  <style>
+    #bay-area-direct-final-map {
+      width: 100%;
+      color: var(--foreground);
+    }
+    #bay-area-direct-final-map .map-shell {
+      position: relative;
+      width: 100%;
+    }
+    #bay-area-direct-final-map .map-svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    #bay-area-direct-final-map .tooltip {
+      position: absolute;
+      display: none;
+      pointer-events: none;
+      z-index: 2;
+      max-width: 250px;
+    }
+    #bay-area-direct-final-map .legend-ramp {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+    }
+    #bay-area-direct-final-map .legend-step {
+      width: 20px;
+      height: 10px;
+      background: var(--viz-series-1);
+    }
+    #bay-area-direct-final-map .legend-raw-gradient {
+      display: inline-block;
+      width: 150px;
+      height: 12px;
+      background: linear-gradient(90deg, #1a9850, #91cf60, #fee08b, #fc8d59, #d73027);
+    }
+    #bay-area-direct-final-map .legend-ltc {
+      border-radius: 0;
+      transform: rotate(45deg);
+    }
+    #bay-area-direct-final-map .legend-bridge {
+      display: inline-block;
+      width: 30px;
+      border-top: 3px solid var(--foreground);
+      margin-inline: 3px;
+      vertical-align: middle;
+    }
+    #bay-area-direct-final-map .bridge-label {
+      fill: var(--foreground);
+      stroke: var(--background);
+      stroke-width: 3px;
+      paint-order: stroke;
+      pointer-events: none;
+    }
+    #bay-area-direct-final-map .legend-dot {
+      display: inline-block;
+      border-radius: 50%;
+      margin-inline: 3px;
+      vertical-align: middle;
+    }
+    #bay-area-direct-final-map .legend-school {
+      width: 9px;
+      height: 9px;
+      background: #2b83ba;
+    }
+    #bay-area-direct-final-map .legend-ltc {
+      width: 12px;
+      height: 12px;
+      background: #7b3294;
+    }
+    #bay-area-direct-final-map .detail-line {
+      margin-top: 10px;
+    }
+    #bay-area-direct-final-map .map-svg {
+      cursor: grab;
+      shape-rendering: geometricPrecision;
+    }
+    #bay-area-direct-final-map .map-svg:active {
+      cursor: grabbing;
+    }
+    #bay-area-direct-final-map .scale-label {
+      fill: var(--foreground);
+      stroke: var(--background);
+      stroke-width: 3px;
+      paint-order: stroke;
+      pointer-events: none;
+      font-size: var(--font-size-base);
+      font-weight: 500;
+    }
+    #bay-area-direct-final-map .scale-tick {
+      stroke: var(--foreground);
+      stroke-width: 1px;
+      pointer-events: none;
+    }
+    #bay-area-direct-final-map .legend-delta-under {
+      background: var(--destructive);
+      border: 1px solid var(--foreground);
+    }
+    #bay-area-direct-final-map .legend-delta-over {
+      background: #ffffff;
+      border: 1px solid var(--foreground);
+    }
+    #bay-area-direct-final-map .legend-delta-ltc {
+      transform: rotate(45deg);
+    }
+    @media (max-width: 520px) {
+      #bay-area-direct-final-map .map-svg {
+        min-height: 440px;
+      }
+    }
+  </style>
+
+  <div class="viz-controls" aria-label="Map controls">
+    <label class="form-label" for="bay-map-metric">Pollutant
+      <select class="form-select" id="bay-map-metric">
+        <optgroup label="PM2.5">
+          <option value="impm">InMAP-only PM2.5</option>
+          <option value="aepm">AERMOD-enhanced PM2.5</option>
+          <option value="dpm">Difference: InMAP-only − AERMOD-enhanced PM2.5</option>
+        </optgroup>
+        <optgroup label="Black Carbon">
+          <option value="imbc">InMAP-only BC</option>
+          <option value="fbc">AERMOD-enhanced BC</option>
+          <option value="dbc">Difference: InMAP-only − AERMOD-enhanced BC</option>
+        </optgroup>
+        <optgroup label="NO₂">
+          <option value="imno2">InMAP-only NO₂</option>
+          <option value="fno2">AERMOD-enhanced NO₂</option>
+          <option value="dno2">Difference: InMAP-only − AERMOD-enhanced NO₂</option>
+        </optgroup>
+      </select>
+    </label>
+    <label class="form-check">
+      <input class="form-check-input" type="checkbox" id="bay-map-raw" checked>
+      <span class="form-check-label">Raw 100 m grid</span>
+    </label>
+    <label class="form-check">
+      <input class="form-check-input" type="checkbox" id="bay-map-bridges" checked>
+      <span class="form-check-label">Major bridges</span>
+    </label>
+    <label class="form-check">
+      <input class="form-check-input" type="checkbox" id="bay-map-tracts">
+      <span class="form-check-label">CES tract PWC</span>
+    </label>
+    <label class="form-check">
+      <input class="form-check-input" type="checkbox" id="bay-map-power-plants" checked>
+      <span class="form-check-label">Power plants</span>
+    </label>
+    <label class="form-check">
+      <input class="form-check-input" type="checkbox" id="bay-map-schools" checked>
+      <span class="form-check-label">Schools</span>
+    </label>
+    <label class="form-check">
+      <input class="form-check-input" type="checkbox" id="bay-map-ltc" checked>
+      <span class="form-check-label">Long-term care</span>
+    </label>
+    <label class="form-check">
+      <input class="form-check-input" type="checkbox" id="bay-map-school-delta">
+      <span class="form-check-label">School delta</span>
+    </label>
+    <label class="form-check">
+      <input class="form-check-input" type="checkbox" id="bay-map-ltc-delta">
+      <span class="form-check-label">LTC delta</span>
+    </label>
+    <button class="btn" type="button" id="bay-map-zoom-in" aria-label="Zoom in">Zoom in</button>
+    <button class="btn" type="button" id="bay-map-zoom-out" aria-label="Zoom out">Zoom out</button>
+    <button class="btn btn-ghost" type="button" id="bay-map-zoom-reset">Reset view</button>
+  </div>
+
+  <div class="map-shell">
+    <svg class="map-svg" id="bay-map-svg" viewBox="0 0 900 650" role="img" aria-label="Bay Area CES tracts with schools and long-term care facilities">
+      <title>Bay Area InMAP-only and AERMOD-enhanced PM2.5, BC, and NO2</title>
+      <desc>The selected InMAP-only or AERMOD-enhanced PM2.5, BC, or NO2 concentration is shown as a 100 metre raster. Optional CES tract population-weighted concentration is shown as tract shading. Facility point size uses its containing 100 metre cell.</desc>
+      <defs>
+        <clipPath id="bay-map-tract-clip"></clipPath>
+        <linearGradient id="bay-map-concentration-gradient" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stop-color="#1a9850"></stop>
+          <stop offset="25%" stop-color="#91cf60"></stop>
+          <stop offset="50%" stop-color="#fee08b"></stop>
+          <stop offset="75%" stop-color="#fc8d59"></stop>
+          <stop offset="100%" stop-color="#d73027"></stop>
+        </linearGradient>
+        <linearGradient id="bay-map-difference-gradient" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stop-color="#b2182b"></stop>
+          <stop offset="25%" stop-color="#ef8a62"></stop>
+          <stop offset="50%" stop-color="#f7f7f7"></stop>
+          <stop offset="75%" stop-color="#67a9cf"></stop>
+          <stop offset="100%" stop-color="#2166ac"></stop>
+        </linearGradient>
+      </defs>
+      <g id="bay-map-zoom-layer">
+      <rect x="0" y="0" width="900" height="650" fill="var(--muted)" fill-opacity="0.28"></rect>
+      <g id="bay-map-land-layer"></g>
+      <image id="bay-map-raw-layer" preserveAspectRatio="none" clip-path="url(#bay-map-tract-clip)" pointer-events="none"></image>
+      <g id="bay-map-tract-layer"></g>
+      <g id="bay-map-bridge-casing-layer"></g>
+      <g id="bay-map-bridge-layer"></g>
+      <g id="bay-map-power-plant-layer"></g>
+      <g id="bay-map-school-layer"></g>
+      <g id="bay-map-ltc-layer"></g>
+      <g id="bay-map-delta-school-layer"></g>
+      <g id="bay-map-delta-ltc-layer"></g>
+      <g id="bay-map-bridge-label-layer"></g>
+      </g>
+      <g id="bay-map-color-scale" transform="translate(790,120)" aria-label="Concentration color scale">
+        <text id="bay-map-scale-pollutant" class="scale-label" x="14" y="-42" text-anchor="middle">PM₂.₅</text>
+        <text class="scale-label" x="14" y="-20" text-anchor="middle">µg/m³</text>
+        <rect x="0" y="0" width="28" height="330" fill="url(#bay-map-concentration-gradient)" stroke="var(--foreground)" stroke-width="1.5"></rect>
+        <g id="bay-map-scale-ticks"></g>
+      </g>
+      <g id="bay-map-delta-scale" transform="translate(800,505)" aria-label="Facility concentration difference legend" style="display:none">
+        <text id="bay-map-delta-scale-pollutant" class="scale-label text-small" x="0" y="0">Δ PM₂.₅</text>
+        <text class="scale-label text-small" x="0" y="17">µg/m³</text>
+        <circle cx="5" cy="36" r="3.2" fill="var(--destructive)" stroke="var(--foreground)" stroke-width="0.6"></circle>
+        <text class="scale-label text-small" x="14" y="40">≤ 0</text>
+        <circle cx="5" cy="54" r="3.2" fill="#ffffff" stroke="var(--foreground)" stroke-width="0.6"></circle>
+        <text class="scale-label text-small" x="14" y="58">&gt; 0</text>
+        <text class="scale-label text-small" x="0" y="76">|Δ| point size</text>
+        <circle cx="5" cy="91" r="1.375" fill="var(--muted)" stroke="var(--foreground)" stroke-width="0.5"></circle>
+        <text class="scale-label text-small" x="14" y="95">0</text>
+        <circle cx="5" cy="109" r="4.125" fill="var(--muted)" stroke="var(--foreground)" stroke-width="0.5"></circle>
+        <text id="bay-map-delta-scale-mid" class="scale-label text-small" x="14" y="113">mid</text>
+        <circle cx="5" cy="130" r="5.25" fill="var(--muted)" stroke="var(--foreground)" stroke-width="0.5"></circle>
+        <text id="bay-map-delta-scale-max" class="scale-label text-small" x="14" y="134">P95</text>
+      </g>
+    </svg>
+    <div class="tooltip" id="bay-map-tooltip" aria-hidden="true"></div>
+  </div>
+
+  <div class="viz-row text-small" aria-label="Map legend">
+    <span id="bay-map-raw-cap" class="sr-only">Raw grid concentration scale is shown at the right of the map.</span>
+    <span>CES PWC: lower</span>
+    <span class="legend-ramp" aria-hidden="true">
+      <span class="legend-step" style="opacity:0.12"></span>
+      <span class="legend-step" style="opacity:0.30"></span>
+      <span class="legend-step" style="opacity:0.50"></span>
+      <span class="legend-step" style="opacity:0.70"></span>
+      <span class="legend-step" style="opacity:0.90"></span>
+    </span>
+    <span>Higher CES tract PWC</span>
+    <span><span style="display:inline-block;color:#2b83ba;font-size:16px;line-height:0;transform:translateY(1px)">▲</span> Emitting power plant</span>
+    <span id="bay-map-concentration-facility-legend">
+      <span><span class="legend-dot legend-school" aria-hidden="true"></span>School: color intensity = concentration; size = concentration × enrollment</span>
+      <span><span class="legend-dot legend-ltc" aria-hidden="true"></span>LTC: color intensity = concentration; size = concentration × licensed beds</span>
+    </span>
+    <span id="bay-map-delta-legend" hidden>
+      <span><span class="legend-dot legend-delta-under" aria-hidden="true"></span>Red: InMAP − AERMOD ≤ 0 (InMAP underestimate)</span>
+      <span><span class="legend-dot legend-delta-over" aria-hidden="true"></span>White: InMAP − AERMOD &gt; 0 (InMAP overestimate)</span>
+      <span><span class="legend-dot" aria-hidden="true"></span>Circle = school</span>
+      <span><span class="legend-dot legend-delta-ltc" aria-hidden="true"></span>Diamond = LTC</span>
+      <span id="bay-map-delta-size-legend">Point size = |InMAP − AERMOD|</span>
+    </span>
+    <span><span class="legend-bridge" aria-hidden="true"></span>Major bridge</span>
+    <a href="https://www.openstreetmap.org/copyright">Road/bridge data © OpenStreetMap contributors</a>
+  </div>
+
+  <div class="card detail-line text-small" id="bay-map-detail" aria-live="polite">
+    Hover over a tract or facility to inspect its concentration and CES group.
+  </div>
+
+  <script type="module">
+    import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
+
+    const DATA = {"tracts":{"type":"FeatureCollection","features":[]},"schools":[],"ltc":[]};
+    const RAW = {"bounds":[0,0,0,0],"width":1,"height":1,"sourceCellMetres":100,"composite":"maximum","displayCapQuantile":0.995,"scaleMode":"shared within pollutant","caps":{},"positivePixels":{},"rasters":{}};
+    const POWER_PLANTS = [];
+    const BASEMAP = {"bridges":{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.11676,38.03172],[-122.11671,38.03365],[-122.11672,38.03412],[-122.11675,38.03455],[-122.11684,38.0351],[-122.11699,38.03577],[-122.11712,38.03617],[-122.11722,38.03645],[-122.11735,38.03676],[-122.11761,38.03729],[-122.11796,38.03787],[-122.11838,38.03847],[-122.12176,38.04285]]},"properties":{"name":"Benicia–Martinez Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.23604,37.74742],[-122.23614,37.74757],[-122.23622,37.74775],[-122.23627,37.74792],[-122.23629,37.74807],[-122.2363,37.74822],[-122.23622,37.74902]]},"properties":{"name":"Bay Farm Island Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27679,37.79932],[-122.2782,37.80006],[-122.27836,37.80013],[-122.27848,37.80018],[-122.27866,37.80027],[-122.2788,37.80034],[-122.27896,37.80043],[-122.27908,37.80051],[-122.27921,37.80061],[-122.27932,37.80071],[-122.27952,37.80093],[-122.2797,37.80117]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.28448,37.82735],[-122.28483,37.82726]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.12618,38.04858],[-122.12626,38.04876],[-122.1272,38.04997],[-122.1277,38.05064]]},"properties":{"name":"Benicia–Martinez Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.36729,37.80808],[-122.3904,37.7865],[-122.39073,37.7862]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29235,37.82712],[-122.29224,37.82703],[-122.29212,37.82694],[-122.29201,37.82684],[-122.2919,37.82674],[-122.29181,37.82663],[-122.29172,37.82652]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-121.75164,38.04271],[-121.75156,38.01839],[-121.75156,38.01673]]},"properties":{"name":"Antioch Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.26728,37.82668],[-122.26722,37.82694]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.28633,37.82665],[-122.28573,37.82676],[-122.28509,37.82687],[-122.28437,37.82701]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27496,37.82595],[-122.27544,37.82606]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29067,37.82578],[-122.29068,37.82591],[-122.2907,37.82604],[-122.29072,37.82616],[-122.29075,37.8263],[-122.29079,37.82643],[-122.29084,37.82656],[-122.29089,37.82668],[-122.29094,37.8268],[-122.291,37.82692],[-122.29107,37.82704],[-122.29115,37.82716],[-122.29123,37.82727],[-122.29131,37.82739],[-122.29141,37.8275],[-122.2915,37.8276],[-122.29161,37.8277],[-122.29172,37.8278],[-122.29183,37.8279],[-122.29217,37.82818],[-122.29228,37.82829],[-122.29239,37.82838],[-122.29249,37.82849],[-122.29259,37.8286],[-122.29268,37.82871],[-122.29277,37.82882],[-122.29285,37.82893],[-122.29292,37.82905],[-122.29299,37.82917],[-122.29305,37.8293],[-122.2931,37.82942],[-122.29315,37.82955],[-122.29319,37.82968],[-122.29323,37.8298],[-122.29326,37.82993],[-122.29328,37.83006],[-122.29334,37.83045],[-122.29349,37.83137],[-122.29356,37.83177],[-122.29358,37.83189],[-122.29361,37.83203],[-122.29364,37.83216],[-122.29368,37.83229],[-122.29372,37.83241],[-122.29377,37.83254],[-122.29382,37.83266],[-122.29388,37.83279],[-122.29394,37.83291],[-122.29401,37.83303],[-122.29421,37.83339],[-122.29449,37.83386]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29381,37.83031],[-122.29382,37.83024],[-122.29385,37.82996],[-122.29386,37.82988],[-122.29387,37.8298],[-122.29388,37.82972],[-122.29389,37.82963]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29119,37.82529],[-122.29118,37.82516],[-122.29118,37.82503],[-122.29119,37.8249],[-122.2912,37.82477],[-122.29122,37.82464],[-122.29125,37.82452],[-122.29129,37.82439],[-122.29133,37.82426],[-122.29138,37.82414],[-122.29144,37.82402],[-122.2915,37.8239],[-122.29157,37.82378],[-122.29164,37.82366],[-122.2917,37.82353],[-122.29177,37.82341],[-122.29184,37.82329],[-122.2919,37.82317],[-122.29197,37.82305],[-122.29204,37.82293],[-122.29211,37.82281],[-122.29218,37.82269],[-122.29225,37.82258],[-122.29232,37.82246],[-122.2924,37.82234],[-122.29247,37.82222],[-122.29255,37.82211],[-122.29263,37.82199],[-122.29271,37.82188],[-122.2928,37.82176],[-122.29288,37.82165],[-122.29296,37.82153],[-122.29305,37.82142],[-122.29314,37.82131],[-122.29323,37.8212],[-122.29332,37.82109],[-122.29341,37.82098],[-122.2935,37.82087],[-122.2936,37.82077],[-122.29369,37.82065],[-122.29379,37.82055],[-122.29389,37.82044],[-122.29399,37.82034],[-122.29409,37.82023],[-122.29419,37.82013],[-122.29429,37.82003],[-122.2944,37.81992],[-122.2945,37.81982],[-122.29461,37.81972],[-122.29472,37.81962],[-122.29482,37.81953],[-122.29494,37.81943],[-122.29505,37.81933],[-122.29516,37.81923],[-122.29525,37.81915]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29633,37.81829],[-122.29739,37.81744],[-122.29846,37.81658],[-122.29958,37.81568]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.40628,37.93255],[-122.40658,37.93256],[-122.40717,37.93259],[-122.40772,37.93263],[-122.41429,37.9331],[-122.42087,37.93353],[-122.434,37.93439],[-122.44807,37.93535],[-122.4488,37.9354],[-122.44947,37.93547],[-122.45015,37.93557],[-122.4508,37.93567],[-122.45149,37.93579],[-122.45222,37.93594],[-122.45289,37.93608],[-122.4536,37.93627],[-122.45429,37.93645],[-122.455,37.93666],[-122.4628,37.93911],[-122.46775,37.94064],[-122.46841,37.94084]]},"properties":{"name":"Richmond–San Rafael Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.36632,37.80898],[-122.36729,37.80808]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.22803,38.05221],[-122.22637,38.05338],[-122.22602,38.05362],[-122.22582,38.05379],[-122.22564,38.05395],[-122.22552,38.05407],[-122.22538,38.05424],[-122.22525,38.05441],[-122.2251,38.05466],[-122.225,38.05484],[-122.22493,38.05502],[-122.22486,38.05522],[-122.2248,38.05547],[-122.22476,38.05565]]},"properties":{"name":"Carquinez Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.23633,37.74903],[-122.2364,37.74824],[-122.2364,37.74807],[-122.23638,37.7479],[-122.23633,37.74771],[-122.23625,37.74754],[-122.23617,37.74735]]},"properties":{"name":"Bay Farm Island Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.47781,37.94252],[-122.47414,37.94186],[-122.47245,37.94153],[-122.47083,37.94118],[-122.46872,37.9407],[-122.46705,37.94027],[-122.46576,37.93994],[-122.46283,37.93906],[-122.45502,37.93662],[-122.45429,37.93641],[-122.45361,37.93623],[-122.45291,37.93604],[-122.45223,37.93589],[-122.4515,37.93574],[-122.4508,37.93562],[-122.45015,37.93553],[-122.44947,37.93542],[-122.4488,37.93536],[-122.44806,37.9353],[-122.43399,37.93435],[-122.42282,37.9336],[-122.40901,37.93268],[-122.40795,37.93258],[-122.4064,37.93239],[-122.40536,37.93227]]},"properties":{"name":"Richmond–San Rafael Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.10844,37.51413],[-122.1089,37.51355],[-122.10937,37.51303],[-122.10985,37.51253],[-122.11034,37.51204],[-122.11086,37.51155],[-122.11139,37.51107],[-122.11255,37.5101],[-122.11311,37.50967],[-122.11366,37.50926],[-122.11423,37.50886],[-122.11721,37.50685]]},"properties":{"name":"Dumbarton Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27397,37.81189],[-122.27303,37.81272],[-122.27208,37.81357]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27197,37.81406],[-122.27199,37.81403],[-122.27209,37.81392],[-122.27218,37.8138],[-122.27229,37.81369],[-122.27239,37.81359],[-122.27249,37.81348],[-122.2726,37.81337],[-122.27271,37.81327],[-122.27283,37.81317],[-122.27339,37.8127]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27057,37.8171],[-122.27093,37.81603],[-122.27097,37.81591],[-122.27102,37.81577],[-122.27106,37.81564],[-122.27112,37.81551],[-122.27118,37.81536]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27134,37.8143],[-122.27124,37.81442],[-122.27115,37.81454],[-122.27107,37.81465],[-122.271,37.81476],[-122.27093,37.81488],[-122.27085,37.815],[-122.27079,37.81512],[-122.27072,37.81525],[-122.27066,37.81537],[-122.27061,37.81548],[-122.27056,37.81561],[-122.27052,37.81573],[-122.27048,37.81586],[-122.27044,37.81599],[-122.2704,37.81612],[-122.27037,37.81624],[-122.27033,37.81637]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.26984,37.81965],[-122.26992,37.81932]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.26954,37.81926],[-122.26945,37.81959]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.26623,37.79515],[-122.26633,37.7952],[-122.26667,37.79535],[-122.267,37.7955]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29636,37.80185],[-122.29615,37.80185],[-122.29597,37.80186],[-122.29582,37.80186],[-122.29566,37.80187],[-122.29549,37.80189],[-122.29533,37.8019],[-122.29516,37.80192],[-122.295,37.80194],[-122.29483,37.80196]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.28249,37.80157],[-122.28294,37.80175],[-122.28323,37.80187],[-122.28338,37.80193],[-122.28353,37.802],[-122.28367,37.80206],[-122.28382,37.80212],[-122.28397,37.80218],[-122.28412,37.80223],[-122.28427,37.80229],[-122.28442,37.80234],[-122.28457,37.80239],[-122.28473,37.80244],[-122.28488,37.80249],[-122.28504,37.80253],[-122.2852,37.80258],[-122.28535,37.80262],[-122.28551,37.80266],[-122.28567,37.8027],[-122.28583,37.80273],[-122.28599,37.80277],[-122.28615,37.8028],[-122.28631,37.80283],[-122.28647,37.80286],[-122.28664,37.80289],[-122.2868,37.80291],[-122.28697,37.80293],[-122.28713,37.80295],[-122.28729,37.80297],[-122.28746,37.80299],[-122.28762,37.803],[-122.28779,37.80302],[-122.28795,37.80303],[-122.28812,37.80304],[-122.28828,37.80304],[-122.28845,37.80305],[-122.28862,37.80305],[-122.28878,37.80305],[-122.28895,37.80305],[-122.28911,37.80305],[-122.28928,37.80305],[-122.28943,37.80304],[-122.28958,37.80303],[-122.28974,37.80302],[-122.2899,37.80301],[-122.29007,37.803],[-122.29024,37.80298],[-122.2904,37.80296],[-122.29057,37.80294],[-122.29073,37.80292],[-122.29089,37.8029],[-122.29105,37.80287],[-122.29463,37.80229],[-122.2948,37.80226],[-122.29496,37.80224],[-122.29512,37.80222],[-122.29528,37.8022],[-122.29544,37.80218],[-122.29561,37.80217],[-122.29578,37.80216],[-122.29594,37.80215],[-122.29611,37.80214],[-122.2963,37.80214],[-122.29637,37.80214]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27766,37.7995],[-122.27575,37.79875],[-122.27272,37.79757],[-122.27177,37.79716]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29483,37.80196],[-122.29467,37.80199],[-122.29451,37.80201],[-122.29112,37.80256],[-122.29096,37.80259],[-122.2908,37.80262],[-122.29064,37.80264],[-122.29047,37.80266],[-122.29032,37.80268],[-122.29015,37.8027],[-122.28999,37.80272],[-122.28982,37.80273],[-122.28966,37.80275],[-122.2895,37.80276],[-122.28933,37.80276],[-122.28917,37.80277],[-122.289,37.80277],[-122.28884,37.80278],[-122.28867,37.80278],[-122.2885,37.80278],[-122.28835,37.80278],[-122.28816,37.80277],[-122.28801,37.80276],[-122.28785,37.80275],[-122.28768,37.80274],[-122.28752,37.80273],[-122.28736,37.80271],[-122.28719,37.8027],[-122.28702,37.80268],[-122.28686,37.80266],[-122.2867,37.80263],[-122.28654,37.80261],[-122.28638,37.80258],[-122.28622,37.80255],[-122.28606,37.80252],[-122.2859,37.80249],[-122.28574,37.80246],[-122.28558,37.80242],[-122.28542,37.80238],[-122.28527,37.80234],[-122.28511,37.8023],[-122.28496,37.80226],[-122.2848,37.80221],[-122.28465,37.80216],[-122.28449,37.80211],[-122.28434,37.80206],[-122.28419,37.80201],[-122.28404,37.80196],[-122.28389,37.8019]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.28035,37.80238],[-122.28035,37.80228],[-122.28034,37.80214],[-122.28032,37.802],[-122.28029,37.80187],[-122.28027,37.80175],[-122.28022,37.80161],[-122.28018,37.80148],[-122.28013,37.80136],[-122.28008,37.80124],[-122.28002,37.80112],[-122.27995,37.801],[-122.27988,37.80087],[-122.2798,37.80076],[-122.27972,37.80065],[-122.27962,37.80054],[-122.27952,37.80043],[-122.27942,37.80032],[-122.27931,37.80022],[-122.27919,37.80011],[-122.2791,37.80004],[-122.27898,37.79995],[-122.27885,37.79986],[-122.27871,37.79978]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.28153,37.82729],[-122.28121,37.82724],[-122.28088,37.82719],[-122.27977,37.82693]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.13001,37.49794],[-122.12945,37.49837],[-122.12894,37.49877],[-122.12841,37.49916],[-122.1279,37.49952],[-122.12738,37.49987],[-122.11714,37.50676]]},"properties":{"name":"Dumbarton Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.26313,37.5729],[-122.24548,37.589],[-122.24523,37.58922],[-122.245,37.58942],[-122.24483,37.58956],[-122.24466,37.58969],[-122.24451,37.5898],[-122.24434,37.58992],[-122.24417,37.59003],[-122.24397,37.59016],[-122.24378,37.59027],[-122.24356,37.59039],[-122.24337,37.59049],[-122.24316,37.59059],[-122.24297,37.59067],[-122.24277,37.59076],[-122.24257,37.59084],[-122.24234,37.59092],[-122.24215,37.59098],[-122.24194,37.59105],[-122.24147,37.59119],[-122.24101,37.59133],[-122.23599,37.59282],[-122.23421,37.59336],[-122.23265,37.59383],[-122.20407,37.60234],[-122.18501,37.608],[-122.17039,37.61235],[-122.1557,37.61671]]},"properties":{"name":"San Mateo–Hayward Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.26767,37.82423],[-122.26873,37.82448]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.26944,37.82465],[-122.26992,37.82476]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.26998,37.82461],[-122.26951,37.8245]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.26623,37.82372],[-122.2657,37.82358]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.2656,37.82374],[-122.26619,37.82387]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.26877,37.82432],[-122.26776,37.82408]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.30493,37.80819],[-122.30491,37.80807],[-122.3049,37.80794],[-122.30488,37.80784],[-122.30487,37.80772],[-122.30485,37.80761]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.30446,37.80754],[-122.30448,37.8076],[-122.3045,37.80773],[-122.30452,37.80786],[-122.30454,37.80799],[-122.30455,37.80809]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.12871,38.04769],[-122.11813,38.03458],[-122.11794,38.03433],[-122.11776,38.03404],[-122.11762,38.03381],[-122.11751,38.03357],[-122.11742,38.03335],[-122.11734,38.03313]]},"properties":{"name":"Benicia–Martinez Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29248,37.82762],[-122.29235,37.82755],[-122.2922,37.82747],[-122.29206,37.82739],[-122.29191,37.82732],[-122.29177,37.82724],[-122.29162,37.82717],[-122.29148,37.8271],[-122.29133,37.82702],[-122.29118,37.82695],[-122.29105,37.82688],[-122.29089,37.82681],[-122.29073,37.82674],[-122.29058,37.82668],[-122.29042,37.82663],[-122.29026,37.82658],[-122.2901,37.82654],[-122.28993,37.8265],[-122.28976,37.82647],[-122.28959,37.82644],[-122.28942,37.82642],[-122.28925,37.8264],[-122.28908,37.82638],[-122.28892,37.82637],[-122.28875,37.82636],[-122.28859,37.82636],[-122.28842,37.82636],[-122.28824,37.82636],[-122.28807,37.82636]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27548,37.82593],[-122.27499,37.82581]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27811,37.82672],[-122.27882,37.82688],[-122.2808,37.82735],[-122.28097,37.82739],[-122.28113,37.82742],[-122.28129,37.82746],[-122.28145,37.82749]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27872,37.82668],[-122.2781,37.82653]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.28905,37.82685],[-122.28921,37.82689],[-122.28938,37.82693],[-122.28954,37.82697],[-122.2897,37.82702],[-122.28987,37.82706],[-122.29003,37.82711],[-122.29019,37.82716],[-122.29035,37.82721],[-122.29051,37.82726],[-122.29067,37.82732],[-122.29083,37.82737],[-122.29099,37.82743],[-122.29114,37.82749],[-122.2913,37.82755],[-122.29146,37.82761],[-122.2916,37.82767],[-122.29176,37.82773],[-122.29191,37.8278],[-122.29207,37.82787],[-122.29221,37.82795],[-122.29235,37.82803],[-122.29248,37.82813],[-122.29259,37.82823],[-122.29264,37.82827]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27033,37.81637],[-122.27017,37.81698]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.39183,37.78547],[-122.39185,37.78546]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.22476,38.05565],[-122.22475,38.05576],[-122.22476,38.05623],[-122.22518,38.06119]]},"properties":{"name":"Carquinez Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.12848,38.05165],[-122.12874,38.05202],[-122.12886,38.05221],[-122.12897,38.05242],[-122.12907,38.05262],[-122.12918,38.05286],[-122.12929,38.0532],[-122.12939,38.05357]]},"properties":{"name":"Benicia–Martinez Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29389,37.82963],[-122.29389,37.82952],[-122.29388,37.8294],[-122.29386,37.82927],[-122.29384,37.82916],[-122.29381,37.82905],[-122.2938,37.82899],[-122.29378,37.82893],[-122.29376,37.82888],[-122.29374,37.82882],[-122.29372,37.82876],[-122.29369,37.8287],[-122.29366,37.82864],[-122.29362,37.82858],[-122.2936,37.82854],[-122.29357,37.8285],[-122.29352,37.82844],[-122.29348,37.82838],[-122.29338,37.82827]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.28483,37.82726],[-122.28567,37.8271],[-122.28584,37.82706],[-122.28601,37.82703],[-122.28618,37.82699],[-122.28634,37.82695],[-122.28651,37.82691],[-122.28667,37.82687],[-122.28683,37.82683],[-122.287,37.82678],[-122.28709,37.82677],[-122.28717,37.82675],[-122.28725,37.82674],[-122.28734,37.82673],[-122.28743,37.82672],[-122.28751,37.82671],[-122.2876,37.82671],[-122.28769,37.82671],[-122.28777,37.82671],[-122.28785,37.8267],[-122.28795,37.82671],[-122.28803,37.82671],[-122.28811,37.82671],[-122.2882,37.82672],[-122.28829,37.82673],[-122.28838,37.82674],[-122.28846,37.82675],[-122.28854,37.82676],[-122.28871,37.82678],[-122.28888,37.82682],[-122.28905,37.82685]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.28807,37.82636],[-122.28793,37.82637],[-122.28775,37.82639],[-122.28758,37.82641],[-122.28741,37.82644],[-122.28633,37.82665]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29451,37.81917],[-122.29426,37.81951],[-122.29399,37.81984],[-122.29309,37.82095],[-122.29292,37.82116],[-122.29274,37.82139],[-122.29257,37.82162],[-122.2924,37.82184],[-122.29224,37.82208],[-122.29209,37.82231],[-122.29194,37.82254],[-122.2918,37.82278],[-122.29166,37.82303],[-122.29153,37.82326],[-122.29141,37.82351],[-122.29129,37.82375]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.28106,37.80101],[-122.28176,37.80128],[-122.28215,37.80143],[-122.28249,37.80157]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27177,37.79716],[-122.27075,37.79677],[-122.27009,37.79651]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27199,37.82526],[-122.27248,37.82537]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27252,37.82521],[-122.27204,37.8251]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.15577,37.61687],[-122.2326,37.59403],[-122.23333,37.59382],[-122.23417,37.59354],[-122.23501,37.59327],[-122.23591,37.59297],[-122.23612,37.59291],[-122.24103,37.59144],[-122.24189,37.59119],[-122.2422,37.59109],[-122.24237,37.59103],[-122.24266,37.59093],[-122.24287,37.59084],[-122.24303,37.59078],[-122.24324,37.59068],[-122.24344,37.59058],[-122.24363,37.59049],[-122.24392,37.59033],[-122.24414,37.5902],[-122.24431,37.59008],[-122.24451,37.58996],[-122.24474,37.58979],[-122.24493,37.58965],[-122.2451,37.5895],[-122.24534,37.58929],[-122.26324,37.57298]]},"properties":{"name":"San Mateo–Hayward Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.22668,38.06594],[-122.22635,38.06118],[-122.22594,38.05622]]},"properties":{"name":"Carquinez Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.26971,37.81863],[-122.26962,37.81896]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27,37.81905],[-122.27008,37.81872]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.30003,37.81463],[-122.29987,37.81474],[-122.29974,37.81483],[-122.29961,37.81491],[-122.29948,37.81499],[-122.29935,37.81507],[-122.29896,37.81531],[-122.29883,37.81539],[-122.2987,37.81547],[-122.29844,37.81563],[-122.29818,37.8158],[-122.29793,37.81597],[-122.29768,37.81614],[-122.29744,37.81632],[-122.2972,37.81651],[-122.29708,37.8166],[-122.29696,37.81669],[-122.29685,37.81679],[-122.29674,37.81688],[-122.29662,37.81698],[-122.29651,37.81707],[-122.2964,37.81717],[-122.29628,37.81727],[-122.29618,37.81737],[-122.29607,37.81747],[-122.29596,37.81757],[-122.29585,37.81767],[-122.29575,37.81777],[-122.29565,37.81788],[-122.29555,37.81798],[-122.29544,37.81809],[-122.29535,37.81819],[-122.29525,37.8183],[-122.29515,37.81841],[-122.29506,37.81851],[-122.29496,37.81862],[-122.29487,37.81874],[-122.29478,37.81884],[-122.29469,37.81895],[-122.29451,37.81917]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.11714,37.50676],[-122.11414,37.50878],[-122.11357,37.50918],[-122.11301,37.50959],[-122.11245,37.51003],[-122.11185,37.51051],[-122.11129,37.511],[-122.11076,37.51148],[-122.11024,37.51198],[-122.10974,37.51247],[-122.10926,37.51297],[-122.10879,37.51349],[-122.10834,37.51407]]},"properties":{"name":"Dumbarton Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.11721,37.50685],[-122.12487,37.5017],[-122.12747,37.49995],[-122.12799,37.4996],[-122.12823,37.49943],[-122.1285,37.49924],[-122.12903,37.49884],[-122.12954,37.49843],[-122.1301,37.49801]]},"properties":{"name":"Dumbarton Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-121.75149,38.01673],[-121.7515,38.01839],[-121.75158,38.04271]]},"properties":{"name":"Antioch Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.36045,37.81439],[-122.36059,37.8143],[-122.36072,37.81422],[-122.36085,37.81414],[-122.36097,37.81405],[-122.36132,37.81381]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.32776,37.82219],[-122.32818,37.82216],[-122.3285,37.82213],[-122.32883,37.8221],[-122.32916,37.82208],[-122.32949,37.82204],[-122.32982,37.82201],[-122.33014,37.82198],[-122.33047,37.82195],[-122.3308,37.82191],[-122.33113,37.82188],[-122.33145,37.82184],[-122.33178,37.8218],[-122.3321,37.82176],[-122.33243,37.82172],[-122.33275,37.82168],[-122.33308,37.82163],[-122.33341,37.82159],[-122.33369,37.82155],[-122.34152,37.8204],[-122.3498,37.81919],[-122.34996,37.81917],[-122.35012,37.81915],[-122.35028,37.81912],[-122.35044,37.81909],[-122.3506,37.81907],[-122.35076,37.81903],[-122.35092,37.819],[-122.35108,37.81897],[-122.35124,37.81893],[-122.3514,37.8189],[-122.35156,37.81886],[-122.35172,37.81882],[-122.35187,37.81877],[-122.35203,37.81873],[-122.35218,37.81869],[-122.35234,37.81864],[-122.35249,37.81859],[-122.35264,37.81854],[-122.3528,37.81849],[-122.35295,37.81844],[-122.35309,37.81838],[-122.35325,37.81832],[-122.35339,37.81827],[-122.35354,37.81821],[-122.35369,37.81814],[-122.35383,37.81808],[-122.35398,37.81802],[-122.35412,37.81795],[-122.35426,37.81788],[-122.3544,37.81782],[-122.35454,37.81775],[-122.35468,37.81767],[-122.35482,37.8176],[-122.35496,37.81753],[-122.35509,37.81745],[-122.35522,37.81737],[-122.36031,37.81447],[-122.36038,37.81443],[-122.36045,37.81439]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.36378,37.81131],[-122.36362,37.81146],[-122.36347,37.81161],[-122.36313,37.81194],[-122.36298,37.81207],[-122.36283,37.8122],[-122.36272,37.8123],[-122.36261,37.8124],[-122.3625,37.81249],[-122.36239,37.81258],[-122.36227,37.81267],[-122.36215,37.81276],[-122.36204,37.81285],[-122.36192,37.81294],[-122.3618,37.81303],[-122.36168,37.81312],[-122.36143,37.81329],[-122.36132,37.81337],[-122.36119,37.81345],[-122.36107,37.81353],[-122.36094,37.81362],[-122.36082,37.8137],[-122.36069,37.81378],[-122.36056,37.81386],[-122.36043,37.81393],[-122.3603,37.81401],[-122.3601,37.81412],[-122.3548,37.81715],[-122.35467,37.81723],[-122.35453,37.8173],[-122.35439,37.81737],[-122.35425,37.81744],[-122.35412,37.81751],[-122.35398,37.81758],[-122.35383,37.81765],[-122.35367,37.81772],[-122.35353,37.81778],[-122.35338,37.81784],[-122.35324,37.8179],[-122.35309,37.81796],[-122.35294,37.81802],[-122.35279,37.81808],[-122.35264,37.81813],[-122.35249,37.81818],[-122.35234,37.81823],[-122.35219,37.81828],[-122.35203,37.81833],[-122.35187,37.81837],[-122.35172,37.81842],[-122.35156,37.81846],[-122.35141,37.8185],[-122.35125,37.81854],[-122.35109,37.81858],[-122.35093,37.81861],[-122.35077,37.81864],[-122.35061,37.81867],[-122.35046,37.8187],[-122.3503,37.81873],[-122.35016,37.81876],[-122.34999,37.81878],[-122.3415,37.82002],[-122.3336,37.82118],[-122.33326,37.82123],[-122.33293,37.82127],[-122.33261,37.82132],[-122.33228,37.82136],[-122.33196,37.8214],[-122.33163,37.82144],[-122.33131,37.82148],[-122.33099,37.82152],[-122.33063,37.82156],[-122.33032,37.82159],[-122.33,37.82163],[-122.32967,37.82166],[-122.32934,37.82169],[-122.32901,37.82172],[-122.32869,37.82175],[-122.32835,37.82178],[-122.32803,37.82181],[-122.32771,37.82183]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.40529,37.93256],[-122.40558,37.93256]]},"properties":{"name":"Richmond–San Rafael Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.1277,38.05064],[-122.12848,38.05165]]},"properties":{"name":"Benicia–Martinez Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.36447,37.81071],[-122.36472,37.81047],[-122.36507,37.81016]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27871,37.79978],[-122.27857,37.7997],[-122.27843,37.79962],[-122.27829,37.79955],[-122.27814,37.79948],[-122.27791,37.79938]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27961,37.80027],[-122.2782,37.79971]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.28389,37.8019],[-122.2836,37.80179],[-122.2833,37.80168],[-122.28301,37.80157],[-122.28271,37.80146],[-122.28241,37.80135],[-122.28212,37.80124],[-122.28182,37.80113],[-122.28138,37.80096],[-122.28108,37.80084],[-122.28079,37.80073],[-122.28049,37.80061],[-122.27961,37.80027]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.28017,37.80067],[-122.28077,37.8009],[-122.28106,37.80101]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.48065,37.83212],[-122.48061,37.83208],[-122.48051,37.83197],[-122.48043,37.83186],[-122.48034,37.83174],[-122.48025,37.83161],[-122.48018,37.83149],[-122.48011,37.83136],[-122.48006,37.83124],[-122.48001,37.83111],[-122.47996,37.83098],[-122.47993,37.83084],[-122.4799,37.83072],[-122.47988,37.83058],[-122.47986,37.83042],[-122.47984,37.83027],[-122.47743,37.80963],[-122.47741,37.80953],[-122.47739,37.80942],[-122.47736,37.80931],[-122.47733,37.80921],[-122.47729,37.8091],[-122.47724,37.80899],[-122.47718,37.80886],[-122.47711,37.80875],[-122.47704,37.80863],[-122.47696,37.80853],[-122.47688,37.80842],[-122.47678,37.8083],[-122.47668,37.80819],[-122.47657,37.80806]]},"properties":{"name":"Golden Gate Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.47647,37.80813],[-122.47658,37.80824],[-122.47668,37.80835],[-122.47679,37.80847],[-122.47687,37.80858],[-122.47695,37.80868],[-122.47702,37.8088],[-122.47708,37.80891],[-122.47715,37.80904],[-122.4772,37.80915],[-122.47724,37.80925],[-122.47727,37.80936],[-122.4773,37.80947],[-122.47732,37.80957],[-122.47733,37.80968],[-122.47975,37.83032],[-122.47977,37.83047],[-122.47979,37.83063],[-122.47981,37.83076],[-122.47983,37.83089],[-122.47987,37.83103],[-122.47991,37.83116],[-122.47996,37.83129],[-122.48002,37.83141],[-122.48008,37.83154],[-122.48015,37.83166],[-122.48021,37.83174],[-122.48024,37.83179],[-122.48033,37.83191],[-122.48042,37.83202],[-122.48052,37.83212],[-122.48063,37.83223],[-122.48072,37.83233]]},"properties":{"name":"Golden Gate Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27362,37.79809],[-122.27521,37.79871]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29664,37.80184],[-122.29636,37.80185]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.39158,37.78558],[-122.39146,37.78565],[-122.39133,37.78572]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.39037,37.78648],[-122.36726,37.80806]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.23622,37.74902],[-122.2362,37.74935]]},"properties":{"name":"Bay Farm Island Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.2363,37.74936],[-122.23633,37.74903]]},"properties":{"name":"Bay Farm Island Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.23624,37.75],[-122.2363,37.74936]]},"properties":{"name":"Bay Farm Island Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.2362,37.74935],[-122.23614,37.74999]]},"properties":{"name":"Bay Farm Island Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29172,37.82652],[-122.29163,37.82641],[-122.29156,37.8263],[-122.29148,37.82618],[-122.29142,37.82606],[-122.29137,37.82594],[-122.29132,37.82582],[-122.29128,37.82569],[-122.29124,37.82556],[-122.29121,37.82542],[-122.29119,37.82529]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.2797,37.80117],[-122.2798,37.80137],[-122.27987,37.80149],[-122.27992,37.80164],[-122.27996,37.80177],[-122.27999,37.80191],[-122.28001,37.80204],[-122.28002,37.80216],[-122.28001,37.80228]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27679,37.79932],[-122.27734,37.79955],[-122.27792,37.79978],[-122.27822,37.79988],[-122.27836,37.79994],[-122.27851,37.8],[-122.27863,37.80005],[-122.27878,37.80011],[-122.28017,37.80067]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.40558,37.93256],[-122.40628,37.93255]]},"properties":{"name":"Richmond–San Rafael Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.36132,37.81381],[-122.3614,37.81375],[-122.36145,37.81371],[-122.36156,37.81362],[-122.36168,37.81353],[-122.36179,37.81344],[-122.3619,37.81334],[-122.362,37.81325],[-122.36211,37.81315],[-122.36222,37.81305],[-122.36232,37.81295],[-122.36242,37.81285],[-122.36251,37.81275],[-122.36261,37.81265],[-122.3627,37.81254],[-122.36355,37.81162],[-122.36365,37.81151],[-122.36382,37.81134],[-122.36396,37.8112],[-122.36417,37.811],[-122.36447,37.81071]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.267,37.7955],[-122.26751,37.79569],[-122.26916,37.7963],[-122.271,37.79702],[-122.27362,37.79809]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.2782,37.79971],[-122.27766,37.7995]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29525,37.81915],[-122.29527,37.81914],[-122.29539,37.81904],[-122.29633,37.81829]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29423,37.83389],[-122.29432,37.83405]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.22594,38.05622],[-122.22593,38.05597],[-122.22593,38.05569],[-122.22594,38.05535],[-122.22601,38.055],[-122.22618,38.05469],[-122.22629,38.05445],[-122.22642,38.05421],[-122.22667,38.05386],[-122.2268,38.0537],[-122.22702,38.05349],[-122.22727,38.05327],[-122.22763,38.053],[-122.22834,38.05246]]},"properties":{"name":"Carquinez Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29129,37.82375],[-122.29099,37.82437],[-122.29094,37.82449],[-122.29088,37.82462],[-122.29083,37.82475],[-122.29079,37.82486],[-122.29075,37.82499],[-122.29072,37.82512],[-122.2907,37.82525],[-122.29068,37.82538],[-122.29067,37.82552],[-122.29067,37.82565],[-122.29067,37.82578]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27009,37.79651],[-122.2672,37.79539],[-122.26676,37.79521],[-122.26632,37.795]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.46841,37.94084],[-122.46902,37.94101],[-122.46964,37.94115],[-122.4702,37.94127],[-122.4709,37.9414],[-122.4777,37.9426]]},"properties":{"name":"Richmond–San Rafael Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.22518,38.06119],[-122.22558,38.06553]]},"properties":{"name":"Carquinez Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.48085,37.83231],[-122.48072,37.83219],[-122.48065,37.83212]]},"properties":{"name":"Golden Gate Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.2968,37.80184],[-122.29664,37.80184]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27521,37.79871],[-122.27679,37.79932]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29432,37.83405],[-122.29442,37.83422]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27977,37.82693],[-122.27872,37.82668]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.27339,37.8127],[-122.27415,37.81205]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.39073,37.7862],[-122.39123,37.78583],[-122.39183,37.78547]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29389,37.82963],[-122.2939,37.82952],[-122.2939,37.8294],[-122.2939,37.82927],[-122.2939,37.82915],[-122.29388,37.82904],[-122.29385,37.82892],[-122.29382,37.8288],[-122.29379,37.8287],[-122.29374,37.82857],[-122.29368,37.82845],[-122.29362,37.82834],[-122.29354,37.82822]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29354,37.82822],[-122.29346,37.82811],[-122.29337,37.82799]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29337,37.82799],[-122.29328,37.82789],[-122.2932,37.8278],[-122.29307,37.82768],[-122.29295,37.82757]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29295,37.82757],[-122.29283,37.82748],[-122.29235,37.82712]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.29338,37.82827],[-122.29327,37.82816],[-122.29315,37.82806],[-122.29302,37.82796],[-122.2929,37.82787],[-122.29276,37.82778],[-122.29262,37.8277],[-122.29248,37.82762]]},"properties":{"name":"San Francisco–Oakland Bay Bridge"}},{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-122.12176,38.04285],[-122.12618,38.04858]]},"properties":{"name":"Benicia–Martinez Bridge"}}]},"bridgeLabels":[{"name":"Dumbarton Bridge","label":"Dumbarton Bridge","lon":-122.11763,"lat":37.50677,"dx":18,"dy":11},{"name":"Golden Gate Bridge","label":"Golden Gate","lon":-122.47879,"lat":37.82133,"dx":-16,"dy":-8},{"name":"San Francisco–Oakland Bay Bridge","label":"Bay Bridge","lon":-122.30113,"lat":37.81593,"dx":24,"dy":10},{"name":"San Mateo–Hayward Bridge","label":"San Mateo Bridge","lon":-122.23644,"lat":37.59212,"dx":18,"dy":-7}],"source":"OpenStreetMap contributors"};
+    const root = document.getElementById("bay-area-direct-final-map");
+    const svg = d3.select(root.querySelector("#bay-map-svg"));
+    const zoomLayer = svg.select("#bay-map-zoom-layer");
+    const rawLayer = svg.select("#bay-map-raw-layer");
+    const rawClip = svg.select("#bay-map-tract-clip");
+    const landLayer = svg.select("#bay-map-land-layer");
+    const tractLayer = svg.select("#bay-map-tract-layer");
+    const bridgeCasingLayer = svg.select("#bay-map-bridge-casing-layer");
+    const bridgeLayer = svg.select("#bay-map-bridge-layer");
+    const bridgeLabelLayer = svg.select("#bay-map-bridge-label-layer");
+    const plantLayer = svg.select("#bay-map-power-plant-layer");
+    const schoolLayer = svg.select("#bay-map-school-layer");
+    const ltcLayer = svg.select("#bay-map-ltc-layer");
+    const deltaSchoolLayer = svg.select("#bay-map-delta-school-layer");
+    const deltaLtcLayer = svg.select("#bay-map-delta-ltc-layer");
+    const metricSelect = root.querySelector("#bay-map-metric");
+    const rawToggle = root.querySelector("#bay-map-raw");
+    const bridgeToggle = root.querySelector("#bay-map-bridges");
+    const tractToggle = root.querySelector("#bay-map-tracts");
+    const plantToggle = root.querySelector("#bay-map-power-plants");
+    const schoolToggle = root.querySelector("#bay-map-schools");
+    const ltcToggle = root.querySelector("#bay-map-ltc");
+    const schoolDeltaToggle = root.querySelector("#bay-map-school-delta");
+    const ltcDeltaToggle = root.querySelector("#bay-map-ltc-delta");
+    const tooltip = root.querySelector("#bay-map-tooltip");
+    const detail = root.querySelector("#bay-map-detail");
+    const rawCap = root.querySelector("#bay-map-raw-cap");
+    const scalePollutant = root.querySelector("#bay-map-scale-pollutant");
+    const scaleTicks = svg.select("#bay-map-scale-ticks");
+    const colorScale = svg.select("#bay-map-color-scale");
+    const deltaScale = svg.select("#bay-map-delta-scale");
+    const deltaScalePollutant = root.querySelector("#bay-map-delta-scale-pollutant");
+    const deltaScaleMid = root.querySelector("#bay-map-delta-scale-mid");
+    const deltaScaleMax = root.querySelector("#bay-map-delta-scale-max");
+    const concentrationFacilityLegend = root.querySelector("#bay-map-concentration-facility-legend");
+    const deltaLegend = root.querySelector("#bay-map-delta-legend");
+    const deltaSizeLegend = root.querySelector("#bay-map-delta-size-legend");
+    const zoomInButton = root.querySelector("#bay-map-zoom-in");
+    const zoomOutButton = root.querySelector("#bay-map-zoom-out");
+    const zoomResetButton = root.querySelector("#bay-map-zoom-reset");
+    const mapShell = root.querySelector(".map-shell");
+
+    const metricNames = {
+      impm: "InMAP-only PM2.5",
+      aepm: "AERMOD-enhanced PM2.5",
+      dpm: "InMAP-only − AERMOD-enhanced PM2.5",
+      imbc: "InMAP-only Black Carbon",
+      fbc: "AERMOD-enhanced Black Carbon",
+      dbc: "InMAP-only − AERMOD-enhanced Black Carbon",
+      imno2: "InMAP-only NO₂",
+      fno2: "AERMOD-enhanced NO₂",
+      dno2: "InMAP-only − AERMOD-enhanced NO₂",
+    };
+    const deltaPairByMetric = {
+      impm: {
+        inmap: "impm",
+        aermod: "aepm",
+        pollutant: "PM2.5",
+        aermodLabel: "AERMOD-enhanced PM2.5",
+      },
+      aepm: {
+        inmap: "impm",
+        aermod: "aepm",
+        pollutant: "PM2.5",
+        aermodLabel: "AERMOD-enhanced PM2.5",
+      },
+      dpm: {
+        inmap: "impm",
+        aermod: "aepm",
+        pollutant: "PM2.5",
+        aermodLabel: "AERMOD-enhanced PM2.5",
+      },
+      imbc: {
+        inmap: "imbc",
+        aermod: "fbc",
+        pollutant: "BC",
+        aermodLabel: "AERMOD-enhanced BC",
+      },
+      fbc: {
+        inmap: "imbc",
+        aermod: "fbc",
+        pollutant: "BC",
+        aermodLabel: "AERMOD-enhanced BC",
+      },
+      dbc: {
+        inmap: "imbc",
+        aermod: "fbc",
+        pollutant: "BC",
+        aermodLabel: "AERMOD-enhanced BC",
+      },
+      imno2: {
+        inmap: "imno2",
+        aermod: "fno2",
+        pollutant: "NO₂",
+        aermodLabel: "AERMOD-enhanced NO₂",
+      },
+      fno2: {
+        inmap: "imno2",
+        aermod: "fno2",
+        pollutant: "NO₂",
+        aermodLabel: "AERMOD-enhanced NO₂",
+      },
+      dno2: {
+        inmap: "imno2",
+        aermod: "fno2",
+        pollutant: "NO₂",
+        aermodLabel: "AERMOD-enhanced NO₂",
+      },
+    };
+
+    const projection = d3.geoMercator().fitExtent(
+      [[24, 18], [790, 628]],
+      DATA.tracts
+    );
+    const path = d3.geoPath(projection);
+    const pollutantLabels = {
+      impm: "PM₂.₅",
+      aepm: "PM₂.₅",
+      dpm: "Δ PM₂.₅",
+      imbc: "BC",
+      fbc: "BC",
+      dbc: "Δ BC",
+      imno2: "NO₂",
+      fno2: "NO₂",
+      dno2: "Δ NO₂",
+    };
+    landLayer
+      .selectAll("path")
+      .data(DATA.tracts.features)
+      .join("path")
+      .attr("d", path)
+      .attr("fill", "var(--background)")
+      .attr("stroke", "none");
+    bridgeCasingLayer
+      .selectAll("path")
+      .data(BASEMAP.bridges.features)
+      .join("path")
+      .attr("d", path)
+      .attr("fill", "none")
+      .attr("stroke", "var(--background)")
+      .attr("stroke-width", 4.2)
+      .attr("stroke-linecap", "round");
+    bridgeLayer
+      .selectAll("path")
+      .data(BASEMAP.bridges.features)
+      .join("path")
+      .attr("d", path)
+      .attr("fill", "none")
+      .attr("stroke", "var(--foreground)")
+      .attr("stroke-width", 1.8)
+      .attr("stroke-linecap", "round")
+      .on("mousemove", function(event, feature) {
+        showTooltip(event, `<strong>${escapeHtml(feature.properties.name)}</strong><br>Major Bay Area bridge`, feature.properties.name);
+      })
+      .on("mouseleave", hideTooltip);
+    bridgeLabelLayer
+      .selectAll("text")
+      .data(BASEMAP.bridgeLabels)
+      .join("text")
+      .attr("class", "bridge-label text-small")
+      .attr("x", d => projection([d.lon, d.lat])[0])
+      .attr("y", d => projection([d.lon, d.lat])[1])
+      .attr("text-anchor", "middle")
+      .attr("dx", d => d.dx)
+      .attr("dy", d => d.dy)
+      .text(d => d.label);
+    rawClip
+      .selectAll("path")
+      .data(DATA.tracts.features)
+      .join("path")
+      .attr("d", path);
+    const rawNorthWest = projection([RAW.bounds[0], RAW.bounds[3]]);
+    const rawSouthEast = projection([RAW.bounds[2], RAW.bounds[1]]);
+    const rawX = rawNorthWest[0];
+    const rawY = rawNorthWest[1];
+    const rawWidth = rawSouthEast[0] - rawNorthWest[0];
+    const rawHeight = rawSouthEast[1] - rawNorthWest[1];
+    rawLayer.attr("x", rawX).attr("y", rawY).attr("width", rawWidth).attr("height", rawHeight);
+
+    let currentZoomScale = 1;
+    const zoomBehavior = d3.zoom()
+      .scaleExtent([1, 12])
+      .extent([[0, 0], [900, 650]])
+      .translateExtent([[-40, -40], [940, 690]])
+      .on("zoom", event => {
+        currentZoomScale = event.transform.k;
+        zoomLayer.attr("transform", event.transform);
+        applyDeltaMarkerScreenSize();
+      });
+    svg.call(zoomBehavior).on("dblclick.zoom", null);
+    zoomInButton.addEventListener("click", () => svg.call(zoomBehavior.scaleBy, 1.6));
+    zoomOutButton.addEventListener("click", () => svg.call(zoomBehavior.scaleBy, 0.625));
+    zoomResetButton.addEventListener("click", () => svg.call(zoomBehavior.transform, d3.zoomIdentity));
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function formatValue(value) {
+      if (!Number.isFinite(value)) return "No data";
+      if (Math.abs(value) >= 10) return value.toFixed(2);
+      if (Math.abs(value) >= 1) return value.toFixed(3);
+      return value.toFixed(4);
+    }
+
+    function showTooltip(event, html, detailText) {
+      tooltip.innerHTML = html;
+      tooltip.style.display = "block";
+      tooltip.setAttribute("aria-hidden", "false");
+      const shellRect = mapShell.getBoundingClientRect();
+      const tipRect = tooltip.getBoundingClientRect();
+      const x = Math.min(
+        Math.max(event.clientX - shellRect.left + 12, 6),
+        Math.max(6, shellRect.width - tipRect.width - 6)
+      );
+      const y = Math.min(
+        Math.max(event.clientY - shellRect.top + 12, 6),
+        Math.max(6, shellRect.height - tipRect.height - 6)
+      );
+      tooltip.style.left = `${x}px`;
+      tooltip.style.top = `${y}px`;
+      detail.textContent = detailText;
+    }
+
+    function hideTooltip() {
+      tooltip.style.display = "none";
+      tooltip.setAttribute("aria-hidden", "true");
+    }
+
+    tractLayer
+      .selectAll("path")
+      .data(DATA.tracts.features)
+      .join("path")
+      .attr("d", path)
+      .attr("fill", "var(--viz-series-1)")
+      .attr("stroke", "var(--border)")
+      .attr("stroke-width", 0.45)
+      .on("mousemove", function(event, feature) {
+        const metric = metricSelect.value;
+        const value = Number(feature.properties[metric]);
+        showTooltip(
+          event,
+          `<strong>${escapeHtml(feature.properties.county)} tract ${escapeHtml(feature.properties.id)}</strong><br>` +
+          `CES: ${escapeHtml(feature.properties.group)}<br>` +
+          `${escapeHtml(metricNames[metric])}: ${formatValue(value)} µg/m³`,
+          `${feature.properties.county} tract ${feature.properties.id} · CES ${feature.properties.group} · ${metricNames[metric]} ${formatValue(value)} µg/m³`
+        );
+      })
+      .on("mouseleave", hideTooltip);
+
+
+    const plantSymbol = d3.symbol().type(d3.symbolTriangle).size(70);
+    plantLayer
+      .selectAll("path")
+      .data(POWER_PLANTS.filter(item => {
+        const point = projection([item.lon, item.lat]);
+        return Number.isFinite(point?.[0]) && Number.isFinite(point?.[1]);
+      }))
+      .join("path")
+      .attr("d", plantSymbol)
+      .attr("transform", item => `translate(${projection([item.lon, item.lat]).join(",")})`)
+      .attr("fill", "#2b83ba")
+      .attr("stroke", "var(--background)")
+      .attr("stroke-width", 0.9)
+      .attr("aria-label", item => `Emitting power plant: ${item.name}`)
+      .on("mousemove", function(event, item) {
+        showTooltip(
+          event,
+          `<strong>${escapeHtml(item.name)}</strong><br>` +
+          `Emitting power plant · ORIS ${escapeHtml(item.id)}<br>` +
+          `Added generation: ${Number(item.generation).toLocaleString(undefined, {maximumFractionDigits: 2})} MWh<br>` +
+          `PM₂.₅ emissions: ${formatValue(Number(item.PM2_5_kg))} kg`,
+          `${item.name} · emitting power plant · added generation ${Number(item.generation).toLocaleString()} MWh`
+        );
+      })
+      .on("mouseleave", hideTooltip);
+
+    function deltaValue(item, spec) {
+      const inmap = Number(item[spec.inmap]);
+      const aermod = Number(item[spec.aermod]);
+      return Number.isFinite(inmap) && Number.isFinite(aermod) ? inmap - aermod : NaN;
+    }
+
+    function showFacilityTooltip(event, item, facilityType) {
+      const metric = metricSelect.value;
+      const spec = null;
+      const isSchool = facilityType === "School";
+      const weightLabel = isSchool ? "Enrollment" : "Licensed beds";
+      const weightUnit = isSchool ? "enrolled-person" : "licensed-bed";
+      if (spec) {
+        const inmap = Number(item[spec.inmap]);
+        const aermod = Number(item[spec.aermod]);
+        const delta = deltaValue(item, spec);
+        const direction = delta <= 0
+          ? "InMAP underestimate (red)"
+          : "InMAP overestimate (white)";
+        showTooltip(
+          event,
+          `<strong>${escapeHtml(item.name)}</strong><br>` +
+          `${facilityType} · ${escapeHtml(item.county)} · CES ${escapeHtml(item.group)}<br>` +
+          `${weightLabel}: ${Number(item.weight).toLocaleString()}<br>` +
+          `InMAP-only ${escapeHtml(spec.pollutant)}: ${formatValue(inmap)} µg/m³<br>` +
+          `${escapeHtml(spec.aermodLabel)}: ${formatValue(aermod)} µg/m³<br>` +
+          `InMAP − AERMOD: ${formatValue(delta)} µg/m³<br>` +
+          `${direction}`,
+          `${item.name} · ${spec.pollutant} delta ${formatValue(delta)} µg/m³ · ${direction} · ${weightLabel.toLowerCase()} ${Number(item.weight).toLocaleString()}`
+        );
+        return;
+      }
+      const value = Number(item[metric]);
+      showTooltip(
+        event,
+        `<strong>${escapeHtml(item.name)}</strong><br>` +
+        `${facilityType} · ${escapeHtml(item.county)} · CES ${escapeHtml(item.group)}<br>` +
+        `${weightLabel}: ${Number(item.weight).toLocaleString()}<br>` +
+        `${escapeHtml(metricNames[metric])}: ${formatValue(value)} µg/m³<br>` +
+        `Exposure index: ${formatValue(value * Number(item.weight))} ${weightUnit}·µg/m³`,
+        `${item.name} · concentration ${formatValue(value)} µg/m³ · exposure index ${formatValue(value * Number(item.weight))} ${weightUnit}·µg/m³ · CES ${item.group}`
+      );
+    }
+
+    schoolLayer
+      .selectAll("circle")
+      .data(DATA.schools)
+      .join("circle")
+      .attr("cx", item => projection([item.lon, item.lat])[0])
+      .attr("cy", item => projection([item.lon, item.lat])[1])
+      .attr("fill", "#2b83ba")
+      .attr("fill-opacity", 0.68)
+      .attr("stroke", "var(--background)")
+      .attr("stroke-width", 0.45)
+      .on("mousemove", (event, item) => showFacilityTooltip(event, item, "School"))
+      .on("mouseleave", hideTooltip);
+
+    ltcLayer
+      .selectAll("rect")
+      .data(DATA.ltc)
+      .join("rect")
+      .attr("transform", item => `translate(${projection([item.lon, item.lat])[0]},${projection([item.lon, item.lat])[1]}) rotate(45)`)
+      .attr("fill", "#7b3294")
+      .attr("stroke", "var(--background)")
+      .attr("stroke-width", 0.75)
+      .on("mousemove", (event, item) => showFacilityTooltip(event, item, "Long-term care"))
+      .on("mouseleave", hideTooltip);
+
+    function showDeltaTooltip(event, item, facilityType) {
+      const spec = deltaPairByMetric[metricSelect.value];
+      const isSchool = facilityType === "School";
+      const weightLabel = isSchool ? "Enrollment" : "Licensed beds";
+      const inmap = Number(item[spec.inmap]);
+      const aermod = Number(item[spec.aermod]);
+      const delta = deltaValue(item, spec);
+      const direction = delta <= 0
+        ? "InMAP underestimate (red)"
+        : "InMAP overestimate (white)";
+      showTooltip(
+        event,
+        `<strong>${escapeHtml(item.name)}</strong><br>` +
+        `${facilityType} · ${escapeHtml(item.county)} · CES ${escapeHtml(item.group)}<br>` +
+        `${weightLabel}: ${Number(item.weight).toLocaleString()}<br>` +
+        `InMAP-only ${escapeHtml(spec.pollutant)}: ${formatValue(inmap)} µg/m³<br>` +
+        `${escapeHtml(spec.aermodLabel)}: ${formatValue(aermod)} µg/m³<br>` +
+        `InMAP − AERMOD: ${formatValue(delta)} µg/m³<br>` +
+        `${direction}`,
+        `${item.name} · ${spec.pollutant} delta ${formatValue(delta)} µg/m³ · ${direction}`
+      );
+    }
+
+    deltaSchoolLayer
+      .selectAll("circle")
+      .data(DATA.schools)
+      .join("circle")
+      .attr("cx", item => projection([item.lon, item.lat])[0])
+      .attr("cy", item => projection([item.lon, item.lat])[1])
+      .on("mousemove", (event, item) => showDeltaTooltip(event, item, "School"))
+      .on("mouseleave", hideTooltip);
+
+    deltaLtcLayer
+      .selectAll("rect")
+      .data(DATA.ltc)
+      .join("rect")
+      .attr("transform", item => `translate(${projection([item.lon, item.lat])[0]},${projection([item.lon, item.lat])[1]}) rotate(45)`)
+      .on("mousemove", (event, item) => showDeltaTooltip(event, item, "Long-term care"))
+      .on("mouseleave", hideTooltip);
+
+    function applyDeltaMarkerScreenSize() {
+      schoolLayer.selectAll("circle")
+        .attr("r", function() {
+          return Number(this.dataset.baseRadius || 0) / currentZoomScale;
+        });
+      ltcLayer.selectAll("rect")
+        .each(function() {
+          const side = Number(this.dataset.baseSide || 0) / currentZoomScale;
+          d3.select(this)
+            .attr("x", -side / 2)
+            .attr("y", -side / 2)
+            .attr("width", side)
+            .attr("height", side);
+        });
+      plantLayer.selectAll("path")
+        .attr("transform", item => {
+          const point = projection([item.lon, item.lat]);
+          return `translate(${point.join(",")}) scale(${1 / currentZoomScale})`;
+        });
+      deltaSchoolLayer.selectAll("circle")
+        .attr("r", function() {
+          return Number(this.dataset.baseRadius || 0) / currentZoomScale;
+        });
+      deltaLtcLayer.selectAll("rect")
+        .each(function() {
+          const side = Number(this.dataset.baseSide || 0) / currentZoomScale;
+          d3.select(this)
+            .attr("x", -side / 2)
+            .attr("y", -side / 2)
+            .attr("width", side)
+            .attr("height", side);
+        });
+    }
+
+    function updateDeltaLayer(metric) {
+      const spec = deltaPairByMetric[metric];
+      const allItems = [...DATA.schools, ...DATA.ltc];
+      const absoluteDeltas = allItems
+        .map(item => Math.abs(deltaValue(item, spec)))
+        .filter(Number.isFinite)
+        .sort(d3.ascending);
+      const deltaCap = d3.quantileSorted(absoluteDeltas, 0.95) || 1;
+      const pointRadius = d3.scaleSqrt()
+        .domain([0, deltaCap])
+        .range([1.375, 5.25])
+        .clamp(true);
+
+      deltaSchoolLayer.selectAll("circle")
+        .attr("data-base-radius", item => pointRadius(Math.abs(deltaValue(item, spec))))
+        .attr("fill", item => deltaValue(item, spec) <= 0 ? "var(--destructive)" : "#ffffff")
+        .attr("fill-opacity", 0.88)
+        .attr("stroke", "var(--foreground)")
+        .attr("stroke-width", 0.45)
+        .attr("vector-effect", "non-scaling-stroke");
+      deltaLtcLayer.selectAll("rect")
+        .each(function(item) {
+          const equivalentRadius = pointRadius(Math.abs(deltaValue(item, spec)));
+          const side = equivalentRadius * Math.sqrt(Math.PI);
+          this.dataset.baseSide = side;
+        })
+        .attr("fill", item => deltaValue(item, spec) <= 0 ? "var(--destructive)" : "#ffffff")
+        .attr("fill-opacity", 0.88)
+        .attr("stroke", "var(--foreground)")
+        .attr("stroke-width", 0.45)
+        .attr("vector-effect", "non-scaling-stroke");
+      applyDeltaMarkerScreenSize();
+
+      deltaSchoolLayer.style("display", schoolDeltaToggle.checked ? null : "none");
+      deltaLtcLayer.style("display", ltcDeltaToggle.checked ? null : "none");
+      const anyDeltaVisible = schoolDeltaToggle.checked || ltcDeltaToggle.checked;
+      deltaLegend.hidden = !anyDeltaVisible;
+      deltaScale.style("display", anyDeltaVisible ? null : "none");
+      deltaScalePollutant.textContent = `Δ ${spec.pollutant}`;
+      deltaScaleMid.textContent = formatValue(deltaCap / 2);
+      deltaScaleMax.textContent = `${formatValue(deltaCap)} P95`;
+      const summaries = [];
+      if (schoolDeltaToggle.checked) {
+        const schoolDeltas = DATA.schools.map(item => deltaValue(item, spec)).filter(Number.isFinite);
+        summaries.push(`School ${schoolDeltas.filter(value => value <= 0).length.toLocaleString()} red / ${schoolDeltas.filter(value => value > 0).length.toLocaleString()} white`);
+      }
+      if (ltcDeltaToggle.checked) {
+        const ltcDeltas = DATA.ltc.map(item => deltaValue(item, spec)).filter(Number.isFinite);
+        summaries.push(`LTC ${ltcDeltas.filter(value => value <= 0).length.toLocaleString()} red / ${ltcDeltas.filter(value => value > 0).length.toLocaleString()} white`);
+      }
+      deltaSizeLegend.textContent = `Point area = |InMAP − AERMOD|; shared P95 cap ${formatValue(deltaCap)} µg/m³${summaries.length ? ` · ${summaries.join(" · ")}` : ""}`;
+    }
+
+    function updateMap() {
+      const metric = metricSelect.value;
+      const isDifference = metric === "dpm" || metric === "dbc" || metric === "dno2";
+      const displayMagnitude = value => isDifference ? Math.abs(Number(value)) : Number(value);
+      concentrationFacilityLegend.hidden = false;
+      colorScale.style("display", null);
+      rawToggle.disabled = false;
+      tractToggle.disabled = false;
+
+      const tractValues = DATA.tracts.features
+        .map(feature => displayMagnitude(feature.properties[metric]))
+        .filter(Number.isFinite)
+        .sort(d3.ascending);
+      const schoolConcentrations = DATA.schools.map(item => displayMagnitude(item[metric])).filter(Number.isFinite).sort(d3.ascending);
+      const ltcConcentrations = DATA.ltc.map(item => displayMagnitude(item[metric])).filter(Number.isFinite).sort(d3.ascending);
+      const schoolExposure = DATA.schools.map(item => displayMagnitude(item[metric]) * Number(item.weight)).filter(Number.isFinite).sort(d3.ascending);
+      const ltcExposure = DATA.ltc.map(item => displayMagnitude(item[metric]) * Number(item.weight)).filter(Number.isFinite).sort(d3.ascending);
+      const tractCeiling = d3.quantileSorted(tractValues, 0.95) || 1;
+      const schoolConcentrationCeiling = d3.quantileSorted(schoolConcentrations, 0.95) || 1;
+      const ltcConcentrationCeiling = d3.quantileSorted(ltcConcentrations, 0.95) || 1;
+      const schoolExposureCeiling = d3.quantileSorted(schoolExposure, 0.95) || 1;
+      const ltcExposureCeiling = d3.quantileSorted(ltcExposure, 0.95) || 1;
+      const schoolRadius = d3.scaleSqrt().domain([0, schoolExposureCeiling]).range([1.1, 5.8]).clamp(true);
+      const ltcSide = d3.scaleSqrt().domain([0, ltcExposureCeiling]).range([2.4, 8.8]).clamp(true);
+
+      rawLayer.attr("href", RAW.rasters[metric]);
+      rawLayer.style("display", rawToggle.checked ? null : "none");
+      const rawScaleCap = Number(RAW.caps[metric]);
+      rawCap.textContent = isDifference
+        ? `Raw 100 m difference grid: ${formatValue(-rawScaleCap)} to +${formatValue(rawScaleCap)} µg/m³; absolute values above the 99.5th percentile use the maximum color.`
+        : `Raw grid concentration: 0 to ${formatValue(rawScaleCap)} µg/m³; values above the 99.5th percentile use the maximum color.`;
+      scalePollutant.textContent = pollutantLabels[metric];
+      colorScale.select("rect").attr("fill", isDifference
+        ? "url(#bay-map-difference-gradient)"
+        : "url(#bay-map-concentration-gradient)");
+      const scalePosition = isDifference
+        ? d3.scaleLinear().domain([-rawScaleCap, rawScaleCap]).range([330, 0])
+        : d3.scaleSqrt().domain([0, rawScaleCap]).range([330, 0]);
+      const scaleValues = isDifference
+        ? [rawScaleCap, rawScaleCap * 0.5, 0, -rawScaleCap * 0.5, -rawScaleCap]
+        : [rawScaleCap, rawScaleCap * 0.75, rawScaleCap * 0.50, rawScaleCap * 0.25, 0];
+      const scaleGroups = scaleTicks
+        .selectAll("g")
+        .data(scaleValues)
+        .join(enter => {
+          const group = enter.append("g");
+          group.append("line").attr("class", "scale-tick");
+          group.append("text").attr("class", "scale-label");
+          return group;
+        })
+        .attr("transform", value => `translate(0,${scalePosition(value)})`);
+      scaleGroups.select("line").attr("x1", 28).attr("x2", 40).attr("y1", 0).attr("y2", 0);
+      scaleGroups.select("text")
+        .attr("x", 45)
+        .attr("y", 5)
+        .text(value => formatValue(value));
+      tractLayer
+        .style("display", null)
+        .selectAll("path")
+        .attr("fill-opacity", feature => {
+          if (!tractToggle.checked) return 0;
+          const value = displayMagnitude(feature.properties[metric]);
+          return Number.isFinite(value)
+            ? 0.08 + 0.82 * Math.min(1, Math.max(0, value / tractCeiling))
+            : 0.02;
+        });
+      schoolLayer.selectAll("circle")
+        .attr("data-base-radius", item => schoolRadius(displayMagnitude(item[metric]) * Number(item.weight)))
+        .attr("r", item => schoolRadius(displayMagnitude(item[metric]) * Number(item.weight)))
+        .attr("fill", "#2b83ba")
+        .attr("fill-opacity", item => 0.35 + 0.60 * Math.min(1, displayMagnitude(item[metric]) / schoolConcentrationCeiling))
+        .attr("stroke", "var(--background)")
+        .attr("stroke-width", 0.45);
+      ltcLayer.selectAll("rect")
+        .attr("data-base-side", item => ltcSide(displayMagnitude(item[metric]) * Number(item.weight)))
+        .attr("x", item => -ltcSide(displayMagnitude(item[metric]) * Number(item.weight)) / 2)
+        .attr("y", item => -ltcSide(displayMagnitude(item[metric]) * Number(item.weight)) / 2)
+        .attr("width", item => ltcSide(displayMagnitude(item[metric]) * Number(item.weight)))
+        .attr("height", item => ltcSide(displayMagnitude(item[metric]) * Number(item.weight)))
+        .attr("fill", "#7b3294")
+        .attr("fill-opacity", item => 0.40 + 0.58 * Math.min(1, displayMagnitude(item[metric]) / ltcConcentrationCeiling))
+        .attr("stroke", "var(--background)")
+        .attr("stroke-width", 0.75);
+      plantLayer.style("display", plantToggle.checked ? null : "none");
+      schoolLayer.style("display", schoolToggle.checked ? null : "none");
+      ltcLayer.style("display", ltcToggle.checked ? null : "none");
+      updateDeltaLayer(metric);
+      applyDeltaMarkerScreenSize();
+      svg.attr(
+        "aria-label",
+        `Bay Area ${metricNames[metric]} map with original 100 metre concentration, major bridges, schools, long-term care, and an optional facility delta layer.`
+      );
+      detail.textContent = `${metricNames[metric]} · ${isDifference ? "raw grid uses red (negative), white (zero), and blue (positive)" : "raw grid uses green-to-red concentration"} · school size = ${isDifference ? "absolute difference" : "concentration"} × enrollment · LTC size = ${isDifference ? "absolute difference" : "concentration"} × licensed beds${schoolDeltaToggle.checked || ltcDeltaToggle.checked ? " · selected delta layers use InMAP − AERMOD concentration." : ""}`;
+    }
+
+    metricSelect.addEventListener("change", updateMap);
+    schoolDeltaToggle.addEventListener("change", updateMap);
+    ltcDeltaToggle.addEventListener("change", updateMap);
+    rawToggle.addEventListener("change", updateMap);
+    bridgeToggle.addEventListener("change", () => {
+      const display = bridgeToggle.checked ? null : "none";
+      bridgeCasingLayer.style("display", display);
+      bridgeLayer.style("display", display);
+      bridgeLabelLayer.style("display", display);
+    });
+    tractToggle.addEventListener("change", updateMap);
+    plantToggle.addEventListener("change", () => {
+      plantLayer.style("display", plantToggle.checked ? null : "none");
+    });
+    schoolToggle.addEventListener("change", () => {
+      schoolLayer.style("display", schoolToggle.checked ? null : "none");
+    });
+    ltcToggle.addEventListener("change", () => {
+      ltcLayer.style("display", ltcToggle.checked ? null : "none");
+    });
+
+    updateMap();
+  </script>
+</div>
+
+<script src="https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js"></script>
+<script src="https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js"></script>
+<script>
+(() => {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set(["top", "right", "bottom", "left"]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+
+  const getTrigger = (target) =>
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest("[data-tooltip]")
+      : null;
+  const containsTarget = (trigger, target) =>
+    target?.nodeType != null && trigger.contains(target);
+  const getContent = (trigger) =>
+    trigger.getAttribute("data-tooltip")?.trim() ?? "";
+  const getPlacement = (trigger) => {
+    const placement = trigger.getAttribute("data-tooltip-placement");
+    return tooltipPlacements.has(placement) ? placement : "top";
+  };
+  const getTooltip = () => {
+    if (tooltip == null) {
+      tooltip = document.createElement("div");
+      tooltip.id = tooltipId;
+      tooltip.className = "tooltip";
+      tooltip.setAttribute("role", "tooltip");
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) => {
+    const ids = new Set(
+      (trigger.getAttribute("aria-describedby") ?? "")
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute("aria-describedby");
+    } else {
+      trigger.setAttribute("aria-describedby", [...ids].join(" "));
+    }
+  };
+  const clearOpenTimeout = () => {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) => {
+    clearOpenTimeout();
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) => {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              "--tooltip-available-width",
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              "--tooltip-available-height",
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: "fixed",
+    })
+      .then(({ x, y }) => {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = "visible";
+      })
+      .catch(() => {
+        if (activeTrigger === trigger && request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) => {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = "hidden";
+    floating.style.transform = "translate(0, 0)";
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () => {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) => {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() < skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() => {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) => {
+    if (event.pointerType === "touch") {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handleLeave = (event) => {
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) => {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(":focus-visible")) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) => {
+    if (event.key === "Escape") {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) => {
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () => {
+    closeTooltip(false);
+    document.removeEventListener("pointerover", handlePointerOpen);
+    document.removeEventListener("pointerout", handleLeave);
+    document.removeEventListener("focusin", handleFocusIn);
+    document.removeEventListener("focusout", handleLeave);
+    document.removeEventListener("keydown", handleKeyDown);
+    document.removeEventListener("contextmenu", handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener("pointerover", handlePointerOpen);
+  document.addEventListener("pointerout", handleLeave);
+  document.addEventListener("focusin", handleFocusIn);
+  document.addEventListener("focusout", handleLeave);
+  document.addEventListener("keydown", handleKeyDown);
+  document.addEventListener("contextmenu", handleContextMenu);
+  window.addEventListener("pagehide", destroy, { once: true });
+})();
+</script>
+<script id="codex-visualization-lucide" async src="https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js"></script>
+<script>
+(() => {
+  const initialize = () => {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById("codex-visualization-lucide")
+    ?.addEventListener("load", initialize, { once: true });
+})();
+</script>
+
+</body>
+</html>

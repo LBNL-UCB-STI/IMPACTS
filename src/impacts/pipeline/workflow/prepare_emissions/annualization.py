@@ -340,6 +340,7 @@ def _resolve_vehicle_type_annualization_days_lookup(
 
 
 def _load_vehicle_tailpipe_height_lookup(csv_path: str) -> dict[str, float]:
+    supported_aermod_heights = {1.0, 3.5}
     frame = read_table(csv_path)
     category_column = "emfac_vehicle_category"
     if category_column not in frame.columns:
@@ -361,6 +362,13 @@ def _load_vehicle_tailpipe_height_lookup(csv_path: str) -> dict[str, float]:
             raise ValueError(
                 "Vehicle category metadata has invalid tailpipe_height_meters for "
                 f"emfac_vehicle_category={category!r}: {row[1]!r}"
+            )
+        if height not in supported_aermod_heights:
+            raise ValueError(
+                "Vehicle category metadata contains a tailpipe height unsupported by the "
+                "project AERMOD pattern library. Expected one of "
+                f"{sorted(supported_aermod_heights)}, got {height:g} for "
+                f"emfac_vehicle_category={category!r}."
             )
         lookup[category] = height
     if not lookup:

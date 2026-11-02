@@ -714,6 +714,16 @@ def test_tailpipe_height_lookup_requires_metadata_height_column(tmp_path: Path) 
         )
 
 
+def test_tailpipe_height_lookup_rejects_height_missing_from_aermod_library(tmp_path: Path) -> None:
+    metadata_path = tmp_path / "vehicle_categories.csv"
+    pd.DataFrame(
+        [{"emfac_vehicle_category": "Class 4-6 Vocational", "tailpipe_height_meters": 1.5}]
+    ).to_csv(metadata_path, index=False)
+
+    with pytest.raises(ValueError, match=r"Expected one of \[1\.0, 3\.5\], got 1\.5"):
+        annualization_module._load_vehicle_tailpipe_height_lookup(str(metadata_path))
+
+
 def test_tailpipe_height_lookup_rejects_conflicting_vehicle_type_categories(tmp_path: Path) -> None:
     passenger_path = tmp_path / "vehicleTypes--atlas.csv"
     freight_path = tmp_path / "vehicleTypes--frism.csv"

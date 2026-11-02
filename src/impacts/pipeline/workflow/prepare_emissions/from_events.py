@@ -31,6 +31,7 @@ speedMph         : float — mean link speed (0 for parked processes)
 from __future__ import annotations
 
 import logging
+import json
 from pathlib import Path
 from typing import Any
 from typing import Dict
@@ -303,13 +304,12 @@ def _calculate_emissions(
         transit_sample: accepted for configuration parity; transit rows are not sample-expanded.
         freight_sample: optional simulation sample fraction for freight rows.
     """
-    from ..tools.beam.events_to_skims_emissions import read_rates_directory
+    from ....tools.beam.events_to_skims_emissions import read_rates_directory
 
     rates = _normalize_rate_dimensions(read_rates_directory(rates_folder))
     rates = rates[rates["pollutant"].isin(set(pollutants))]
     if rates.empty:
-        logger.warning("Step 1: no matching rates found in %s for configured pollutants", rates_folder)
-        return skims
+        raise ValueError(f'No matching long-form emission rates in {rates_folder}; use the native partition events adapter for an EMFAC dataset store.')
 
     rates["canonical_pollutant"] = rates["pollutant"]
     rates["rate"] = pd.to_numeric(rates["rate"], errors="coerce").fillna(0.0)
@@ -555,21 +555,26 @@ def build_staged_skims_from_events(
     freight_vehicle_types_path: Optional[str],
     intersection_path: str,
     manifest_inputs: Optional[Dict[str, Any]] = None,
+    pollutants: Optional[list[str]] = None,
+    allowed_vehicle_type_ids: Optional[set[str]] = None,
 ) -> Optional[str]:
     events_path = find_staged_events_path(manifest_inputs)
     if not events_path:
         return None
 
-    logger.info("Step 1: building skims from staged events %s", events_path)
-    skims_df = build_skims_from_events(
-        events_path,
-        network_path=network_path,
-        passenger_vehicle_types_path=passenger_vehicle_types_path,
-        freight_vehicle_types_path=freight_vehicle_types_path,
-        intersection_path=intersection_path,
+    from .event_emfac import build_daily_emissions
+
+    rates_folder = resolve_required_manifest_input(manifest_inputs, key='rates_folder')
+    if not pollutants:
+        raise ValueError('Events conversion requires explicit pollutants.')
+    logger.info('Step 1: calculating daily EMFAC grams from events %s', events_path)
+    skims_path = input_root / 'skims_from_events.parquet'
+    audit = build_daily_emissions(
+        events_path, network_path, intersection_path, rates_folder,
+        [passenger_vehicle_types_path, freight_vehicle_types_path], pollutants,
+        skims_path, allowed_ids=allowed_vehicle_type_ids,
     )
-    skims_path = _write_staged_skims(skims_df, input_root=input_root)
-    logger.info("Step 1: wrote skims derived from events %d rows → %s", len(skims_df), skims_path)
+    (input_root / 'events_emfac_audit.json').write_text(json.dumps(audit, indent=2), encoding='utf-8')
     return str(skims_path)
 
 
@@ -598,34 +603,26 @@ def prepare_events_inputs(
         logger.info("Step 1: no events file found under %s", input_root)
         return None
     logger.info("Step 1: building skims from events %s", events_path)
-    skims_df = build_skims_from_events(
-        events_path,
+    from .from_skims import _resolve_assignment_filter_ids
+    allowed, _ = _resolve_assignment_filter_ids(
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
+        include_passenger=include_passenger, include_freight=include_freight,
+    )
+    skims_path = build_staged_skims_from_events(
+        input_root=input_root, manifest_inputs=manifest_inputs, pollutants=pollutants,
+        allowed_vehicle_type_ids=allowed,
         network_path=network_path,
         passenger_vehicle_types_path=passenger_vehicle_types_path,
         freight_vehicle_types_path=freight_vehicle_types_path,
         intersection_path=intersection_path,
     )
-    skims_path = _write_staged_skims(skims_df, input_root=input_root)
-    logger.info("Step 1: wrote skims derived from events %d rows → %s", len(skims_df), skims_path)
-    skims_path = str(skims_path)
     manifest_inputs["skims_from_events"] = file_entry(
         kind="local",
         path=events_path,
         staged_path=skims_path,
         optional=True,
     )
-
-    activity_df = build_activity_table(skims_df)
-    input_root.mkdir(parents=True, exist_ok=True)
-    activity_path = input_root / "activity_from_events.parquet"
-    activity_df.to_parquet(activity_path, index=False)
-    manifest_inputs["activity_from_events"] = file_entry(
-        kind="local",
-        path=events_path,
-        staged_path=str(activity_path),
-        optional=True,
-    )
-    logger.info("Step 1: wrote activity table %d rows → %s", len(activity_df), activity_path)
 
     from .from_skims import prepare_staged_skims_for_processing
 
@@ -647,6 +644,17 @@ def prepare_events_inputs(
         include_freight=include_freight,
     )
     prepared_skims_path = prepared_table_target(input_root, "prepared_skims_for_grid_allocation")
+
+    # Allocate activity only after the single standard annualization step.
+    zones = read_table(intersection_path)
+    weights = zones.groupby(['linkId', 'county_COUNTYFP'], as_index=False).county_proportion.sum()
+    activity = skims_df.loc[skims_df.process.eq('RUNEX'), ['linkId', 'totVMT', 'totTrips']].merge(weights, on='linkId')
+    for col in ['totVMT', 'totTrips']:
+        activity[col] *= activity.county_proportion
+    activity_df = activity.groupby('county_COUNTYFP')[['totVMT', 'totTrips']].sum().reset_index().rename(columns={'county_COUNTYFP': 'countyfp'})
+    activity_path = input_root / 'activity_from_events.parquet'
+    activity_df.to_parquet(activity_path, index=False)
+    manifest_inputs['activity_from_events'] = file_entry(kind='local', path=events_path, staged_path=str(activity_path), optional=True)
 
     return {
         "events_path": events_path,

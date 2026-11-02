@@ -250,13 +250,15 @@ def file_entry(
     staged_path: str | Path,
     optional: bool = False,
 ) -> Dict[str, Any]:
-    src = Path(path)
-    staged = Path(staged_path)
+    raw_source = str(path)
+    raw_staged = str(staged_path)
+    source_is_uri = "://" in raw_source
+    staged_is_uri = "://" in raw_staged
     entry: Dict[str, Any] = {
         "kind": kind,
-        "source_path": str(src),
-        "staged_path": str(staged),
+        "source_path": raw_source if source_is_uri else str(Path(raw_source)),
+        "staged_path": raw_staged if staged_is_uri else str(Path(raw_staged)),
         "optional": optional,
-        "exists": src.exists(),
+        "exists": True if source_is_uri else Path(raw_source).exists(),
     }
     return entry

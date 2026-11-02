@@ -18,6 +18,7 @@ from ...common import read_table
 from ...common import read_vector
 from ...common import resolve_required_manifest_input
 from ...config.defaults import primary_pm25_integration_strategies as default_primary_pm25_integration_strategies
+from ...config.defaults import primary_pm25_strategy_additive_inmap_aermod
 from ...config.defaults import primary_pm25_strategy_impute_inmap_primary_in_aermod_domain
 from ...config.defaults import primary_pm25_strategy_inmap_only
 from ...config.defaults import primary_pm25_strategy_scale_aermod_to_inmap_domain_primary
@@ -60,6 +61,15 @@ def _prepare_inmap_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         raise ValueError("InMAP concentrations must include 'BC'.")
     if "NO2" not in gdf.columns:
         raise ValueError("InMAP concentrations must include 'NO2'.")
+    baseline_required = {
+        "InMAPOnly_PrimaryPM25", "InMAPOnly_TotalPM25", "InMAPOnly_BC", "InMAPOnly_NO2"
+    }
+    baseline_missing = baseline_required.difference(gdf.columns)
+    if baseline_missing:
+        raise ValueError(
+            "InMAP concentrations must include the unadjusted InMAP-only baseline columns: "
+            f"{sorted(baseline_missing)}"
+        )
 
     prepared = gdf.copy()
     prepared["inmap_SecondaryPM25"] = (
@@ -67,7 +77,17 @@ def _prepare_inmap_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         - pd.to_numeric(prepared["PrimaryPM25"], errors="coerce").fillna(0.0)
     )
     prepared = prepared.rename(columns={"PrimaryPM25": "inmap_PrimaryPM25", "BC": "inmap_BC", "NO2": "inmap_NO2"})
-    keep = [_INMAP_SOURCE_ID_COLUMN, "inmap_PrimaryPM25", "inmap_SecondaryPM25", "inmap_BC", "inmap_NO2"]
+    prepared = prepared.rename(columns={
+        "InMAPOnly_PrimaryPM25": "inmap_only_PrimaryPM25",
+        "InMAPOnly_TotalPM25": "inmap_only_TotalPM25",
+        "InMAPOnly_BC": "inmap_only_BC",
+        "InMAPOnly_NO2": "inmap_only_NO2",
+    })
+    keep = [
+        _INMAP_SOURCE_ID_COLUMN,
+        "inmap_PrimaryPM25", "inmap_SecondaryPM25", "inmap_BC", "inmap_NO2",
+        "inmap_only_PrimaryPM25", "inmap_only_TotalPM25", "inmap_only_BC", "inmap_only_NO2",
+    ]
     return prepared[keep + (["geometry"] if "geometry" in prepared.columns else [])]
 
 
@@ -95,48 +115,38 @@ def _prepare_aermod_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return prepared[keep + (["geometry"] if "geometry" in prepared.columns else [])]
 
 
-def _safe_geometry_area(gdf: gpd.GeoDataFrame) -> pd.Series:
-    area = pd.Series(gdf.geometry.area, index=gdf.index, dtype="float64")
-    return area.where(np.isfinite(area) & area.gt(0.0), 1.0)
+def _prepare_power_generation_inputs(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
+    required = {_INMAP_SOURCE_ID_COLUMN, "power_PrimaryPM25", "power_SecondaryPM25", "power_TotalPM25"}
+    missing = required.difference(gdf.columns)
+    if missing:
+        raise ValueError(f"Power-generation concentrations are missing columns: {sorted(missing)}")
+    _require_unique_id_rows(gdf, id_col=_INMAP_SOURCE_ID_COLUMN, label="Power-generation concentrations")
+    columns = [_INMAP_SOURCE_ID_COLUMN] + [c for c in gdf.columns if c.startswith("power_")]
+    return pd.DataFrame(gdf[columns])
 
 
 def _scale_aermod_primary_to_inmap_domain_primary(result: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     scaled = result.copy()
-    area = _safe_geometry_area(scaled)
-    aermod_domain = scaled["has_aermod_primarypm25"]
-    raw_aermod_primary = pd.Series(
-        np.where(aermod_domain, scaled["aermod_PrimaryPM25"].clip(lower=0.0), 0.0),
+    area = pd.Series(scaled.geometry.area, index=scaled.index, dtype="float64")
+    area = area.where(np.isfinite(area) & area.gt(0.0), 1.0)
+    domain = scaled["has_aermod_primarypm25"]
+    raw = pd.Series(
+        np.where(domain, scaled["aermod_PrimaryPM25"].clip(lower=0.0), 0.0),
         index=scaled.index,
         dtype="float64",
     )
-
-    target_budget = float(
-        (scaled.loc[aermod_domain, "inmap_PrimaryPM25"].clip(lower=0.0) * area[aermod_domain]).sum()
-    )
-    aermod_budget = float((raw_aermod_primary * area).sum())
-    scaled_primary = pd.Series(0.0, index=scaled.index, dtype="float64")
-    scale_factor = np.nan
-    if target_budget <= _PRIMARY_PM25_MASS_EPSILON:
-        scale_factor = 0.0
-    elif aermod_budget > _PRIMARY_PM25_MASS_EPSILON:
+    target_budget = float((scaled.loc[domain, "inmap_PrimaryPM25"].clip(lower=0.0) * area[domain]).sum())
+    aermod_budget = float((raw * area).sum())
+    scale_factor = 0.0 if target_budget <= _PRIMARY_PM25_MASS_EPSILON else np.nan
+    if target_budget > _PRIMARY_PM25_MASS_EPSILON and aermod_budget > _PRIMARY_PM25_MASS_EPSILON:
         scale_factor = target_budget / aermod_budget
-        scaled_primary.loc[aermod_domain] = raw_aermod_primary.loc[aermod_domain] * scale_factor
-    else:
-        logger.warning(
-            "Step 4 exposure integration could not scale AERMOD PrimaryPM25 over the AERMOD domain "
-            "because the raw AERMOD PrimaryPM25 budget was zero; using InMAP PrimaryPM25 in that domain."
-        )
-        scaled_primary.loc[aermod_domain] = scaled.loc[aermod_domain, "inmap_PrimaryPM25"].clip(lower=0.0)
-
-    scaled["aermod_PrimaryPM25_scale_factor"] = np.where(aermod_domain, scale_factor, np.nan)
-    scaled["aermod_PrimaryPM25_scaled"] = scaled_primary
-    if np.isfinite(scale_factor) and scale_factor > 0.0 and (scale_factor < 0.1 or scale_factor > 10.0):
-        logger.warning(
-            "Step 4 exposure integration found an extreme AERMOD-domain PrimaryPM25 "
-            "scale factor %.4g (target budget %.4g, raw AERMOD budget %.4g).",
-            float(scale_factor),
-            target_budget,
-            aermod_budget,
+    scaled["aermod_PrimaryPM25_scale_factor"] = np.where(domain, scale_factor, np.nan)
+    scaled["aermod_PrimaryPM25_scaled"] = np.where(domain, raw * scale_factor, 0.0)
+    if target_budget > _PRIMARY_PM25_MASS_EPSILON and aermod_budget <= _PRIMARY_PM25_MASS_EPSILON:
+        # No AERMOD pattern can be scaled to a positive budget. Preserve the
+        # legacy InMAP fallback instead of producing NaN concentrations.
+        scaled["aermod_PrimaryPM25_scaled"] = np.where(
+            domain, scaled["inmap_PrimaryPM25"].clip(lower=0.0), 0.0
         )
     return scaled
 
@@ -147,6 +157,7 @@ def _build_full_exposure_grid(
     prepared_inmap: gpd.GeoDataFrame,
     prepared_aermod: Optional[gpd.GeoDataFrame],
     working_dir: Path,
+    prepared_power: Optional[pd.DataFrame] = None,
 ) -> gpd.GeoDataFrame:
     if not pipeline.aermod_full_grid_path:
         raise ValueError("pipeline.aermod_full_grid_path must be configured before building the full exposure grid.")
@@ -170,8 +181,17 @@ def _build_full_exposure_grid(
         configure_duckdb_connection(_con, working_dir=working_dir, show_progress=False, profile="balanced")
         _con.register("_grid", grid_df)
         _con.register("_inmap", inmap_df)
+        if prepared_power is not None:
+            _con.register("_power", prepared_power)
 
         _inmap_sel = ", ".join(f'i."{c}"' for c in inmap_cols if c != _INMAP_SOURCE_ID_COLUMN)
+
+        power_select = ""
+        power_join = ""
+        if prepared_power is not None:
+            power_cols = [c for c in prepared_power.columns if c != _INMAP_SOURCE_ID_COLUMN]
+            power_select = ", " + ", ".join(f'p."{c}"' for c in power_cols)
+            power_join = f' LEFT JOIN _power p ON g."{_INMAP_SOURCE_ID_COLUMN}" = p."{_INMAP_SOURCE_ID_COLUMN}"'
 
         if prepared_aermod is not None:
             _require_unique_id_rows(
@@ -185,16 +205,18 @@ def _build_full_exposure_grid(
             _aermod_sel = ", ".join(f'a."{c}"' for c in aermod_cols if c != _AERMOD_SOURCE_ID_COLUMN)
             _joined_df = _con.execute(f"""
                 SELECT g."{_AERMOD_SOURCE_ID_COLUMN}", g."{_INMAP_SOURCE_ID_COLUMN}",
-                       {_inmap_sel}, {_aermod_sel}
+                       {_inmap_sel}, {_aermod_sel}{power_select}
                 FROM _grid g
                 LEFT JOIN _inmap i ON g."{_INMAP_SOURCE_ID_COLUMN}" = i."{_INMAP_SOURCE_ID_COLUMN}"
                 LEFT JOIN _aermod a ON g."{_AERMOD_SOURCE_ID_COLUMN}" = a."{_AERMOD_SOURCE_ID_COLUMN}"
+                {power_join}
             """).df()
         else:
             _joined_df = _con.execute(f"""
-                SELECT g."{_AERMOD_SOURCE_ID_COLUMN}", g."{_INMAP_SOURCE_ID_COLUMN}", {_inmap_sel}
+                SELECT g."{_AERMOD_SOURCE_ID_COLUMN}", g."{_INMAP_SOURCE_ID_COLUMN}", {_inmap_sel}{power_select}
                 FROM _grid g
                 LEFT JOIN _inmap i ON g."{_INMAP_SOURCE_ID_COLUMN}" = i."{_INMAP_SOURCE_ID_COLUMN}"
+                {power_join}
             """).df()
     finally:
         _con.close()
@@ -219,24 +241,40 @@ def _build_full_exposure_grid(
         if col not in result.columns:
             result[col] = default
 
+    # Direct callers that already provide a prepared InMAP frame retain the
+    # legacy fallback. The production loader above requires explicit baseline
+    # columns so an adjusted surface cannot silently masquerade as InMAP-only.
+    if "inmap_only_PrimaryPM25" not in result:
+        result["inmap_only_PrimaryPM25"] = result["inmap_PrimaryPM25"]
+    if "inmap_only_TotalPM25" not in result:
+        result["inmap_only_TotalPM25"] = result["inmap_PrimaryPM25"] + result["inmap_SecondaryPM25"]
+    if "inmap_only_BC" not in result:
+        result["inmap_only_BC"] = result["inmap_BC"]
+    if "inmap_only_NO2" not in result:
+        result["inmap_only_NO2"] = result["inmap_NO2"]
+
     for col in ("inmap_PrimaryPM25", "inmap_SecondaryPM25", "aermod_PrimaryPM25", "aermod_SecondaryPM25", "aermod_BC", "aermod_NO2"):
         result[col] = pd.to_numeric(result[col], errors="coerce").fillna(0.0)
-    for col in ("inmap_BC", "inmap_NO2"):
+    for col in (
+        "inmap_BC", "inmap_NO2", "inmap_only_PrimaryPM25", "inmap_only_TotalPM25",
+        "inmap_only_BC", "inmap_only_NO2",
+    ):
         result[col] = pd.to_numeric(result[col], errors="coerce").fillna(0.0)
     for col in ("has_aermod_primarypm25", "has_aermod_bc", "has_aermod_no2"):
         result[col] = result[col].fillna(False).astype(bool)
 
     primary_strategy = pipeline.primary_pm25_integration_strategy
-    if primary_strategy == primary_pm25_strategy_inmap_only:
-        result["aermod_PrimaryPM25_scale_factor"] = np.nan
-        result["aermod_PrimaryPM25_scaled"] = 0.0
-        result["PrimaryPM25"] = result["inmap_PrimaryPM25"]
+    result["aermod_PrimaryPM25_scale_factor"] = np.nan
+    result["aermod_PrimaryPM25_scaled"] = 0.0
+    if primary_strategy == primary_pm25_strategy_additive_inmap_aermod:
+        result["aermod_PrimaryPM25_scale_factor"] = 1.0
+        result["aermod_PrimaryPM25_scaled"] = result["aermod_PrimaryPM25"]
+        result["PrimaryPM25"] = result["inmap_PrimaryPM25"] + result["aermod_PrimaryPM25"]
+    elif primary_strategy == primary_pm25_strategy_inmap_only:
+        result["PrimaryPM25"] = result["inmap_only_PrimaryPM25"]
     elif primary_strategy == primary_pm25_strategy_impute_inmap_primary_in_aermod_domain:
-        result["aermod_PrimaryPM25_scale_factor"] = np.nan
         result["aermod_PrimaryPM25_scaled"] = np.where(
-            result["has_aermod_primarypm25"],
-            result["aermod_PrimaryPM25"],
-            0.0,
+            result["has_aermod_primarypm25"], result["aermod_PrimaryPM25"], 0.0
         )
         result["PrimaryPM25"] = np.where(
             result["has_aermod_primarypm25"],
@@ -254,32 +292,41 @@ def _build_full_exposure_grid(
         )
     else:
         raise ValueError(
-            "pipeline.primary_pm25_integration_strategy must be one of "
-            f"{list(default_primary_pm25_integration_strategies)}, "
-            f"got {primary_strategy!r}"
+            "Unsupported primary PM2.5 integration strategy. This workflow supports "
+            "additive_inmap_aermod, inmap_only, and impute_inmap_primary_in_aermod_domain; "
+            f"configured={primary_strategy!r}, allowed={list(default_primary_pm25_integration_strategies)}"
         )
     result["SecondaryPM25"] = result["inmap_SecondaryPM25"]
     result["TotalPM25"] = result["SecondaryPM25"] + result["PrimaryPM25"]
-    result["BC"] = np.where(
-        result["has_aermod_bc"],
-        result["inmap_BC"] + result["aermod_BC"],
-        result["inmap_BC"],
-    )
-    result["NO2"] = np.where(
-        result["has_aermod_no2"],
-        result["inmap_NO2"] + result["aermod_NO2"],
-        result["inmap_NO2"],
-    )
+    for pollutant in ("BC", "NO2"):
+        result[pollutant] = (
+            result[f"inmap_only_{pollutant}"]
+            if primary_strategy == primary_pm25_strategy_inmap_only
+            else result[f"inmap_{pollutant}"] + result[f"aermod_{pollutant}"]
+        )
+
+    # Power-sector ISRM uses its configured source layer. It is added only
+    # after the traffic ISRM/AERMOD integration, so traffic local-local removal
+    # can never remove power-generation concentration.
+    power_cols = [c for c in result.columns if c.startswith("power_")]
+    for col in power_cols:
+        result[col] = pd.to_numeric(result[col], errors="coerce").fillna(0.0)
+    if "power_PrimaryPM25" in result:
+        result["PrimaryPM25"] += result["power_PrimaryPM25"]
+        result["SecondaryPM25"] += result.get("power_SecondaryPM25", 0.0)
+        result["TotalPM25"] = result["PrimaryPM25"] + result["SecondaryPM25"]
 
     ordered = [
         _AERMOD_SOURCE_ID_COLUMN, _INMAP_SOURCE_ID_COLUMN,
         "TotalPM25", "PrimaryPM25", "SecondaryPM25", "BC", "NO2",
         "inmap_PrimaryPM25", "inmap_SecondaryPM25",
+        "inmap_only_PrimaryPM25", "inmap_only_TotalPM25", "inmap_only_BC", "inmap_only_NO2",
         "aermod_PrimaryPM25", "aermod_PrimaryPM25_scaled", "aermod_PrimaryPM25_scale_factor",
         "aermod_SecondaryPM25",
         "has_aermod_primarypm25", "has_aermod_bc", "has_aermod_no2",
     ]
     ordered.extend(("inmap_BC", "inmap_NO2", "aermod_BC", "aermod_NO2"))
+    ordered.extend(c for c in power_cols if c not in ordered)
     ordered.append("geometry")
     return gpd.GeoDataFrame(result[ordered], geometry="geometry", crs=full_grid.crs)
 
@@ -300,6 +347,7 @@ def run(
     raw_dir: Path,
     inmap_concentrations_path: Optional[str] = None,
     aermod_concentrations_path: Optional[str] = None,
+    power_generation_concentrations_path: Optional[str] = None,
     manifest_inputs: Optional[dict[str, Any]] = None,
 ) -> tuple[Optional[gpd.GeoDataFrame], Path, Optional[Path], Optional[Path]]:
     """Step 4: prepare the merged exposure artifact from dispersion outputs."""
@@ -309,6 +357,7 @@ def run(
     log_substep_banner("4.1", "load concentration inputs", logger=logger)
     prepared_inmap: Optional[gpd.GeoDataFrame] = None
     prepared_aermod: Optional[gpd.GeoDataFrame] = None
+    prepared_power: Optional[pd.DataFrame] = None
     if inmap_concentrations_path:
         inmap_gdf = read_vector(inmap_concentrations_path)
         prepared_inmap = _prepare_inmap_exposure_inputs(inmap_gdf)
@@ -317,6 +366,9 @@ def run(
         aermod_gdf = read_vector(aermod_concentrations_path)
         prepared_aermod = _prepare_aermod_exposure_inputs(aermod_gdf)
         _trace_frame("1", "prepared_aermod_concentrations", pd.DataFrame(prepared_aermod.drop(columns="geometry", errors="ignore")))
+    if power_generation_concentrations_path:
+        prepared_power = _prepare_power_generation_inputs(read_vector(power_generation_concentrations_path))
+        _trace_frame("1", "prepared_power_generation_concentrations", prepared_power)
 
     log_substep_banner("4.2", "build concentration distribution", logger=logger)
     if prepared_inmap is None:
@@ -325,6 +377,7 @@ def run(
         pipeline=pipeline,
         prepared_inmap=prepared_inmap,
         prepared_aermod=prepared_aermod,
+        prepared_power=prepared_power,
         working_dir=raw_dir,
     )
     _trace_frame("2", "full_exposure_grid", pd.DataFrame(full_exposure_grid.drop(columns="geometry", errors="ignore")))

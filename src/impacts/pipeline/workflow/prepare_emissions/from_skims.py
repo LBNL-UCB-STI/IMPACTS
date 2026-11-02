@@ -635,7 +635,7 @@ def _resolve_staged_skims_input_path(manifest_inputs: Optional[Dict[str, Any]] =
     if not manifest_inputs:
         return None
     for key in ["emissions_skims_input", "skims_from_events"]:
-        if key in manifest_inputs:
+        if key in manifest_inputs and manifest_inputs[key].get('exists', True):
             return resolve_required_manifest_input(manifest_inputs, key=key)
     return None
 
@@ -776,6 +776,11 @@ def load_or_prepare_skims_df(
 
     from .from_events import build_staged_skims_from_events
 
+    allowed_ids, _ = _resolve_assignment_filter_ids(
+        passenger_vehicle_types_path=passenger_vehicle_types_path,
+        freight_vehicle_types_path=freight_vehicle_types_path,
+        include_passenger=include_passenger, include_freight=include_freight,
+    )
     events_skims_path = build_staged_skims_from_events(
         input_root=input_root,
         network_path=network_path,
@@ -783,6 +788,8 @@ def load_or_prepare_skims_df(
         freight_vehicle_types_path=freight_vehicle_types_path,
         intersection_path=intersection_path,
         manifest_inputs=manifest_inputs,
+        pollutants=pollutants,
+        allowed_vehicle_type_ids=allowed_ids,
     )
     if not events_skims_path:
         raise FileNotFoundError(

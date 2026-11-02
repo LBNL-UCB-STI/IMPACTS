@@ -66,6 +66,7 @@ class PipelineConfig:
     include_non_osm_car_links: bool = False
     include_passenger: bool = True
     include_freight: bool = True
+    power_generation: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PipelineConfig":
@@ -114,6 +115,7 @@ class PipelineConfig:
                 "include_non_osm_car_links",
                 "include_passenger",
                 "include_freight",
+                "power_generation",
             },
             "pipeline",
         )
@@ -193,6 +195,7 @@ class PipelineConfig:
             ),
             include_passenger=_required_bool(payload.get("include_passenger", True), "pipeline.include_passenger"),
             include_freight=_required_bool(payload.get("include_freight", True), "pipeline.include_freight"),
+            power_generation=_required_dict(payload.get("power_generation", {}), "pipeline.power_generation"),
         )
         for key in ("light_duty", "medium_heavy_duty"):
             if key not in result.annualization_days:
