@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from impacts.pipeline.workflow.truck_charging import trip_energy, schedule_vehicle, build_truck_profiles
+from impacts.pipeline.workflow.charging.truck_opportunity import trip_energy, schedule_vehicle, build_truck_profiles
 
 
 def trips(kind='hdv', miles=20, seconds=3600):

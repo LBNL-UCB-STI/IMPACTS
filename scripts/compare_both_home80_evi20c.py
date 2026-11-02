@@ -11,10 +11,15 @@ from PIL import Image
 
 from compare_charging_0224_evi20c import sha
 from compare_unified_ev_energy_evi20c import BASE, REFERENCE, SEEDS, save_details
-from impacts.pipeline.workflow.home_priority_charging import build_schedules,run_periodic
-from impacts.pipeline.workflow.phev_home_charging import (
-    build_phev_preference_schedules,build_phev_home_schedules,run_phev_periodic,
-    BATTERY_KWH_PER_KM,CHARGING_EFFICIENCY)
+from impacts.pipeline.workflow.charging.ldv_home_sensitivity import (
+    build_schedules,
+    run_periodic,
+    build_phev_preference_schedules,
+    build_phev_home_schedules,
+    run_phev_periodic,
+    BATTERY_KWH_PER_KM,
+    CHARGING_EFFICIENCY,
+)
 
 OLD=BASE/'unified-ev-energy-evi20c-20261012'
 OUT=BASE/'bev-phev-home80-evi20c-20261012'
@@ -163,8 +168,8 @@ def main():
         EVI_caveat='Cached reference and subtype weights unchanged; similar preference label does not imply identical EVI algorithms',
         seed42_metrics=selected,seed42_audit=records[0],random_seeds=SEEDS,
         previous_results_preserved=True,source_hashes={str(p):h for p,h in protected.items()},
-        code_hashes={str(p):sha(p) for p in [Path(__file__),Path('src/impacts/pipeline/workflow/phev_home_charging.py'),
-            Path('src/impacts/pipeline/workflow/home_priority_charging.py')]},
+        code_hashes={str(p):sha(p) for p in [Path(__file__),Path('src/impacts/pipeline/workflow/charging/ldv_home_sensitivity.py'),
+            Path('src/impacts/pipeline/workflow/charging/ldv_home_sensitivity.py')]},
         power_generation_run=False,downstream_AQ_run=False)
     (OUT/'run_summary.json').write_text(json.dumps(result,indent=2,allow_nan=False),encoding='utf-8')
     print(pd.DataFrame(selected).to_string(index=False))

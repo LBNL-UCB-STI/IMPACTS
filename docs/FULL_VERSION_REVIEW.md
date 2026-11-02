@@ -1,5 +1,7 @@
 # IMPACTS: complete review of the current version
 
+Module paths have been consolidated; see [Charging module organization](CHARGING_MODULES.md).
+
 Review date: November 2, 2026. This document describes the implemented functionality, calculation conventions, validation evidence, and items requiring review.
 
 **Charging model update:** the preferred LDV pathway has been restored to the original Cristian notebook functions and settings. See [CRISTIAN_COMPATIBILITY.md](CRISTIAN_COMPATIBILITY.md). The designed Home80/periodic/electric-first cases described below are historical sensitivity cases and their reproduction evidence, not the recommended compatible model. The power module still consumes an explicitly supplied curve; saved concentrations were not replaced.
@@ -145,11 +147,11 @@ Full baseline fields are named `InMAPOnly_*` at the InMAP stage and renamed `inm
 
 ### Original-function adaptation
 
-`notebook_charging.py` and `existing_ev_charging.py` load trusted collaborator notebook functions, prepare parking stops, and provide performance/compatibility adaptations. Parity tests compare charging-stop and charger choices, SOC, and delivered energy. They establish agreement with the specified original functions, not that subsequent Home80 model changes leave the original algorithm unchanged.
+`charging/ldv_charging.py` loads trusted collaborator notebook functions, prepare parking stops, and provide performance/compatibility adaptations. Parity tests compare charging-stop and charger choices, SOC, and delivered energy. They establish agreement with the specified original functions, not that subsequent Home80 model changes leave the original algorithm unchanged.
 
 ### Historical replayed Home80 / Home80 model
 
-Implementations: `home_priority_charging.py` and `phev_home_charging.py`. Inspect the entry point and explicit arguments in `scripts/replay_charging_power.py`.
+Implementations: `charging/ldv_home_sensitivity.py`. Inspect the entry point and explicit arguments in `scripts/replay_charging_power.py`.
 
 | Item | Explicit setting in the reference case |
 |---|---|
@@ -291,7 +293,7 @@ Read this document and [CHANGE_INDEX.md](CHANGE_INDEX.md), then inspect:
 2. `prepare_emissions/event_emfac.py`, `from_events.py`, and `annualization.py`: emissions and expansion.
 3. `isrm_near_source.py`, `step2_compute_inmap_concentrations.py`, and `step3_compute_aermod_concentrations.py`: responses and cutoffs.
 4. `step4_prepare_exposure.py`: components, baselines, and final addition.
-5. `home_priority_charging.py`, `phev_home_charging.py`, and `scripts/replay_charging_power.py`: current LDV arguments and SOC.
+5. `charging/ldv_home_sensitivity.py` and `scripts/replay_charging_power.py`: current LDV arguments and SOC.
 6. `scripts/analyze_collaborator_truck_charging.py`: freight sessions and hourly load.
 7. `hourly_power.py` and `power_generation.py`: plant allocation, scope, and matrix multiplication.
 8. `postprocess/step8_human_exposure.py` and `step9_human_exposure_webmap.py`: exposure and web output.

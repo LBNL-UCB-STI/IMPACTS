@@ -17,7 +17,7 @@ from PIL import Image
 
 import match_baseline_evi_profiles as evi
 from test_home_priority_scenarios import metrics
-from impacts.pipeline.workflow.home_priority_charging import build_schedules, run_periodic
+from impacts.pipeline.workflow.charging.ldv_home_sensitivity import build_schedules, run_periodic
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = ROOT/'examples/pilates/impacts/impacts_output/events-fc07-existing-ev-charging-code10x-20260928-v2'

@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from impacts.pipeline.workflow.native_ev_charging import reconstruct_sessions
+from impacts.pipeline.workflow.charging.beam_sessions import reconstruct_sessions
 
 
 def session(start, end, kwh, kind='ev-test', active=None):

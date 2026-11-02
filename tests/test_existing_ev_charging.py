@@ -4,8 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from impacts.pipeline.workflow.existing_ev_charging import prepare_existing_ev_stops
-from impacts.pipeline.workflow.notebook_charging import load_notebook_functions, assign_stops_indexed, fill_stops
+from impacts.pipeline.workflow.charging.ldv_charging import (
+    prepare_existing_ev_stops,
+    load_notebook_functions,
+    assign_stops_indexed,
+    fill_stops,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 

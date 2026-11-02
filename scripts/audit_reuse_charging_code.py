@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-from impacts.pipeline.workflow.notebook_charging import (
+from impacts.pipeline.workflow.charging.ldv_charging import (
     load_notebook_functions, prepare_passenger_stops, assign_stops_indexed, fill_stops,
 )
 

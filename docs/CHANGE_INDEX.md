@@ -4,6 +4,8 @@ Current November 2 release relative to upstream commit `159a5598210905471a041260
 
 Test names identify coverage, not complete real-data replay of every script.
 
+The charging modules were consolidated after packaging; see [CHARGING_MODULES.md](CHARGING_MODULES.md) and [charging_refactor_validation.json](charging_refactor_validation.json).
+
 ## Core model and configuration
 
 | Status | File |
@@ -24,14 +26,12 @@ Test names identify coverage, not complete real-data replay of every script.
 | Added | [src/impacts/pipeline/postprocess/step9_human_exposure_webmap.py](../src/impacts/pipeline/postprocess/step9_human_exposure_webmap.py) |
 | Modified | [src/impacts/pipeline/preprocessing/step1_collect_inputs.py](../src/impacts/pipeline/preprocessing/step1_collect_inputs.py) |
 | Added | [src/impacts/pipeline/workflow/charging_plots.py](../src/impacts/pipeline/workflow/charging_plots.py) |
-| Added | [src/impacts/pipeline/workflow/cristian_charging.py](../src/impacts/pipeline/workflow/cristian_charging.py) |
-| Added | [src/impacts/pipeline/workflow/existing_ev_charging.py](../src/impacts/pipeline/workflow/existing_ev_charging.py) |
-| Added | [src/impacts/pipeline/workflow/home_priority_charging.py](../src/impacts/pipeline/workflow/home_priority_charging.py) |
+| Added | [src/impacts/pipeline/workflow/charging/__init__.py](../src/impacts/pipeline/workflow/charging/__init__.py) |
+| Added | [src/impacts/pipeline/workflow/charging/ldv_charging.py](../src/impacts/pipeline/workflow/charging/ldv_charging.py) |
+| Added | [src/impacts/pipeline/workflow/charging/ldv_home_sensitivity.py](../src/impacts/pipeline/workflow/charging/ldv_home_sensitivity.py) |
 | Added | [src/impacts/pipeline/workflow/hourly_power.py](../src/impacts/pipeline/workflow/hourly_power.py) |
 | Added | [src/impacts/pipeline/workflow/isrm_near_source.py](../src/impacts/pipeline/workflow/isrm_near_source.py) |
-| Added | [src/impacts/pipeline/workflow/native_ev_charging.py](../src/impacts/pipeline/workflow/native_ev_charging.py) |
-| Added | [src/impacts/pipeline/workflow/notebook_charging.py](../src/impacts/pipeline/workflow/notebook_charging.py) |
-| Added | [src/impacts/pipeline/workflow/phev_home_charging.py](../src/impacts/pipeline/workflow/phev_home_charging.py) |
+| Added | [src/impacts/pipeline/workflow/charging/beam_sessions.py](../src/impacts/pipeline/workflow/charging/beam_sessions.py) |
 | Added | [src/impacts/pipeline/workflow/power_generation.py](../src/impacts/pipeline/workflow/power_generation.py) |
 | Modified | [src/impacts/pipeline/workflow/prepare_emissions/annualization.py](../src/impacts/pipeline/workflow/prepare_emissions/annualization.py) |
 | Added | [src/impacts/pipeline/workflow/prepare_emissions/event_emfac.py](../src/impacts/pipeline/workflow/prepare_emissions/event_emfac.py) |
@@ -40,7 +40,7 @@ Test names identify coverage, not complete real-data replay of every script.
 | Modified | [src/impacts/pipeline/workflow/step2_compute_inmap_concentrations.py](../src/impacts/pipeline/workflow/step2_compute_inmap_concentrations.py) |
 | Modified | [src/impacts/pipeline/workflow/step3_compute_aermod_concentrations.py](../src/impacts/pipeline/workflow/step3_compute_aermod_concentrations.py) |
 | Modified | [src/impacts/pipeline/workflow/step4_prepare_exposure.py](../src/impacts/pipeline/workflow/step4_prepare_exposure.py) |
-| Added | [src/impacts/pipeline/workflow/truck_charging.py](../src/impacts/pipeline/workflow/truck_charging.py) |
+| Added | [src/impacts/pipeline/workflow/charging/truck_opportunity.py](../src/impacts/pipeline/workflow/charging/truck_opportunity.py) |
 | Modified | [src/impacts/postprocessor.py](../src/impacts/postprocessor.py) |
 | Modified | [src/impacts/preprocessor.py](../src/impacts/preprocessor.py) |
 | Modified | [src/impacts/runner.py](../src/impacts/runner.py) |
@@ -103,7 +103,7 @@ Test names identify coverage, not complete real-data replay of every script.
 | Added | [scripts/replot_ldv_figures_24h.py](../scripts/replot_ldv_figures_24h.py) |
 | Added | [scripts/research_paths.py](../scripts/research_paths.py) |
 | Added | [scripts/run_baseline0_collaborator_pipeline.py](../scripts/run_baseline0_collaborator_pipeline.py) |
-| Added | [scripts/run_cristian_charging.py](../scripts/run_cristian_charging.py) |
+| Added | [scripts/run_ldv_charging.py](../scripts/run_ldv_charging.py) |
 | Added | [scripts/run_events_traffic_pipeline.py](../scripts/run_events_traffic_pipeline.py) |
 | Added | [scripts/run_existing_ev_charging_code.py](../scripts/run_existing_ev_charging_code.py) |
 | Added | [scripts/run_future_detailed_products.py](../scripts/run_future_detailed_products.py) |
@@ -126,7 +126,7 @@ Test names identify coverage, not complete real-data replay of every script.
 | Modified | [tests/test_aermod_concentrations.py](../tests/test_aermod_concentrations.py) |
 | Added | [tests/test_charging_continuation.py](../tests/test_charging_continuation.py) |
 | Added | [tests/test_charging_plots.py](../tests/test_charging_plots.py) |
-| Added | [tests/test_cristian_charging.py](../tests/test_cristian_charging.py) |
+| Added | [tests/test_ldv_charging.py](../tests/test_ldv_charging.py) |
 | Added | [tests/test_events_emfac.py](../tests/test_events_emfac.py) |
 | Added | [tests/test_evi_15k_comparison.py](../tests/test_evi_15k_comparison.py) |
 | Added | [tests/test_evi_fleet_matching.py](../tests/test_evi_fleet_matching.py) |

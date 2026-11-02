@@ -10,8 +10,10 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from impacts.pipeline.workflow.notebook_charging import load_notebook_functions
-from impacts.pipeline.workflow.existing_ev_charging import prepare_existing_ev_stops
+from impacts.pipeline.workflow.charging.ldv_charging import (
+    load_notebook_functions,
+    prepare_existing_ev_stops,
+)
 from impacts.pipeline.workflow.power_generation import allocate_charging_event
 from compare_native_evi_15k_weekday import weekday_hourly
 

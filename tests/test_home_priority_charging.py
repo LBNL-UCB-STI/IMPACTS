@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import pandas as pd
 
-from impacts.pipeline.workflow.home_priority_charging import Schedule,simulate_day,run_periodic,uniform,build_schedules
+from impacts.pipeline.workflow.charging.ldv_home_sensitivity import Schedule,simulate_day,run_periodic,uniform,build_schedules
 
 
 def make(kind='BEV',capacity=10.,initial=6.,energy=(3.,4.,1.),dwell=(7200.,3600.,43200.)):

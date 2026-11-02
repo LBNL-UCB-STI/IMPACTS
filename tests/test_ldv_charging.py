@@ -2,10 +2,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from impacts.pipeline.workflow.cristian_charging import (
-    expand_stop_bins, load_original, pandas2_sampling, run_cristian_charging,
+from impacts.pipeline.workflow.charging.ldv_charging import (
+    expand_stop_bins,
+    load_original,
+    pandas2_sampling,
+    run_ldv_charging,
+    assign_stops_indexed,
+    fill_stops,
 )
-from impacts.pipeline.workflow.notebook_charging import assign_stops_indexed, fill_stops
 
 
 def stops():
@@ -26,7 +30,7 @@ def test_direct_original_matches_previously_verified_adapter(charging_notebooks)
     original, params, _ = load_original(charging_notebooks)
     assigned = assign_stops_indexed(activity, original)
     expected, audit, curve = fill_stops(assigned)
-    actual, vehicles, hourly, settings, provenance = run_cristian_charging(
+    actual, vehicles, hourly, settings, provenance = run_ldv_charging(
         activity, notebooks=charging_notebooks, input_layout='stops')
     by_stop = actual.groupby('PTID').agg(energyCharged_kWh=('energyCharged_kWh','sum'),
         timeCharging_s=('timeCharging_s','sum'), socAfterCharging_kWh=('socAfterCharging_kWh','last'),
@@ -54,7 +58,7 @@ def test_no_stale_energy_proxy_or_home_flags_are_reused(charging_notebooks):
     activity = stops()
     activity['energyConsumption_kWh'] = 999
     activity['is_home'] = ~activity.is_home
-    result, vehicles, _, _, _ = run_cristian_charging(activity, notebooks=charging_notebooks, input_layout='stops')
+    result, vehicles, _, _, _ = run_ldv_charging(activity, notebooks=charging_notebooks, input_layout='stops')
     phev = vehicles.powertrain_proxy.eq('PHEV')
     np.testing.assert_allclose(vehicles.loc[phev, 'traction_kWh'], .34)
     np.testing.assert_allclose(vehicles.loc[~phev, 'traction_kWh'], 3.4)

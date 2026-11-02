@@ -38,8 +38,8 @@ def main():
     assert Path(impacts.__file__).resolve().is_relative_to(ROOT)
     from impacts.pipeline.workflow.hourly_power import run_hourly_power
     from analyze_collaborator_truck_charging import allocate
-    from impacts.pipeline.workflow.home_priority_charging import build_schedules, run_periodic
-    from impacts.pipeline.workflow.phev_home_charging import build_phev_preference_schedules, run_phev_periodic
+    from impacts.pipeline.workflow.charging.ldv_home_sensitivity import build_schedules, run_periodic
+    from impacts.pipeline.workflow.charging.ldv_home_sensitivity import build_phev_preference_schedules, run_phev_periodic
     spatial_base = args.outputs_root / 'impacts-postsim--sfbay--base--20260901-165739'
     base = args.outputs_root / 'events-fc07-existing-ev-charging-code10x-20260928-v2'
     ldv_ref = base / 'bev-phev-home80-evi20c-20261012'

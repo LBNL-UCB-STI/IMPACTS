@@ -1,6 +1,8 @@
 # Restored Cristian charging compatibility
 
-The preferred LDV charging entry point is now `scripts/run_cristian_charging.py`.
+Module paths have been consolidated; see [Charging module organization](CHARGING_MODULES.md).
+
+The preferred LDV charging entry point is now `scripts/run_ldv_charging.py`.
 It executes the original functions from the supplied collaborator notebooks
 and reads their literal parameters. The notebooks are external, read-only inputs
 and are identified by SHA-256 in each output. No original notebook file is edited.
@@ -32,7 +34,7 @@ net grid load. The code validates required fields rather than inventing missing
 charger or grid inputs.
 
 ```bash
-python scripts/run_cristian_charging.py --activity-file D:/inputs/expanded_activity.csv --notebooks D:/external/chargingcode --fleet-scale 10 --output D:/results/cristian-original
+python scripts/run_ldv_charging.py --activity-file D:/inputs/expanded_activity.csv --notebooks D:/external/chargingcode --fleet-scale 10 --output D:/results/cristian-original
 ```
 
 The notebook folder must contain `GenerateVehicleActivity.ipynb` and

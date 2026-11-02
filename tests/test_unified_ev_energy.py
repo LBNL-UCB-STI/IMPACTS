@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from impacts.pipeline.workflow.home_priority_charging import Schedule, simulate_day, run_periodic
+from impacts.pipeline.workflow.charging.ldv_home_sensitivity import Schedule, simulate_day, run_periodic
 
 
 def schedule(dwell=12*3600., energy=10., capacity=32.):

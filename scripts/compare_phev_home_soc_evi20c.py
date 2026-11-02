@@ -10,8 +10,12 @@ import matplotlib.pyplot as plt
 from PIL import Image
 
 from compare_charging_0224_evi20c import sha
-from impacts.pipeline.workflow.home_priority_charging import build_schedules,run_periodic
-from impacts.pipeline.workflow.phev_home_charging import build_phev_home_schedules,run_phev_periodic
+from impacts.pipeline.workflow.charging.ldv_home_sensitivity import (
+    build_schedules,
+    run_periodic,
+    build_phev_home_schedules,
+    run_phev_periodic,
+)
 
 ROOT=Path(__file__).resolve().parents[1]
 BASE=ROOT/'examples/pilates/impacts/impacts_output/events-fc07-existing-ev-charging-code10x-20260928-v2'
@@ -179,7 +183,7 @@ def main():
         missing_input_vehicles=missing,seed42_PHEV=phev_records[0],metrics=selected,
         random_seeds=SEEDS,all_previous_results_preserved=True,source_hashes={str(p):h for p,h in protected.items()},
         ready_for_power_generation=False,downstream_AQ_run=False,
-        implementation='src/impacts/pipeline/workflow/phev_home_charging.py')
+        implementation='src/impacts/pipeline/workflow/charging/ldv_home_sensitivity.py')
     (OUT/'run_summary.json').write_text(json.dumps(result,indent=2,allow_nan=False),encoding='utf-8')
     print(pd.DataFrame(selected).to_string(index=False))
     print('OUTPUT:',OUT)

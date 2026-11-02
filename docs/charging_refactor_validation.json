@@ -1,0 +1,58 @@
+{
+  "scope": "Charging module consolidation only; no parameter changes or concentration rerun.",
+  "charging_modules_identical_between_worktrees": true,
+  "unchanged_functions_and_classes": 22,
+  "module_constants_unchanged": true,
+  "syntax_import_paths_and_git_diff_check": "passed",
+  "real_data_replay": {
+    "reference": "2026-11-02 restored Cristian original-compatible run",
+    "exact_match": [
+      "hourly curve",
+      "vehicle SOC audit",
+      "retained profiles",
+      "all activity rows"
+    ],
+    "daily_energy_MWh": 87.47684806611898,
+    "peak_MW": 7.060441859078166,
+    "peak_hour": 19,
+    "retained_vehicles": 1539,
+    "ready_for_full_electrification_pipeline": false,
+    "annualized_or_dispatched": false
+  },
+  "tests": {
+    "github-before": {
+      "passed": 402,
+      "failed": 0,
+      "failures": []
+    },
+    "github-after": {
+      "passed": 402,
+      "failed": 0,
+      "failures": []
+    },
+    "research-before": {
+      "passed": 383,
+      "failed": 6,
+      "failures": [
+        "tests.test_terminal_contract::test_example_settings_yaml_is_current_settings_file",
+        "tests.test_terminal_contract::test_pipeline_profile_time_relaunches_under_impacts_output",
+        "tests.test_terminal_contract::test_pipeline_profile_all_relaunches_with_time_memray_and_cpu",
+        "tests.test_terminal_contract::test_postsim_profile_time_uses_timestamped_output_env",
+        "tests.test_terminal_contract::test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_defaults",
+        "tests.test_terminal_contract::test_build_settings_from_pilates_template_uses_builtin_impacts_settings"
+      ]
+    },
+    "research-after": {
+      "passed": 388,
+      "failed": 6,
+      "failures": [
+        "tests.test_terminal_contract::test_example_settings_yaml_is_current_settings_file",
+        "tests.test_terminal_contract::test_pipeline_profile_time_relaunches_under_impacts_output",
+        "tests.test_terminal_contract::test_pipeline_profile_all_relaunches_with_time_memray_and_cpu",
+        "tests.test_terminal_contract::test_postsim_profile_time_uses_timestamped_output_env",
+        "tests.test_terminal_contract::test_settings_and_pipeline_use_vehicle_category_metadata_and_annualization_defaults",
+        "tests.test_terminal_contract::test_build_settings_from_pilates_template_uses_builtin_impacts_settings"
+      ]
+    }
+  }
+}

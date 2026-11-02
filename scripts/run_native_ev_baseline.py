@@ -22,7 +22,7 @@ import pyarrow.parquet as pq
 import yaml
 
 import continue_beam_charging_pipeline as continuation
-from impacts.pipeline.workflow.native_ev_charging import ROAD_MODES, reconstruct_sessions
+from impacts.pipeline.workflow.charging.beam_sessions import ROAD_MODES, reconstruct_sessions
 from impacts.pipeline.workflow.power_generation import _safe_profile_token, write_charging_curve_outputs
 
 ROOT = Path(__file__).resolve().parents[1]

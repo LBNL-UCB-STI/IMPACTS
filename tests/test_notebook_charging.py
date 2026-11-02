@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from impacts.pipeline.workflow.notebook_charging import (
+from impacts.pipeline.workflow.charging.ldv_charging import (
     load_notebook_functions, prepare_passenger_stops, assign_stops_indexed, fill_stops,
 )
 from impacts.pipeline.workflow.power_generation import build_beam_hourly_charging_demand

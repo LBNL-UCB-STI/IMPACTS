@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 from impacts.pipeline.workflow.power_generation import _safe_profile_token, write_charging_curve_outputs
-from impacts.pipeline.workflow.truck_charging import PARAMETERS, ASSUMPTIONS, SPEED_MPH, SPEED_FACTORS, build_truck_profiles
+from impacts.pipeline.workflow.charging.truck_opportunity import PARAMETERS, ASSUMPTIONS, SPEED_MPH, SPEED_FACTORS, build_truck_profiles
 
 
 def digest(path):

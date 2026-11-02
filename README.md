@@ -3,7 +3,7 @@
 Current release review: [Complete version review](docs/FULL_VERSION_REVIEW.md)
 and [file-by-file change index](docs/CHANGE_INDEX.md).
 
-For LDV charging, use [run_cristian_charging.py](scripts/run_cristian_charging.py):
+For LDV charging, use [run_ldv_charging.py](scripts/run_ldv_charging.py):
 the original collaborator algorithm and notebook parameters are preserved.
 See [charging compatibility](docs/CRISTIAN_COMPATIBILITY.md) for inputs, checks,
 and the distinction from archived designed Home80 sensitivity cases.
@@ -80,3 +80,8 @@ both call `pipeline/workflow/hourly_power.py`. The former WA/annual-energy
 scaling method has been removed; old settings produce a migration error.
 EVI profiles are comparison inputs, not event or power-demand replacements.
 See [the hourly-only update](docs/HOURLY_POWER_UPDATE.md) for changes and validation.
+
+## Charging code organization
+
+See [charging modules and migration](docs/CHARGING_MODULES.md) for model selection,
+entry points, and the old-to-new module mapping.

@@ -9,7 +9,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from .power_generation import allocate_charging_event
+from ..power_generation import allocate_charging_event
 
 EMFAC_URL = 'https://ww2.arb.ca.gov/sites/default/files/2021-08/emfac2021_technical_documentation_april2021.pdf'
 EPA_URL = 'https://www.energystar.gov/products/ev_chargers/electric-vehicles-and-hybrids/details/45318'

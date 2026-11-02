@@ -1,8 +1,11 @@
 from dataclasses import replace
 import numpy as np
 import pytest
-from impacts.pipeline.workflow.home_priority_charging import Schedule
-from impacts.pipeline.workflow.phev_home_charging import simulate_phev_day,run_phev_periodic
+from impacts.pipeline.workflow.charging.ldv_home_sensitivity import (
+    Schedule,
+    simulate_phev_day,
+    run_phev_periodic,
+)
 
 
 def schedule(home=(False,False,True), energy=(6.,6.,6.), dwell=(7200.,7200.,43200.)):

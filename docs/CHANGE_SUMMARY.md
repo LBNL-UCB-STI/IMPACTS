@@ -18,8 +18,8 @@ scripts. The clean release was prepared separately, preserving the original.
 | 3 km ISRM local-to-local removal and full InMAP-only references | `workflow/isrm_near_source.py`; `step2_compute_inmap_concentrations.py` |
 | Circular 3 km AERMOD cutoff and compatible-class site matching | `workflow/step3_compute_aermod_concentrations.py` |
 | Traffic InMAP + AERMOD + separate power increments | `workflow/step4_prepare_exposure.py` |
-| Cristian charging-code adaptation and original-function parity tests | `workflow/notebook_charging.py`; `existing_ev_charging.py` |
-| Home80, periodic SOC, and PHEV fuel fallback models | `workflow/home_priority_charging.py`; `phev_home_charging.py` |
+| Cristian charging-code adaptation and original-function parity tests | `workflow/charging/ldv_charging.py` |
+| Home80, periodic SOC, and PHEV fuel fallback models | `workflow/charging/ldv_home_sensitivity.py` |
 | Collaborator freight charging, hourly allocation, annual plant emissions, and ISRM | `scripts/analyze_collaborator_truck_charging.py`; `workflow/hourly_power.py`; `workflow/power_generation.py` |
 | Optional passenger/freight/port/gateway products and future cases | `scripts/run_*products.py`; `run_future_fixed_factor_scenarios.py` |
 | CES, school, and LTC exposure; original-style figures and web maps | `src/impacts/pipeline/postprocess/step8_human_exposure.py`; `step9_human_exposure_webmap.py` |

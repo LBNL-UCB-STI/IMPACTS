@@ -10,7 +10,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from PIL import Image
 
-from impacts.pipeline.workflow.home_priority_charging import build_schedules,run_periodic
+from impacts.pipeline.workflow.charging.ldv_home_sensitivity import build_schedules,run_periodic
 
 ROOT=Path(__file__).resolve().parents[1]
 BASE=ROOT/'examples/pilates/impacts/impacts_output/events-fc07-existing-ev-charging-code10x-20260928-v2'
@@ -161,7 +161,7 @@ def main():
         seed_ranges=seedrange.reset_index().to_dict('records'),common_cohort=common_rows,
         incomplete_input_vehicles=sorted(set(pd.read_parquet(BASE/'existing_ev_inventory.parquet').vehicle)-set(audit.vehicle)),
         ready_for_power_generation=False,downstream='Not run: revised PHEV fuel use, incomplete fleet and proxy assumptions need review',
-        algorithm_file=str(ROOT/'src/impacts/pipeline/workflow/home_priority_charging.py'))
+        algorithm_file=str(ROOT/'src/impacts/pipeline/workflow/charging/ldv_home_sensitivity.py'))
     for p,sha in protected.items():assert hashlib.sha256(p.read_bytes()).hexdigest()==sha,f'Old result modified: {p}'
     manifest['all_prior_results_preserved']=True
     (OUT/'run_summary.json').write_text(json.dumps(manifest,indent=2,allow_nan=False),encoding='utf-8')

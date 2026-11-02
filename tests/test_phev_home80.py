@@ -2,9 +2,12 @@ from dataclasses import replace
 import numpy as np
 import pandas as pd
 import pytest
-from impacts.pipeline.workflow.home_priority_charging import Schedule
-from impacts.pipeline.workflow.phev_home_charging import (
-    build_phev_preference_schedules,simulate_phev_day,run_phev_periodic)
+from impacts.pipeline.workflow.charging.ldv_home_sensitivity import (
+    Schedule,
+    build_phev_preference_schedules,
+    simulate_phev_day,
+    run_phev_periodic,
+)
 
 
 def schedule(primary=0):

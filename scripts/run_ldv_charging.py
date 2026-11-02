@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / 'src'))
 
 import numpy as np
 import pandas as pd
-from impacts.pipeline.workflow.cristian_charging import run_cristian_charging
+from impacts.pipeline.workflow.charging.ldv_charging import run_ldv_charging
 
 
 def main():
@@ -37,7 +37,7 @@ def main():
     data = (pd.read_parquet(args.activity_file) if args.activity_file.suffix == '.parquet'
             else pd.read_csv(args.activity_file, low_memory=False))
     args.output.mkdir(parents=True)
-    result, vehicles, daily, settings, provenance = run_cristian_charging(
+    result, vehicles, daily, settings, provenance = run_ldv_charging(
         data, notebooks=args.notebooks, seed=args.seed, input_layout=args.input_layout)
     result.to_parquet(args.output / 'charging_activity_audit.parquet', index=False)
     result.loc[result.retained].to_parquet(args.output / 'charging_profiles.parquet', index=False)

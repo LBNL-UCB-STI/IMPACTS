@@ -1,11 +1,11 @@
 {
   "upstream_commit": "159a5598210905471a0412609d8414ccf97f355f",
   "file_counts": {
-    "added": 129,
+    "unchanged": 87,
     "modified": 31,
-    "unchanged": 87
+    "added": 129
   },
-  "total_bytes": 2899367,
+  "total_bytes": 2905445,
   "exclusions": "raw data, matrices, external notebooks/allocator, results, environments, caches, git history",
   "inventory_self_excluded": true,
   "files": [
@@ -54,8 +54,8 @@
     {
       "path": "README.md",
       "status": "modified",
-      "bytes": 4629,
-      "sha256": "5ee33f4a67e09cb6bd9e79af50f050874876f3d1ba9370cafe25d9c561959c70"
+      "bytes": 4702,
+      "sha256": "ecf15d29e3802e7ca5ef48090bfab922659a12b0ce7cbf95bdcc8862363d9552"
     },
     {
       "path": "docker/env.yml",
@@ -66,26 +66,32 @@
     {
       "path": "docs/CHANGE_INDEX.md",
       "status": "added",
-      "bytes": 16261,
-      "sha256": "7eef5ca0fbec48a2e8ab1336e59050617fe1aa9602acebcd47dda6bdf44fc398"
+      "bytes": 16036,
+      "sha256": "8e63e67af8c3a93fb75bd76a4e265813dde3f7aadfe4d2556250ed8939f76142"
     },
     {
       "path": "docs/CHANGE_SUMMARY.md",
       "status": "added",
-      "bytes": 5074,
-      "sha256": "fc4cb18b55dc8c94053cc3c6240e43d6cb7e3e583987f2a4bc9bfdf5aceb13cc"
+      "bytes": 5033,
+      "sha256": "7c6b18c99e7d8d0ef458d449f939f046cff61d3feeda9753df57b9f4b98fb0d5"
+    },
+    {
+      "path": "docs/CHARGING_MODULES.md",
+      "status": "added",
+      "bytes": 5482,
+      "sha256": "5a9ba95af2bf7daafd787b7d1cb5b24eedbb16abb766e08ad914cf8edcec3b4f"
     },
     {
       "path": "docs/CRISTIAN_COMPATIBILITY.md",
       "status": "added",
-      "bytes": 5350,
-      "sha256": "3ff5d93f7cf6c5c26d9113cb3c28fd0c51596742619fe8b86f2d109028f8fb1a"
+      "bytes": 5435,
+      "sha256": "98366e1557708dcc0863c96a8c26deb2f0f9264506ec22c9fda7d9ee7c04cb52"
     },
     {
       "path": "docs/FULL_VERSION_REVIEW.md",
       "status": "added",
-      "bytes": 29680,
-      "sha256": "bfac337cc5a1c8576dbfadadf9909cd428ff68731b01b76af7f20be78d4b5015"
+      "bytes": 29710,
+      "sha256": "85eb58ca41bc0144ab27d69b706c52a51096985226f88d097191297a530db527"
     },
     {
       "path": "docs/HOURLY_POWER_UPDATE.md",
@@ -96,20 +102,26 @@
     {
       "path": "docs/RELEASE_REVIEW.md",
       "status": "added",
-      "bytes": 12290,
-      "sha256": "8534fb5f7633a2d366acc7749887a7047192e05982b1c24d031012df676d53ae"
+      "bytes": 12260,
+      "sha256": "a689de47b663414a933218a40c6c4b7cf8f38ca9d9f5bbe02e61e1b636df95d8"
     },
     {
       "path": "docs/REPRODUCING.md",
       "status": "added",
-      "bytes": 9666,
-      "sha256": "3e1c56096f151b1ca869a6ab1aeebde55274a131afac481122cb7402f1f03f4b"
+      "bytes": 9661,
+      "sha256": "76bb354f900fbb9f12d618567cc91442d49bed7e1abdd4f84570cb092498affc"
     },
     {
       "path": "docs/VALIDATION.md",
       "status": "added",
       "bytes": 8184,
       "sha256": "4a1d12e0c8b5d3b814ab9c31b1386fa2f0235bd670cde409551a3e9c4e82f292"
+    },
+    {
+      "path": "docs/charging_refactor_validation.json",
+      "status": "added",
+      "bytes": 2451,
+      "sha256": "1aa422649ff07da4ef240499309a7f6133dbb454043c07617ca176112103068c"
     },
     {
       "path": "docs/consist_for_impacts.md",
@@ -234,8 +246,8 @@
     {
       "path": "scripts/audit_baseline_ev_arrivals.py",
       "status": "added",
-      "bytes": 14478,
-      "sha256": "3e9385a92a232ea37371354c0a540c8b0fa63dc520f93590a128349755dda28f"
+      "bytes": 14437,
+      "sha256": "8123850907b2b183cc40e4edb7ab603b6204f4b5f82c494ef107304dc0b0906e"
     },
     {
       "path": "scripts/audit_future_scenario_inputs.py",
@@ -258,8 +270,8 @@
     {
       "path": "scripts/audit_reuse_charging_code.py",
       "status": "added",
-      "bytes": 14398,
-      "sha256": "cde63b28a1198381ec8ffc64208ff19146a6b2d10a443cdabc28552b09da0367"
+      "bytes": 14402,
+      "sha256": "d703c5d70ca2c7abadc45366a78f886ddc5b59b2a66def00840356cf460f07d6"
     },
     {
       "path": "scripts/build_original_style_exposure_webmap.py",
@@ -276,14 +288,14 @@
     {
       "path": "scripts/compare_both_home80_evi20c.py",
       "status": "added",
-      "bytes": 12237,
-      "sha256": "32f4ba4f4972dd90910771c4e76f6e71bb3ea9494725760fef5536f870753ef3"
+      "bytes": 12232,
+      "sha256": "8c4a17c6fa0eef4282c31260fd32807735f5e4b7fa3a07082e57163ac7404f28"
     },
     {
       "path": "scripts/compare_charging_0224_evi20c.py",
       "status": "added",
-      "bytes": 12728,
-      "sha256": "be693ef62e825aed7401c8a1e1026493307656830644a26c6c295a087b0a6b53"
+      "bytes": 12735,
+      "sha256": "41affa69128a81a884edce5f2ad39e25cb0b94b0139a786485385cfb3b2478ce"
     },
     {
       "path": "scripts/compare_charging_code_evi_15k.py",
@@ -318,14 +330,14 @@
     {
       "path": "scripts/compare_phev_home90_evi_equal.py",
       "status": "added",
-      "bytes": 10984,
-      "sha256": "12ba804a0b4de4b9486c1064cc67b67697fe982b061876502b1c96e7a379ead1"
+      "bytes": 11013,
+      "sha256": "b9d464bd28c8b43a069df91fbc4ac84e9a0d957a3f62bae655ac5d4fdab34df0"
     },
     {
       "path": "scripts/compare_phev_home_soc_evi20c.py",
       "status": "added",
-      "bytes": 12285,
-      "sha256": "4603cf7a49b47b14e64777a2d73eb290eb25f72fe949aac1838b4165099f42ff"
+      "bytes": 12270,
+      "sha256": "99851055d629cce6c59a65cb6ba6f27d53b3d9613104c0e2d41481542422ebf0"
     },
     {
       "path": "scripts/compare_sf_evi_410k.py",
@@ -336,8 +348,8 @@
     {
       "path": "scripts/compare_unified_ev_energy_evi20c.py",
       "status": "added",
-      "bytes": 13159,
-      "sha256": "1e21e6a5c31dd5a508c73436e81dfe93c08ca0e9edb88924e6d52d324c87c6dd"
+      "bytes": 13150,
+      "sha256": "491343ee9bef6167aa02cb0022dc60cb72f13ce6967f6b40b6e271bdb64d9616"
     },
     {
       "path": "scripts/continue_beam_charging_pipeline.py",
@@ -474,8 +486,8 @@
     {
       "path": "scripts/rebuild_truck_charging.py",
       "status": "added",
-      "bytes": 7436,
-      "sha256": "b9068d991d0415a15f44c1c24e404952ba48e04e7050f1f1d6243a357ef2709d"
+      "bytes": 7448,
+      "sha256": "ca2626df195e32891a0cf8a9d0e1ee52b2f54321228265e8877fdd8aeade9b57"
     },
     {
       "path": "scripts/render_ces_pwc_manuscript_table.py",
@@ -486,8 +498,8 @@
     {
       "path": "scripts/replay_charging_power.py",
       "status": "added",
-      "bytes": 7890,
-      "sha256": "d13ffa24d00d4a5dbe6e898c8d057edac7de7e74ba80b1b8aa35aa5038aa1b3a"
+      "bytes": 7908,
+      "sha256": "a16255913bcec21558a7a41cb4a4b1ec3572ab3e9f11bf04673c7052adfd771b"
     },
     {
       "path": "scripts/replay_human_exposure.py",
@@ -532,12 +544,6 @@
       "sha256": "c8a08d40c45878cab698cbfe9e59ca879ca517beec229efe7bcbaa050374461f"
     },
     {
-      "path": "scripts/run_cristian_charging.py",
-      "status": "added",
-      "bytes": 5439,
-      "sha256": "6238a12c3169ff1bae1691d401a64a01a4257a2f39852c589191d0906ddc6e1a"
-    },
-    {
       "path": "scripts/run_events_traffic_pipeline.py",
       "status": "added",
       "bytes": 28582,
@@ -546,8 +552,8 @@
     {
       "path": "scripts/run_existing_ev_charging_code.py",
       "status": "added",
-      "bytes": 15886,
-      "sha256": "3629faacf5108bc6a973e0c1ce9f4ab25d8af24f31cba6fdf25a04347814a408"
+      "bytes": 15643,
+      "sha256": "b3a0d0210e433df2956f31de1f9146c6e13073df0c255315226b4d50cd62d518"
     },
     {
       "path": "scripts/run_future_detailed_products.py",
@@ -574,6 +580,12 @@
       "sha256": "ab3aca751d2778cddda8d91b60f458b49a6e335fd22dff764458f131bb149dbd"
     },
     {
+      "path": "scripts/run_ldv_charging.py",
+      "status": "added",
+      "bytes": 5433,
+      "sha256": "1a21369ff9631054362e23a255a78b31401e4516db1cc972055f68c00b1199d4"
+    },
+    {
       "path": "scripts/run_ldv_freight_products.py",
       "status": "added",
       "bytes": 18622,
@@ -582,8 +594,8 @@
     {
       "path": "scripts/run_native_ev_baseline.py",
       "status": "added",
-      "bytes": 29414,
-      "sha256": "1999502c1e676deeed8858778280fc109c32a5d2f7f4d53d13ff74ddc754060f"
+      "bytes": 29001,
+      "sha256": "c91e741b31a08afcb4b1e22c14e9613668fc88d2295bb616dc8962dd59b11587"
     },
     {
       "path": "scripts/run_original_skims_3km_test.py",
@@ -612,8 +624,8 @@
     {
       "path": "scripts/test_home_priority_scenarios.py",
       "status": "added",
-      "bytes": 12926,
-      "sha256": "4c413e59cbcbaacc5fd8be8cf1c495d8d75a640c0a54200f0066c8ee70134d48"
+      "bytes": 12940,
+      "sha256": "64bdc6c792f2c8dc311b872149509f2e1db310877da20443573e1c0c756a58c1"
     },
     {
       "path": "setup.cfg",
@@ -892,28 +904,40 @@
       "sha256": "bf501ddb97d56f3e48e7ab2f633e72c4641c146885ad2591c06e688b1ab28dc1"
     },
     {
+      "path": "src/impacts/pipeline/workflow/charging/__init__.py",
+      "status": "added",
+      "bytes": 144,
+      "sha256": "c1fb6042af9a9eb03fdc04a03e017897cc187f354b84ab8b2f124b907bc6aa5c"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/charging/beam_sessions.py",
+      "status": "added",
+      "bytes": 4286,
+      "sha256": "b56e7df3cba80fc19126384ecb94b0dca0a1325f652e116736813afb239362f5"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/charging/ldv_charging.py",
+      "status": "added",
+      "bytes": 24819,
+      "sha256": "8c61cbc9099c85754932226f5b971a7d7e145dc038a44d7db7aca052badd60d6"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/charging/ldv_home_sensitivity.py",
+      "status": "added",
+      "bytes": 18998,
+      "sha256": "981fded3403d04f8c91a30e42629eb9989a87f4be638984bf84df51498b473dd"
+    },
+    {
+      "path": "src/impacts/pipeline/workflow/charging/truck_opportunity.py",
+      "status": "added",
+      "bytes": 11257,
+      "sha256": "b4339021d99168716c3d6038fc41b92dd50afe743fc245020871e7b8c854d880"
+    },
+    {
       "path": "src/impacts/pipeline/workflow/charging_plots.py",
       "status": "added",
       "bytes": 10222,
       "sha256": "769cad0d5af70f32be1b315954cbe5b5dd469a4a492523aad152982e9581d1d2"
-    },
-    {
-      "path": "src/impacts/pipeline/workflow/cristian_charging.py",
-      "status": "added",
-      "bytes": 9042,
-      "sha256": "584ea9eb68f4b43439b0d38fdb71920386f6711055c0388e3543fa48a31b3d9c"
-    },
-    {
-      "path": "src/impacts/pipeline/workflow/existing_ev_charging.py",
-      "status": "added",
-      "bytes": 4918,
-      "sha256": "45a689f27b8e480c9363efc85c91581f2fd3d0be67e779327524cda059ba9353"
-    },
-    {
-      "path": "src/impacts/pipeline/workflow/home_priority_charging.py",
-      "status": "added",
-      "bytes": 11514,
-      "sha256": "78410a200ca9f8baa6d9840f917c9cf4ebaef2fd3521d72401b9c2c2e2193fb5"
     },
     {
       "path": "src/impacts/pipeline/workflow/hourly_power.py",
@@ -926,24 +950,6 @@
       "status": "added",
       "bytes": 5158,
       "sha256": "68daacabb0e62aa0940daeccef1247e03c6988422e2892fad1db7b5223d33c7a"
-    },
-    {
-      "path": "src/impacts/pipeline/workflow/native_ev_charging.py",
-      "status": "added",
-      "bytes": 4286,
-      "sha256": "b56e7df3cba80fc19126384ecb94b0dca0a1325f652e116736813afb239362f5"
-    },
-    {
-      "path": "src/impacts/pipeline/workflow/notebook_charging.py",
-      "status": "added",
-      "bytes": 11720,
-      "sha256": "95c117d3914b1eb39da8ebb5cc83fa65b7194b3b689a24ee88755c62b4341427"
-    },
-    {
-      "path": "src/impacts/pipeline/workflow/phev_home_charging.py",
-      "status": "added",
-      "bytes": 7753,
-      "sha256": "401d468d2a37b778b7e84db0dc486a4bb4888f57b7505ff5bfb7ac76547a74e1"
     },
     {
       "path": "src/impacts/pipeline/workflow/power_generation.py",
@@ -1004,12 +1010,6 @@
       "status": "modified",
       "bytes": 21718,
       "sha256": "95ae98ac59cf7e33d4f5e81102490b1161d07d135620edf72891b10e71aad627"
-    },
-    {
-      "path": "src/impacts/pipeline/workflow/truck_charging.py",
-      "status": "added",
-      "bytes": 11256,
-      "sha256": "c131bcc988689777971edc26a7f69864ea6125b15e5f444d9226359c84203054"
     },
     {
       "path": "src/impacts/postprocessor.py",
@@ -1156,12 +1156,6 @@
       "sha256": "cdb0563888cac6adcb8121f4e719e3727e898db6fd83115ec92a6b51f3c21948"
     },
     {
-      "path": "tests/test_cristian_charging.py",
-      "status": "added",
-      "bytes": 4315,
-      "sha256": "ac739f62ad97811544b524b921010fad012a45f7c34126fd3d73ed11a0f78bc8"
-    },
-    {
       "path": "tests/test_emfac_activities_step1.py",
       "status": "unchanged",
       "bytes": 6371,
@@ -1212,8 +1206,8 @@
     {
       "path": "tests/test_existing_ev_charging.py",
       "status": "added",
-      "bytes": 4944,
-      "sha256": "0ff4a7b93604ecb5780c142ab779d97ce97e6213e9383ea2d32860881e29da95"
+      "bytes": 4911,
+      "sha256": "e7b9aaad9b5ca52deed536f3e3a2f3ae9f1a66a42d1cfbecd2f684e90966195e"
     },
     {
       "path": "tests/test_fleet_config.py",
@@ -1284,8 +1278,8 @@
     {
       "path": "tests/test_home_priority_charging.py",
       "status": "added",
-      "bytes": 3465,
-      "sha256": "dd2a543ef703f38d3892bfa84d8a42489cfa4aea61081a5aed9d6e350edfb2aa"
+      "bytes": 3472,
+      "sha256": "51cdd799080e7abbfee914a191298ab6df5644dc74e9ede3d80a84b9254f1a82"
     },
     {
       "path": "tests/test_hourly_power.py",
@@ -1312,6 +1306,12 @@
       "sha256": "6d47e9831517859d8e8bd136d655c8cdebe33f94680a760bcb955a8e61fb30b9"
     },
     {
+      "path": "tests/test_ldv_charging.py",
+      "status": "added",
+      "bytes": 4269,
+      "sha256": "090e4ca2306a66cbcfe9a295420d7fdbfb35d47e37ec2ca9a7a458c87bd96d9e"
+    },
+    {
       "path": "tests/test_ldv_freight_products.py",
       "status": "added",
       "bytes": 1569,
@@ -1326,8 +1326,8 @@
     {
       "path": "tests/test_native_ev_charging.py",
       "status": "added",
-      "bytes": 2917,
-      "sha256": "46d748bcd6548342780103fe018ea121f2c658ee1a8781c13e0ac4e24ba2f5e3"
+      "bytes": 2921,
+      "sha256": "e0b228dfdbe6a8dd832d210d2c28612a53e2b8767e5633d2c19518797dcbfde0"
     },
     {
       "path": "tests/test_native_ev_charging_plots.py",
@@ -1338,8 +1338,8 @@
     {
       "path": "tests/test_notebook_charging.py",
       "status": "added",
-      "bytes": 6503,
-      "sha256": "dd878e40bfa018e79e9097d0196f139148b40e052dedeb573bcd0d08877a5029"
+      "bytes": 6507,
+      "sha256": "7e294a48d7f80b14adc3e231dff6295013645778d3acaab89afe7685a66115e9"
     },
     {
       "path": "tests/test_original_exposure_tables.py",
@@ -1350,14 +1350,14 @@
     {
       "path": "tests/test_phev_home80.py",
       "status": "added",
-      "bytes": 3288,
-      "sha256": "61885d22076107b60a37e6c830cbbda69842a3a2f2f95215acff4efcda2e2ce0"
+      "bytes": 3255,
+      "sha256": "5bab458c60a967b5653958018fe7f7e5e7059249f56a62c5ce08a1d620b6e741"
     },
     {
       "path": "tests/test_phev_home_charging.py",
       "status": "added",
-      "bytes": 2871,
-      "sha256": "328cdcafbe9b598b8377da0746fa796f8c390f8fd809c153801f59232daa5208"
+      "bytes": 2840,
+      "sha256": "cbcb3f3d26647554ef79a1f337b6f610eef740b57b1af489006572a5c01b8001"
     },
     {
       "path": "tests/test_plot_concentration_components.py",
@@ -1482,14 +1482,15 @@
     {
       "path": "tests/test_truck_charging.py",
       "status": "added",
-      "bytes": 3805,
-      "sha256": "3c402ade7352914b295ea4659708e294580c8709f21da0de7f941838a36b58ef"
+      "bytes": 3817,
+      "sha256": "e52a55d2cca15f91431ffc7a7dce6496d08c79a9fc8c8110b90bb2cdc6e9662e"
     },
     {
       "path": "tests/test_unified_ev_energy.py",
       "status": "added",
-      "bytes": 2318,
-      "sha256": "00e0b842b888a9582196b42c15a5cdebff9a41fe49ff60b9a60c40e734acb05f"
+      "bytes": 2325,
+      "sha256": "ebee8e8e2cfc980df9364e607748e4f7dff9317952e7394512ca24be369cfb99"
     }
-  ]
+  ],
+  "inventory_note": "Refreshed after charging consolidation and functional LDV naming; exported ZIP snapshots are unchanged."
 }

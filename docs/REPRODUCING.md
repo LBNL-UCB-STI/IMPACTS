@@ -100,7 +100,7 @@ three LDV+freight sums. A new study should use the modules with its own explicit
 inputs rather than pretending these dated reference case names are generic.
 
 For new compatible LDV charging, prepare demand using
-`scripts/run_cristian_charging.py`; see [CRISTIAN_COMPATIBILITY.md](CRISTIAN_COMPATIBILITY.md).
+`scripts/run_ldv_charging.py`; see [CRISTIAN_COMPATIBILITY.md](CRISTIAN_COMPATIBILITY.md).
 The Home80 replay above remains a historical sensitivity reproduction.
 
 To run a new hourly power case after preparing demand:
