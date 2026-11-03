@@ -3,9 +3,9 @@
   "file_counts": {
     "unchanged": 85,
     "modified": 33,
-    "added": 136
+    "added": 137
   },
-  "total_bytes": 2956520,
+  "total_bytes": 2968792,
   "exclusions": "raw data, matrices, external notebooks/allocator, results, environments, caches, git history",
   "inventory_self_excluded": true,
   "files": [
@@ -120,8 +120,8 @@
     {
       "path": "docs/RELEASE_REVIEW.md",
       "status": "added",
-      "bytes": 12812,
-      "sha256": "48f8959c0514ce81008f2002b82cea6492f1ffb5166fcdb1098de2fed9e6377c"
+      "bytes": 12940,
+      "sha256": "756a529a86fc25df483b61da0bdcac2637687093a2f9d8058ab3bebb2ee68b4a"
     },
     {
       "path": "docs/REPRODUCING.md",
@@ -134,6 +134,12 @@
       "status": "added",
       "bytes": 8184,
       "sha256": "4a1d12e0c8b5d3b814ab9c31b1386fa2f0235bd670cde409551a3e9c4e82f292"
+    },
+    {
+      "path": "docs/WEBMAP_METHOD_COMPARISON.md",
+      "status": "added",
+      "bytes": 3932,
+      "sha256": "f87bb54ac907fc5e1659817f16e2fc76e283ac18f4d04426cfcbe71ae67a0b4e"
     },
     {
       "path": "docs/charging_refactor_validation.json",
@@ -828,8 +834,8 @@
     {
       "path": "src/impacts/pipeline/postprocess/assets/human_exposure_webmap.html",
       "status": "added",
-      "bytes": 109646,
-      "sha256": "98b21fd8d384f17e488aa7ceb08de6c738863df3281331ad2f52ab373d412296"
+      "bytes": 110757,
+      "sha256": "da0c1ecd6392825ab4a10082f65dcc35af5fed4b64931d67ed879b90b8a3bc03"
     },
     {
       "path": "src/impacts/pipeline/postprocess/step1_compare_fleet.py",
@@ -882,8 +888,8 @@
     {
       "path": "src/impacts/pipeline/postprocess/step9_human_exposure_webmap.py",
       "status": "added",
-      "bytes": 14865,
-      "sha256": "dfeb7f587b97f648069af424d54ed558626ba29966ed4fdee7087b81c9d4f1ac"
+      "bytes": 18077,
+      "sha256": "afc9f1904c92ee6f5b49aede912c24255803b750d3a692e8826de6918e089ae8"
     },
     {
       "path": "src/impacts/pipeline/preprocessing/__init__.py",
@@ -1320,8 +1326,8 @@
     {
       "path": "tests/test_human_exposure_webmap.py",
       "status": "added",
-      "bytes": 1907,
-      "sha256": "e14840d16fb0589cd8ef6540a3252daf2b8546c52ddafcb316bdf8336e88e292"
+      "bytes": 5796,
+      "sha256": "2900c368274f2240cf2a82ba59ffb3038e259ad3c8f60561f92a2ff4f2f9860f"
     },
     {
       "path": "tests/test_hybrid_defaults.py",

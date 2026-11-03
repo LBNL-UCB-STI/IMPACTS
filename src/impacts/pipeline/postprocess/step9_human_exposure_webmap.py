@@ -13,6 +13,7 @@ from typing import Any
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 from PIL import Image
 from pyproj import Transformer
 from shapely.geometry import mapping
@@ -26,16 +27,34 @@ _CES_GROUPS = {"0.00-0.25", "0.25-0.50", "0.50-0.75", "0.75-1.00"}
 _RASTER_FIELDS = {
     "impm": "inmap_only_TotalPM25",
     "aepm": "TotalPM25",
+    "trafficpm": "Traffic_TotalPM25",
     "imbc": "inmap_only_BC",
     "fbc": "BC",
     "imno2": "inmap_only_NO2",
     "fno2": "NO2",
 }
 _DELTA_RASTER_FIELDS = {
-    "dpm": ("inmap_only_TotalPM25", "TotalPM25"),
+    "dpm": ("inmap_only_TotalPM25", "Traffic_TotalPM25"),
     "dbc": ("inmap_only_BC", "BC"),
     "dno2": ("inmap_only_NO2", "NO2"),
 }
+
+
+def _traffic_pm25(frame, *, total, traffic, power, require_component=False):
+    """Recover the hybrid traffic component without subtracting power twice."""
+    if traffic in frame:
+        values = pd.to_numeric(frame[traffic], errors="raise")
+        if power in frame:
+            expected = pd.to_numeric(frame[total], errors="raise") - pd.to_numeric(frame[power], errors="raise")
+            if not np.allclose(values, expected, rtol=1e-6, atol=1e-9, equal_nan=True):
+                raise ValueError(f"Inconsistent {traffic}: expected {total} minus {power}. Regenerate human-exposure products.")
+        return values
+    if power in frame:
+        return pd.to_numeric(frame[total], errors="raise") - pd.to_numeric(frame[power], errors="raise")
+    if require_component:
+        raise ValueError(f"Missing {traffic} and {power} in power-inclusive map inputs. Regenerate human-exposure products.")
+    # Older traffic-only products did not contain a separate power column.
+    return pd.to_numeric(frame[total], errors="raise")
 
 
 def _number(value: Any, digits: int = 6) -> float:
@@ -74,8 +93,10 @@ def _wrap_original_artifact(inner_html: str) -> str:
 '''
 
 
-def _tract_data(path: str) -> dict[str, Any]:
+def _tract_data(path: str, *, require_component: bool = False) -> dict[str, Any]:
     frame = gpd.read_parquet(path)
+    frame["Traffic_TotalPM25_PW"] = _traffic_pm25(frame, total="Final_TotalPM25_PW",
+        traffic="Traffic_TotalPM25_PW", power="Power_TotalPM25_PW", require_component=require_component)
     frame = frame.loc[
         frame["CES_Group"].isin(_CES_GROUPS)
         & pd.to_numeric(frame["ModelPopulation"], errors="coerce").fillna(0).gt(0)
@@ -98,8 +119,9 @@ def _tract_data(path: str) -> dict[str, Any]:
                 "county": str(getattr(row, "County", "")),
                 "group": str(row.CES_Group),
                 "aepm": aepm,
+                "trafficpm": _number(row.Traffic_TotalPM25_PW),
                 "impm": impm,
-                "dpm": _number(impm - aepm),
+                "dpm": _number(row.InMAP_TotalPM25_PW - row.Traffic_TotalPM25_PW),
                 "fbc": fbc,
                 "imbc": imbc,
                 "dbc": _number(imbc - fbc),
@@ -111,8 +133,11 @@ def _tract_data(path: str) -> dict[str, Any]:
     return {"type": "FeatureCollection", "features": features}
 
 
-def _facility_data(path: str, *, name_field: str, weight_field: str) -> list[dict[str, Any]]:
+def _facility_data(path: str, *, name_field: str, weight_field: str,
+                   require_component: bool = False) -> list[dict[str, Any]]:
     frame = gpd.read_parquet(path)
+    frame["Traffic_TotalPM25"] = _traffic_pm25(frame, total="Final_TotalPM25",
+        traffic="Traffic_TotalPM25", power="Power_TotalPM25", require_component=require_component)
     frame = frame.loc[frame["CES_Group"].isin(_CES_GROUPS)].to_crs(4326)
     points = frame.geometry
     result = []
@@ -133,8 +158,9 @@ def _facility_data(path: str, *, name_field: str, weight_field: str) -> list[dic
             "group": str(row.CES_Group),
             "weight": _number(getattr(row, weight_field, 0), 2),
             "aepm": aepm,
+            "trafficpm": _number(row.Traffic_TotalPM25),
             "impm": impm,
-            "dpm": _number(impm - aepm),
+            "dpm": _number(row.InMAP_TotalPM25 - row.Traffic_TotalPM25),
             "fbc": fbc,
             "imbc": imbc,
             "dbc": _number(imbc - fbc),
@@ -231,7 +257,14 @@ def _signed_png_data_url(raster: np.ndarray, cap: float) -> str:
 def _raw_rasters(path: str) -> dict[str, Any]:
     columns = list(dict.fromkeys(["geometry", *_RASTER_FIELDS.values(),
                                   *(field for pair in _DELTA_RASTER_FIELDS.values() for field in pair)]))
+    available = set(pq.ParquetFile(path).schema_arrow.names)
+    columns = [c for c in columns if c != "Traffic_TotalPM25" or c in available]
+    if "power_TotalPM25" in available:
+        columns.append("power_TotalPM25")
     frame = gpd.read_parquet(path, columns=columns)
+    frame["Traffic_TotalPM25"] = _traffic_pm25(frame, total="TotalPM25",
+        traffic="Traffic_TotalPM25", power="power_TotalPM25")
+    power_included = bool((pd.to_numeric(frame["TotalPM25"]) - frame["Traffic_TotalPM25"]).abs().gt(0).any())
     layout = _grid_raster_layout(frame)
     composites: dict[str, np.ndarray] = {}
     for key, column in _RASTER_FIELDS.items():
@@ -244,12 +277,13 @@ def _raw_rasters(path: str) -> dict[str, Any]:
             inmap - enhanced, layout.rows, layout.cols, layout.shape
         )
     caps = {}
-    for left, right in (("impm", "aepm"), ("imbc", "fbc"), ("imno2", "fno2")):
+    for group in (("impm", "trafficpm", "aepm"), ("imbc", "fbc"), ("imno2", "fno2")):
         quantiles = []
-        for key in (left, right):
+        for key in group:
             positive = composites[key][np.isfinite(composites[key]) & (composites[key] > 0)]
             quantiles.append(float(np.quantile(positive, 0.995)) if positive.size else 0.0)
-        caps[left] = caps[right] = max(quantiles)
+        for key in group:
+            caps[key] = max(quantiles)
     for key in _DELTA_RASTER_FIELDS:
         finite = np.abs(composites[key][np.isfinite(composites[key])])
         caps[key] = float(np.quantile(finite, 0.995)) if finite.size else 0.0
@@ -263,6 +297,11 @@ def _raw_rasters(path: str) -> dict[str, Any]:
         "width": int(first.shape[1]),
         "height": int(first.shape[0]),
         "sourceCellMetres": 100,
+        "comparisonScope": "traffic_only",
+        "differenceFormula": "InMAP-only traffic minus AERMOD-enhanced traffic",
+        "powerIncludedInFinal": power_included,
+        "pm25Layers": {"impm": "InMAP-only traffic", "trafficpm": "AERMOD-enhanced traffic",
+                       "aepm": "AERMOD-enhanced traffic plus power"},
         "composite": "maximum",
         "displayCapQuantile": 0.995,
         "scaleMode": "shared within pollutant",
@@ -281,18 +320,26 @@ def run(*, concentration_path: str, tracts_path: str, schools_path: str, ltc_pat
     if not _TEMPLATE_PATH.exists():
         raise FileNotFoundError(f"Human-exposure web-map template not found: {_TEMPLATE_PATH}")
     logger.info("Generating original-style human-exposure web map")
+    raw = _raw_rasters(concentration_path)
+    require_component = raw["powerIncludedInFinal"]
     data = {
-        "tracts": _tract_data(tracts_path),
-        "schools": _facility_data(schools_path, name_field="SchoolName", weight_field="Enrollment"),
-        "ltc": _facility_data(ltc_path, name_field="FacilityName", weight_field="TotalLicensedBeds"),
+        "tracts": _tract_data(tracts_path, require_component=require_component),
+        "schools": _facility_data(schools_path, name_field="SchoolName", weight_field="Enrollment", require_component=require_component),
+        "ltc": _facility_data(ltc_path, name_field="FacilityName", weight_field="TotalLicensedBeds", require_component=require_component),
     }
     template = _TEMPLATE_PATH.read_text(encoding="utf-8")
     template = _replace_json_constant(template, "DATA", data)
-    template = _replace_json_constant(template, "RAW", _raw_rasters(concentration_path))
+    template = _replace_json_constant(template, "RAW", raw)
     template = _replace_json_constant(template, "POWER_PLANTS", _power_plant_data(power_plants_path))
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "BayArea_Interactive_Direct_Final_PM25_BC_NO2_Power.html"
     output_path.write_text(_wrap_original_artifact(template), encoding="utf-8")
+    (output_dir / "webmap_comparison.json").write_text(json.dumps({
+        "comparison_scope": raw["comparisonScope"], "difference_formula": raw["differenceFormula"],
+        "power_included_in_final_layer": require_component, "pm25_layers": raw["pm25Layers"],
+        "inputs": {"concentrations": str(concentration_path), "tracts": str(tracts_path),
+                   "schools": str(schools_path), "ltc": str(ltc_path)},
+    }, indent=2), encoding="utf-8")
     logger.info("Human-exposure web map written to %s", output_path)
     return str(output_path)

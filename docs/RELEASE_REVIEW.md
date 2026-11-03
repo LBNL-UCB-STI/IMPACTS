@@ -112,3 +112,5 @@ dependencies. They do not establish predictive accuracy of EMFAC, charging,
 ISRM, AERMOD, or the power allocation assumptions.
 
 Electricity-year follow-up: [2018 historical allocation, all four charging cases and pending ISRM coverage](HISTORICAL_POWER_2018.md).
+
+Web-map comparison follow-up: [traffic-only method differences and separate final PM2.5 layer](WEBMAP_METHOD_COMPARISON.md).

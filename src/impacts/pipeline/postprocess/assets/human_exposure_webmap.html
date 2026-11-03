@@ -916,13 +916,16 @@ html>body{padding:0}</style>
     }
   </style>
 
+  <p class="form-label">Method differences compare traffic-only concentrations. Final PM2.5 also includes the available power-plant contribution; it is excluded from every method-difference layer.</p>
+
   <div class="viz-controls" aria-label="Map controls">
     <label class="form-label" for="bay-map-metric">Pollutant
       <select class="form-select" id="bay-map-metric">
         <optgroup label="PM2.5">
-          <option value="impm">InMAP-only PM2.5</option>
-          <option value="aepm">AERMOD-enhanced PM2.5</option>
-          <option value="dpm">Difference: InMAP-only − AERMOD-enhanced PM2.5</option>
+          <option value="impm">Traffic InMAP-only PM2.5</option>
+          <option value="trafficpm">Traffic AERMOD-enhanced PM2.5</option>
+          <option value="aepm">Final PM2.5 (traffic + power)</option>
+          <option value="dpm">Difference: Traffic method difference: InMAP-only − AERMOD-enhanced PM2.5</option>
         </optgroup>
         <optgroup label="Black Carbon">
           <option value="imbc">InMAP-only BC</option>
@@ -1050,11 +1053,11 @@ html>body{padding:0}</style>
       <span><span class="legend-dot legend-ltc" aria-hidden="true"></span>LTC: color intensity = concentration; size = concentration × licensed beds</span>
     </span>
     <span id="bay-map-delta-legend" hidden>
-      <span><span class="legend-dot legend-delta-under" aria-hidden="true"></span>Red: InMAP − AERMOD ≤ 0 (InMAP underestimate)</span>
-      <span><span class="legend-dot legend-delta-over" aria-hidden="true"></span>White: InMAP − AERMOD &gt; 0 (InMAP overestimate)</span>
+      <span><span class="legend-dot legend-delta-under" aria-hidden="true"></span>Red: Traffic InMAP − traffic AERMOD-enhanced ≤ 0 (InMAP underestimate)</span>
+      <span><span class="legend-dot legend-delta-over" aria-hidden="true"></span>White: Traffic InMAP − traffic AERMOD-enhanced &gt; 0 (InMAP overestimate)</span>
       <span><span class="legend-dot" aria-hidden="true"></span>Circle = school</span>
       <span><span class="legend-dot legend-delta-ltc" aria-hidden="true"></span>Diamond = LTC</span>
-      <span id="bay-map-delta-size-legend">Point size = |InMAP − AERMOD|</span>
+      <span id="bay-map-delta-size-legend">Point size = |Traffic InMAP − traffic AERMOD-enhanced|</span>
     </span>
     <span><span class="legend-bridge" aria-hidden="true"></span>Major bridge</span>
     <a href="https://www.openstreetmap.org/copyright">Road/bridge data © OpenStreetMap contributors</a>
@@ -1114,9 +1117,10 @@ html>body{padding:0}</style>
     const mapShell = root.querySelector(".map-shell");
 
     const metricNames = {
-      impm: "InMAP-only PM2.5",
-      aepm: "AERMOD-enhanced PM2.5",
-      dpm: "InMAP-only − AERMOD-enhanced PM2.5",
+      impm: "Traffic InMAP-only PM2.5",
+      aepm: "Final PM2.5 (traffic + power)",
+      trafficpm: "Traffic AERMOD-enhanced PM2.5",
+      dpm: "Traffic method difference: InMAP-only − AERMOD-enhanced PM2.5",
       imbc: "InMAP-only Black Carbon",
       fbc: "AERMOD-enhanced Black Carbon",
       dbc: "InMAP-only − AERMOD-enhanced Black Carbon",
@@ -1125,23 +1129,30 @@ html>body{padding:0}</style>
       dno2: "InMAP-only − AERMOD-enhanced NO₂",
     };
     const deltaPairByMetric = {
+      trafficpm: {
+        inmap: "impm", aermod: "trafficpm", delta: "dpm",
+        pollutant: "PM2.5", aermodLabel: "Traffic AERMOD-enhanced PM2.5",
+      },
       impm: {
         inmap: "impm",
-        aermod: "aepm",
+        aermod: "trafficpm",
+        delta: "dpm",
         pollutant: "PM2.5",
-        aermodLabel: "AERMOD-enhanced PM2.5",
+        aermodLabel: "Traffic AERMOD-enhanced PM2.5",
       },
       aepm: {
         inmap: "impm",
-        aermod: "aepm",
+        aermod: "trafficpm",
+        delta: "dpm",
         pollutant: "PM2.5",
-        aermodLabel: "AERMOD-enhanced PM2.5",
+        aermodLabel: "Traffic AERMOD-enhanced PM2.5",
       },
       dpm: {
         inmap: "impm",
-        aermod: "aepm",
+        aermod: "trafficpm",
+        delta: "dpm",
         pollutant: "PM2.5",
-        aermodLabel: "AERMOD-enhanced PM2.5",
+        aermodLabel: "Traffic AERMOD-enhanced PM2.5",
       },
       imbc: {
         inmap: "imbc",
@@ -1189,6 +1200,7 @@ html>body{padding:0}</style>
     const pollutantLabels = {
       impm: "PM₂.₅",
       aepm: "PM₂.₅",
+      trafficpm: "PM₂.₅",
       dpm: "Δ PM₂.₅",
       imbc: "BC",
       fbc: "BC",
@@ -1354,6 +1366,7 @@ html>body{padding:0}</style>
       .on("mouseleave", hideTooltip);
 
     function deltaValue(item, spec) {
+      if (spec.delta && Number.isFinite(Number(item[spec.delta]))) return Number(item[spec.delta]);
       const inmap = Number(item[spec.inmap]);
       const aermod = Number(item[spec.aermod]);
       return Number.isFinite(inmap) && Number.isFinite(aermod) ? inmap - aermod : NaN;
@@ -1379,7 +1392,7 @@ html>body{padding:0}</style>
           `${weightLabel}: ${Number(item.weight).toLocaleString()}<br>` +
           `InMAP-only ${escapeHtml(spec.pollutant)}: ${formatValue(inmap)} µg/m³<br>` +
           `${escapeHtml(spec.aermodLabel)}: ${formatValue(aermod)} µg/m³<br>` +
-          `InMAP − AERMOD: ${formatValue(delta)} µg/m³<br>` +
+          `Traffic InMAP − traffic AERMOD-enhanced: ${formatValue(delta)} µg/m³<br>` +
           `${direction}`,
           `${item.name} · ${spec.pollutant} delta ${formatValue(delta)} µg/m³ · ${direction} · ${weightLabel.toLowerCase()} ${Number(item.weight).toLocaleString()}`
         );
@@ -1438,7 +1451,7 @@ html>body{padding:0}</style>
         `${weightLabel}: ${Number(item.weight).toLocaleString()}<br>` +
         `InMAP-only ${escapeHtml(spec.pollutant)}: ${formatValue(inmap)} µg/m³<br>` +
         `${escapeHtml(spec.aermodLabel)}: ${formatValue(aermod)} µg/m³<br>` +
-        `InMAP − AERMOD: ${formatValue(delta)} µg/m³<br>` +
+        `Traffic InMAP − traffic AERMOD-enhanced: ${formatValue(delta)} µg/m³<br>` +
         `${direction}`,
         `${item.name} · ${spec.pollutant} delta ${formatValue(delta)} µg/m³ · ${direction}`
       );
@@ -1545,7 +1558,7 @@ html>body{padding:0}</style>
         const ltcDeltas = DATA.ltc.map(item => deltaValue(item, spec)).filter(Number.isFinite);
         summaries.push(`LTC ${ltcDeltas.filter(value => value <= 0).length.toLocaleString()} red / ${ltcDeltas.filter(value => value > 0).length.toLocaleString()} white`);
       }
-      deltaSizeLegend.textContent = `Point area = |InMAP − AERMOD|; shared P95 cap ${formatValue(deltaCap)} µg/m³${summaries.length ? ` · ${summaries.join(" · ")}` : ""}`;
+      deltaSizeLegend.textContent = `Point area = |Traffic InMAP − traffic AERMOD-enhanced|; shared P95 cap ${formatValue(deltaCap)} µg/m³${summaries.length ? ` · ${summaries.join(" · ")}` : ""}`;
     }
 
     function updateMap() {
@@ -1640,7 +1653,7 @@ html>body{padding:0}</style>
         "aria-label",
         `Bay Area ${metricNames[metric]} map with original 100 metre concentration, major bridges, schools, long-term care, and an optional facility delta layer.`
       );
-      detail.textContent = `${metricNames[metric]} · ${isDifference ? "raw grid uses red (negative), white (zero), and blue (positive)" : "raw grid uses green-to-red concentration"} · school size = ${isDifference ? "absolute difference" : "concentration"} × enrollment · LTC size = ${isDifference ? "absolute difference" : "concentration"} × licensed beds${schoolDeltaToggle.checked || ltcDeltaToggle.checked ? " · selected delta layers use InMAP − AERMOD concentration." : ""}`;
+      detail.textContent = `${metricNames[metric]} · ${isDifference ? "raw grid uses red (negative), white (zero), and blue (positive)" : "raw grid uses green-to-red concentration"} · school size = ${isDifference ? "absolute difference" : "concentration"} × enrollment · LTC size = ${isDifference ? "absolute difference" : "concentration"} × licensed beds${schoolDeltaToggle.checked || ltcDeltaToggle.checked ? " · selected delta layers use Traffic InMAP − traffic AERMOD-enhanced concentration." : ""}`;
     }
 
     metricSelect.addEventListener("change", updateMap);
