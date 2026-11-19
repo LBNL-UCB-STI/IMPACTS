@@ -15,7 +15,7 @@ COPY README.md /work/README.md
 COPY setup.cfg /work/setup.cfg
 COPY pyproject.toml /work/pyproject.toml
 WORKDIR /work
-RUN SETUPTOOLS_SCM_PRETEND_VERSION="$PACKAGE_VERSION" pip install --no-cache-dir .
+RUN SETUPTOOLS_SCM_PRETEND_VERSION="$PACKAGE_VERSION" micromamba run -n base python -m pip install --no-cache-dir .
 
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
