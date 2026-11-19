@@ -74,6 +74,7 @@ jobs:
             echo "Release tag must use vMAJOR.MINOR.PATCH: $VERSION" >&2
             exit 1
           fi
+          echo "PACKAGE_VERSION=${VERSION#v}" >> "$GITHUB_ENV"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -90,7 +91,9 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          build-args: IMAGE_VERSION=${{ env.VERSION }}
+          build-args: |
+            IMAGE_VERSION=${{ env.VERSION }}
+            PACKAGE_VERSION=${{ env.PACKAGE_VERSION }}
           tags: ${{ env.IMAGE }}:${{ env.VERSION }}
 
       - name: Verify anonymous pull for HPC

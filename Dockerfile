@@ -1,5 +1,6 @@
 FROM mambaorg/micromamba:1.5.1
 ARG IMAGE_VERSION=dev
+ARG PACKAGE_VERSION=0.0.0
 LABEL org.opencontainers.image.source="https://github.com/LBNL-UCB-STI/IMPACTS"
 LABEL org.opencontainers.image.title="impacts"
 LABEL org.opencontainers.image.description="IMPACTS workflow container"
@@ -14,7 +15,7 @@ COPY README.md /work/README.md
 COPY setup.cfg /work/setup.cfg
 COPY pyproject.toml /work/pyproject.toml
 WORKDIR /work
-RUN pip install --no-cache-dir .
+RUN SETUPTOOLS_SCM_PRETEND_VERSION="$PACKAGE_VERSION" pip install --no-cache-dir .
 
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
