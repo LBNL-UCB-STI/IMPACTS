@@ -10,7 +10,7 @@ COPY --chown=$MAMBA_USER:$MAMBA_USER docker/env.yml /tmp/env.yml
 RUN micromamba install -y -n base -f /tmp/env.yml && \
     micromamba clean --all --yes
 
-COPY src /work/src
+COPY --chown=$MAMBA_USER:$MAMBA_USER src /work/src
 COPY README.md /work/README.md
 COPY setup.cfg /work/setup.cfg
 COPY pyproject.toml /work/pyproject.toml
