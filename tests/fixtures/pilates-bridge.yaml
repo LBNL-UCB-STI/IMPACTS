@@ -1,0 +1,31 @@
+run:
+  region: fixture
+  scenario: container-smoke
+  start_year: 2030
+shared:
+  geography:
+    FIPS:
+      state: "06"
+      counties: [001]
+    local_crs: 26910
+beam:
+  local_input_folder: /app/beam_input
+  local_output_folder: /app/workspace/beam_output
+impacts:
+  local_input_folder: /app/workspace/impacts_inputs
+  local_output_folder: /app/workspace/impacts_output
+  population:
+    passenger_folder: /app/beam_input/urbansim
+    freight_folder: /app/beam_input/freight
+  dispersions:
+    inmap:
+      isrm_zarr: /app/inmap/isrm_v1.2.1.zarr
+  pipeline:
+    presim:
+      activities: false
+      fleet: false
+    postsim:
+      emissions: false
+      inmap: false
+      aermod: false
+      exposure: false

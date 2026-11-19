@@ -2,6 +2,33 @@
 
 This document describes the `impacts` integration pattern for PILATES and the example scenario under `examples/pilates/`.
 
+## Container use
+
+The image installs `derive_settings_from_pilates`, `presim`, and `postsim` on `PATH`. It has no command entrypoint, so PILATES can use each executable as its container command from any working directory:
+
+Releases tagged `vMAJOR.MINOR.PATCH` publish `ghcr.io/lbnl-ucb-sti/impacts:<tag>` after the image smoke tests pass. The release workflow also checks an anonymous GHCR pull, which is required for HPC environments that do not authenticate to GHCR. No `latest` tag is published.
+
+```bash
+derive_settings_from_pilates --pilates-settings /app/workspace/bridge.yaml --output /app/workspace/settings.yaml
+presim --config /app/workspace/settings.yaml
+postsim --config /app/workspace/settings.yaml
+```
+
+Mount the persistent PILATES run workspace at `/app/workspace` and the BEAM input tree at `/app/beam_input`. The bridge settings should point IMPACTS outputs and inputs into `/app/workspace`, BEAM inputs into `/app/beam_input`, and passenger/freight data into their corresponding paths under `/app/beam_input`. When InMAP is enabled, mount the runtime ISRM dataset at `/app/inmap` and set `impacts.dispersions.inmap.isrm_zarr` to `/app/inmap/<dataset>.zarr`. The image does not contain ISRM or other scenario data. The InMAP mount is optional when that stage is disabled.
+
+For example, with Docker:
+
+```bash
+docker run --rm \
+  --mount type=bind,src=/path/to/run-workspace,dst=/app/workspace \
+  --mount type=bind,src=/path/to/beam-input,dst=/app/beam_input,readonly \
+  --mount type=bind,src=/path/to/isrm_v1.2.1.zarr,dst=/app/inmap/isrm_v1.2.1.zarr,readonly \
+  <image> derive_settings_from_pilates \
+  --pilates-settings /app/workspace/bridge.yaml --output /app/workspace/settings.yaml
+```
+
+Use the same mounts with `presim --config /app/workspace/settings.yaml` and `postsim --config /app/workspace/settings.yaml`. For Apptainer/Singularity, use `--bind /path/to/run-workspace:/app/workspace,/path/to/beam-input:/app/beam_input:ro,/path/to/isrm_v1.2.1.zarr:/app/inmap/isrm_v1.2.1.zarr:ro` with the `docker://` image URI and the command after the image URI. Omit the InMAP bind when InMAP is disabled. The workspace must be writable.
+
 ## Example layout
 
 ```text

@@ -1,7 +1,10 @@
 FROM mambaorg/micromamba:1.5.1
-LABEL org.opencontainers.image.source="https://github.com/LBNL-UCB-STI/"
+ARG IMAGE_VERSION=dev
+LABEL org.opencontainers.image.source="https://github.com/LBNL-UCB-STI/IMPACTS"
 LABEL org.opencontainers.image.title="impacts"
 LABEL org.opencontainers.image.description="IMPACTS workflow container"
+LABEL org.opencontainers.image.version="$IMAGE_VERSION"
+WORKDIR /app
 
 COPY --chown=$MAMBA_USER:$MAMBA_USER docker/env.yml /tmp/env.yml
 RUN micromamba install -y -n base -f /tmp/env.yml && \
@@ -13,9 +16,4 @@ COPY setup.cfg /work/setup.cfg
 COPY pyproject.toml /work/pyproject.toml
 RUN pip install --no-cache-dir .
 
-ENV PYTHONPATH=/work/src
-WORKDIR /work
-
-VOLUME ["/input", "/output"]
-
-ENTRYPOINT ["/usr/local/bin/_entrypoint.sh", "python", "-m", "impacts"]
+ENV PYTHONUNBUFFERED=1
