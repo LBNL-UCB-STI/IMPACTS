@@ -333,7 +333,7 @@ def test_build_full_exposure_grid_handles_missing_aermod_bc_and_no2_columns(tmp_
     assert bool(by_id.loc[11, "has_aermod_no2"]) is False
 
 
-def test_build_full_exposure_grid_uses_per_pollutant_aermod_increment_masks(tmp_path: Path) -> None:
+def test_build_full_exposure_grid_uses_per_pollutant_aermod_support_masks(tmp_path: Path) -> None:
     full_grid = gpd.GeoDataFrame(
         {
             "aermod_cell_id": [11, 22],
@@ -389,7 +389,7 @@ def test_build_full_exposure_grid_uses_per_pollutant_aermod_increment_masks(tmp_
     assert by_id.loc[11, "SecondaryPM25"] == 1.0
     assert by_id.loc[11, "TotalPM25"] == 1.9
     assert by_id.loc[11, "BC"] == 0.3
-    assert by_id.loc[11, "NO2"] == 12.0
+    assert by_id.loc[11, "NO2"] == 7.0
     assert by_id.loc[22, "PrimaryPM25"] == 0.2
     assert by_id.loc[22, "SecondaryPM25"] == 2.0
     assert by_id.loc[22, "TotalPM25"] == 2.2

@@ -136,25 +136,9 @@ def _aggregate_inventory_emissions(
         raise ValueError("Inventory input must include county for postprocess step 3.")
     rows: list[pd.DataFrame] = []
     for pollutant, selector in pollutant_targets.items():
-        explicit_columns = tuple(selector.get("columns", ()))
-        prefixes = tuple(selector.get("prefixes", ()))
-        exclude_columns = set(selector.get("exclude_columns", ()))
-        exclude_prefixes = tuple(selector.get("exclude_prefixes", ()))
-        if explicit_columns:
-            pollutant_cols = [
-                column for column in explicit_columns
-                if column in inventory.columns
-            ]
-        else:
-            pollutant_cols = [
-                column for column in inventory.columns
-                if any(column.startswith(prefix) for prefix in prefixes)
-                and column.endswith("_short_tons_per_year")
-            ]
         pollutant_cols = [
-            column for column in pollutant_cols
-            if column not in exclude_columns
-            and not any(column.startswith(prefix) for prefix in exclude_prefixes)
+            column for column in selector.get("columns", ())
+            if column in inventory.columns
         ]
         if not pollutant_cols:
             continue
@@ -269,6 +253,50 @@ def _plot_county_comparison(
     return str(output_path)
 
 
+def _plot_regional_totals_comparison(
+    comparison: pd.DataFrame,
+    *,
+    inventory_label: str,
+    output_dir: Path,
+    target_slug: str,
+) -> Optional[str]:
+    totals = (
+        comparison.groupby("pollutant", dropna=False)[["simulation_tons", "emfac_tons"]]
+        .sum()
+        .reset_index()
+    )
+    if totals.empty:
+        return None
+    x = range(len(totals))
+    width = 0.38
+    fig, ax = plt.subplots(figsize=(max(7, len(totals) * 1.2), 5))
+    ax.bar(
+        [pos - width / 2 for pos in x],
+        totals["simulation_tons"].to_numpy(dtype=float),
+        width=width,
+        label="Simulation",
+        color="#1f77b4",
+    )
+    ax.bar(
+        [pos + width / 2 for pos in x],
+        totals["emfac_tons"].to_numpy(dtype=float),
+        width=width,
+        label=inventory_label,
+        color="#ff7f0e",
+    )
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(totals["pollutant"].tolist(), rotation=30, ha="right")
+    ax.set_ylabel("Annual tons (all counties)")
+    ax.set_title(f"Regional Total: Simulation vs {inventory_label}")
+    ax.grid(axis="y", alpha=0.2)
+    _style_chart_axes(ax)
+    fig.tight_layout()
+    output_path = output_dir / f"step3_{target_slug}_regional_totals_simulation_vs_emfac.png"
+    fig.savefig(output_path, dpi=PLOT_DPI)
+    plt.close(fig)
+    return str(output_path)
+
+
 def run(
     *,
     modeled_emissions_path: str,
@@ -282,7 +310,7 @@ def run(
 ) -> dict[str, str]:
     log_step_banner("Postprocess Step 3", f"Compare Emissions Inventory ({inventory_label})", logger=logger)
     log_substep_banner("3.1", f"compare modeled emissions with {inventory_label} inventory", logger=logger)
-    progress = _step_progress(6, "Postprocess Step 3")
+    progress = _step_progress(7, "Postprocess Step 3")
     try:
         _set_progress_task(progress, "county lookup", step_label="Postprocess Step 3")
         county_lookup = _load_county_lookup(county_boundaries_path)
@@ -316,7 +344,7 @@ def run(
         outputs = _write_comparison_table(comparison, output_dir=output_dir, target_slug=target_slug)
         _advance_progress(progress)
 
-        _set_progress_task(progress, "plots", step_label="Postprocess Step 3")
+        _set_progress_task(progress, "county plots", step_label="Postprocess Step 3")
         for pollutant in ("PM2.5", "NOx", "BC"):
             plot_path = _plot_county_comparison(
                 comparison,
@@ -327,6 +355,17 @@ def run(
             )
             if plot_path:
                 outputs[f"{pollutant}_plot"] = plot_path
+        _advance_progress(progress)
+
+        _set_progress_task(progress, "regional totals plot", step_label="Postprocess Step 3")
+        plot_path = _plot_regional_totals_comparison(
+            comparison,
+            inventory_label=inventory_label,
+            output_dir=output_dir,
+            target_slug=target_slug,
+        )
+        if plot_path:
+            outputs["regional_totals_plot"] = plot_path
         _advance_progress(progress)
     finally:
         _close_progress(progress)
@@ -341,9 +380,10 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
     from impacts.postprocessor import (
         _humanize_target_name,
         _resolve_county_boundaries_path,
-        _resolve_inventory_target_path,
+        _resolve_emissions_inventory_path,
         _resolve_modeled_emissions_path,
     )
+    from impacts.config.path_registry import build_registry
 
     from ._common import settings_path_from_output_dir
     from ...common import normalize_county_fips
@@ -356,6 +396,7 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
     if not settings.impacts.analysis.inventory_targets:
         logger.info("No inventory targets configured, skipping Step 3.")
         return {}
+    registry = build_registry(settings, settings_path)
     modeled_path = _resolve_modeled_emissions_path(
         settings_path,
         run_manifest_path=run_manifest_path,
@@ -384,9 +425,15 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
             .astype(str)
             .tolist()
         )
-    inventory_path = _resolve_inventory_target_path(
-        settings_path, settings.impacts.analysis.inventory_file
+    inventory_path = _resolve_emissions_inventory_path(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_dir,
+        registry=registry,
+        settings=settings,
     )
+    _activities = dict(getattr(settings.impacts, "activities", None) or {})
+    _model_source = dict(_activities.get("emissions_inventory") or {}).get("model_source") or "EMFAC"
     outputs: dict[str, str] = {}
     for target in settings.impacts.analysis.inventory_targets:
         target_outputs = run(
@@ -396,13 +443,10 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
             output_dir=output_dir / "postprocess" / "emissions_inventory",
             county_order=county_order,
             target_name=target.name,
-            inventory_label=f"{settings.impacts.analysis.inventory_label} {_humanize_target_name(target.name)}".strip(),
+            inventory_label=f"{_model_source} {_humanize_target_name(target.name)}".strip(),
             pollutant_targets={
                 pollutant: {
                     "columns": tuple(selector.columns),
-                    "prefixes": tuple(selector.prefixes),
-                    "exclude_columns": tuple(selector.exclude_columns),
-                    "exclude_prefixes": tuple(selector.exclude_prefixes),
                 }
                 for pollutant, selector in target.pollutants.items()
             },

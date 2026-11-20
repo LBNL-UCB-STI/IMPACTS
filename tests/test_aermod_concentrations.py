@@ -180,7 +180,7 @@ def test_prepare_source_emissions_rejects_missing_source_class_columns(tmp_path:
         )
 
 
-def test_assign_source_pattern_keys_requires_exact_source_class_pattern() -> None:
+def test_assign_source_pattern_keys_raises_when_no_fallback_available() -> None:
     source_df = pd.DataFrame(
         {
             "source_xm": [0.0],
@@ -192,10 +192,9 @@ def test_assign_source_pattern_keys_requires_exact_source_class_pattern() -> Non
     )
     site_reference = pd.DataFrame({"DataSet_ID": ["site-a"], "site_xm": [0.0], "site_ym": [0.0]})
 
-    with pytest.raises(ValueError, match="missing exact source class patterns"):
+    with pytest.raises(ValueError, match="no available fallback"):
         aermod_step._assign_source_pattern_keys(
             source_df=source_df,
-            pipeline=object(),
             site_reference=site_reference,
             available_pattern_keys={"site-a__1000__CITYSTREET__1"},
         )

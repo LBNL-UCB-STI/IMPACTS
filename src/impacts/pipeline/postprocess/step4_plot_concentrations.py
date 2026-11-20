@@ -24,11 +24,13 @@ from ._common import (
     MAP_COLORBAR_TICK_FONTSIZE,
     MAP_DPI,
     MAP_FIGSIZE,
+    MAP_SUPTITLE_FONTSIZE,
     MAP_TITLE_FONTSIZE,
     _advance_progress,
     _add_basemap,
     _add_colorbar,
     _add_network,
+    _apply_colorbar_intensity_alpha,
     _close_progress,
     _grid_raster_layout,
     _map_progress,
@@ -47,6 +49,8 @@ _LAYERS = [
     ("NO2",           "NO₂ (μg/m³)",               CMAP_NO2,  0.99),
 ]
 _PRIMARY_SECONDARY_COLUMNS = ["PrimaryPM25", "SecondaryPM25"]
+# San Francisco county in EPSG:26910 (NAD83 / UTM Zone 10N, meters)
+_SF_COUNTY_ZOOM_BBOX = (542547.0, 4173516.0, 557372.0, 4185156.0)
 _SUPERSEDED_OUTPUT_GLOBS = (
     "primarypm25.png",
     "secondarypm25.png",
@@ -79,37 +83,30 @@ def _shared_positive_vmax(conc_gdf, columns: list[str], vmax_q: float) -> float 
     return float(max(series.quantile(vmax_q) for series in positive))
 
 
-def _plot_one(conc_gdf, net_gdf, layout, column: str, title: str, cmap, vmax_q: float, out_path: Path) -> Optional[str]:
-    if column not in conc_gdf.columns:
-        logger.warning("  Column %s not in concentration data, skipping.", column)
-        return None
-
-    vals = conc_gdf[column].dropna()
-    nonzero = vals[vals > 0]
-    if nonzero.empty:
-        logger.warning("  Column %s has no positive values, skipping.", column)
-        return None
-
-    vmax = float(nonzero.quantile(vmax_q))
-    logger.info("  %s  vmax=%.4f → %s", column, vmax, out_path.name)
-
+def _render_one(
+    conc_gdf,
+    net_gdf,
+    layout,
+    column: str,
+    title: str,
+    cmap,
+    vmax: float,
+    out_path: Path,
+    zoom_bbox: tuple[float, float, float, float] | None = None,
+) -> str:
     fig, ax = plt.subplots(figsize=MAP_FIGSIZE, dpi=MAP_DPI)
     ax.set_aspect("equal")
-    _plot_raster_layer(
-        ax,
-        conc_gdf,
-        column,
-        cmap,
-        layout=layout,
-        vmax=vmax,
-    )
+    _plot_raster_layer(ax, conc_gdf, column, cmap, layout=layout, vmax=vmax)
     _add_network(ax, net_gdf)
+    if zoom_bbox is not None:
+        xmin, ymin, xmax, ymax = zoom_bbox
+        ax.set_xlim(xmin, xmax)
+        ax.set_ylim(ymin, ymax)
     _add_basemap(ax, crs=conc_gdf.crs)
-    _add_colorbar(fig, ax, cmap, vmax, title)
+    _add_colorbar(fig, ax, cmap, vmax, title, intensity_alpha=True)
     ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
     ax.set_axis_off()
     fig.tight_layout(pad=0.5)
-
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=MAP_DPI, bbox_inches="tight")
     plt.close(fig)
@@ -117,20 +114,49 @@ def _plot_one(conc_gdf, net_gdf, layout, column: str, title: str, cmap, vmax_q: 
     return str(out_path)
 
 
-def _plot_primary_secondary_comparison(conc_gdf, net_gdf, layout, out_path: Path) -> Optional[str]:
-    columns = _PRIMARY_SECONDARY_COLUMNS
-    missing = [column for column in columns if column not in conc_gdf.columns]
-    if missing:
-        logger.warning("  Columns %s not in concentration data, skipping PM₂.₅ comparison.", missing)
-        return None
+def _plot_one(
+    conc_gdf,
+    net_gdf,
+    layout,
+    column: str,
+    title: str,
+    cmap,
+    vmax_q: float,
+    out_path: Path,
+    zoom_bbox: tuple[float, float, float, float] | None = None,
+) -> dict[str, str]:
+    if column not in conc_gdf.columns:
+        logger.warning("  Column %s not in concentration data, skipping.", column)
+        return {}
 
-    vmax = _shared_positive_vmax(conc_gdf, columns, 0.99)
-    if vmax is None:
-        logger.warning("  PrimaryPM25 and SecondaryPM25 have no positive values, skipping PM₂.₅ comparison.")
-        return None
+    vals = conc_gdf[column].dropna()
+    nonzero = vals[vals > 0]
+    if nonzero.empty:
+        logger.warning("  Column %s has no positive values, skipping.", column)
+        return {}
 
-    logger.info("  Primary/Secondary PM₂.₅ shared vmax=%.4f → %s", vmax, out_path.name)
+    vmax = float(nonzero.quantile(vmax_q))
+    logger.info("  %s  vmax=%.4f → %s", column, vmax, out_path.name)
 
+    key = column.lower()
+    outputs = {f"{key}_map": _render_one(conc_gdf, net_gdf, layout, column, title, cmap, vmax, out_path)}
+    if zoom_bbox is not None:
+        zoom_path = out_path.with_stem(out_path.stem + "_zoom")
+        logger.info("  Rendering zoom → %s", zoom_path.name)
+        outputs[f"{key}_zoom_map"] = _render_one(
+            conc_gdf, net_gdf, layout, column, title, cmap, vmax, zoom_path, zoom_bbox=zoom_bbox
+        )
+    return outputs
+
+
+def _render_primary_secondary(
+    conc_gdf,
+    net_gdf,
+    layout,
+    vmax: float,
+    out_path: Path,
+    zoom_bbox: tuple[float, float, float, float] | None = None,
+) -> str:
     fig, axes = plt.subplots(
         1,
         2,
@@ -139,30 +165,28 @@ def _plot_primary_secondary_comparison(conc_gdf, net_gdf, layout, out_path: Path
     )
     for ax, column, title in zip(
         axes,
-        columns,
+        _PRIMARY_SECONDARY_COLUMNS,
         ["Primary PM₂.₅", "Secondary PM₂.₅"],
         strict=True,
     ):
         ax.set_aspect("equal")
-        _plot_raster_layer(
-            ax,
-            conc_gdf,
-            column,
-            CMAP_PM25,
-            layout=layout,
-            vmax=vmax,
-        )
+        _plot_raster_layer(ax, conc_gdf, column, CMAP_PM25, layout=layout, vmax=vmax)
         _add_network(ax, net_gdf)
+        if zoom_bbox is not None:
+            xmin, ymin, xmax, ymax = zoom_bbox
+            ax.set_xlim(xmin, xmax)
+            ax.set_ylim(ymin, ymax)
         _add_basemap(ax, crs=conc_gdf.crs)
         ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
         ax.set_axis_off()
 
-    fig.suptitle("Primary vs Secondary PM₂.₅", fontsize=MAP_TITLE_FONTSIZE + 4, y=0.98)
+    fig.suptitle("Primary vs Secondary PM₂.₅", fontsize=MAP_SUPTITLE_FONTSIZE, y=0.98)
     fig.tight_layout(rect=[0, 0, 0.9, 0.96], pad=0.5)
     cbar_ax = fig.add_axes([0.91, 0.15, 0.02, 0.7])
     sm = plt.cm.ScalarMappable(cmap=CMAP_PM25, norm=plt.Normalize(vmin=0, vmax=vmax))
     sm.set_array([])
     cbar = fig.colorbar(sm, cax=cbar_ax)
+    _apply_colorbar_intensity_alpha(cbar, sm.norm)
     cbar.set_label("PM₂.₅ (μg/m³)", fontsize=MAP_COLORBAR_LABEL_FONTSIZE, labelpad=MAP_COLORBAR_LABELPAD)
     cbar.ax.tick_params(labelsize=MAP_COLORBAR_TICK_FONTSIZE, pad=6)
     cbar.ax.yaxis.get_offset_text().set_fontsize(MAP_COLORBAR_TICK_FONTSIZE)
@@ -174,11 +198,44 @@ def _plot_primary_secondary_comparison(conc_gdf, net_gdf, layout, out_path: Path
     return str(out_path)
 
 
+def _plot_primary_secondary_comparison(
+    conc_gdf,
+    net_gdf,
+    layout,
+    out_path: Path,
+    zoom_bbox: tuple[float, float, float, float] | None = None,
+) -> dict[str, str]:
+    columns = _PRIMARY_SECONDARY_COLUMNS
+    missing = [column for column in columns if column not in conc_gdf.columns]
+    if missing:
+        logger.warning("  Columns %s not in concentration data, skipping PM₂.₅ comparison.", missing)
+        return {}
+
+    vmax = _shared_positive_vmax(conc_gdf, columns, 0.99)
+    if vmax is None:
+        logger.warning("  PrimaryPM25 and SecondaryPM25 have no positive values, skipping PM₂.₅ comparison.")
+        return {}
+
+    logger.info("  Primary/Secondary PM₂.₅ shared vmax=%.4f → %s", vmax, out_path.name)
+    outputs: dict[str, str] = {}
+    outputs["primary_secondary_pm25_map"] = _render_primary_secondary(
+        conc_gdf, net_gdf, layout, vmax, out_path
+    )
+    if zoom_bbox is not None:
+        zoom_path = out_path.with_stem(out_path.stem + "_zoom")
+        logger.info("  Rendering zoom (bbox=%s) → %s", zoom_bbox, zoom_path.name)
+        outputs["primary_secondary_pm25_zoom_map"] = _render_primary_secondary(
+            conc_gdf, net_gdf, layout, vmax, zoom_path, zoom_bbox=zoom_bbox
+        )
+    return outputs
+
+
 def run(
     *,
     concentration_path: str,
     network_path: str,
     output_dir: Path,
+    zoom_bbox: tuple[float, float, float, float] | None = _SF_COUNTY_ZOOM_BBOX,
 ) -> dict[str, str]:
     """Render concentration maps for all pollutant variables.
 
@@ -190,6 +247,10 @@ def run(
         Path to ``beam_osm_mapped.parquet``.
     output_dir:
         Directory where PNG files are written.
+    zoom_bbox:
+        ``(xmin, ymin, xmax, ymax)`` in the data CRS for a zoomed
+        primary/secondary comparison map.  Defaults to San Francisco county
+        (EPSG:26910).  Pass ``None`` to skip the zoom plot.
     """
     import geopandas as gpd
 
@@ -219,20 +280,20 @@ def run(
     try:
         for column, title, cmap, vmax_q in _LAYERS:
             _set_progress_task(progress, column, step_label="Postprocess Step 4")
-            result = _plot_one(conc_gdf, net_gdf, layout, column, title, cmap, vmax_q,
-                               output_dir / f"{column.lower()}.png")
-            if result is not None:
-                outputs[f"{column.lower()}_map"] = result
+            outputs.update(_plot_one(
+                conc_gdf, net_gdf, layout, column, title, cmap, vmax_q,
+                output_dir / f"{column.lower()}.png",
+                zoom_bbox=zoom_bbox if column == "TotalPM25" else None,
+            ))
             _advance_progress(progress)
         _set_progress_task(progress, "Primary/Secondary PM2.5", step_label="Postprocess Step 4")
-        result = _plot_primary_secondary_comparison(
+        outputs.update(_plot_primary_secondary_comparison(
             conc_gdf,
             net_gdf,
             layout,
             output_dir / "primary_secondary_pm25.png",
-        )
-        if result is not None:
-            outputs["primary_secondary_pm25_map"] = result
+            zoom_bbox=zoom_bbox,
+        ))
         _advance_progress(progress)
     finally:
         _close_progress(progress)
@@ -241,7 +302,10 @@ def run(
     return outputs
 
 
-def run_from_output_dir(output_dir: Path) -> dict[str, str]:
+def run_from_output_dir(
+    output_dir: Path,
+    zoom_bbox: tuple[float, float, float, float] | None = _SF_COUNTY_ZOOM_BBOX,
+) -> dict[str, str]:
     """Run Step 4 from a pipeline output directory using manifest-resolved paths."""
     from ._common import pipeline_outputs
 
@@ -255,6 +319,7 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
         concentration_path=conc_path,
         network_path=net_path,
         output_dir=output_dir / "postprocess" / "concentrations",
+        zoom_bbox=zoom_bbox,
     )
 
 
@@ -274,6 +339,13 @@ if __name__ == "__main__":
     )
     parser.add_argument("output_dir", type=Path,
                         help="Path to the main pipeline output folder.")
+    parser.add_argument(
+        "--zoom-bbox", nargs=4, type=float, metavar=("XMIN", "YMIN", "XMAX", "YMAX"),
+        help="Bounding box in data CRS for a zoomed primary/secondary comparison map.",
+    )
     args = parser.parse_args()
 
-    run_from_output_dir(Path(args.output_dir))
+    run_from_output_dir(
+        Path(args.output_dir),
+        zoom_bbox=tuple(args.zoom_bbox) if args.zoom_bbox else None,
+    )

@@ -30,8 +30,11 @@ from ...consist_artifacts import find_latest_beam_population_reference
 from ...consist_artifacts import resolve_logged_path
 from ...config.path_registry import build_registry
 from ...config.settings import presim_activities_inventory_root
+from ...config.settings import presim_activities_tmp_root
 from ...manifest.file_ops import resolve_path
 from ...manifest.file_ops import resolve_required_path
+from ...manifest.file_ops import is_remote_path
+from ...isrm_store import localize_isrm_store
 
 logger = logging.getLogger(__name__)
 
@@ -353,6 +356,8 @@ def run(
         substep_13_total += 1
     if emissions.inventory.enable_freight_activity_correction:
         substep_13_total += 1
+    if settings.impacts.analysis.inventory_targets:
+        substep_13_total += 1
     progress = make_progress("Preprocess Step 1.3", total=substep_13_total, unit="task", leave=False)
     try:
         if emissions.inventory.enable_passenger_activity_correction:
@@ -406,6 +411,29 @@ def run(
             metadata={"artifact_family": "freight_inventory_emfacid_file"},
         )
         progress.update(1)
+
+        if settings.impacts.analysis.inventory_targets:
+            _set_progress_task(progress, "emissions inventory", step_label="Preprocess Step 1.3")
+            _tmp_root = presim_activities_tmp_root(
+                local_output_folder,
+                region=settings.run.region,
+                output_run_name=getattr(settings.run, "output_run_name", None),
+                run_scenario=settings.run.scenario,
+            )
+            _acts = settings.impacts.activities if isinstance(settings.impacts.activities, dict) else {}
+            region_slug = str(_acts.get("region_label") or settings.run.region).lower()
+            year = int(settings.run.start_year)
+            emissions_inv_path = _tmp_root / f"{region_slug}-emfac-{year}-inventory-intermediate-with-activity.parquet"
+            required_local_path(emissions_inv_path, "emissions_inventory_file (inventory-intermediate-with-activity)")
+            _register_manifest_input(
+                manifest_inputs,
+                input_root=input_root,
+                key="emissions_inventory_file",
+                source_path=str(emissions_inv_path),
+                relative_target=emissions_inv_path.name,
+                metadata={"artifact_family": "emissions_inventory_file"},
+            )
+            progress.update(1)
     finally:
         progress.close()
 
@@ -449,9 +477,20 @@ def run(
                 progress.update(1)
 
                 _set_progress_task(progress, "isrm store", step_label="Preprocess Step 1.4")
-                isrm_source = str(registry.locate_required(
-                    inmap.isrm_zarr, label="impacts.dispersions.inmap.isrm_zarr"
-                ))
+                if impacts.shared_input_cache_dir:
+                    shared_cache_root = Path(resolve_path(impacts.shared_input_cache_dir, config_path))
+                    isrm_cache_root = shared_cache_root / "isrm"
+                else:
+                    impacts_input_root = Path(resolve_required_path(
+                        impacts.local_input_folder, config_path, "impacts.local_input_folder"
+                    ))
+                    isrm_cache_root = impacts_input_root / "isrm_cache"
+                if is_remote_path(inmap.isrm_zarr):
+                    isrm_source = localize_isrm_store(inmap.isrm_zarr, isrm_cache_root)
+                else:
+                    local_isrm_source = registry.locate(inmap.isrm_zarr)
+                    source = local_isrm_source or resolve_path(inmap.isrm_zarr, config_path)
+                    isrm_source = localize_isrm_store(str(source), isrm_cache_root)
                 staged_isrm = _register_manifest_input(
                     manifest_inputs,
                     input_root=input_root,

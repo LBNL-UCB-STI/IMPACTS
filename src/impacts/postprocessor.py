@@ -358,26 +358,45 @@ def _resolve_optional_population_assignment_paths(
     return passenger_vehicles_path, freight_carriers_path
 
 
-def _resolve_inventory_target_path(
+def _resolve_emissions_inventory_path(
     settings_path: str | Path,
-    raw: str,
     *,
+    run_manifest_path: str | Path | None = None,
     output_root: Path | None = None,
     registry: "PathRegistry",
+    settings=None,
 ) -> Path:
-    raw_text = str(raw).strip()
-    candidate = _localize_output_path(raw_text, output_root)
-    if candidate.exists():
-        return candidate
-    result = _locate_registry_path(registry, raw_text)
-    if result is not None:
-        return result
-    settings_candidate = _localize_output_path(resolve_path(raw_text, settings_path) or raw_text, output_root)
-    if settings_candidate.exists():
-        return settings_candidate
+    _, _, _, inputs = _load_context(
+        settings_path,
+        run_manifest_path=run_manifest_path,
+        output_root=output_root,
+    )
+    try:
+        candidate = _resolve_input_path(inputs, key="emissions_inventory_file", output_root=output_root, registry=registry)
+        if candidate.exists():
+            return candidate
+    except ValueError:
+        pass
+    # Fallback for runs where preprocessing pre-dates emissions_inventory_file manifest registration.
+    # The presim activities _tmp dir is a sibling of the postsim output dir under the same parent.
+    if settings is not None and output_root is not None:
+        from .config.settings import presim_activities_tmp_root
+        _acts = settings.impacts.activities if isinstance(settings.impacts.activities, dict) else {}
+        region_slug = str(_acts.get("region_label") or settings.run.region).lower()
+        year = int(settings.run.start_year)
+        fallback_tmp = presim_activities_tmp_root(
+            output_root.parent,
+            region=str(settings.run.region),
+            output_run_name=getattr(settings.run, "output_run_name", None),
+            run_scenario=str(settings.run.scenario),
+        )
+        fallback = fallback_tmp / f"{region_slug}-emfac-{year}-inventory-intermediate-with-activity.parquet"
+        if fallback.exists():
+            logger.info("Resolved emissions inventory via presim fallback: %s", fallback)
+            return fallback
     raise FileNotFoundError(
-        f"Postprocess inventory target file was configured but not found. "
-        f"Searched: {', '.join(str(r) for r in registry.roots)}. Path: {raw}"
+        "Postprocess step 3 requires the EMFAC emissions inventory file. "
+        "Re-run the preprocessing workflow: python -m impacts preprocess --config <config>"
     )
 
 
@@ -400,7 +419,7 @@ def _resolve_delta_baseline_concentration_path(
 
 
 def _remove_stale_postprocess_delta_outputs(output_dir: Path) -> None:
-    for subdir in ("delta_concentrations", "delta_exposure"):
+    for subdir in ("delta_concentrations", "delta_exposure", "delta_transects"):
         target_dir = output_dir / subdir
         if not target_dir.exists():
             continue
@@ -462,15 +481,24 @@ def _resolve_vehicle_category_metadata_path(
     except ValueError:
         pass
     settings = load_settings_from_yaml(settings_path)
-    if not settings.impacts.emissions.vehicle_category_metadata_file:
+    raw = settings.impacts.emissions.vehicle_category_metadata_file
+    if not raw:
         raise ValueError(
             "Postprocess step 2 requires impacts.emissions.vehicle_category_metadata_file when annual sector targets are configured."
         )
-    return _resolve_inventory_target_path(
-        settings_path,
-        settings.impacts.emissions.vehicle_category_metadata_file,
-        output_root=output_root,
-        registry=registry,
+    raw_text = str(raw).strip()
+    candidate = _localize_output_path(raw_text, output_root)
+    if candidate.exists():
+        return candidate
+    result = _locate_registry_path(registry, raw_text)
+    if result is not None:
+        return result
+    settings_candidate = _localize_output_path(resolve_path(raw_text, settings_path) or raw_text, output_root)
+    if settings_candidate.exists():
+        return settings_candidate
+    raise FileNotFoundError(
+        f"Postprocess step 2 vehicle_category_metadata_file not found. "
+        f"Searched: {', '.join(str(r) for r in registry.roots)}. Path: {raw}"
     )
 
 
@@ -487,8 +515,10 @@ def _run_postprocess_steps(
     from .pipeline.postprocess.step2_compare_annual_targets import run as run_step2
     from .pipeline.postprocess.step3_compare_emissions_inventory import run as run_step3
     from .pipeline.postprocess.step4_plot_concentrations import run as run_step4
+    from .pipeline.postprocess.step4b_plot_transects import run as run_step4b
     from .pipeline.postprocess.step5_plot_exposure import run as run_step5
     from .pipeline.postprocess.step6_plot_delta_concentrations import run as run_step6
+    from .pipeline.postprocess.step6b_plot_delta_transects import run as run_step6b
     from .pipeline.postprocess.step7_plot_delta_exposure import run as run_step7
 
     settings = load_settings_from_yaml(settings_path)
@@ -632,12 +662,15 @@ def _run_postprocess_steps(
                 .astype(str)
                 .tolist()
             )
-        inventory_path = _resolve_inventory_target_path(
+        inventory_path = _resolve_emissions_inventory_path(
             settings_path,
-            settings.impacts.analysis.inventory_file,
+            run_manifest_path=run_manifest_path,
             output_root=output_root,
             registry=registry,
+            settings=settings,
         )
+        _activities = dict(getattr(settings.impacts, "activities", None) or {})
+        _model_source = dict(_activities.get("emissions_inventory") or {}).get("model_source") or "EMFAC"
         for target in settings.impacts.analysis.inventory_targets:
             target_outputs = run_step3(
                 modeled_emissions_path=str(modeled_emissions_path),
@@ -646,13 +679,10 @@ def _run_postprocess_steps(
                 output_dir=output_dir / "emissions_inventory",
                 county_order=county_order,
                 target_name=target.name,
-                inventory_label=f"{settings.impacts.analysis.inventory_label} {_humanize_target_name(target.name)}".strip(),
+                inventory_label=f"{_model_source} {_humanize_target_name(target.name)}".strip(),
                 pollutant_targets={
                     pollutant: {
                         "columns": tuple(selector.columns),
-                        "prefixes": tuple(selector.prefixes),
-                        "exclude_columns": tuple(selector.exclude_columns),
-                        "exclude_prefixes": tuple(selector.exclude_prefixes),
                     }
                     for pollutant, selector in target.pollutants.items()
                 },
@@ -699,8 +729,15 @@ def _run_postprocess_steps(
         )
         for key, value in map_outputs.items():
             outputs[f"concentration_{key}"] = value
+        transect_outputs = run_step4b(
+            concentration_path=str(conc_path),
+            network_path=str(net_path),
+            output_dir=output_dir / "concentration_transects",
+        )
+        for key, value in transect_outputs.items():
+            outputs[f"concentration_transect_{key}"] = value
     else:
-        logger.info("Skipping Step 4: concentration or network output not found at %s", output_root)
+        logger.info("Skipping Steps 4/4b: concentration or network output not found at %s", output_root)
     if pop_path.exists() and conc_path.exists() and net_path.exists():
         exp_outputs = run_step5(
             population_path=str(pop_path),
@@ -716,9 +753,9 @@ def _run_postprocess_steps(
     delta_table_path = None
     if delta_baseline_concentration_path is None:
         if delta_baseline_raw:
-            logger.info("Skipping Steps 6-7: delta baseline file was configured but could not be found.")
+            logger.info("Skipping Steps 6/6b-7: delta baseline file was configured but could not be found.")
         else:
-            logger.info("Skipping Steps 6-7: no delta baseline concentration distribution configured.")
+            logger.info("Skipping Steps 6/6b-7: no delta baseline concentration distribution configured.")
     elif conc_path.exists() and net_path.exists():
         logger.info(
             "Step 6 — resolved paths:\n  current (c) : %s\n  baseline (b): %s",
@@ -734,8 +771,17 @@ def _run_postprocess_steps(
         delta_table_path = delta_outputs.get("delta_table")
         for key, value in delta_outputs.items():
             outputs[f"delta_concentration_{key}"] = value
+        if delta_table_path:
+            delta_transect_outputs = run_step6b(
+                concentration_path=str(conc_path),
+                delta_table_path=str(delta_table_path),
+                network_path=str(net_path),
+                output_dir=output_dir / "delta_transects",
+            )
+            for key, value in delta_transect_outputs.items():
+                outputs[f"delta_transect_{key}"] = value
     else:
-        logger.info("Skipping Step 6: concentration or network output not found at %s", output_root)
+        logger.info("Skipping Steps 6/6b: concentration or network output not found at %s", output_root)
     if delta_table_path and pop_path.exists() and net_path.exists() and inmap_cells_path.exists():
         delta_exposure_outputs = run_step7(
             population_path=str(pop_path),
@@ -757,6 +803,7 @@ def postprocess_from_pipeline_manifest(
     run_manifest_path: str | Path,
     manifest_path: str | Path | None = None,
     output_root_override: str | Path | None = None,
+    settings_override: str | Path | None = None,
     input_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
     baseline_concentration_override: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -767,7 +814,11 @@ def postprocess_from_pipeline_manifest(
     output_root.mkdir(parents=True, exist_ok=True)
 
     log_step_banner("Postprocess", "Run Postprocess Steps", logger=logger)
-    settings_path = _resolve_settings_path(run_manifest_path, output_root=output_root_arg)
+    settings_path = (
+        Path(settings_override).resolve()
+        if settings_override is not None
+        else _resolve_settings_path(run_manifest_path, output_root=output_root_arg)
+    )
     if output_root_arg is None:
         postprocess_outputs = _run_postprocess_steps(
             settings_path,

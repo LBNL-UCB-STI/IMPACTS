@@ -18,6 +18,7 @@ def _run_smoke(tmp_path: Path):
     settings = cli.load_settings_from_yaml(settings_path)
     assert settings.run.region == "fixture"
     assert settings.beam.local_input_folder == "/app/beam_input"
+    assert settings.impacts.shared_input_cache_dir == "/app/impacts_cache"
     assert settings.impacts.dispersions.inmap.isrm_zarr == "/app/inmap/isrm_v1.2.1.zarr"
 
     # Redirect fixture mount paths into the temporary smoke-test workspace.

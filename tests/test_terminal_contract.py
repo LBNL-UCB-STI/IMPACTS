@@ -97,7 +97,7 @@ def _preprocess_manifest_payload(tmp_path: Path) -> dict:
 
 
 def test_example_settings_yaml_is_current_settings_file():
-    settings_yaml = Path(__file__).resolve().parents[1] / "examples" / "pilates" / "settings.yaml"
+    settings_yaml = Path(__file__).resolve().parents[1] / "settings.yaml"
 
     config = load_settings_from_yaml(settings_yaml)
 
@@ -132,7 +132,8 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.analysis.sector_targets[-1].source == "road_dust"
     assert config.impacts.analysis.sector_targets[-1].annual_pm25_short_tons == 1499.25
     assert config.impacts.analysis.sector_targets[-1].annual_nox_short_tons is None
-    assert config.impacts.analysis.inventory_targets == []
+    assert len(config.impacts.analysis.inventory_targets) == 1
+    assert config.impacts.analysis.inventory_targets[0].name == "mobile_on_road"
 
 
 def test_resolve_region_input_root_accepts_direct_region_root_layout(tmp_path: Path) -> None:
@@ -147,7 +148,7 @@ def test_resolve_region_input_root_accepts_direct_region_root_layout(tmp_path: P
 
 def test_builtin_settings_source_of_truth_is_current() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    example_payload = yaml.safe_load((repo_root / "examples" / "pilates" / "settings.yaml").read_text())
+    example_payload = yaml.safe_load((repo_root / "settings.yaml").read_text())
     default_settings_path = repo_root / "src" / "impacts" / "config" / "settings.yaml"
     default_payload = yaml.safe_load(default_settings_path.read_text())
     default_config = load_settings_from_yaml(default_settings_path)
@@ -933,6 +934,8 @@ def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_pat
     def _fake_postprocess(
         run_manifest_path,
         manifest_path=None,
+        output_root_override=None,
+        settings_override=None,
         input_roots=None,
         baseline_concentration_override=None,
     ):
@@ -1034,6 +1037,7 @@ def test_postprocess_impact_output_dir_cli_passes_output_root_override_and_impac
         run_manifest_path,
         manifest_path=None,
         output_root_override=None,
+        settings_override=None,
         input_roots=None,
         baseline_concentration_override=None,
     ):
@@ -1272,8 +1276,10 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
     import impacts.pipeline.postprocess.step2_compare_annual_targets as step2_module
     import impacts.pipeline.postprocess.step3_compare_emissions_inventory as step3_module
     import impacts.pipeline.postprocess.step4_plot_concentrations as step4_module
+    import impacts.pipeline.postprocess.step4b_plot_transects as step4b_module
     import impacts.pipeline.postprocess.step5_plot_exposure as step5_module
     import impacts.pipeline.postprocess.step6_plot_delta_concentrations as step6_module
+    import impacts.pipeline.postprocess.step6b_plot_delta_transects as step6b_module
     import impacts.pipeline.postprocess.step7_plot_delta_exposure as step7_module
 
     output_root = tmp_path / "impacts_output"
@@ -1311,17 +1317,12 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
                         annual_sox_short_tons=None,
                     )
                 ]
-                inventory_file = "inventory.parquet"
-                inventory_label = "EMFAC"
                 inventory_targets = [
                     SimpleNamespace(
                         name="inventory",
                         pollutants={
                             "PM25": SimpleNamespace(
                                 columns=("PM25",),
-                                prefixes=(),
-                                exclude_columns=(),
-                                exclude_prefixes=(),
                             )
                         },
                     )
@@ -1363,13 +1364,15 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
     monkeypatch.setattr(postprocessor_module, "_resolve_inventory_emfacid_activity_path", lambda *_args, **_kwargs: output_root / "activity.parquet")
     monkeypatch.setattr(postprocessor_module, "_resolve_vehicle_category_metadata_path", lambda *_args, **_kwargs: output_root / "metadata.csv")
     monkeypatch.setattr(postprocessor_module, "_resolve_county_boundaries_path", lambda *_args, **_kwargs: output_root / "county.gpkg")
-    monkeypatch.setattr(postprocessor_module, "_resolve_inventory_target_path", lambda *_args, **_kwargs: output_root / "inventory.parquet")
+    monkeypatch.setattr(postprocessor_module, "_resolve_emissions_inventory_path", lambda *_args, **_kwargs: output_root / "inventory.parquet")
     monkeypatch.setattr(step1_module, "run", _fake_step("step1"))
     monkeypatch.setattr(step2_module, "run", _fake_step("step2"))
     monkeypatch.setattr(step3_module, "run", _fake_step("step3"))
     monkeypatch.setattr(step4_module, "run", _fake_step4)
+    monkeypatch.setattr(step4b_module, "run", _fake_step("step4b"))
     monkeypatch.setattr(step5_module, "run", _fake_step("step5"))
     monkeypatch.setattr(step6_module, "run", _fake_step6)
+    monkeypatch.setattr(step6b_module, "run", _fake_step("step6b"))
     monkeypatch.setattr(step7_module, "run", _fake_step7)
 
     outputs = postprocessor_module._run_postprocess_steps(
@@ -1382,8 +1385,10 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
         "step2": output_root / "postprocess" / "annual_targets",
         "step3": output_root / "postprocess" / "emissions_inventory",
         "step4": output_root / "postprocess" / "concentrations",
+        "step4b": output_root / "postprocess" / "concentration_transects",
         "step5": output_root / "postprocess" / "exposure",
         "step6": output_root / "postprocess" / "delta_concentrations",
+        "step6b": output_root / "postprocess" / "delta_transects",
         "step7": output_root / "postprocess" / "delta_exposure",
     }
     assert step4_calls["called"] is True
@@ -1398,9 +1403,11 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
         "annual_targets_step2_output",
         "inventory_step3_output",
         "concentration_step4_output",
+        "concentration_transect_step4b_output",
         "exposure_step5_output",
         "delta_concentration_delta_table",
         "delta_concentration_step6_output",
+        "delta_transect_step6b_output",
         "delta_exposure_step7_output",
     }
 

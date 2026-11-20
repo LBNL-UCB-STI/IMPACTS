@@ -26,11 +26,13 @@ from ._common import (
     MAP_COLORBAR_TICK_FONTSIZE,
     MAP_DPI,
     MAP_FIGSIZE,
+    MAP_SUPTITLE_FONTSIZE,
     MAP_TITLE_FONTSIZE,
     _advance_progress,
     _add_basemap,
     _add_colorbar,
     _add_network,
+    _apply_colorbar_intensity_alpha,
     _close_progress,
     _grid_raster_layout,
     _map_progress,
@@ -46,9 +48,9 @@ logger = logging.getLogger(__name__)
 
 DELTA_COLUMNS = ["TotalPM25", "PrimaryPM25", "SecondaryPM25", "BC", "NO2"]
 _DELTA_SCALAR_LAYERS = [
-    ("TotalPM25", "Total PM₂.₅ delta (μg/m³)"),
-    ("BC", "Black Carbon delta (μg/m³)"),
-    ("NO2", "NO₂ delta (μg/m³)"),
+    ("TotalPM25", "ΔTotal PM₂.₅ (μg/m³)"),
+    ("BC", "ΔBC (μg/m³)"),
+    ("NO2", "ΔNO₂ (μg/m³)"),
 ]
 _PRIMARY_SECONDARY_COLUMNS = ["PrimaryPM25", "SecondaryPM25"]
 _DELTA_OUTPUT_FILES = [
@@ -211,7 +213,7 @@ def _plot_delta_map(delta_gdf, net_gdf, layout, column: str, title: str, out_pat
     )
     _add_network(ax, net_gdf)
     _add_basemap(ax, crs=delta_gdf.crs)
-    _add_colorbar(fig, ax, DELTA_CMAP, float(norm.vmax), title, norm=norm)
+    _add_colorbar(fig, ax, DELTA_CMAP, float(norm.vmax), title, norm=norm, intensity_alpha=True)
     ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
     ax.set_axis_off()
     fig.tight_layout(pad=0.5)
@@ -239,7 +241,7 @@ def _plot_primary_secondary_delta_comparison(delta_gdf, net_gdf, layout, out_pat
     for ax, column, title in zip(
         axes,
         _PRIMARY_SECONDARY_COLUMNS,
-        ["Primary PM₂.₅ delta", "Secondary PM₂.₅ delta"],
+        ["ΔPrimary PM₂.₅", "ΔSecondary PM₂.₅"],
         strict=True,
     ):
         ax.set_aspect("equal")
@@ -256,7 +258,7 @@ def _plot_primary_secondary_delta_comparison(delta_gdf, net_gdf, layout, out_pat
         ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
         ax.set_axis_off()
 
-    fig.suptitle("Primary vs Secondary PM₂.₅ Delta", fontsize=MAP_TITLE_FONTSIZE + 4, y=0.98)
+    fig.suptitle("Primary vs Secondary PM₂.₅ Δ", fontsize=MAP_SUPTITLE_FONTSIZE, y=0.98)
     # Reserve 10% on the right for the colorbar and 4% on top for suptitle, then
     # place the colorbar in a manually-sized axis to prevent overlap with the right panel.
     fig.tight_layout(rect=[0, 0, 0.9, 0.96], pad=0.5)
@@ -264,7 +266,8 @@ def _plot_primary_secondary_delta_comparison(delta_gdf, net_gdf, layout, out_pat
     sm = plt.cm.ScalarMappable(cmap=DELTA_CMAP, norm=norm)
     sm.set_array([])
     cbar = fig.colorbar(sm, cax=cbar_ax)
-    cbar.set_label("PM₂.₅ delta (current - baseline, μg/m³)", fontsize=MAP_COLORBAR_LABEL_FONTSIZE, labelpad=MAP_COLORBAR_LABELPAD)
+    _apply_colorbar_intensity_alpha(cbar, sm.norm)
+    cbar.set_label("ΔPM₂.₅ (μg/m³)", fontsize=MAP_COLORBAR_LABEL_FONTSIZE, labelpad=MAP_COLORBAR_LABELPAD)
     cbar.ax.tick_params(labelsize=MAP_COLORBAR_TICK_FONTSIZE, pad=6)
     cbar.ax.yaxis.get_offset_text().set_fontsize(MAP_COLORBAR_TICK_FONTSIZE)
 

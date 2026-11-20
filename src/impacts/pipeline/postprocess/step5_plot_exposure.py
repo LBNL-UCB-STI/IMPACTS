@@ -22,6 +22,7 @@ from ...common import log_step_banner, configure_duckdb_connection
 from ._common import (
     CMAP_PM25,
     CMAP_POP,
+    MAP_BIVARIATE_LEGEND_FONTSIZE,
     MAP_DPI,
     MAP_FIGSIZE,
     MAP_TITLE_FONTSIZE,
@@ -30,6 +31,7 @@ from ._common import (
     _add_colorbar,
     _add_network,
     _close_progress,
+    _intensity_rgba,
     _map_progress,
     _padded_extent_from_bounds,
     _set_progress_task,
@@ -135,9 +137,7 @@ def _plot_inmap_scalar(
     norm = PowerNorm(gamma=gamma, vmin=0, vmax=vmax)
     plot_gdf.plot(
         ax=ax,
-        column=column,
-        cmap=cmap,
-        norm=norm,
+        color=_intensity_rgba(plot_gdf[column].to_numpy(), cmap, norm),
         edgecolor="#555555",
         linewidth=0.18,
         rasterized=True,
@@ -148,7 +148,7 @@ def _plot_inmap_scalar(
     ax.set_ylim(ymin, ymax)
     _add_network(ax, net_gdf)
     _add_basemap(ax, crs=plot_gdf.crs)
-    _add_colorbar(fig, ax, cmap, vmax, colorbar_label, norm=norm)
+    _add_colorbar(fig, ax, cmap, vmax, colorbar_label, norm=norm, intensity_alpha=True)
 
     ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
     ax.set_axis_off()
@@ -176,11 +176,11 @@ def _add_bivariate_legend(ax) -> None:
     ax_leg.set_xlim(0, 3)
     ax_leg.set_ylim(0, 3)
     ax_leg.set_xticks([1.5])
-    ax_leg.set_xticklabels(["Population →"], fontsize=18)
+    ax_leg.set_xticklabels(["Population →"], fontsize=MAP_BIVARIATE_LEGEND_FONTSIZE)
     ax_leg.xaxis.set_ticks_position("top")
     ax_leg.xaxis.set_label_position("top")
     ax_leg.set_yticks([1.5])
-    ax_leg.set_yticklabels(["PM₂.₅ →"], fontsize=18, rotation=90, va="center")
+    ax_leg.set_yticklabels(["PM₂.₅ →"], fontsize=MAP_BIVARIATE_LEGEND_FONTSIZE, rotation=90, va="center")
     ax_leg.tick_params(length=0, pad=6)
     ax_leg.set_facecolor("none")
     for spine in ax_leg.spines.values():

@@ -395,12 +395,20 @@ def build_parser() -> argparse.ArgumentParser:
     _add_profile_argument(postsim)
 
     postprocess = subparsers.add_parser("postprocess", help="Run postprocess comparisons and map plots")
-    postprocess_group = postprocess.add_mutually_exclusive_group(required=True)
+    postprocess_group = postprocess.add_mutually_exclusive_group(required=False)
     postprocess_group.add_argument("--run-manifest", help="Path to an existing pipeline_manifest.yaml.")
-    postprocess_group.add_argument("--config", help="Path to a settings YAML (re-runs the full pipeline first).")
     postprocess_group.add_argument(
         "--impact-output-dir",
         help="Path to a completed pipeline output folder containing pipeline_manifest.yaml.",
+    )
+    postprocess.add_argument(
+        "--config",
+        help=(
+            "Path to a settings YAML. Used alone: locates the pipeline output from "
+            "impacts.local_output_folder and re-runs postprocess. Combined with "
+            "--impact-output-dir or --run-manifest: overrides the settings used for "
+            "analysis config (inventory_targets, etc.) without re-running the pipeline."
+        ),
     )
     postprocess.add_argument("--postprocess-manifest")
     postprocess.add_argument(
@@ -579,28 +587,29 @@ def main(argv: list[str] | None = None) -> int:
         from impacts.postprocessor import postprocess_from_settings
 
         baseline = args.baseline_concentration_parquet
-        if args.run_manifest:
+        if not args.run_manifest and not args.impact_output_dir and not args.config:
+            parser.error("postprocess requires --run-manifest, --impact-output-dir, or --config")
+        if args.run_manifest or args.impact_output_dir:
+            if args.run_manifest:
+                run_manifest_path = args.run_manifest
+                output_root_override = None
+            else:
+                run_manifest_path = Path(args.impact_output_dir) / "pipeline_manifest.yaml"
+                if not Path(run_manifest_path).exists():
+                    parser.error(f"pipeline_manifest.yaml not found in {args.impact_output_dir}")
+                output_root_override = args.impact_output_dir
             postprocess_from_pipeline_manifest(
-                run_manifest_path=args.run_manifest,
+                run_manifest_path=run_manifest_path,
                 manifest_path=args.postprocess_manifest,
-                input_roots=args.impact_input_dir,
-                baseline_concentration_override=baseline,
-            )
-        elif args.config:
-            postprocess_from_settings(
-                settings_path=args.config,
-                manifest_path=args.postprocess_manifest,
+                output_root_override=output_root_override,
+                settings_override=args.config,
                 input_roots=args.impact_input_dir,
                 baseline_concentration_override=baseline,
             )
         else:
-            pipeline_manifest = Path(args.impact_output_dir) / "pipeline_manifest.yaml"
-            if not pipeline_manifest.exists():
-                parser.error(f"pipeline_manifest.yaml not found in {args.impact_output_dir}")
-            postprocess_from_pipeline_manifest(
-                run_manifest_path=pipeline_manifest,
+            postprocess_from_settings(
+                settings_path=args.config,
                 manifest_path=args.postprocess_manifest,
-                output_root_override=args.impact_output_dir,
                 input_roots=args.impact_input_dir,
                 baseline_concentration_override=baseline,
             )

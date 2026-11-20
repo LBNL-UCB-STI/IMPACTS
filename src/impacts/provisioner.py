@@ -12,7 +12,9 @@ from .config.settings import presim_activities_manifest_path
 from .config.settings import presim_activities_rates_root
 from .config.settings import presim_activities_tmp_root
 from .manifest.file_ops import write_structured_file
+from .manifest.file_ops import resolve_path
 from .manifest.schema import ActivitiesManifest
+from .input_cache import emfac_raw_cache_root
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +85,7 @@ def _build_activities_manifest_payload(
             "final_activity_by_emfacid_output_freight": str(
                 Path(str(paths["final_activity_by_emfacid_output_freight"])).resolve()
             ),
+            "emissions_inventory": str(Path(str(paths["emissions_inventory"])).resolve()),
         },
         "notes": [
             "Activities manifest is the contract boundary between EMFAC activities and fleet.",
@@ -143,6 +146,9 @@ def _write_activities_manifest_from_cfg(
                 ),
                 "final_activity_by_emfacid_output_freight": str(
                     (activities_output_root / f"{inventory_final_name}-freight-activity-by-emfacid.parquet").resolve()
+                ),
+                "emissions_inventory": str(
+                    (tmp_root / f"{region_slug}-emfac-{int(calendar_year)}-inventory-intermediate-with-activity.parquet").resolve()
                 ),
             },
             "notes": [
@@ -287,6 +293,12 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
     if not archive_setting:
         raise ValueError("Missing required setting: impacts.activities.emissions_raw_archive")
     archive = registry.locate_required(archive_setting, label="activities.emissions_raw_archive")
+    extract_root = local_input_folder
+    if settings.impacts.shared_input_cache_dir:
+        shared_cache_root = Path(
+            resolve_path(settings.impacts.shared_input_cache_dir, config_path)
+        ).resolve()
+        extract_root = emfac_raw_cache_root(archive, shared_cache_root)
 
     return {
         "region_name": region_name,
@@ -298,7 +310,7 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
         "seed": settings.impacts.seed,
         "output_root": local_output_folder,
         "archive": archive,
-        "extract_root": local_input_folder,
+        "extract_root": extract_root,
         "project_analysis_folder": project_analysis_folder,
         "black_carbon_folder": black_carbon_folder,
         "road_dust_folder": road_dust_folder,

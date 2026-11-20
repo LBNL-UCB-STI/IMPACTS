@@ -204,7 +204,7 @@ def _validate_activities_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
     _reject_unknown_keys(
         emissions_inventory,
-        {"folder_in_archive", "fallback_folder_in_archive", "fuel_map"},
+        {"folder_in_archive", "fallback_folder_in_archive", "fuel_map", "model_source"},
         "impacts.activities.emissions_inventory",
     )
     return activities
@@ -568,25 +568,14 @@ class ImpactsBeamProcessing:
 @dataclass(frozen=True)
 class AnalysisPollutantTarget:
     columns: List[str] = field(default_factory=list)
-    prefixes: List[str] = field(default_factory=list)
-    exclude_columns: List[str] = field(default_factory=list)
-    exclude_prefixes: List[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any], *, path: str) -> "AnalysisPollutantTarget":
-        _reject_unknown_keys(payload, {"columns", "prefixes", "exclude_columns", "exclude_prefixes"}, path)
+        _reject_unknown_keys(payload, {"columns"}, path)
         columns = _coerce_string_list(payload.get("columns"))
-        prefixes = _coerce_string_list(payload.get("prefixes"))
-        exclude_columns = _coerce_string_list(payload.get("exclude_columns"))
-        exclude_prefixes = _coerce_string_list(payload.get("exclude_prefixes"))
-        if not columns and not prefixes:
-            raise ValueError(f"{path} must define at least one of columns or prefixes")
-        return cls(
-            columns=columns,
-            prefixes=prefixes,
-            exclude_columns=exclude_columns,
-            exclude_prefixes=exclude_prefixes,
-        )
+        if not columns:
+            raise ValueError(f"{path} must define at least one column")
+        return cls(columns=columns)
 
 
 @dataclass(frozen=True)
@@ -663,8 +652,6 @@ def _parse_analysis_sector_targets(
 
 @dataclass(frozen=True)
 class Analysis:
-    inventory_file: Optional[str] = None
-    inventory_label: Optional[str] = None
     delta_baseline_concentration_distribution_file: Optional[str] = None
     inventory_targets: List[AnalysisTarget] = field(default_factory=list)
     sector_targets: List[AnalysisSectorTarget] = field(default_factory=list)
@@ -674,8 +661,6 @@ class Analysis:
         _reject_unknown_keys(
             payload,
             {
-                "inventory_file",
-                "inventory_label",
                 "delta_baseline_concentration_distribution_file",
                 "targets",
                 "inventory_targets",
@@ -703,8 +688,6 @@ class Analysis:
             raw_targets is None
             and raw_inventory_targets is None
             and all(v is None for v in raw_pollutant_targets.values())
-            and payload.get("inventory_file") is None
-            and payload.get("inventory_label") is None
             and payload.get("delta_baseline_concentration_distribution_file") is None
         ):
             return cls()
@@ -725,19 +708,10 @@ class Analysis:
             raw_pollutant_targets=raw_pollutant_targets,
             path_prefix="impacts.analysis.targets",
         )
-        inventory_file = _optional_string(payload.get("inventory_file"))
-        inventory_label = _optional_string(payload.get("inventory_label"))
-        delta_baseline_concentration_distribution_file = _optional_string(
-            payload.get("delta_baseline_concentration_distribution_file")
-        )
-        if inventory_targets and (not inventory_file or not inventory_label):
-            raise ValueError(
-                "impacts.analysis.inventory_file and impacts.analysis.inventory_label are required when impacts.analysis.inventory_targets is configured"
-            )
         return cls(
-            inventory_file=inventory_file,
-            inventory_label=inventory_label,
-            delta_baseline_concentration_distribution_file=delta_baseline_concentration_distribution_file,
+            delta_baseline_concentration_distribution_file=_optional_string(
+                payload.get("delta_baseline_concentration_distribution_file")
+            ),
             inventory_targets=inventory_targets,
             sector_targets=sector_targets,
         )
@@ -746,6 +720,7 @@ class Analysis:
 class Impacts:
     local_output_folder: str
     local_input_folder: str
+    shared_input_cache_dir: Optional[str]
     seed: int
     scenario: Optional[str]
     pipeline: "Pipeline"
@@ -762,7 +737,7 @@ class Impacts:
         _reject_unknown_keys(
             impacts_settings,
             {
-                "local_output_folder", "local_input_folder", "seed", "scenario",
+                "local_output_folder", "local_input_folder", "shared_input_cache_dir", "seed", "scenario",
                 "pipeline", "population",
                 "activities", "fleet", "emissions", "dispersions", "exposure", "analysis",
             },
@@ -792,6 +767,7 @@ class Impacts:
         result = cls(
             local_output_folder=_required_string(impacts_settings.get("local_output_folder"), "impacts.local_output_folder"),
             local_input_folder=_required_string(impacts_settings.get("local_input_folder"), "impacts.local_input_folder"),
+            shared_input_cache_dir=_optional_string(impacts_settings.get("shared_input_cache_dir")),
             seed=int(impacts_settings.get("seed") or 0),
             scenario=scenario,
             pipeline=Pipeline.from_dict(dict(impacts_settings.get("pipeline", {}) or {})),
@@ -991,6 +967,7 @@ class ImpactsSettings:
             "impacts": {
                 "local_output_folder": self.impacts.local_output_folder,
                 "local_input_folder": self.impacts.local_input_folder,
+                "shared_input_cache_dir": self.impacts.shared_input_cache_dir,
                 "seed": self.impacts.seed,
                 "scenario": self.impacts.scenario,
                 "pipeline": {
@@ -1089,15 +1066,10 @@ class ImpactsSettings:
                         ),
                         **(
                             {
-                                "inventory_file": self.impacts.analysis.inventory_file,
-                                "inventory_label": self.impacts.analysis.inventory_label,
                                 "inventory_targets": {
                                     target.name: {
                                         pollutant: {
                                             "columns": list(selector.columns),
-                                            "prefixes": list(selector.prefixes),
-                                            "exclude_columns": list(selector.exclude_columns),
-                                            "exclude_prefixes": list(selector.exclude_prefixes),
                                         }
                                         for pollutant, selector in target.pollutants.items()
                                     }

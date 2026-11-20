@@ -30,20 +30,29 @@ logger = logging.getLogger(__name__)
 MAP_CONTEXT_PADDING_FRACTION = 0.04
 MAP_CONTEXT_MIN_PADDING = 2_000.0
 PLOT_DPI = 300
-CHART_TITLE_FONTSIZE = 18
-CHART_AXIS_LABEL_FONTSIZE = 16
-CHART_TICK_LABEL_FONTSIZE = 13
-CHART_LEGEND_FONTSIZE = 13
+CHART_TITLE_FONTSIZE = 54
+CHART_SUPTITLE_FONTSIZE = 60
+CHART_AXIS_LABEL_FONTSIZE = 48
+CHART_TICK_LABEL_FONTSIZE = 39
+CHART_LEGEND_FONTSIZE = 39
 MAP_FIGSIZE = (24, 24)
 MAP_DPI = 400
-MAP_TITLE_FONTSIZE = 28
+MAP_TITLE_FONTSIZE = 84
+MAP_SUPTITLE_FONTSIZE = 96
+MAP_BIVARIATE_LEGEND_FONTSIZE = 54
 MAP_BASEMAP_ZOOM_ADJUST = 1
 MAP_COLORBAR_FRACTION = 0.04
 MAP_COLORBAR_PAD = 0.025
 MAP_COLORBAR_SHRINK = 0.74
-MAP_COLORBAR_LABEL_FONTSIZE = 24
-MAP_COLORBAR_TICK_FONTSIZE = 20
+MAP_COLORBAR_LABEL_FONTSIZE = 72
+MAP_COLORBAR_TICK_FONTSIZE = 60
 MAP_COLORBAR_LABELPAD = 18
+MAP_SCALEBAR_FONTSIZE = 44
+# Per-cell alpha scales with how far the value sits from "uninteresting" (zero for
+# sequential data, no-change for diverging delta data), so background areas (incl.
+# water) show the basemap through while hotspots stay clearly visible.
+MAP_RASTER_ALPHA_MIN = 0.35
+MAP_RASTER_ALPHA_MAX = 0.92
 
 # ---------------------------------------------------------------------------
 # Colormaps — fully opaque, mild low values → saturated high values
@@ -120,7 +129,7 @@ def _add_basemap(ax, *, crs=None) -> None:
         import contextily as ctx
         ctx.add_basemap(
             ax,
-            source=ctx.providers.CartoDB.PositronNoLabels,
+            source=ctx.providers.CartoDB.Voyager,  # labeled, with blue water (unlike Positron)
             zoom="auto",
             zoom_adjust=MAP_BASEMAP_ZOOM_ADJUST,
             crs=crs,
@@ -128,13 +137,55 @@ def _add_basemap(ax, *, crs=None) -> None:
         )
     except Exception as exc:
         logger.warning("Could not add basemap (offline or contextily missing): %s", exc)
+    _add_scalebar(ax)
 
 
-def _add_colorbar(fig, ax, cmap, vmax: float, label: str, *, norm=None) -> None:
-    sm = plt.cm.ScalarMappable(
-        cmap=cmap,
-        norm=norm if norm is not None else plt.Normalize(vmin=0, vmax=vmax),
-    )
+def _nice_round_number(value: float) -> float:
+    """Round down to a 1/2/5 * 10^n step, for human-friendly scale bar lengths."""
+    if value <= 0:
+        return 0.0
+    exponent = np.floor(np.log10(value))
+    fraction = value / 10**exponent
+    nice = 1 if fraction < 1.5 else 2 if fraction < 3.5 else 5 if fraction < 7.5 else 10
+    return nice * 10**exponent
+
+
+def _add_scalebar(ax) -> None:
+    """Draw a map-resolution scale bar; axes are assumed to be in meters (projected CRS)."""
+    from matplotlib.font_manager import FontProperties
+    from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
+
+    xmin, xmax = ax.get_xlim()
+    length_m = _nice_round_number((xmax - xmin) * 0.2)
+    if length_m <= 0:
+        return
+    label = f"{length_m / 1000:g} km" if length_m >= 1000 else f"{length_m:g} m"
+    ax.add_artist(AnchoredSizeBar(
+        ax.transData,
+        length_m,
+        label,
+        loc="lower right",
+        pad=0.6,
+        borderpad=1.5,
+        sep=8,
+        color="black",
+        frameon=False,
+        size_vertical=(xmax - xmin) * 0.0025,
+        fontproperties=FontProperties(size=MAP_SCALEBAR_FONTSIZE),
+    ))
+
+
+def _apply_colorbar_intensity_alpha(cbar, norm) -> None:
+    """Fade the colorbar swatch the same way `_plot_raster_layer` fades the map."""
+    raw_values = np.asarray(cbar.solids.get_array())
+    normed = np.clip(norm(raw_values), 0.0, 1.0)
+    center = 0.5 if hasattr(norm, "vcenter") else 0.0
+    cbar.solids.set_alpha(_intensity_alpha(normed, center))
+
+
+def _add_colorbar(fig, ax, cmap, vmax: float, label: str, *, norm=None, intensity_alpha: bool = False) -> None:
+    plot_norm = norm if norm is not None else plt.Normalize(vmin=0, vmax=vmax)
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=plot_norm)
     sm.set_array([])
     cbar = fig.colorbar(
         sm,
@@ -143,6 +194,8 @@ def _add_colorbar(fig, ax, cmap, vmax: float, label: str, *, norm=None) -> None:
         pad=MAP_COLORBAR_PAD,
         shrink=MAP_COLORBAR_SHRINK,
     )
+    if intensity_alpha:
+        _apply_colorbar_intensity_alpha(cbar, plot_norm)
     cbar.set_label(label, fontsize=MAP_COLORBAR_LABEL_FONTSIZE, labelpad=MAP_COLORBAR_LABELPAD)
     cbar.ax.tick_params(labelsize=MAP_COLORBAR_TICK_FONTSIZE, pad=6)
     cbar.ax.yaxis.get_offset_text().set_fontsize(MAP_COLORBAR_TICK_FONTSIZE)
@@ -208,6 +261,21 @@ def _rasterize_grid_values(
     return np.ma.masked_invalid(arr)
 
 
+def _intensity_alpha(normed: np.ndarray, center: float) -> np.ndarray:
+    """Alpha that grows with distance from `center` (0 for sequential, 0.5 for diverging)."""
+    intensity = np.clip(np.abs(normed - center) / (1 - center), 0.0, 1.0)
+    return MAP_RASTER_ALPHA_MIN + (MAP_RASTER_ALPHA_MAX - MAP_RASTER_ALPHA_MIN) * intensity
+
+
+def _intensity_rgba(values, cmap, norm) -> np.ndarray:
+    """RGBA colors for vector `.plot()` calls, faded the same way `_plot_raster_layer` fades rasters."""
+    normed = np.clip(norm(np.asarray(values, dtype="float64")), 0.0, 1.0)
+    center = 0.5 if hasattr(norm, "vcenter") else 0.0
+    rgba = cmap(normed)
+    rgba[:, 3] = _intensity_alpha(normed, center)
+    return rgba
+
+
 def _plot_raster_layer(
     ax,
     gdf,
@@ -223,16 +291,15 @@ def _plot_raster_layer(
     if raster.count() == 0:
         logger.warning("  No raster cells to plot for %s.", column)
         return
-    plot_cmap = cmap.copy()
-    plot_cmap.set_bad((1, 1, 1, 0))
+    plot_norm = norm if norm is not None else mcolors.Normalize(vmin=0, vmax=vmax)
+    normed = np.clip(plot_norm(raster.filled(0)), 0.0, 1.0)
+    center = 0.5 if hasattr(plot_norm, "vcenter") else 0.0
+    rgba = cmap(normed)
+    rgba[..., 3] = np.where(np.ma.getmaskarray(raster), 0.0, _intensity_alpha(normed, center))
     ax.imshow(
-        raster,
+        rgba,
         extent=layout.extent,
         origin="lower",
-        cmap=plot_cmap,
-        vmin=None if norm is not None else 0,
-        vmax=None if norm is not None else vmax,
-        norm=norm,
         interpolation="nearest",
         zorder=2,
     )
