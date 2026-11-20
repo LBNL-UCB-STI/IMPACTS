@@ -33,6 +33,8 @@ from ...config.settings import presim_activities_inventory_root
 from ...config.settings import presim_activities_tmp_root
 from ...manifest.file_ops import resolve_path
 from ...manifest.file_ops import resolve_required_path
+from ...manifest.file_ops import is_remote_path
+from ...isrm_store import localize_isrm_store
 
 logger = logging.getLogger(__name__)
 
@@ -475,9 +477,20 @@ def run(
                 progress.update(1)
 
                 _set_progress_task(progress, "isrm store", step_label="Preprocess Step 1.4")
-                isrm_source = str(registry.locate_required(
-                    inmap.isrm_zarr, label="impacts.dispersions.inmap.isrm_zarr"
-                ))
+                if impacts.shared_input_cache_dir:
+                    shared_cache_root = Path(resolve_path(impacts.shared_input_cache_dir, config_path))
+                    isrm_cache_root = shared_cache_root / "isrm"
+                else:
+                    impacts_input_root = Path(resolve_required_path(
+                        impacts.local_input_folder, config_path, "impacts.local_input_folder"
+                    ))
+                    isrm_cache_root = impacts_input_root / "isrm_cache"
+                if is_remote_path(inmap.isrm_zarr):
+                    isrm_source = localize_isrm_store(inmap.isrm_zarr, isrm_cache_root)
+                else:
+                    local_isrm_source = registry.locate(inmap.isrm_zarr)
+                    source = local_isrm_source or resolve_path(inmap.isrm_zarr, config_path)
+                    isrm_source = localize_isrm_store(str(source), isrm_cache_root)
                 staged_isrm = _register_manifest_input(
                     manifest_inputs,
                     input_root=input_root,

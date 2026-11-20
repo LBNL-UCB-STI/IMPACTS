@@ -720,6 +720,7 @@ class Analysis:
 class Impacts:
     local_output_folder: str
     local_input_folder: str
+    shared_input_cache_dir: Optional[str]
     seed: int
     scenario: Optional[str]
     pipeline: "Pipeline"
@@ -736,7 +737,7 @@ class Impacts:
         _reject_unknown_keys(
             impacts_settings,
             {
-                "local_output_folder", "local_input_folder", "seed", "scenario",
+                "local_output_folder", "local_input_folder", "shared_input_cache_dir", "seed", "scenario",
                 "pipeline", "population",
                 "activities", "fleet", "emissions", "dispersions", "exposure", "analysis",
             },
@@ -766,6 +767,7 @@ class Impacts:
         result = cls(
             local_output_folder=_required_string(impacts_settings.get("local_output_folder"), "impacts.local_output_folder"),
             local_input_folder=_required_string(impacts_settings.get("local_input_folder"), "impacts.local_input_folder"),
+            shared_input_cache_dir=_optional_string(impacts_settings.get("shared_input_cache_dir")),
             seed=int(impacts_settings.get("seed") or 0),
             scenario=scenario,
             pipeline=Pipeline.from_dict(dict(impacts_settings.get("pipeline", {}) or {})),
@@ -965,6 +967,7 @@ class ImpactsSettings:
             "impacts": {
                 "local_output_folder": self.impacts.local_output_folder,
                 "local_input_folder": self.impacts.local_input_folder,
+                "shared_input_cache_dir": self.impacts.shared_input_cache_dir,
                 "seed": self.impacts.seed,
                 "scenario": self.impacts.scenario,
                 "pipeline": {

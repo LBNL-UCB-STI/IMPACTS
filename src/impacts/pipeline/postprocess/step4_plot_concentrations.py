@@ -30,6 +30,7 @@ from ._common import (
     _add_basemap,
     _add_colorbar,
     _add_network,
+    _apply_colorbar_intensity_alpha,
     _close_progress,
     _grid_raster_layout,
     _map_progress,
@@ -102,7 +103,7 @@ def _render_one(
         ax.set_xlim(xmin, xmax)
         ax.set_ylim(ymin, ymax)
     _add_basemap(ax, crs=conc_gdf.crs)
-    _add_colorbar(fig, ax, cmap, vmax, title)
+    _add_colorbar(fig, ax, cmap, vmax, title, intensity_alpha=True)
     ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
     ax.set_axis_off()
     fig.tight_layout(pad=0.5)
@@ -185,6 +186,7 @@ def _render_primary_secondary(
     sm = plt.cm.ScalarMappable(cmap=CMAP_PM25, norm=plt.Normalize(vmin=0, vmax=vmax))
     sm.set_array([])
     cbar = fig.colorbar(sm, cax=cbar_ax)
+    _apply_colorbar_intensity_alpha(cbar, sm.norm)
     cbar.set_label("PM₂.₅ (μg/m³)", fontsize=MAP_COLORBAR_LABEL_FONTSIZE, labelpad=MAP_COLORBAR_LABELPAD)
     cbar.ax.tick_params(labelsize=MAP_COLORBAR_TICK_FONTSIZE, pad=6)
     cbar.ax.yaxis.get_offset_text().set_fontsize(MAP_COLORBAR_TICK_FONTSIZE)

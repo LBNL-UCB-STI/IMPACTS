@@ -1276,8 +1276,10 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
     import impacts.pipeline.postprocess.step2_compare_annual_targets as step2_module
     import impacts.pipeline.postprocess.step3_compare_emissions_inventory as step3_module
     import impacts.pipeline.postprocess.step4_plot_concentrations as step4_module
+    import impacts.pipeline.postprocess.step4b_plot_transects as step4b_module
     import impacts.pipeline.postprocess.step5_plot_exposure as step5_module
     import impacts.pipeline.postprocess.step6_plot_delta_concentrations as step6_module
+    import impacts.pipeline.postprocess.step6b_plot_delta_transects as step6b_module
     import impacts.pipeline.postprocess.step7_plot_delta_exposure as step7_module
 
     output_root = tmp_path / "impacts_output"
@@ -1367,8 +1369,10 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
     monkeypatch.setattr(step2_module, "run", _fake_step("step2"))
     monkeypatch.setattr(step3_module, "run", _fake_step("step3"))
     monkeypatch.setattr(step4_module, "run", _fake_step4)
+    monkeypatch.setattr(step4b_module, "run", _fake_step("step4b"))
     monkeypatch.setattr(step5_module, "run", _fake_step("step5"))
     monkeypatch.setattr(step6_module, "run", _fake_step6)
+    monkeypatch.setattr(step6b_module, "run", _fake_step("step6b"))
     monkeypatch.setattr(step7_module, "run", _fake_step7)
 
     outputs = postprocessor_module._run_postprocess_steps(
@@ -1381,8 +1385,10 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
         "step2": output_root / "postprocess" / "annual_targets",
         "step3": output_root / "postprocess" / "emissions_inventory",
         "step4": output_root / "postprocess" / "concentrations",
+        "step4b": output_root / "postprocess" / "concentration_transects",
         "step5": output_root / "postprocess" / "exposure",
         "step6": output_root / "postprocess" / "delta_concentrations",
+        "step6b": output_root / "postprocess" / "delta_transects",
         "step7": output_root / "postprocess" / "delta_exposure",
     }
     assert step4_calls["called"] is True
@@ -1397,9 +1403,11 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
         "annual_targets_step2_output",
         "inventory_step3_output",
         "concentration_step4_output",
+        "concentration_transect_step4b_output",
         "exposure_step5_output",
         "delta_concentration_delta_table",
         "delta_concentration_step6_output",
+        "delta_transect_step6b_output",
         "delta_exposure_step7_output",
     }
 

@@ -707,5 +707,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.error(f"Unknown command: {args.command}")
 
 
+def derive_settings_from_pilates_cli() -> None:
+    raise SystemExit(main(["derive_settings_from_pilates", *sys.argv[1:]]))
+
+
+def presim_cli() -> None:
+    raise SystemExit(main(["presim", *sys.argv[1:]]))
+
+
+def postsim_cli() -> None:
+    raise SystemExit(main(["postsim", *sys.argv[1:]]))
+
+
 if __name__ == "__main__":
     main()

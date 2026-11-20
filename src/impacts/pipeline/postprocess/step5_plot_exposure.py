@@ -31,6 +31,7 @@ from ._common import (
     _add_colorbar,
     _add_network,
     _close_progress,
+    _intensity_rgba,
     _map_progress,
     _padded_extent_from_bounds,
     _set_progress_task,
@@ -136,9 +137,7 @@ def _plot_inmap_scalar(
     norm = PowerNorm(gamma=gamma, vmin=0, vmax=vmax)
     plot_gdf.plot(
         ax=ax,
-        column=column,
-        cmap=cmap,
-        norm=norm,
+        color=_intensity_rgba(plot_gdf[column].to_numpy(), cmap, norm),
         edgecolor="#555555",
         linewidth=0.18,
         rasterized=True,
@@ -149,7 +148,7 @@ def _plot_inmap_scalar(
     ax.set_ylim(ymin, ymax)
     _add_network(ax, net_gdf)
     _add_basemap(ax, crs=plot_gdf.crs)
-    _add_colorbar(fig, ax, cmap, vmax, colorbar_label, norm=norm)
+    _add_colorbar(fig, ax, cmap, vmax, colorbar_label, norm=norm, intensity_alpha=True)
 
     ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
     ax.set_axis_off()

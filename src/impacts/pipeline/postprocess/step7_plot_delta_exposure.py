@@ -24,6 +24,7 @@ from ._common import (
     _add_colorbar,
     _add_network,
     _close_progress,
+    _intensity_rgba,
     _map_progress,
     _padded_extent_from_bounds,
     _set_progress_task,
@@ -130,9 +131,7 @@ def _plot_inmap_delta_scalar(
     ax.set_aspect("equal")
     plot_gdf.plot(
         ax=ax,
-        column=column,
-        cmap=DELTA_CMAP,
-        norm=norm,
+        color=_intensity_rgba(plot_gdf[column].to_numpy(), DELTA_CMAP, norm),
         edgecolor="#555555",
         linewidth=0.18,
         rasterized=True,
@@ -143,7 +142,7 @@ def _plot_inmap_delta_scalar(
     ax.set_ylim(ymin, ymax)
     _add_network(ax, net_gdf)
     _add_basemap(ax, crs=plot_gdf.crs)
-    _add_colorbar(fig, ax, DELTA_CMAP, float(norm.vmax), colorbar_label, norm=norm)
+    _add_colorbar(fig, ax, DELTA_CMAP, float(norm.vmax), colorbar_label, norm=norm, intensity_alpha=True)
 
     ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
     ax.set_axis_off()
@@ -231,7 +230,7 @@ def _plot_delta_bivariate(inmap_delta_gdf, net_gdf, out_path: Path) -> Optional[
     _add_delta_bivariate_legend(ax)
 
     ax.set_title(
-        "Population-weighted PM₂.₅ delta × population by InMAP cell",
+        "ΔPopulation-weighted PM₂.₅ × Population",
         fontsize=MAP_TITLE_FONTSIZE,
         pad=16,
     )
@@ -299,8 +298,8 @@ def run(
             inmap_delta_gdf,
             net_gdf,
             column="pwc_pm25_delta",
-            title="Population-weighted PM₂.₅ delta by InMAP cell",
-            colorbar_label="Population-weighted PM₂.₅ delta (current - baseline, μg/m³)",
+            title="ΔPopulation-weighted PM₂.₅",
+            colorbar_label="ΔPopulation-weighted PM₂.₅ (μg/m³)",
             out_path=output_dir / "pwc_inmap_delta.png",
         )
         if result:
@@ -312,8 +311,8 @@ def run(
             inmap_delta_gdf,
             net_gdf,
             column="exposure_burden_delta",
-            title="PM₂.₅ exposure burden delta by InMAP cell",
-            colorbar_label="PM₂.₅ exposure burden delta (person·μg/m³)",
+            title="ΔPM₂.₅ Exposure Burden",
+            colorbar_label="ΔExposure Burden (person·μg/m³)",
             out_path=output_dir / "exposure_burden_delta.png",
         )
         if result:

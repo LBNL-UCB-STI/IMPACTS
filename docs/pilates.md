@@ -2,6 +2,33 @@
 
 This document describes the `impacts` integration pattern for PILATES and the example scenario under `examples/pilates/`.
 
+## Container use
+
+The image installs `derive_settings_from_pilates`, `presim`, and `postsim` on `PATH`. It has no command entrypoint, so PILATES can use each executable as its container command from any working directory:
+
+Releases tagged `vMAJOR.MINOR.PATCH` publish `ghcr.io/lbnl-ucb-sti/impacts:<tag>` after the image smoke tests pass. The release workflow also checks an anonymous GHCR pull, which is required for HPC environments that do not authenticate to GHCR. No `latest` tag is published.
+
+```bash
+derive_settings_from_pilates --pilates-settings /app/workspace/bridge.yaml --output /app/workspace/settings.yaml
+presim --config /app/workspace/settings.yaml
+postsim --config /app/workspace/settings.yaml
+```
+
+Mount the persistent PILATES run workspace at `/app/workspace`, the BEAM input tree at `/app/beam_input`, and one durable shared cache directory at `/app/impacts_cache`. PILATES mounts the same host cache for presim and postsim; by default its host location is `<run.output_directory>/.pilates-cache/impacts`, outside timestamped run folders. IMPACTS stores ISRM copies under `isrm/` and extracted EMFAC raw archives under `emfac_raw/<archive-key>/` within that shared directory. Set `impacts.shared_input_cache_dir` to `/app/impacts_cache`. When InMAP is enabled, `impacts.dispersions.inmap.isrm_zarr` may point to a local Zarr store or a public `s3://`, `http://`, or `https://` Zarr store; IMPACTS copies either source into the shared cache. Remote URLs must expose a recursively listable Zarr store; a web page or a link to an archive is not a Zarr store URL. ISRM cache entries are keyed by source URL or local path. EMFAC raw cache entries are keyed by archive path, size, and modification time. To refresh data changed in place, remove the corresponding cache entry. The image does not contain ISRM or other scenario data. A local ISRM source mount is needed only when populating its cache for the first time.
+
+For example, with Docker:
+
+```bash
+docker run --rm \
+  --mount type=bind,src=/path/to/run-workspace,dst=/app/workspace \
+  --mount type=bind,src=/path/to/beam-input,dst=/app/beam_input,readonly \
+  --mount type=bind,src=/path/to/shared/impacts-cache,dst=/app/impacts_cache \
+  <image> derive_settings_from_pilates \
+  --pilates-settings /app/workspace/bridge.yaml --output /app/workspace/settings.yaml
+```
+
+Use the same mounts with `presim --config /app/workspace/settings.yaml` and `postsim --config /app/workspace/settings.yaml`. For a local ISRM copy, add `--mount type=bind,src=/path/to/isrm_v1.2.1.zarr,dst=/app/inmap/isrm_v1.2.1.zarr,readonly` on the cache's first use, and set `isrm_zarr` to that container path. For Apptainer/Singularity, bind the workspace, BEAM input, and shared cache as above, then run the `docker://` image URI with the command after the image URI. The shared cache must be writable, visible to every run, and large enough for the ISRM and EMFAC raw inputs.
+
 ## Example layout
 
 ```text

@@ -90,6 +90,9 @@ env/
 !.env.example
 
 # Repo-specific files that must remain tracked
+!.github/
+!.github/workflows/
+!.github/workflows/container-release.yml
 !.gitattributes
 !.gitignore
 !NOAI
