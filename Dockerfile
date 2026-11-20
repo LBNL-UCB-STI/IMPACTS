@@ -10,13 +10,13 @@ COPY --chown=$MAMBA_USER:$MAMBA_USER docker/env.yml /tmp/env.yml
 RUN micromamba install -y -n base -f /tmp/env.yml && \
     micromamba clean --all --yes
 
-COPY src /work/src
+COPY --chown=$MAMBA_USER:$MAMBA_USER src /work/src
 COPY README.md /work/README.md
 COPY LICENSE.txt /work/LICENSE.txt
 COPY setup.cfg /work/setup.cfg
 COPY pyproject.toml /work/pyproject.toml
 WORKDIR /work
-RUN SETUPTOOLS_SCM_PRETEND_VERSION="$PACKAGE_VERSION" pip install --no-cache-dir .
+RUN SETUPTOOLS_SCM_PRETEND_VERSION="$PACKAGE_VERSION" micromamba run -n base python -m pip install --no-cache-dir .
 
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
