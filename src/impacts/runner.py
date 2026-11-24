@@ -347,7 +347,7 @@ def _run_stages_from_preprocess_manifest(
             "uses_baked_work_data": False,
         },
         "execution": {
-            "dispersion_completed": bool(execute_inmap or execute_aermod),
+            "dispersion_completed": bool(concentration_path or aermod_concentration_path),
             "stage_timings_seconds": stage_timings,
             "stopped_after": (
                 "step4_prepare_exposure"

@@ -34,6 +34,8 @@ from ...config.settings import presim_activities_tmp_root
 from ...manifest.file_ops import resolve_path
 from ...manifest.file_ops import resolve_required_path
 from ...manifest.file_ops import is_remote_path
+from ...manifest.file_ops import load_structured_file
+from ...manifest.schema import ActivitiesManifest
 from ...isrm_store import localize_isrm_store
 
 logger = logging.getLogger(__name__)
@@ -151,6 +153,23 @@ def run(
         region=settings.run.region,
     )
     registry = build_registry(settings, config_path)
+    fleet_outputs = None
+    presim_activities = None
+    if impacts.presim_fleet_manifest:
+        fleet_manifest = load_structured_file(
+            resolve_required_path(impacts.presim_fleet_manifest, config_path, "impacts.presim_fleet_manifest")
+        )
+        if fleet_manifest.get("contract_version") != "1":
+            raise ValueError("Unsupported presim fleet manifest contract version.")
+        fleet_outputs = fleet_manifest["outputs"]
+        presim_activities = ActivitiesManifest.from_dict(
+            load_structured_file(fleet_manifest["activities_manifest_path"])
+        )
+        if (
+            presim_activities.calendar_year != settings.run.start_year
+            or presim_activities.scenario != impacts.scenario
+        ):
+            raise ValueError("Presim fleet and postsim do not describe the same year and scenario.")
     input_root.mkdir(parents=True, exist_ok=True)
     staged_events = None
     staged_inmap_grid = None
@@ -242,7 +261,8 @@ def run(
 
         _set_progress_task(progress, "emissions rates", step_label="Preprocess Step 1.2")
         emissions_rates_source = str(registry.locate_required(
-            emissions.rates_folder, label="impacts.emissions.rates_folder"
+            presim_activities.outputs["emissions_store_root"] if presim_activities else emissions.rates_folder,
+            label="impacts.emissions.rates_folder",
         ))
         _register_manifest_input(
             manifest_inputs,
@@ -255,7 +275,10 @@ def run(
         progress.update(1)
 
         _set_progress_task(progress, "passenger vehicle types", step_label="Preprocess Step 1.2")
-        passenger_vtypes_path = beam_processing.passenger_vehicle_types_file
+        passenger_vtypes_path = (
+            fleet_outputs["passenger_vehicle_types"]
+            if fleet_outputs is not None else beam_processing.passenger_vehicle_types_file
+        )
         if passenger_vtypes_path:
             passenger_vehicle_types_source = str(registry.locate_required(
                 passenger_vtypes_path, label="impacts.emissions.passenger_vehicle_types_file"
@@ -278,7 +301,10 @@ def run(
         progress.update(1)
 
         _set_progress_task(progress, "freight vehicle types", step_label="Preprocess Step 1.2")
-        freight_vtypes_path = beam_processing.freight_vehicle_types_file
+        freight_vtypes_path = (
+            fleet_outputs["freight_vehicle_types"]
+            if fleet_outputs is not None else beam_processing.freight_vehicle_types_file
+        )
         if freight_vtypes_path:
             freight_vehicle_types_source = str(registry.locate_required(
                 freight_vtypes_path, label="impacts.emissions.freight_vehicle_types_file"
@@ -299,6 +325,17 @@ def run(
             metadata={"artifact_family": "freight_vehicle_types_input"},
         )
         progress.update(1)
+
+        if fleet_outputs is not None:
+            for key in ("passenger_vehicles", "freight_carriers"):
+                assignment_path = registry.locate_required(fleet_outputs[key], label=f"presim fleet {key}")
+                _register_manifest_input(
+                    manifest_inputs,
+                    input_root=input_root,
+                    key=f"{key}_input",
+                    source_path=str(assignment_path),
+                    relative_target=assignment_path.name,
+                )
 
         if emissions.vehicle_category_metadata_file:
             _set_progress_task(progress, "vehicle category metadata", step_label="Preprocess Step 1.2")
@@ -329,7 +366,9 @@ def run(
     )
     passenger_inv_path = emissions.inventory.passenger_file
     freight_inv_path = emissions.inventory.freight_file
-    if passenger_inv_path:
+    if presim_activities:
+        passenger_emfacid_source = presim_activities.outputs["final_activity_by_emfacid_output_passenger"]
+    elif passenger_inv_path:
         passenger_emfacid_source = _resolve_emfacid_path(
             str(registry.locate_required(passenger_inv_path, label="impacts.emissions.inventory.passenger_file")),
             label="passenger",
@@ -339,7 +378,9 @@ def run(
             _find_emfacid_file(_inv_folder, "passenger"),
             "impacts.emissions.inventory.passenger_file (activity-by-emfacid)",
         )
-    if freight_inv_path:
+    if presim_activities:
+        freight_emfacid_source = presim_activities.outputs["final_activity_by_emfacid_output_freight"]
+    elif freight_inv_path:
         freight_emfacid_source = _resolve_emfacid_path(
             str(registry.locate_required(freight_inv_path, label="impacts.emissions.inventory.freight_file")),
             label="freight",

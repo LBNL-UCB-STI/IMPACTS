@@ -18,6 +18,6 @@ COPY pyproject.toml /work/pyproject.toml
 WORKDIR /work
 RUN SETUPTOOLS_SCM_PRETEND_VERSION="$PACKAGE_VERSION" micromamba run -n base python -m pip install --no-cache-dir .
 
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 LD_LIBRARY_PATH=/opt/conda/lib
 WORKDIR /app
 RUN mkdir -p /app/workspace /app/beam_input /app/impacts_cache /app/inmap
