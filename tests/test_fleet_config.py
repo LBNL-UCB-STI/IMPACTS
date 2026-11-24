@@ -597,3 +597,55 @@ def test_normalize_alias_mapping_supports_quoted_list_emissions_inventory_fuel_m
         "Natural Gas": "NG",
         "Plug-in Hybrid": "Phe",
     }
+
+
+def test_fleet_manifest_preserves_settings_and_selects_published_rates(monkeypatch, tmp_path):
+    from impacts.config import settings
+    from impacts.manifest.schema import ActivitiesManifest
+    from impacts.pipeline.emfac._common import load_rates_store_relative_paths
+
+    groups = {"light_duty": [">=2015"]}
+    raw = {
+        "region": "sfbay",
+        "scenario": "2018-Baseline",
+        "seed": 0,
+        "output": str(tmp_path / "fleet"),
+        "atlas": {"year": 2019},
+        "frism": {"year": 2018},
+        "activities": {"model_year_groups": groups, "outputs": "/default"},
+    }
+    store = tmp_path / "presim" / "activities" / "2018-Baseline" / "rates"
+    rate = store / "dataset/emfacId=post2014LDAGas/post2014LDAGas.parquet"
+    rate.parent.mkdir(parents=True)
+    rate.touch()
+    outputs = {
+        name: str(tmp_path / name)
+        for name in (
+            "outputs_root", "passenger_rates_file", "passenger_activity_file",
+            "passenger_fleet_file", "freight_rates_file", "freight_activity_file",
+            "freight_fleet_file",
+        )
+    }
+    outputs["emissions_store_root"] = str(store)
+    manifest = {
+        "settings_source": str(tmp_path / "settings.yaml"),
+        "outputs": outputs,
+        "vehicle_category_metadata_file": str(tmp_path / "categories.csv"),
+    }
+    monkeypatch.setattr(settings, "_build_emfac_root_from_settings_file", lambda _: {})
+    monkeypatch.setattr(settings, "_build_fleet_config_from_root", lambda _: raw)
+    monkeypatch.setattr(settings, "_validate_fleet", lambda *_: None)
+    monkeypatch.setattr(settings, "_ingest_fleet_sources", lambda value: value)
+    monkeypatch.setattr(ActivitiesManifest, "from_dict", lambda _: type("Manifest", (), {"to_dict": lambda self: manifest})())
+    path = tmp_path / "activities_manifest.yaml"
+    path.write_text("{}")
+    config = settings.load_fleet_workflow_from_activities_manifest(path)["config"]
+    assert config["activities"]["model_year_groups"] == groups
+    assert config["activities"]["passenger_rates_file"] == outputs["passenger_rates_file"]
+    paths = load_rates_store_relative_paths(
+        config=config,
+        scenario=raw["scenario"],
+        output_root=tmp_path / "fleet",
+        required_emfac_ids=["post2014LDAGas"],
+    )
+    assert (tmp_path / "fleet" / paths["post2014LDAGas"]).resolve() == rate

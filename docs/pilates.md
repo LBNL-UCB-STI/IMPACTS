@@ -31,6 +31,19 @@ docker run --rm \
 
 Use the same workspace, BEAM input, and shared-cache mounts with `presim --config /app/workspace/settings.yaml` and `postsim --config /app/workspace/settings.yaml`. For a local ISRM copy, add `--mount type=bind,src=/path/to/isrm_v1.2.1.zarr,dst=/app/inmap/isrm_v1.2.1.zarr,readonly` on the cache's first use and set `isrm_zarr` to that container path. The shared cache must be writable, visible to every run, and large enough for the ISRM and EMFAC raw inputs. For Apptainer/Singularity, bind the workspace, BEAM input, and shared cache as above, adding the local ISRM bind on its first cache population, and run the `docker://` image URI with the command after the image URI.
 
+## Generated fleet handoff
+
+After fleet generation, presim writes `fleet_manifest.yaml` beside
+`activities_manifest.yaml`. Use the passenger vehicle types and assignments,
+freight vehicle types and carriers, and referenced emissions rates from that run
+when compiling the BEAM launch. For postsim, set `impacts.presim_fleet_manifest`
+to the same manifest's container path. Postsim then uses its matching rates,
+types, assignments, and EMFAC inventories and checks the EMFAC year and scenario.
+
+If the original ATLAS vehicle table is stored under a different name from
+`vehicles.parquet`, set `impacts.fleet.atlas.vehicles_file` to its path
+relative to the BEAM input root, or to an absolute mounted path.
+
 ## Example layout
 
 ```text

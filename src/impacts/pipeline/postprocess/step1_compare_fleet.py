@@ -96,6 +96,7 @@ def _build_beam_population_breakdown_from_assignments(
     assignments_path: str,
     vehicle_lookup: pd.DataFrame,
     assignment_group: str,
+    working_dir: Path,
 ) -> pd.DataFrame:
     if Path(assignments_path).suffix.lower() == ".parquet":
         lookup = (
@@ -123,7 +124,7 @@ def _build_beam_population_breakdown_from_assignments(
         try:
             configure_duckdb_connection(
                 con,
-                working_dir=Path(assignments_path).parent,
+                working_dir=working_dir,
                 show_progress=False,
                 profile="balanced",
             )
@@ -185,6 +186,7 @@ def _build_beam_population_breakdown_from_assignments(
 def _build_beam_population_breakdown_with_actual_assignments(
     *,
     vehicle_lookup: pd.DataFrame,
+    working_dir: Path,
     passenger_vehicles_path: Optional[str] = None,
     freight_carriers_path: Optional[str] = None,
 ) -> pd.DataFrame:
@@ -195,6 +197,7 @@ def _build_beam_population_breakdown_with_actual_assignments(
                 assignments_path=passenger_vehicles_path,
                 vehicle_lookup=vehicle_lookup,
                 assignment_group="passenger",
+                working_dir=working_dir,
             )
         )
     if freight_carriers_path:
@@ -203,6 +206,7 @@ def _build_beam_population_breakdown_with_actual_assignments(
                 assignments_path=freight_carriers_path,
                 vehicle_lookup=vehicle_lookup,
                 assignment_group="freight",
+                working_dir=working_dir,
             )
         )
     if not outputs:
@@ -698,6 +702,7 @@ def run(
         _set_progress_task(progress, "BEAM assignments", step_label="Postprocess Step 1")
         beam_population_breakdown = _build_beam_population_breakdown_with_actual_assignments(
             vehicle_lookup=vehicle_lookup,
+            working_dir=output_dir,
             passenger_vehicles_path=passenger_vehicles_path,
             freight_carriers_path=freight_carriers_path,
         )

@@ -214,7 +214,7 @@ def _validate_fleet_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
     fleet = _mapping_payload(payload, path="impacts.fleet")
     _reject_unknown_keys(fleet, {"assignment_model", "atlas"}, "impacts.fleet")
     atlas = _mapping_payload(fleet.get("atlas"), path="impacts.fleet.atlas")
-    _reject_unknown_keys(atlas, {"fuel_map", "income_bins"}, "impacts.fleet.atlas")
+    _reject_unknown_keys(atlas, {"fuel_map", "income_bins", "vehicles_file"}, "impacts.fleet.atlas")
     if atlas:
         fleet["atlas"] = atlas
     return fleet
@@ -731,6 +731,7 @@ class Impacts:
     exposure: Exposure
     population: "Population"
     analysis: Analysis = field(default_factory=Analysis)
+    presim_fleet_manifest: Optional[str] = None
 
     @classmethod
     def from_dict(cls, impacts_settings: Dict[str, Any]) -> "Impacts":
@@ -738,7 +739,7 @@ class Impacts:
             impacts_settings,
             {
                 "local_output_folder", "local_input_folder", "shared_input_cache_dir", "seed", "scenario",
-                "pipeline", "population",
+                "pipeline", "population", "presim_fleet_manifest",
                 "activities", "fleet", "emissions", "dispersions", "exposure", "analysis",
             },
             "impacts",
@@ -774,6 +775,7 @@ class Impacts:
             activities=activities,
             fleet=fleet,
             emissions=Emissions.from_dict(emissions_payload),
+            presim_fleet_manifest=_optional_string(impacts_settings.get("presim_fleet_manifest")),
             dispersions=Dispersions.from_dict(dict(impacts_settings.get("dispersions", {}) or {})),
             exposure=Exposure.from_dict(dict(impacts_settings.get("exposure", {}) or {})),
             population=population,
@@ -968,6 +970,7 @@ class ImpactsSettings:
                 "local_output_folder": self.impacts.local_output_folder,
                 "local_input_folder": self.impacts.local_input_folder,
                 "shared_input_cache_dir": self.impacts.shared_input_cache_dir,
+                "presim_fleet_manifest": self.impacts.presim_fleet_manifest,
                 "seed": self.impacts.seed,
                 "scenario": self.impacts.scenario,
                 "pipeline": {
@@ -1196,6 +1199,9 @@ def _build_emfac_root_from_settings_file(path: Path) -> dict[str, object]:
     if population_folder:
         resolved_pop = registry.locate(population_folder)
         atlas.setdefault("population_folder", str(resolved_pop) if resolved_pop else population_folder)
+    vehicles_file = atlas.get("vehicles_file")
+    if vehicles_file:
+        atlas["vehicles_file"] = str(registry.locate_required(vehicles_file, label="fleet.atlas.vehicles_file"))
     if atlas:
         fleet["atlas"] = atlas
 
@@ -2485,7 +2491,7 @@ def _ingest_fleet_sources(config: dict) -> dict:
         )
         if population_folder:
             pop_path = Path(population_folder)
-            atlas["vehicles_file"] = str(pop_path / "vehicles.parquet")
+            atlas.setdefault("vehicles_file", str(pop_path / "vehicles.parquet"))
             atlas["households_file"] = str(pop_path / "households.parquet")
             atlas["persons_file"] = str(pop_path / "persons.parquet")
         atlas["population_folder"] = population_folder
@@ -2595,6 +2601,7 @@ def load_fleet_workflow_from_activities_manifest(activities_manifest_path: str |
     _validate_fleet(raw, settings_source)
     raw = _ingest_fleet_sources(raw)
     raw["activities"] = {
+        **raw["activities"],
         "outputs": manifest["outputs"]["outputs_root"],
         "passenger_rates_file": manifest["outputs"]["passenger_rates_file"],
         "passenger_activity_file": manifest["outputs"]["passenger_activity_file"],

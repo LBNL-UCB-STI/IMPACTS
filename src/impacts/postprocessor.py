@@ -341,6 +341,16 @@ def _resolve_optional_population_assignment_paths(
     output_root: Path | None = None,
     registry: "PathRegistry",
 ) -> tuple[Path | None, Path | None]:
+    _, _, _, inputs = _load_context(
+        settings_path, run_manifest_path=run_manifest_path, output_root=output_root,
+    )
+    assignment_keys = ("passenger_vehicles_input", "freight_carriers_input")
+    if any(key in inputs for key in assignment_keys):
+        passenger, freight = (
+            _resolve_input_path(inputs, key=key, output_root=output_root, registry=registry)
+            for key in assignment_keys
+        )
+        return passenger, freight
     passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_vehicle_types_paths(
         settings_path,
         run_manifest_path=run_manifest_path,

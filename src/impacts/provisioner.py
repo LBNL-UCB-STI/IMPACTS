@@ -612,7 +612,22 @@ def run_fleet(
     except Exception as error:
         raise_runtime_error("config_load", error)
     workflow = _ensure_fleet_activities_exist(workflow)
-    _run_fleet_steps(workflow)
+    workflow = _run_fleet_steps(workflow)
+    if activities_manifest_path is not None:
+        activities_manifest = Path(activities_manifest_path).resolve()
+        write_structured_file(
+            activities_manifest.parent / "fleet_manifest.yaml",
+            {
+                "contract_version": "1",
+                "activities_manifest_path": str(activities_manifest),
+                "outputs": {
+                    "passenger_vehicle_types": workflow["mapped_passenger_vehicle_types_file"],
+                    "passenger_vehicles": workflow["mapped_passenger_vehicles_file"],
+                    "freight_vehicle_types": workflow["built_freight_vehicle_types_file"],
+                    "freight_carriers": workflow["mapped_freight_carriers_file"],
+                },
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
