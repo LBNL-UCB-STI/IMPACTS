@@ -135,3 +135,34 @@ def test_find_beam_r5_osm_reference_reads_canonical_key(monkeypatch, tmp_path: P
     assert entry is not None
     assert entry["staged_path"] == str(osm.resolve())
     assert entry["consist"]["artifact_key"] == "beam_r5_osm_file"
+
+
+def test_find_beam_r5_osm_reference_uses_local_fallback_without_active_run(monkeypatch):
+    def _raise_no_active_run():
+        raise RuntimeError("No active Consist run found. Ensure you are within a start_run block.")
+
+    def _unexpected_lookup(**_kwargs):
+        raise AssertionError("Artifact lookup should be skipped without an active run")
+
+    fake_consist = types.SimpleNamespace(
+        get_run_outputs=_raise_no_active_run,
+        get_artifact=_unexpected_lookup,
+    )
+    monkeypatch.setitem(sys.modules, "consist", fake_consist)
+
+    assert find_beam_r5_osm_reference(optional=True) is None
+
+
+def test_find_beam_r5_osm_reference_skips_legacy_lookup_without_run_id(
+    monkeypatch, caplog
+):
+    def _legacy_get_artifact(run_id, key):
+        raise AssertionError("The legacy lookup cannot be called without a run ID")
+
+    fake_consist = types.SimpleNamespace(
+        get_artifact=_legacy_get_artifact,
+    )
+    monkeypatch.setitem(sys.modules, "consist", fake_consist)
+
+    assert find_beam_r5_osm_reference(optional=True) is None
+    assert "Consist get_artifact lookup failed" not in caplog.text

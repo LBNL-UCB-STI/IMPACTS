@@ -136,6 +136,16 @@ def _call_consist_lookup(query_fn: Any, *, key: str, metadata: Dict[str, Any]) -
     )
 
 
+def _lookup_requires_run_id(query_fn: Any) -> bool:
+    """Return whether a lookup requires a run ID that this adapter cannot supply."""
+    try:
+        parameters = inspect.signature(query_fn).parameters
+    except (TypeError, ValueError):
+        return False
+    run_id = parameters.get("run_id")
+    return run_id is not None and run_id.default is inspect.Parameter.empty
+
+
 def _call_consist_outputs_reader(query_fn: Any, *, metadata: Dict[str, Any]) -> Any:
     signature = inspect.signature(query_fn)
     accepted = set(signature.parameters)
@@ -185,9 +195,27 @@ def find_input_reference(
     except ImportError:
         return None
     artifact_metadata = {"artifact_key": key, **(metadata or {})}
+    outputs_reader = getattr(consist, "get_run_outputs", None)
+    if outputs_reader is not None:
+        try:
+            _call_consist_outputs_reader(outputs_reader, metadata=artifact_metadata)
+        except RuntimeError as exc:
+            if _is_missing_active_run(exc):
+                logger.info("Consist has no active run; using local input for %s.", key)
+                return None
+            logger.warning("Consist run lookup failed for %s: %s", key, exc)
+        except Exception as exc:
+            logger.warning("Consist run lookup failed for %s: %s", key, exc)
     for attr_name in ("find_artifact", "get_artifact", "find_input"):
         query_fn = getattr(consist, attr_name, None)
         if query_fn is None:
+            continue
+        if _lookup_requires_run_id(query_fn):
+            logger.info(
+                "Consist %s lookup for %s requires a run_id; using the configured local input.",
+                attr_name,
+                key,
+            )
             continue
         try:
             artifact = _call_consist_lookup(query_fn, key=key, metadata=artifact_metadata)
