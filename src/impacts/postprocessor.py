@@ -736,7 +736,7 @@ def _run_postprocess_steps(
             concentration_path=str(conc_path),
             network_path=str(net_path),
             output_dir=output_dir / "concentrations",
-            skip_web_tiles=settings.impacts.analysis.skip_web_tiles,
+            basemap=settings.impacts.analysis.basemap,
         )
         for key, value in map_outputs.items():
             outputs[f"concentration_{key}"] = value
@@ -756,7 +756,7 @@ def _run_postprocess_steps(
             network_path=str(net_path),
             inmap_cells_path=str(inmap_cells_path) if inmap_cells_path.exists() else None,
             output_dir=output_dir / "exposure",
-            skip_web_tiles=settings.impacts.analysis.skip_web_tiles,
+            basemap=settings.impacts.analysis.basemap,
         )
         for key, value in exp_outputs.items():
             outputs[f"exposure_{key}"] = value
@@ -779,7 +779,7 @@ def _run_postprocess_steps(
             delta_baseline_concentration_path=str(delta_baseline_concentration_path),
             network_path=str(net_path),
             output_dir=output_dir / "delta_concentrations",
-            skip_web_tiles=settings.impacts.analysis.skip_web_tiles,
+            basemap=settings.impacts.analysis.basemap,
         )
         delta_table_path = delta_outputs.get("delta_table")
         for key, value in delta_outputs.items():
@@ -802,7 +802,7 @@ def _run_postprocess_steps(
             network_path=str(net_path),
             inmap_cells_path=str(inmap_cells_path),
             output_dir=output_dir / "delta_exposure",
-            skip_web_tiles=settings.impacts.analysis.skip_web_tiles,
+            basemap=settings.impacts.analysis.basemap,
         )
         for key, value in delta_exposure_outputs.items():
             outputs[f"delta_exposure_{key}"] = value

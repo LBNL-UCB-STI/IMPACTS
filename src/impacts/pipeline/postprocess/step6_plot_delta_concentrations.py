@@ -199,7 +199,7 @@ def _plot_delta_map(
     column: str,
     title: str,
     out_path: Path,
-    skip_web_tiles: bool = False,
+    basemap: str = "carto",
 ) -> Optional[str]:
     delta_col = f"{column}_delta"
     norm = delta_norm(delta_gdf[delta_col])
@@ -220,7 +220,7 @@ def _plot_delta_map(
         norm=norm,
     )
     _add_network(ax, net_gdf)
-    _add_basemap(ax, crs=delta_gdf.crs, skip_web_tiles=skip_web_tiles)
+    _add_basemap(ax, crs=delta_gdf.crs, basemap=basemap)
     _add_colorbar(fig, ax, DELTA_CMAP, float(norm.vmax), title, norm=norm, intensity_alpha=True)
     ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
     ax.set_axis_off()
@@ -238,7 +238,7 @@ def _plot_primary_secondary_delta_comparison(
     net_gdf,
     layout,
     out_path: Path,
-    skip_web_tiles: bool = False,
+    basemap: str = "carto",
 ) -> Optional[str]:
     norm = _shared_delta_norm(delta_gdf, _PRIMARY_SECONDARY_COLUMNS)
     if norm is None:
@@ -268,7 +268,7 @@ def _plot_primary_secondary_delta_comparison(
             norm=norm,
         )
         _add_network(ax, net_gdf)
-        _add_basemap(ax, crs=delta_gdf.crs, skip_web_tiles=skip_web_tiles)
+        _add_basemap(ax, crs=delta_gdf.crs, basemap=basemap)
         ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
         ax.set_axis_off()
 
@@ -298,7 +298,7 @@ def run(
     delta_baseline_concentration_path: str,
     network_path: str,
     output_dir: Path,
-    skip_web_tiles: bool = False,
+    basemap: str = "carto",
 ) -> dict[str, str]:
     """Render concentration delta maps using ``current - baseline``."""
     import geopandas as gpd
@@ -335,7 +335,7 @@ def run(
             result = _plot_delta_map(
                 delta_gdf, net_gdf, layout, column, title,
                 output_dir / f"delta_{column.lower()}.png",
-                skip_web_tiles=skip_web_tiles,
+                basemap=basemap,
             )
             if result is not None:
                 outputs[f"delta_{column.lower()}_map"] = result
@@ -347,7 +347,7 @@ def run(
             net_gdf,
             layout,
             output_dir / "delta_primary_secondary_pm25.png",
-            skip_web_tiles=skip_web_tiles,
+            basemap=basemap,
         )
         if result is not None:
             outputs["delta_primary_secondary_pm25_map"] = result

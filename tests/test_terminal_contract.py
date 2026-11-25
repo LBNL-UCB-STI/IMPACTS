@@ -1304,7 +1304,7 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
 
             class analysis:
                 delta_baseline_concentration_distribution_file = str(baseline_path)
-                skip_web_tiles = True
+                basemap = "none"
                 sector_targets = [
                     SimpleNamespace(
                         source="mobile_onroad",
@@ -1344,7 +1344,7 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
     def _fake_step4(*, output_dir: Path, **_kwargs):
         output_dirs["step4"] = Path(output_dir)
         step4_calls["called"] = True
-        step4_calls["skip_web_tiles"] = _kwargs["skip_web_tiles"]
+        step4_calls["basemap"] = _kwargs["basemap"]
         return {"step4_output": str(Path(output_dir) / "concentration.png")}
 
     def _fake_step6(*, output_dir: Path, delta_baseline_concentration_path: str, **_kwargs):
@@ -1394,7 +1394,7 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
         "step7": output_root / "postprocess" / "delta_exposure",
     }
     assert step4_calls["called"] is True
-    assert step4_calls["skip_web_tiles"] is True
+    assert step4_calls["basemap"] == "none"
     assert step6_calls["delta_baseline_concentration_path"] == str(baseline_path.resolve())
     assert step7_calls["concentration_delta_path"] == str(
         output_root / "postprocess" / "delta_concentrations" / "concentration_delta.parquet"

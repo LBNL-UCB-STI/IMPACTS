@@ -93,7 +93,7 @@ def _render_one(
     vmax: float,
     out_path: Path,
     zoom_bbox: tuple[float, float, float, float] | None = None,
-    skip_web_tiles: bool = False,
+    basemap: str = "carto",
 ) -> str:
     fig, ax = plt.subplots(figsize=MAP_FIGSIZE, dpi=MAP_DPI)
     ax.set_aspect("equal")
@@ -103,7 +103,7 @@ def _render_one(
         xmin, ymin, xmax, ymax = zoom_bbox
         ax.set_xlim(xmin, xmax)
         ax.set_ylim(ymin, ymax)
-    _add_basemap(ax, crs=conc_gdf.crs, skip_web_tiles=skip_web_tiles)
+    _add_basemap(ax, crs=conc_gdf.crs, basemap=basemap)
     _add_colorbar(fig, ax, cmap, vmax, title, intensity_alpha=True)
     ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
     ax.set_axis_off()
@@ -125,7 +125,7 @@ def _plot_one(
     vmax_q: float,
     out_path: Path,
     zoom_bbox: tuple[float, float, float, float] | None = None,
-    skip_web_tiles: bool = False,
+    basemap: str = "carto",
 ) -> dict[str, str]:
     if column not in conc_gdf.columns:
         logger.warning("  Column %s not in concentration data, skipping.", column)
@@ -144,7 +144,7 @@ def _plot_one(
     outputs = {
         f"{key}_map": _render_one(
             conc_gdf, net_gdf, layout, column, title, cmap, vmax, out_path,
-            skip_web_tiles=skip_web_tiles,
+            basemap=basemap,
         )
     }
     if zoom_bbox is not None:
@@ -153,7 +153,7 @@ def _plot_one(
         outputs[f"{key}_zoom_map"] = _render_one(
             conc_gdf, net_gdf, layout, column, title, cmap, vmax, zoom_path,
             zoom_bbox=zoom_bbox,
-            skip_web_tiles=skip_web_tiles,
+            basemap=basemap,
         )
     return outputs
 
@@ -165,7 +165,7 @@ def _render_primary_secondary(
     vmax: float,
     out_path: Path,
     zoom_bbox: tuple[float, float, float, float] | None = None,
-    skip_web_tiles: bool = False,
+    basemap: str = "carto",
 ) -> str:
     fig, axes = plt.subplots(
         1,
@@ -186,7 +186,7 @@ def _render_primary_secondary(
             xmin, ymin, xmax, ymax = zoom_bbox
             ax.set_xlim(xmin, xmax)
             ax.set_ylim(ymin, ymax)
-        _add_basemap(ax, crs=conc_gdf.crs, skip_web_tiles=skip_web_tiles)
+        _add_basemap(ax, crs=conc_gdf.crs, basemap=basemap)
         ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
         ax.set_axis_off()
 
@@ -214,7 +214,7 @@ def _plot_primary_secondary_comparison(
     layout,
     out_path: Path,
     zoom_bbox: tuple[float, float, float, float] | None = None,
-    skip_web_tiles: bool = False,
+    basemap: str = "carto",
 ) -> dict[str, str]:
     columns = _PRIMARY_SECONDARY_COLUMNS
     missing = [column for column in columns if column not in conc_gdf.columns]
@@ -230,7 +230,7 @@ def _plot_primary_secondary_comparison(
     logger.info("  Primary/Secondary PM₂.₅ shared vmax=%.4f → %s", vmax, out_path.name)
     outputs: dict[str, str] = {}
     outputs["primary_secondary_pm25_map"] = _render_primary_secondary(
-        conc_gdf, net_gdf, layout, vmax, out_path, skip_web_tiles=skip_web_tiles
+        conc_gdf, net_gdf, layout, vmax, out_path, basemap=basemap
     )
     if zoom_bbox is not None:
         zoom_path = out_path.with_stem(out_path.stem + "_zoom")
@@ -238,7 +238,7 @@ def _plot_primary_secondary_comparison(
         outputs["primary_secondary_pm25_zoom_map"] = _render_primary_secondary(
             conc_gdf, net_gdf, layout, vmax, zoom_path,
             zoom_bbox=zoom_bbox,
-            skip_web_tiles=skip_web_tiles,
+            basemap=basemap,
         )
     return outputs
 
@@ -249,7 +249,7 @@ def run(
     network_path: str,
     output_dir: Path,
     zoom_bbox: tuple[float, float, float, float] | None = _SF_COUNTY_ZOOM_BBOX,
-    skip_web_tiles: bool = False,
+    basemap: str = "carto",
 ) -> dict[str, str]:
     """Render concentration maps for all pollutant variables.
 
@@ -298,7 +298,7 @@ def run(
                 conc_gdf, net_gdf, layout, column, title, cmap, vmax_q,
                 output_dir / f"{column.lower()}.png",
                 zoom_bbox=zoom_bbox if column == "TotalPM25" else None,
-                skip_web_tiles=skip_web_tiles,
+                basemap=basemap,
             ))
             _advance_progress(progress)
         _set_progress_task(progress, "Primary/Secondary PM2.5", step_label="Postprocess Step 4")
@@ -308,7 +308,7 @@ def run(
             layout,
             output_dir / "primary_secondary_pm25.png",
             zoom_bbox=zoom_bbox,
-            skip_web_tiles=skip_web_tiles,
+            basemap=basemap,
         ))
         _advance_progress(progress)
     finally:

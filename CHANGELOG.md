@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-25
+
+### Changed
+
+- Replace the offline-only web-tile switch with `impacts.analysis.basemap`, supporting `carto` and `none`. Continue accepting `skip_web_tiles` as a compatibility alias.
+
 ## v0.2.2 - 2026-11-24
 
 ### Added
