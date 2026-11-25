@@ -28,9 +28,12 @@ from ...consist_artifacts import find_latest_beam_households_reference
 from ...consist_artifacts import find_latest_beam_network_reference
 from ...consist_artifacts import find_latest_beam_population_reference
 from ...consist_artifacts import resolve_logged_path
+from ...config.path_registry import PathRegistry
 from ...config.path_registry import build_registry
+from ...config.settings import Emissions
 from ...config.settings import presim_activities_inventory_root
 from ...config.settings import presim_activities_tmp_root
+from ...manifest.file_ops import file_entry
 from ...manifest.file_ops import resolve_path
 from ...manifest.file_ops import resolve_required_path
 from ...manifest.file_ops import is_remote_path
@@ -69,6 +72,38 @@ def _register_manifest_input(
 def _use_existing_reference(manifest_inputs: Dict[str, Any], key: str, entry: Dict[str, Any]) -> str:
     manifest_inputs[key] = entry
     return resolve_logged_path(entry)
+
+
+def _resolve_osm_input(
+    manifest_inputs: Dict[str, Any], *, emissions: Emissions, registry: PathRegistry, input_root: Path
+) -> str:
+    if emissions.osm_network_file:
+        label = "impacts.emissions.osm_network_file"
+        path = registry.locate_required(emissions.osm_network_file, label=label)
+        if not path.is_file() or path.suffix.lower() != ".pbf":
+            raise ValueError(f"{label} must point to an OSM PBF file: {path}")
+        entry = file_entry(kind="local", path=path, staged_path=path)
+        if emissions.osm_network_artifact_id:
+            entry["artifact_id"] = emissions.osm_network_artifact_id
+        manifest_inputs["osm_network"] = entry
+        return str(path)
+
+    osm_entry = find_beam_r5_osm_reference(optional=True)
+    if osm_entry:
+        return _use_existing_reference(manifest_inputs, "osm_network", osm_entry)
+
+    label = "impacts.emissions.osm_network_folder"
+    osm_root = str(registry.locate_required(emissions.osm_network_folder, label=label))
+    osm_source = resolve_osm_pbf_local_path(osm_root) or required_local_path(osm_root, label)
+    return _register_manifest_input(
+        manifest_inputs,
+        input_root=input_root,
+        key="osm_network",
+        source_path=osm_source,
+        relative_target=Path(osm_source).name,
+        artifact_key=BEAM_R5_OSM_FILE_KEY,
+        metadata={"artifact_family": BEAM_R5_OSM_FILE_KEY},
+    )
 
 
 def _resolve_emfacid_path(inventory_path: str, *, label: str) -> str:
@@ -238,25 +273,9 @@ def run(
     progress = make_progress("Preprocess Step 1.2", total=substep_12_total, unit="task", leave=False)
     try:
         _set_progress_task(progress, "osm", step_label="Preprocess Step 1.2")
-        osm_entry = find_beam_r5_osm_reference(optional=True)
-        if osm_entry:
-            staged_osm = _use_existing_reference(manifest_inputs, "osm_network", osm_entry)
-        else:
-            osm_root = str(registry.locate_required(
-                emissions.osm_network_folder, label="impacts.emissions.osm_network_folder"
-            ))
-            osm_source = resolve_osm_pbf_local_path(osm_root) or required_local_path(
-                osm_root, "impacts.emissions.osm_network_folder"
-            )
-            staged_osm = _register_manifest_input(
-                manifest_inputs,
-                input_root=input_root,
-                key="osm_network",
-                source_path=osm_source,
-                relative_target=Path(osm_source).name,
-                artifact_key=BEAM_R5_OSM_FILE_KEY,
-                metadata={"artifact_family": BEAM_R5_OSM_FILE_KEY},
-            )
+        staged_osm = _resolve_osm_input(
+            manifest_inputs, emissions=emissions, registry=registry, input_root=input_root
+        )
         progress.update(1)
 
         _set_progress_task(progress, "emissions rates", step_label="Preprocess Step 1.2")

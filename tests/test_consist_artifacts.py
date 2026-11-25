@@ -4,7 +4,14 @@ from pathlib import Path
 import sys
 import types
 
+import pytest
+
 from impacts.common import register_managed_input
+from impacts.config.path_registry import PathRegistry
+from impacts.config.settings import DEFAULT_CONFIG_PATH
+from impacts.config.settings_builder import derive_settings_from_pilates, load_settings_from_yaml
+from impacts.manifest.file_ops import load_structured_file, write_structured_file
+from impacts.pipeline.preprocessing import step1_collect_inputs
 from impacts.consist_artifacts import find_beam_r5_osm_reference
 from impacts.consist_artifacts import find_latest_beam_events_reference
 
@@ -167,3 +174,48 @@ def test_find_beam_r5_osm_reference_keeps_warning_for_active_run_lookup_error(
 
     assert find_beam_r5_osm_reference(optional=True) is None
     assert "Consist get_artifact lookup failed" in caplog.text
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_osm_input_preserves_explicit_file_or_standalone_folder(monkeypatch, tmp_path, explicit):
+    fallback = tmp_path / "fallback"
+    fallback.mkdir()
+    folder_osm = fallback / "fallback.osm.pbf"
+    folder_osm.touch()
+    selected = tmp_path / "selected.osm.pbf"
+    selected.touch()
+    emissions = {"osm_network_folder": str(fallback)}
+    if explicit:
+        emissions.update(osm_network_file=str(selected), osm_network_artifact_id="artifact-123")
+
+    def find_osm(*, optional):
+        assert not explicit, "Explicit OSM selection must bypass Consist"
+        return None
+
+    monkeypatch.setattr(step1_collect_inputs, "find_beam_r5_osm_reference", find_osm)
+
+    default = load_structured_file(DEFAULT_CONFIG_PATH)
+    bridge = {key: default[key] for key in ("run", "shared", "beam")}
+    bridge["impacts"] = {"emissions": emissions}
+    bridge_path, derived = tmp_path / "bridge.yaml", tmp_path / "settings.yaml"
+    write_structured_file(bridge_path, bridge)
+    derive_settings_from_pilates(pilates_settings_path=bridge_path, output_path=derived)
+
+    manifest = {}
+    settings = load_settings_from_yaml(derived)
+    resolved = step1_collect_inputs._resolve_osm_input(
+        manifest, emissions=settings.impacts.emissions,
+        registry=PathRegistry([tmp_path]), input_root=tmp_path / "staged",
+    )
+    assert resolved == str((selected if explicit else folder_osm).resolve())
+    assert manifest["osm_network"]["source_path"] == resolved
+    assert manifest["osm_network"]["staged_path"] == resolved
+    assert manifest["osm_network"].get("artifact_id") == ("artifact-123" if explicit else None)
+
+    if explicit:
+        selected.unlink()
+        with pytest.raises(FileNotFoundError, match="osm_network_file"):
+            step1_collect_inputs._resolve_osm_input(
+                {}, emissions=settings.impacts.emissions,
+                registry=PathRegistry([tmp_path]), input_root=tmp_path / "staged",
+            )

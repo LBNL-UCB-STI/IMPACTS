@@ -468,6 +468,8 @@ class Emissions:
     defaults: "Emissions.Defaults"
     source_pollutants: List[str]
     beam: "ImpactsBeamProcessing"
+    osm_network_file: Optional[str] = None
+    osm_network_artifact_id: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Emissions":
@@ -475,6 +477,8 @@ class Emissions:
             payload,
             {
                 "osm_network_folder",
+                "osm_network_file",
+                "osm_network_artifact_id",
                 "rates_folder",
                 "inventory_folder",
                 "vehicle_category_metadata_file",
@@ -500,6 +504,8 @@ class Emissions:
                 inventory_payload[correction_key] = payload.get(correction_key)
         return cls(
             osm_network_folder=_optional_string(payload.get("osm_network_folder")),
+            osm_network_file=_optional_string(payload.get("osm_network_file")),
+            osm_network_artifact_id=_optional_string(payload.get("osm_network_artifact_id")),
             rates_folder=_required_string(
                 payload.get("rates_folder"),
                 "impacts.emissions.rates_folder",
@@ -1034,6 +1040,15 @@ class ImpactsSettings:
                 "activities": self.impacts.activities,
                 "fleet": self.impacts.fleet,
                 "emissions": {
+                        **{
+                            key: value
+                            for key, value in (
+                                ("osm_network_folder", self.impacts.emissions.osm_network_folder),
+                                ("osm_network_file", self.impacts.emissions.osm_network_file),
+                                ("osm_network_artifact_id", self.impacts.emissions.osm_network_artifact_id),
+                            )
+                            if value is not None
+                        },
                         "include_non_osm_car_links": self.impacts.emissions.beam.include_non_osm_car_links,
                         "include_passenger": self.impacts.emissions.beam.include_passenger,
                         "include_freight": self.impacts.emissions.beam.include_freight,

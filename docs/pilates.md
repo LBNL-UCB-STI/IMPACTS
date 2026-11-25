@@ -46,6 +46,16 @@ If the original ATLAS vehicle table is stored under a different name from
 `vehicles.parquet`, set `impacts.fleet.atlas.vehicles_file` to its path
 relative to the BEAM input root, or to an absolute mounted path.
 
+## BEAM road network handoff
+
+The PILATES postsim bridge can set `impacts.emissions.osm_network_file` to the
+mounted PBF selected by BEAM for the same run as the network and emissions
+skims. IMPACTS reads that file directly and records its path and the optional
+`impacts.emissions.osm_network_artifact_id` under `inputs.osm_network` in
+`preprocess_manifest.yaml`. When the explicit file is absent from settings,
+IMPACTS retains the existing resolution through Consist or the configured
+`osm_network_folder` for standalone runs.
+
 ## Example layout
 
 ```text
