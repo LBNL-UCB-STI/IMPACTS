@@ -7,8 +7,9 @@
 Consist staging:
 
 - find an upstream file
-- log it as a Consist input artifact
-- or, when Consist is unavailable or no active Consist run is present, store the original source path without copying
+- when `run.consist_run_id` is supplied, query that exact Consist run for upstream artifacts
+- otherwise use ambient Consist lookup when supported
+- when no usable Consist run is available, store the original source path without copying
 - store the tracked entry under a stable key in `manifest_inputs`
 - resolve the artifact to a path only when a step needs to read it
 
@@ -29,7 +30,7 @@ The current manifest keys are already close to what Consist needs. These should 
 
 ## PILATES-aligned lookup order
 
-For upstream BEAM-origin files, `impacts` tries PILATES-style artifact keys first and uses local filesystem discovery when nothing is published yet.
+For upstream BEAM-origin files, `impacts` tries PILATES-style artifact keys first within the supplied Consist run and uses local filesystem discovery when nothing is published there.
 
 - `network`: query latest `beam_network_final_*`, otherwise discover the BEAM network locally and register it
 - `events_input`: query latest `events_parquet_*`, otherwise discover the latest local BEAM events file and register it
@@ -43,7 +44,7 @@ Other inputs that do not already have a known PILATES handoff key are still regi
 
 1. Preprocess or workflow code resolves upstream files as it does today.
 2. Source inputs are registered through `register_local_input(...)` or `register_managed_input(...)`, which do not physically copy the source file.
-3. `manifest_inputs[key]` stores a Consist-backed entry when there is an active Consist run, otherwise it stores a no-copy local entry that still points at the original source path.
+3. Set `run.consist_run_id` to the exact Consist run that owns the BEAM artifacts. `manifest_inputs[key]` then stores a Consist-backed entry when found; if no run ID is supplied or the key is missing, it stores a no-copy local entry that points at the configured source path.
 4. Workflow steps resolve the manifest entry to a concrete path right before `read_table(...)`, `read_vector(...)`, or other file IO.
 5. Generated outputs can be logged with `log_output_reference(...)` and stored in the run manifest by stable key.
 
@@ -80,3 +81,10 @@ Current state:
 The important rule for `impacts` is:
 
 “Use Consist to register and find files by logical identity. Resolve to filesystem paths only at the edge where the code actually reads or writes the file.”
+
+`run.consist_run_id` is optional. It must be a Consist run ID, not a PILATES output timestamp or `run.output_run_name`. For example:
+
+```yaml
+run:
+  consist_run_id: <exact-consist-run-id>
+```

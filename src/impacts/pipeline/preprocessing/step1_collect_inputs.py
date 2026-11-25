@@ -181,7 +181,9 @@ def run(
     progress = make_progress("Preprocess Step 1.1", total=3, unit="task", leave=False)
     try:
         _set_progress_task(progress, "network", step_label="Preprocess Step 1.1")
-        network_entry = find_latest_beam_network_reference(optional=True)
+        network_entry = find_latest_beam_network_reference(
+            optional=True, run_id=settings.run.consist_run_id
+        )
         if network_entry:
             staged_network = _use_existing_reference(manifest_inputs, "network", network_entry)
         else:
@@ -211,7 +213,9 @@ def run(
         progress.update(1)
 
         _set_progress_task(progress, "events", step_label="Preprocess Step 1.1")
-        events_entry = find_latest_beam_events_reference(optional=True)
+        events_entry = find_latest_beam_events_reference(
+            optional=True, run_id=settings.run.consist_run_id
+        )
         if events_entry:
             staged_events = _use_existing_reference(manifest_inputs, "events_input", events_entry)
         else:
@@ -238,7 +242,9 @@ def run(
     progress = make_progress("Preprocess Step 1.2", total=substep_12_total, unit="task", leave=False)
     try:
         _set_progress_task(progress, "osm", step_label="Preprocess Step 1.2")
-        osm_entry = find_beam_r5_osm_reference(optional=True)
+        osm_entry = find_beam_r5_osm_reference(
+            optional=True, run_id=settings.run.consist_run_id
+        )
         if osm_entry:
             staged_osm = _use_existing_reference(manifest_inputs, "osm_network", osm_entry)
         else:
@@ -565,8 +571,12 @@ def run(
         log_substep_banner("1.5", "register exposure population inputs", logger=logger)
         population_root = region_input_root / str(population.passenger_folder)
         population_artifact_entries = {
-            "persons": find_latest_beam_population_reference(optional=True),
-            "households": find_latest_beam_households_reference(optional=True),
+            "persons": find_latest_beam_population_reference(
+                optional=True, run_id=settings.run.consist_run_id
+            ),
+            "households": find_latest_beam_households_reference(
+                optional=True, run_id=settings.run.consist_run_id
+            ),
         }
         population_artifact_keys = {
             "persons": BEAM_POPULATION_PREFIX,

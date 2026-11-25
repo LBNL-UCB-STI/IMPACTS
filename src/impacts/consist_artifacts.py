@@ -109,22 +109,51 @@ def _call_consist_logger(logger_fn: Any, *, path: str, key: str, metadata: Dict[
     )
 
 
-def _call_consist_lookup(query_fn: Any, *, key: str, metadata: Dict[str, Any]) -> Any:
+def _call_consist_lookup(
+    query_fn: Any,
+    *,
+    key: str,
+    metadata: Dict[str, Any],
+    run_id: Optional[str] = None,
+) -> Any:
     signature = inspect.signature(query_fn)
     accepted = set(signature.parameters)
-    candidate_kwargs = [
-        {"key": key, "metadata": metadata},
-        {"name": key, "metadata": metadata},
-        {"artifact_key": key, "metadata": metadata},
-        {"key": key},
-        {"name": key},
-        {"artifact_key": key},
-        {"metadata": metadata},
-        {},
-    ]
+    if run_id is not None:
+        if "run_id" not in accepted and not any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        ):
+            raise TypeError(f"{query_fn} does not accept an explicit run_id")
+        candidate_kwargs = [
+            {"run_id": run_id, "key": key, "direction": "input", "metadata": metadata},
+            {"run_id": run_id, "key": key, "direction": "input"},
+            {"run_id": run_id, "key": key, "metadata": metadata},
+            {"run_id": run_id, "key": key},
+            {"run_id": run_id, "name": key},
+            {"run_id": run_id, "artifact_key": key},
+        ]
+    else:
+        candidate_kwargs = [
+            {"key": key, "metadata": metadata},
+            {"name": key, "metadata": metadata},
+            {"artifact_key": key, "metadata": metadata},
+            {"key": key},
+            {"name": key},
+            {"artifact_key": key},
+            {"metadata": metadata},
+            {},
+        ]
     failures: list[str] = []
+    accepts_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
     for raw_kwargs in candidate_kwargs:
-        kwargs = {name: value for name, value in raw_kwargs.items() if name in accepted}
+        kwargs = (
+            raw_kwargs
+            if accepts_kwargs
+            else {name: value for name, value in raw_kwargs.items() if name in accepted}
+        )
         try:
             return query_fn(**kwargs)
         except TypeError as exc:
@@ -146,17 +175,53 @@ def _lookup_requires_run_id(query_fn: Any) -> bool:
     return run_id is not None and run_id.default is inspect.Parameter.empty
 
 
-def _call_consist_outputs_reader(query_fn: Any, *, metadata: Dict[str, Any]) -> Any:
+def _lookup_accepts_run_id(query_fn: Any) -> bool:
+    try:
+        parameters = inspect.signature(query_fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return "run_id" in parameters or any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+
+
+def _call_consist_outputs_reader(
+    query_fn: Any,
+    *,
+    metadata: Dict[str, Any],
+    run_id: Optional[str] = None,
+) -> Any:
     signature = inspect.signature(query_fn)
     accepted = set(signature.parameters)
-    candidate_kwargs = [
-        {"metadata": metadata},
-        {"filters": metadata},
-        {},
-    ]
+    if run_id is not None:
+        if "run_id" not in accepted and not any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        ):
+            raise TypeError(f"{query_fn} does not accept an explicit run_id")
+        candidate_kwargs = [
+            {"run_id": run_id, "metadata": metadata},
+            {"run_id": run_id, "filters": metadata},
+            {"run_id": run_id},
+        ]
+    else:
+        candidate_kwargs = [
+            {"metadata": metadata},
+            {"filters": metadata},
+            {},
+        ]
     failures: list[str] = []
+    accepts_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
     for raw_kwargs in candidate_kwargs:
-        kwargs = {name: value for name, value in raw_kwargs.items() if name in accepted}
+        kwargs = (
+            raw_kwargs
+            if accepts_kwargs
+            else {name: value for name, value in raw_kwargs.items() if name in accepted}
+        )
         try:
             return query_fn(**kwargs)
         except TypeError as exc:
@@ -189,6 +254,7 @@ def find_input_reference(
     key: str,
     optional: bool = False,
     metadata: Optional[Dict[str, Any]] = None,
+    run_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     try:
         consist = _consist_module()
@@ -196,7 +262,7 @@ def find_input_reference(
         return None
     artifact_metadata = {"artifact_key": key, **(metadata or {})}
     outputs_reader = getattr(consist, "get_run_outputs", None)
-    if outputs_reader is not None:
+    if run_id is None and outputs_reader is not None:
         try:
             _call_consist_outputs_reader(outputs_reader, metadata=artifact_metadata)
         except RuntimeError as exc:
@@ -210,7 +276,14 @@ def find_input_reference(
         query_fn = getattr(consist, attr_name, None)
         if query_fn is None:
             continue
-        if _lookup_requires_run_id(query_fn):
+        if run_id is not None and not _lookup_accepts_run_id(query_fn):
+            logger.info(
+                "Consist %s lookup does not accept run_id; skipping it for %s.",
+                attr_name,
+                key,
+            )
+            continue
+        if run_id is None and _lookup_requires_run_id(query_fn):
             logger.info(
                 "Consist %s lookup for %s requires a run_id; using the configured local input.",
                 attr_name,
@@ -218,7 +291,12 @@ def find_input_reference(
             )
             continue
         try:
-            artifact = _call_consist_lookup(query_fn, key=key, metadata=artifact_metadata)
+            artifact = _call_consist_lookup(
+                query_fn,
+                key=key,
+                metadata=artifact_metadata,
+                run_id=run_id,
+            )
         except Exception as exc:
             logger.warning("Consist %s lookup failed for %s: %s", attr_name, key, exc)
             continue
@@ -258,28 +336,32 @@ def find_latest_dynamic_input_reference(
     prefixes: Iterable[str],
     optional: bool = False,
     metadata: Optional[Dict[str, Any]] = None,
+    run_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     try:
         consist = _consist_module()
     except ImportError:
         return None
     outputs: Any = None
-    for attr_name in ("get_run_outputs",):
+    readers = ("get_run_result", "get_run_outputs") if run_id else ("get_run_outputs",)
+    for attr_name in readers:
         query_fn = getattr(consist, attr_name, None)
         if query_fn is None:
             continue
         try:
             outputs = _call_consist_outputs_reader(
-                query_fn,
-                metadata=(metadata or {}),
+                query_fn, metadata=(metadata or {}), run_id=run_id
             )
         except Exception as exc:
             logger.warning("Consist %s lookup failed: %s", attr_name, exc)
+            continue
+        if run_id is not None:
+            outputs = getattr(outputs, "outputs", outputs)
         if outputs is not None:
             break
-    if outputs is None:
+    if outputs is None and run_id is None:
         outputs = getattr(consist, "run_outputs", None)
-    if outputs is None:
+    if outputs is None and run_id is None:
         outputs = getattr(consist, "raw_outputs", None)
     if not isinstance(outputs, dict):
         return None
@@ -299,39 +381,58 @@ def find_latest_dynamic_input_reference(
     return None
 
 
-def find_beam_r5_osm_reference(*, optional: bool = False) -> Optional[Dict[str, Any]]:
-    return find_input_reference(key=BEAM_R5_OSM_FILE_KEY, optional=optional, metadata={"artifact_family": BEAM_R5_OSM_FILE_KEY})
+def find_beam_r5_osm_reference(
+    *, optional: bool = False, run_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    return find_input_reference(
+        key=BEAM_R5_OSM_FILE_KEY,
+        optional=optional,
+        metadata={"artifact_family": BEAM_R5_OSM_FILE_KEY},
+        run_id=run_id,
+    )
 
 
-def find_latest_beam_events_reference(*, optional: bool = False) -> Optional[Dict[str, Any]]:
+def find_latest_beam_events_reference(
+    *, optional: bool = False, run_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     return find_latest_dynamic_input_reference(
         prefixes=[BEAM_EVENTS_PREFIX],
         optional=optional,
         metadata={"artifact_family": BEAM_EVENTS_PREFIX},
+        run_id=run_id,
     )
 
 
-def find_latest_beam_network_reference(*, optional: bool = False) -> Optional[Dict[str, Any]]:
+def find_latest_beam_network_reference(
+    *, optional: bool = False, run_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     return find_latest_dynamic_input_reference(
         prefixes=[BEAM_NETWORK_PREFIX],
         optional=optional,
         metadata={"artifact_family": BEAM_NETWORK_PREFIX},
+        run_id=run_id,
     )
 
 
-def find_latest_beam_households_reference(*, optional: bool = False) -> Optional[Dict[str, Any]]:
+def find_latest_beam_households_reference(
+    *, optional: bool = False, run_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     return find_latest_dynamic_input_reference(
         prefixes=[BEAM_HOUSEHOLDS_PREFIX],
         optional=optional,
         metadata={"artifact_family": BEAM_HOUSEHOLDS_PREFIX},
+        run_id=run_id,
     )
 
 
-def find_latest_beam_population_reference(*, optional: bool = False) -> Optional[Dict[str, Any]]:
+def find_latest_beam_population_reference(
+    *, optional: bool = False, run_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     return find_latest_dynamic_input_reference(
         prefixes=[BEAM_POPULATION_PREFIX],
         optional=optional,
         metadata={"artifact_family": BEAM_POPULATION_PREFIX},
+        run_id=run_id,
     )
 
 

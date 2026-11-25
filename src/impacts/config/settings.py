@@ -269,15 +269,21 @@ class Run:
     scenario: str
     start_year: int
     output_run_name: Optional[str] = None
+    consist_run_id: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Run":
-        _reject_unknown_keys(payload, {"region", "scenario", "start_year", "output_run_name"}, "run")
+        _reject_unknown_keys(
+            payload,
+            {"region", "scenario", "start_year", "output_run_name", "consist_run_id"},
+            "run",
+        )
         return cls(
             region=_required_string(payload.get("region"), "run.region"),
             scenario=_required_string(payload.get("scenario"), "run.scenario"),
             start_year=_required_int(payload.get("start_year"), "run.start_year"),
             output_run_name=_optional_string(payload.get("output_run_name")),
+            consist_run_id=_optional_string(payload.get("consist_run_id")),
         )
 
 
@@ -981,6 +987,8 @@ class ImpactsSettings:
         }
         if self.run.output_run_name is not None:
             run_payload["output_run_name"] = self.run.output_run_name
+        if self.run.consist_run_id is not None:
+            run_payload["consist_run_id"] = self.run.consist_run_id
         return {
             "run": run_payload,
             "shared": {

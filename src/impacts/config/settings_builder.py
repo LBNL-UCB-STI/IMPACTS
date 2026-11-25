@@ -35,7 +35,11 @@ def _load_mapping(source: Dict[str, Any] | str | Path, *, label: str) -> Dict[st
 def _validate_pilates_settings_sections(pilates_settings: Dict[str, Any]) -> None:
     run = dict(pilates_settings.get("run", {}) or {})
     shared = dict(pilates_settings.get("shared", {}) or {})
-    _reject_unknown_keys(run, {"region", "scenario", "start_year", "output_run_name"}, "run")
+    _reject_unknown_keys(
+        run,
+        {"region", "scenario", "start_year", "output_run_name", "consist_run_id"},
+        "run",
+    )
     _reject_unknown_keys(shared, {"geography"}, "shared")
     geography = dict(shared.get("geography", {}) or {})
     _reject_unknown_keys(geography, {"FIPS", "local_crs"}, "shared.geography")
@@ -78,6 +82,7 @@ def build_settings_from_pilates(
             "scenario": run.get("scenario"),
             "start_year": start_year,
             "output_run_name": run.get("output_run_name"),
+            "consist_run_id": run.get("consist_run_id"),
         },
         "shared": {
             "geography": {
