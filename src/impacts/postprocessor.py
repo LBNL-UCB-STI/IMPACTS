@@ -858,6 +858,11 @@ def postprocess_from_pipeline_manifest(
         "postprocess_outputs": postprocess_outputs,
         "validation": {
             "completed": True,
+            "population_source": (
+                pipeline_manifest.get("population_inputs", {})
+                if pipeline_manifest.get("pipeline", {}).get("exposure_enabled")
+                else None
+            ),
         },
         "notes": [
             "Postprocess runs maintained outputs after workflow completion.",

@@ -20,7 +20,19 @@ Set `impacts.analysis.basemap` to `carto` (the default) to add Carto tiles, or `
 
 ## Run-specific BEAM inputs
 
-PILATES should point `beam.local_output_folder` at the materialized BEAM outputs for the current run. IMPACTS reads the network, emissions skims, and optional events from that tree and does not query Consist for a different run's files. For exposure, PILATES points `impacts.population.passenger_folder` at the current BEAM persons and households when available. Duplicate candidates or multiple `ITERS` directories cause IMPACTS to stop rather than guess.
+PILATES should point `beam.local_output_folder` at the materialized BEAM outputs for the current run. IMPACTS reads the network, emissions skims, and optional events from that tree and does not query Consist for a different run's files.
+
+Exposure residents are separate from BEAM's plan-bearing population. When exposure is enabled, PILATES must pass the run-specific full-resident persons and households files and their source manifest through explicit settings. IMPACTS does not use `impacts.population.passenger_folder` as an exposure fallback; that setting remains for fleet generation.
+
+```yaml
+impacts:
+  exposure:
+    persons_file: /app/workspace/impacts/exposure-population/urbansim-forecast-2018/persons.parquet
+    households_file: /app/workspace/impacts/exposure-population/urbansim-forecast-2018/households.parquet
+    source_manifest: /app/workspace/impacts/exposure-population/urbansim-forecast-2018/population_source.yaml
+```
+
+The source manifest and resident-assignment summary are carried into the postsim manifest. The summary reports supplied residents, residents assigned to the 100 m grid, missing home coordinates, and residents outside the grid.
 
 Pass the exact PBF selected from the final `beam.routing.r5.directory` as `impacts.emissions.osm_network_file`, and pass its Consist ID as `osm_network_artifact_id` when available. IMPACTS reads that PBF directly and records the path and ID in its manifest. Standalone settings can omit the file path; IMPACTS then chooses the first top-level `.pbf` by filename in the configured `beam.router_directory`, matching the PILATES R5 choice. It logs and ignores `.vex` files because IMPACTS requires a PBF.
 

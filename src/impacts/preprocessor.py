@@ -185,11 +185,13 @@ def build_preprocess_manifest(
             )
 
     from .pipeline.preprocessing.step4_build_cell_attributes import run as preprocess_step4
-    aermod_cell_attributes_path, staged_population_path = preprocess_step4(
+    aermod_cell_attributes_path, staged_population_path, population_assignment = preprocess_step4(
         pipeline_config,
         input_root,
         population_inputs=step1_outputs.get("population_inputs"),
     )
+    if population_assignment is not None:
+        step1_outputs["population_inputs"]["assignment"] = population_assignment
     if aermod_cell_attributes_path:
         register_local_input(
             manifest_inputs=manifest_inputs,

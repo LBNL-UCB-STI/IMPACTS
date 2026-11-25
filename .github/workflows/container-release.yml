@@ -54,6 +54,10 @@ jobs:
             --mount "type=bind,src=$PWD/tests/test_container_cli_smoke.py,dst=/tmp/test_container_cli_smoke.py,readonly" \
             --mount "type=bind,src=$PWD/tests/fixtures,dst=/tmp/fixtures,readonly" \
             "$IMAGE:$VERSION" python /tmp/test_container_cli_smoke.py
+          docker run --rm \
+            --workdir / \
+            --mount "type=bind,src=$PWD/tests/test_population_exposure.py,dst=/tmp/test_population_exposure.py,readonly" \
+            "$IMAGE:$VERSION" python /tmp/test_population_exposure.py
 
   publish:
     if: github.event_name == 'release' && github.event.action == 'published'

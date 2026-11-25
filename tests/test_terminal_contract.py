@@ -750,6 +750,7 @@ def test_build_preprocess_manifest_runs_step3_and_registers_intersections(monkey
 
     import impacts.pipeline.preprocessing.step1_collect_inputs as step1_collect_inputs
     import impacts.pipeline.preprocessing.step2_prepare_grids as step2_prepare_grids
+    import impacts.pipeline.preprocessing.step4_build_cell_attributes as step4_build_cell_attributes
     import impacts.preprocessor as preprocessor_module
 
     config_path = tmp_path / "settings.yaml"
@@ -870,6 +871,7 @@ def test_build_preprocess_manifest_runs_step3_and_registers_intersections(monkey
 
     monkeypatch.setattr(step1_collect_inputs, "run", _fake_step1)
     monkeypatch.setattr(step2_prepare_grids, "run", _fake_step2)
+    monkeypatch.setattr(step4_build_cell_attributes, "run", lambda *args, **kwargs: (None, None, None))
     fake_step3_module = ModuleType("impacts.pipeline.preprocessing.step3_integrate_grids")
     fake_step3_module.run = _fake_step3
     monkeypatch.setitem(sys.modules, "impacts.pipeline.preprocessing.step3_integrate_grids", fake_step3_module)

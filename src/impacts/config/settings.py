@@ -370,12 +370,15 @@ class Dispersions:
 @dataclass(frozen=True)
 class Exposure:
     primary_pm25_integration_strategy: str = default_primary_pm25_integration_strategy
+    persons_file: Optional[str] = None
+    households_file: Optional[str] = None
+    source_manifest: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Exposure":
         _reject_unknown_keys(
             payload,
-            {"primary_pm25_integration_strategy"},
+            {"primary_pm25_integration_strategy", "persons_file", "households_file", "source_manifest"},
             "impacts.exposure",
         )
         strategy = _optional_string(payload.get("primary_pm25_integration_strategy"))
@@ -385,7 +388,12 @@ class Exposure:
                 "impacts.exposure.primary_pm25_integration_strategy must be one of "
                 f"{sorted(default_primary_pm25_integration_strategies)}, got {strategy!r}"
             )
-        return cls(primary_pm25_integration_strategy=strategy)
+        return cls(
+            primary_pm25_integration_strategy=strategy,
+            persons_file=_optional_string(payload.get("persons_file")),
+            households_file=_optional_string(payload.get("households_file")),
+            source_manifest=_optional_string(payload.get("source_manifest")),
+        )
 
 
 @dataclass(frozen=True)
@@ -1024,6 +1032,9 @@ class ImpactsSettings:
                     "primary_pm25_integration_strategy": (
                         self.impacts.exposure.primary_pm25_integration_strategy
                     ),
+                    "persons_file": self.impacts.exposure.persons_file,
+                    "households_file": self.impacts.exposure.households_file,
+                    "source_manifest": self.impacts.exposure.source_manifest,
                 },
                 "population": {
                     "passenger_folder": self.impacts.population.passenger_folder,

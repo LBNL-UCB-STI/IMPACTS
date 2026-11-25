@@ -50,7 +50,7 @@ def _load_and_merge_population(
     persons_entry: Dict[str, Any],
     households_entry: Dict[str, Any],
     target_epsg: int,
-) -> gpd.GeoDataFrame:
+) -> tuple[gpd.GeoDataFrame, int, int]:
     persons = read_table(resolve_required_manifest_input({"persons": persons_entry}, key="persons")).copy()
     households = read_table(resolve_required_manifest_input({"households": households_entry}, key="households")).copy()
 
@@ -67,6 +67,14 @@ def _load_and_merge_population(
     missing_h = [c for c in _HOUSEHOLD_REQUIRED if c not in households.columns]
     if missing_h:
         raise ValueError(f"Preprocess Step 4: households table missing columns: {missing_h}")
+    if persons["person_id"].isna().any() or persons["household_id"].isna().any():
+        raise ValueError("Preprocess Step 4: persons table has missing person_id or household_id values")
+    if households["household_id"].isna().any():
+        raise ValueError("Preprocess Step 4: households table has missing household_id values")
+    if persons["person_id"].duplicated().any():
+        raise ValueError("Preprocess Step 4: persons table contains duplicate person_id values")
+    if households["household_id"].duplicated().any():
+        raise ValueError("Preprocess Step 4: households table contains duplicate household_id values")
 
     for col in households.columns:
         if col != "household_id" and col in persons.columns:
@@ -75,14 +83,20 @@ def _load_and_merge_population(
     merged = persons.merge(households, how="left", on="household_id")
     merged["home_x"] = pd.to_numeric(merged["home_x"], errors="coerce")
     merged["home_y"] = pd.to_numeric(merged["home_y"], errors="coerce")
-    merged = merged.loc[merged["home_x"].notna() & merged["home_y"].notna()].copy()
+    supplied = len(merged)
+    valid_coordinates = (
+        np.isfinite(merged["home_x"].to_numpy(dtype=float))
+        & np.isfinite(merged["home_y"].to_numpy(dtype=float))
+    )
+    missing_coordinates = int((~valid_coordinates).sum())
+    merged = merged.loc[valid_coordinates].copy()
 
     gdf = gpd.GeoDataFrame(
         merged,
         geometry=gpd.points_from_xy(merged["home_x"], merged["home_y"]),
         crs="EPSG:4326",
     )
-    return gdf.to_crs(epsg=target_epsg)
+    return gdf.to_crs(epsg=target_epsg), supplied, missing_coordinates
 
 
 def _join_population_to_aermod_grid(
@@ -96,6 +110,7 @@ def _join_population_to_aermod_grid(
         how="inner",
         predicate="within",
     )
+    joined = joined.sort_values(_AERMOD_CELL_ID).drop_duplicates("person_id", keep="first")
     return pd.DataFrame(joined.drop(columns=["index_right", "geometry"], errors="ignore"))
 
 
@@ -174,12 +189,15 @@ def run(
     output_root: Path,
     *,
     population_inputs: Optional[Dict[str, Any]] = None,
-) -> tuple[Optional[str], Optional[str]]:
+) -> tuple[Optional[str], Optional[str], Optional[Dict[str, int]]]:
     log_step_banner("Preprocess Step 4", "Build AERMOD Cell Attributes", logger=logger)
+
+    if pipeline.exposure_enabled and not pipeline.aermod_grid_path:
+        raise ValueError("Exposure requires the configured 100 m AERMOD grid for resident assignment.")
 
     if not pipeline.aermod_grid_path:
         logger.info("Preprocess Step 4: no AERMOD grid configured; skipping.")
-        return None, None
+        return None, None, None
 
     output_root.mkdir(parents=True, exist_ok=True)
     cell_attributes_path = output_root / _OUTPUT_FILENAME
@@ -189,18 +207,32 @@ def run(
     logger.info("Preprocess Step 4.1: loaded %d AERMOD study-area cells", len(aermod_grid))
 
     joined: Optional[pd.DataFrame] = None
+    assignment_report: Optional[Dict[str, int]] = None
     log_substep_banner("4.2", "assign population to AERMOD cells", logger=logger)
+    if pipeline.exposure_enabled and (
+        not population_inputs
+        or not all(population_inputs.get(key) for key in ("persons", "households", "source_manifest"))
+    ):
+        raise ValueError(
+            "Exposure is enabled, but explicit persons, households, and source_manifest "
+            "inputs were not supplied by PILATES."
+        )
     if not population_inputs or not population_inputs.get("persons") or not population_inputs.get("households"):
         logger.info(
             "Preprocess Step 4.2: no population inputs available; staged population output will be skipped."
         )
     else:
-        population_gdf = _load_and_merge_population(
+        population_gdf, supplied_count, missing_coordinates = _load_and_merge_population(
             persons_entry=population_inputs["persons"],
             households_entry=population_inputs["households"],
             target_epsg=int(pipeline.output_epsg),
         )
-        logger.info("Preprocess Step 4.2: loaded %d persons with valid coordinates", len(population_gdf))
+        logger.info(
+            "Preprocess Step 4.2: supplied %d residents; %d missing home coordinates; %d have valid coordinates",
+            supplied_count,
+            missing_coordinates,
+            len(population_gdf),
+        )
 
         joined = _join_population_to_aermod_grid(population_gdf=population_gdf, aermod_grid=aermod_grid)
         logger.info(
@@ -208,6 +240,13 @@ def run(
             len(joined),
             joined[_AERMOD_CELL_ID].nunique(),
         )
+        assignment_report = {
+            "residents_supplied": int(supplied_count),
+            "residents_assigned_to_cell": int(len(joined)),
+            "residents_missing_home_coordinates": int(missing_coordinates),
+            "residents_outside_grid": int(len(population_gdf) - len(joined)),
+        }
+        logger.info("Preprocess Step 4.2 population assignment summary: %s", assignment_report)
 
     log_substep_banner("4.3", "build AERMOD cell attributes", logger=logger)
     counts = (
@@ -240,4 +279,8 @@ def run(
     counts.to_parquet(cell_attributes_path, index=False)
     logger.info("Preprocess Step 4.5: AERMOD cell attributes → %s", cell_attributes_path)
 
-    return str(cell_attributes_path), str(staged_population_path) if staged_population_path else None
+    return (
+        str(cell_attributes_path),
+        str(staged_population_path) if staged_population_path else None,
+        assignment_report,
+    )

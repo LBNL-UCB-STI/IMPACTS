@@ -73,24 +73,41 @@ def _resolve_emfacid_path(inventory_path: str, *, label: str) -> str:
     return str(derived)
 
 
-def _locate_exchange_file(folder: Path, stem: str) -> Optional[str]:
-    if not folder.is_dir():
-        return None
-    names = [f"{stem}.csv.gz", f"{stem}.csv", f"{stem}.parquet"]
-    for name in names:
-        direct = folder / name
-        if direct.is_file():
-            return str(direct)
-    for name in names:
-        matches = sorted(path for path in folder.rglob(name) if path.is_file())
-        if len(matches) > 1:
-            raise ValueError(
-                f"Multiple {stem} population files named {name} found under {folder}; "
-                "configure impacts.population.passenger_folder to the intended dataset."
-            )
-        if matches:
-            return str(matches[0])
-    return None
+def _resolve_exposure_population_inputs(settings, *, config_path: Path) -> Dict[str, Any]:
+    """Resolve only explicit resident files supplied by PILATES."""
+    exposure = settings.impacts.exposure
+    required = {
+        "persons": exposure.persons_file,
+        "households": exposure.households_file,
+        "source_manifest": exposure.source_manifest,
+    }
+    missing = [key for key, value in required.items() if not value]
+    if missing:
+        raise ValueError(
+            "Postsim exposure requires explicit impacts.exposure.persons_file, "
+            "impacts.exposure.households_file, and impacts.exposure.source_manifest; "
+            f"missing: {missing}"
+        )
+
+    resolved: Dict[str, Path] = {}
+    for key, raw in required.items():
+        candidate = Path(str(raw)).expanduser()
+        if not candidate.is_absolute():
+            candidate = config_path.parent / candidate
+        candidate = candidate.resolve()
+        if not candidate.is_file():
+            raise FileNotFoundError(f"Configured exposure {key} file was not found: {candidate}")
+        resolved[key] = candidate
+
+    source_manifest = load_structured_file(resolved["source_manifest"])
+    return {
+        "persons": file_entry(kind="local", path=resolved["persons"], staged_path=resolved["persons"]),
+        "households": file_entry(kind="local", path=resolved["households"], staged_path=resolved["households"]),
+        "source_manifest": {
+            "path": str(resolved["source_manifest"]),
+            "document": source_manifest,
+        },
+    }
 
 
 def _find_emfacid_file(folder: Path, pattern: str) -> str | None:
@@ -182,6 +199,18 @@ def run(
     staged_isrm = None
     staged_isrm_nox_to_no2_ratios_file = None
     staged_asrv_patterns_file = None
+
+    population_inputs: Dict[str, Any] = {}
+    if pipeline.exposure:
+        log_substep_banner("1.5", "register explicit exposure population inputs", logger=logger)
+        population_inputs.update(
+            _resolve_exposure_population_inputs(settings, config_path=config_path)
+        )
+        manifest_inputs["exposure_population_source_manifest"] = file_entry(
+            kind="local",
+            path=population_inputs["source_manifest"]["path"],
+            staged_path=population_inputs["source_manifest"]["path"],
+        )
 
     log_substep_banner("1.1", "register BEAM output files", logger=logger)
     progress = make_progress("Preprocess Step 1.1", total=3, unit="task", leave=False)
@@ -575,31 +604,6 @@ def run(
                     relative_target=aermod.asrv_patterns_file,
                     metadata={"artifact_family": "asrv_patterns_file"},
                 )
-                progress.update(1)
-        finally:
-            progress.close()
-
-    population_inputs: Dict[str, Any] = {}
-    if pipeline.exposure:
-        log_substep_banner("1.5", "register exposure population inputs", logger=logger)
-        population_root = region_input_root / str(population.passenger_folder)
-        population_artifact_keys = {"persons": "persons", "households": "households"}
-        progress = make_progress("Preprocess Step 1.5", total=2, unit="task", leave=False)
-        try:
-            for stem in ("persons", "households"):
-                _set_progress_task(progress, stem, step_label="Preprocess Step 1.5")
-                source_path = _locate_exchange_file(population_root, stem)
-                if source_path:
-                    register_managed_input(
-                        manifest_inputs=population_inputs,
-                        input_root=input_root,
-                        key=stem,
-                        source_path=source_path,
-                        relative_target=str(Path(population.passenger_folder) / Path(source_path).name),
-                        artifact_key=population_artifact_keys[stem],
-                        prefer_reference=True,
-                        metadata={"artifact_family": f"impacts_population_{stem}"},
-                    )
                 progress.update(1)
         finally:
             progress.close()
