@@ -655,7 +655,7 @@ class Analysis:
     delta_baseline_concentration_distribution_file: Optional[str] = None
     inventory_targets: List[AnalysisTarget] = field(default_factory=list)
     sector_targets: List[AnalysisSectorTarget] = field(default_factory=list)
-    skip_web_tiles: bool = False
+    basemap: str = "carto"
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Analysis":
@@ -665,6 +665,7 @@ class Analysis:
                 "delta_baseline_concentration_distribution_file",
                 "targets",
                 "inventory_targets",
+                "basemap",
                 "skip_web_tiles",
             },
             "impacts.analysis",
@@ -691,6 +692,7 @@ class Analysis:
             and raw_inventory_targets is None
             and all(v is None for v in raw_pollutant_targets.values())
             and payload.get("delta_baseline_concentration_distribution_file") is None
+            and payload.get("basemap") is None
             and payload.get("skip_web_tiles") is None
         ):
             return cls()
@@ -711,15 +713,38 @@ class Analysis:
             raw_pollutant_targets=raw_pollutant_targets,
             path_prefix="impacts.analysis.targets",
         )
+        raw_basemap = payload.get("basemap")
+        legacy_skip_web_tiles = payload.get("skip_web_tiles")
+        if legacy_skip_web_tiles is not None:
+            legacy_basemap = (
+                "none"
+                if _required_bool(
+                    legacy_skip_web_tiles, "impacts.analysis.skip_web_tiles"
+                )
+                else "carto"
+            )
+            if raw_basemap is not None and raw_basemap != legacy_basemap:
+                raise ValueError(
+                    "impacts.analysis.basemap conflicts with the legacy "
+                    "impacts.analysis.skip_web_tiles option"
+                )
+            if raw_basemap is None:
+                raw_basemap = legacy_basemap
+        basemap = _required_string(
+            "carto" if raw_basemap is None else raw_basemap,
+            "impacts.analysis.basemap",
+        )
+        if basemap not in {"carto", "none"}:
+            raise ValueError(
+                "impacts.analysis.basemap must be one of: carto, none"
+            )
         return cls(
             delta_baseline_concentration_distribution_file=_optional_string(
                 payload.get("delta_baseline_concentration_distribution_file")
             ),
             inventory_targets=inventory_targets,
             sector_targets=sector_targets,
-            skip_web_tiles=_required_bool(
-                payload.get("skip_web_tiles", False), "impacts.analysis.skip_web_tiles"
-            ),
+            basemap=basemap,
         )
 
 @dataclass(frozen=True)
@@ -1039,8 +1064,8 @@ class ImpactsSettings:
                     },
                     "analysis": {
                         **(
-                            {"skip_web_tiles": True}
-                            if self.impacts.analysis.skip_web_tiles
+                            {"basemap": self.impacts.analysis.basemap}
+                            if self.impacts.analysis.basemap != "carto"
                             else {}
                         ),
                         **(

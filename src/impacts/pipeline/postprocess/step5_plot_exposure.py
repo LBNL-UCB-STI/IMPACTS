@@ -121,7 +121,7 @@ def _plot_inmap_scalar(
     cmap,
     out_path: Path,
     gamma: float = 1.0,
-    skip_web_tiles: bool = False,
+    basemap: str = "carto",
 ) -> Optional[str]:
     values = inmap_exposure_gdf[column].dropna()
     positive = values[values > 0]
@@ -148,7 +148,7 @@ def _plot_inmap_scalar(
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymin, ymax)
     _add_network(ax, net_gdf)
-    _add_basemap(ax, crs=plot_gdf.crs, skip_web_tiles=skip_web_tiles)
+    _add_basemap(ax, crs=plot_gdf.crs, basemap=basemap)
     _add_colorbar(fig, ax, cmap, vmax, colorbar_label, norm=norm, intensity_alpha=True)
 
     ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
@@ -199,7 +199,7 @@ def _plot_bivariate(
     net_gdf,
     out_path: Path,
     *,
-    skip_web_tiles: bool = False,
+    basemap: str = "carto",
 ) -> Optional[str]:
     from matplotlib.colors import BoundaryNorm, ListedColormap
 
@@ -241,7 +241,7 @@ def _plot_bivariate(
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymin, ymax)
     _add_network(ax, net_gdf)
-    _add_basemap(ax, crs=inmap_exposure_gdf.crs, skip_web_tiles=skip_web_tiles)
+    _add_basemap(ax, crs=inmap_exposure_gdf.crs, basemap=basemap)
     _add_bivariate_legend(ax)
 
     ax.set_title(
@@ -269,7 +269,7 @@ def run(
     network_path: str,
     inmap_cells_path: str | None = None,
     output_dir: Path,
-    skip_web_tiles: bool = False,
+    basemap: str = "carto",
 ) -> dict[str, str]:
     """Render all exposure maps.
 
@@ -333,7 +333,7 @@ def run(
             cmap=CMAP_POP,
             out_path=output_dir / "population.png",
             gamma=0.55,
-            skip_web_tiles=skip_web_tiles,
+            basemap=basemap,
         )
         if result:
             outputs["population_map"] = result
@@ -349,7 +349,7 @@ def run(
             cmap=CMAP_PM25,
             out_path=output_dir / "pwc_inmap.png",
             gamma=0.65,
-            skip_web_tiles=skip_web_tiles,
+            basemap=basemap,
         )
         if result:
             outputs["pwc_inmap_map"] = result
@@ -358,7 +358,7 @@ def run(
         _set_progress_task(progress, "bivariate", step_label="Postprocess Step 5")
         result = _plot_bivariate(
             inmap_exposure_gdf, net_gdf, output_dir / "bivariate.png",
-            skip_web_tiles=skip_web_tiles,
+            basemap=basemap,
         )
         if result:
             outputs["bivariate_map"] = result

@@ -124,8 +124,10 @@ def _padded_extent_from_bounds(bounds) -> tuple[float, float, float, float]:
     return _padded_extent((minx, maxx, miny, maxy))
 
 
-def _add_basemap(ax, *, crs=None, skip_web_tiles: bool = False) -> None:
-    if not skip_web_tiles:
+def _add_basemap(ax, *, crs=None, basemap: str = "carto") -> None:
+    if basemap not in {"carto", "none"}:
+        raise ValueError("basemap must be one of: carto, none")
+    if basemap == "carto":
         try:
             import contextily as ctx
             ctx.add_basemap(

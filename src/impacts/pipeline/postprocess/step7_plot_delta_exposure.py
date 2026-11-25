@@ -118,7 +118,7 @@ def _plot_inmap_delta_scalar(
     title: str,
     colorbar_label: str,
     out_path: Path,
-    skip_web_tiles: bool = False,
+    basemap: str = "carto",
 ) -> Optional[str]:
     norm = delta_norm(inmap_delta_gdf[column])
     if norm is None:
@@ -142,7 +142,7 @@ def _plot_inmap_delta_scalar(
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymin, ymax)
     _add_network(ax, net_gdf)
-    _add_basemap(ax, crs=plot_gdf.crs, skip_web_tiles=skip_web_tiles)
+    _add_basemap(ax, crs=plot_gdf.crs, basemap=basemap)
     _add_colorbar(fig, ax, DELTA_CMAP, float(norm.vmax), colorbar_label, norm=norm, intensity_alpha=True)
 
     ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
@@ -196,7 +196,7 @@ def _plot_delta_bivariate(
     net_gdf,
     out_path: Path,
     *,
-    skip_web_tiles: bool = False,
+    basemap: str = "carto",
 ) -> Optional[str]:
     merged = inmap_delta_gdf[
         ["population", "pwc_pm25_delta", "geometry"]
@@ -233,7 +233,7 @@ def _plot_delta_bivariate(
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymin, ymax)
     _add_network(ax, net_gdf)
-    _add_basemap(ax, crs=inmap_delta_gdf.crs, skip_web_tiles=skip_web_tiles)
+    _add_basemap(ax, crs=inmap_delta_gdf.crs, basemap=basemap)
     _add_delta_bivariate_legend(ax)
 
     ax.set_title(
@@ -257,7 +257,7 @@ def run(
     network_path: str,
     inmap_cells_path: str | None = None,
     output_dir: Path,
-    skip_web_tiles: bool = False,
+    basemap: str = "carto",
 ) -> dict[str, str]:
     """Render exposure delta maps from Step 6 concentration deltas."""
     import geopandas as gpd
@@ -309,7 +309,7 @@ def run(
             title="ΔPopulation-weighted PM₂.₅",
             colorbar_label="ΔPopulation-weighted PM₂.₅ (μg/m³)",
             out_path=output_dir / "pwc_inmap_delta.png",
-            skip_web_tiles=skip_web_tiles,
+            basemap=basemap,
         )
         if result:
             outputs["pwc_inmap_delta_map"] = result
@@ -323,7 +323,7 @@ def run(
             title="ΔPM₂.₅ Exposure Burden",
             colorbar_label="ΔExposure Burden (person·μg/m³)",
             out_path=output_dir / "exposure_burden_delta.png",
-            skip_web_tiles=skip_web_tiles,
+            basemap=basemap,
         )
         if result:
             outputs["exposure_burden_delta_map"] = result
@@ -332,7 +332,7 @@ def run(
         _set_progress_task(progress, "bivariate delta", step_label="Postprocess Step 7")
         result = _plot_delta_bivariate(
             inmap_delta_gdf, net_gdf, output_dir / "bivariate_delta.png",
-            skip_web_tiles=skip_web_tiles,
+            basemap=basemap,
         )
         if result:
             outputs["bivariate_delta_map"] = result

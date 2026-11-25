@@ -8,7 +8,7 @@ from impacts.config.settings import Analysis
 from impacts.pipeline.postprocess import _common
 
 
-def test_skip_web_tiles_keeps_scale_bar(monkeypatch) -> None:
+def test_basemap_keeps_scale_bar(monkeypatch) -> None:
     add_basemap = Mock()
     contextily = SimpleNamespace(
         add_basemap=add_basemap,
@@ -19,11 +19,11 @@ def test_skip_web_tiles_keeps_scale_bar(monkeypatch) -> None:
     monkeypatch.setattr(_common, "_add_scalebar", add_scalebar)
 
     ax = object()
-    _common._add_basemap(ax, skip_web_tiles=True)
+    _common._add_basemap(ax, basemap="none")
 
     add_basemap.assert_not_called()
     add_scalebar.assert_called_once_with(ax)
 
 
-def test_analysis_parses_skip_web_tiles() -> None:
-    assert Analysis.from_dict({"skip_web_tiles": True}).skip_web_tiles is True
+def test_analysis_parses_basemap() -> None:
+    assert Analysis.from_dict({"basemap": "none"}).basemap == "none"
