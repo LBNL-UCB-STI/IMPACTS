@@ -655,6 +655,7 @@ class Analysis:
     delta_baseline_concentration_distribution_file: Optional[str] = None
     inventory_targets: List[AnalysisTarget] = field(default_factory=list)
     sector_targets: List[AnalysisSectorTarget] = field(default_factory=list)
+    skip_web_tiles: bool = False
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Analysis":
@@ -664,6 +665,7 @@ class Analysis:
                 "delta_baseline_concentration_distribution_file",
                 "targets",
                 "inventory_targets",
+                "skip_web_tiles",
             },
             "impacts.analysis",
         )
@@ -689,6 +691,7 @@ class Analysis:
             and raw_inventory_targets is None
             and all(v is None for v in raw_pollutant_targets.values())
             and payload.get("delta_baseline_concentration_distribution_file") is None
+            and payload.get("skip_web_tiles") is None
         ):
             return cls()
         if raw_inventory_targets is None:
@@ -714,6 +717,9 @@ class Analysis:
             ),
             inventory_targets=inventory_targets,
             sector_targets=sector_targets,
+            skip_web_tiles=_required_bool(
+                payload.get("skip_web_tiles", False), "impacts.analysis.skip_web_tiles"
+            ),
         )
 
 @dataclass(frozen=True)
@@ -1032,6 +1038,11 @@ class ImpactsSettings:
                         },
                     },
                     "analysis": {
+                        **(
+                            {"skip_web_tiles": True}
+                            if self.impacts.analysis.skip_web_tiles
+                            else {}
+                        ),
                         **(
                             {
                                 "delta_baseline_concentration_distribution_file": (

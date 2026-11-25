@@ -192,7 +192,15 @@ def _build_concentration_delta(conc_gdf, delta_baseline_concentration_path: str 
     )
 
 
-def _plot_delta_map(delta_gdf, net_gdf, layout, column: str, title: str, out_path: Path) -> Optional[str]:
+def _plot_delta_map(
+    delta_gdf,
+    net_gdf,
+    layout,
+    column: str,
+    title: str,
+    out_path: Path,
+    skip_web_tiles: bool = False,
+) -> Optional[str]:
     delta_col = f"{column}_delta"
     norm = delta_norm(delta_gdf[delta_col])
     if norm is None:
@@ -212,7 +220,7 @@ def _plot_delta_map(delta_gdf, net_gdf, layout, column: str, title: str, out_pat
         norm=norm,
     )
     _add_network(ax, net_gdf)
-    _add_basemap(ax, crs=delta_gdf.crs)
+    _add_basemap(ax, crs=delta_gdf.crs, skip_web_tiles=skip_web_tiles)
     _add_colorbar(fig, ax, DELTA_CMAP, float(norm.vmax), title, norm=norm, intensity_alpha=True)
     ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
     ax.set_axis_off()
@@ -225,7 +233,13 @@ def _plot_delta_map(delta_gdf, net_gdf, layout, column: str, title: str, out_pat
     return str(out_path)
 
 
-def _plot_primary_secondary_delta_comparison(delta_gdf, net_gdf, layout, out_path: Path) -> Optional[str]:
+def _plot_primary_secondary_delta_comparison(
+    delta_gdf,
+    net_gdf,
+    layout,
+    out_path: Path,
+    skip_web_tiles: bool = False,
+) -> Optional[str]:
     norm = _shared_delta_norm(delta_gdf, _PRIMARY_SECONDARY_COLUMNS)
     if norm is None:
         logger.warning("  PrimaryPM25 and SecondaryPM25 have no non-zero deltas, skipping comparison map.")
@@ -254,7 +268,7 @@ def _plot_primary_secondary_delta_comparison(delta_gdf, net_gdf, layout, out_pat
             norm=norm,
         )
         _add_network(ax, net_gdf)
-        _add_basemap(ax, crs=delta_gdf.crs)
+        _add_basemap(ax, crs=delta_gdf.crs, skip_web_tiles=skip_web_tiles)
         ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
         ax.set_axis_off()
 
@@ -284,6 +298,7 @@ def run(
     delta_baseline_concentration_path: str,
     network_path: str,
     output_dir: Path,
+    skip_web_tiles: bool = False,
 ) -> dict[str, str]:
     """Render concentration delta maps using ``current - baseline``."""
     import geopandas as gpd
@@ -317,7 +332,11 @@ def run(
     try:
         for column, title in _DELTA_SCALAR_LAYERS:
             _set_progress_task(progress, f"Delta {column}", step_label="Postprocess Step 6")
-            result = _plot_delta_map(delta_gdf, net_gdf, layout, column, title, output_dir / f"delta_{column.lower()}.png")
+            result = _plot_delta_map(
+                delta_gdf, net_gdf, layout, column, title,
+                output_dir / f"delta_{column.lower()}.png",
+                skip_web_tiles=skip_web_tiles,
+            )
             if result is not None:
                 outputs[f"delta_{column.lower()}_map"] = result
             _advance_progress(progress)
@@ -328,6 +347,7 @@ def run(
             net_gdf,
             layout,
             output_dir / "delta_primary_secondary_pm25.png",
+            skip_web_tiles=skip_web_tiles,
         )
         if result is not None:
             outputs["delta_primary_secondary_pm25_map"] = result

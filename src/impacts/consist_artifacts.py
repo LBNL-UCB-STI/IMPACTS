@@ -185,6 +185,17 @@ def find_input_reference(
     except ImportError:
         return None
     artifact_metadata = {"artifact_key": key, **(metadata or {})}
+    outputs_reader = getattr(consist, "get_run_outputs", None)
+    if outputs_reader is not None:
+        try:
+            _call_consist_outputs_reader(outputs_reader, metadata=artifact_metadata)
+        except RuntimeError as exc:
+            if _is_missing_active_run(exc):
+                logger.info("Consist has no active run; using local input for %s.", key)
+                return None
+            logger.warning("Consist run lookup failed for %s: %s", key, exc)
+        except Exception as exc:
+            logger.warning("Consist run lookup failed for %s: %s", key, exc)
     for attr_name in ("find_artifact", "get_artifact", "find_input"):
         query_fn = getattr(consist, attr_name, None)
         if query_fn is None:

@@ -124,19 +124,20 @@ def _padded_extent_from_bounds(bounds) -> tuple[float, float, float, float]:
     return _padded_extent((minx, maxx, miny, maxy))
 
 
-def _add_basemap(ax, *, crs=None) -> None:
-    try:
-        import contextily as ctx
-        ctx.add_basemap(
-            ax,
-            source=ctx.providers.CartoDB.Voyager,  # labeled, with blue water (unlike Positron)
-            zoom="auto",
-            zoom_adjust=MAP_BASEMAP_ZOOM_ADJUST,
-            crs=crs,
-            zorder=0,
-        )
-    except Exception as exc:
-        logger.warning("Could not add basemap (offline or contextily missing): %s", exc)
+def _add_basemap(ax, *, crs=None, skip_web_tiles: bool = False) -> None:
+    if not skip_web_tiles:
+        try:
+            import contextily as ctx
+            ctx.add_basemap(
+                ax,
+                source=ctx.providers.CartoDB.Voyager,  # labeled, with blue water (unlike Positron)
+                zoom="auto",
+                zoom_adjust=MAP_BASEMAP_ZOOM_ADJUST,
+                crs=crs,
+                zorder=0,
+            )
+        except Exception as exc:
+            logger.warning("Could not add basemap (offline or contextily missing): %s", exc)
     _add_scalebar(ax)
 
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.2 - 2026-11-24
+
+### Added
+
+- Added `impacts.analysis.skip_web_tiles` for offline plotting while preserving concentration layers, road overlays, and scale bars.
+- Use the configured OSM input when IMPACTS runs without an active Consist run, avoiding an unsupported artifact lookup inside the container.
+
+### Tests
+
+- Added coverage for offline basemap behavior and Consist lookup behavior with and without an active run.
+
 ## 2026-05-14
 
 ### Changed
