@@ -153,17 +153,16 @@ def test_find_beam_r5_osm_reference_uses_local_fallback_without_active_run(monke
     assert find_beam_r5_osm_reference(optional=True) is None
 
 
-def test_find_beam_r5_osm_reference_keeps_warning_for_active_run_lookup_error(
+def test_find_beam_r5_osm_reference_skips_legacy_lookup_without_run_id(
     monkeypatch, caplog
 ):
     def _legacy_get_artifact(run_id, key):
-        raise AssertionError("The incompatible legacy lookup should not be invoked")
+        raise AssertionError("The legacy lookup cannot be called without a run ID")
 
     fake_consist = types.SimpleNamespace(
-        get_run_outputs=lambda: {},
         get_artifact=_legacy_get_artifact,
     )
     monkeypatch.setitem(sys.modules, "consist", fake_consist)
 
     assert find_beam_r5_osm_reference(optional=True) is None
-    assert "Consist get_artifact lookup failed" in caplog.text
+    assert "Consist get_artifact lookup failed" not in caplog.text
