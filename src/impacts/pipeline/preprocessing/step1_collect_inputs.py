@@ -6,7 +6,6 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
-from ...common import find_preferred_file
 from ...common import log_step_banner
 from ...common import make_progress
 from ...common import _set_progress_task
@@ -15,19 +14,9 @@ from ...common import required_local_path
 from ...common import resolve_beam_network_local_path
 from ...common import resolve_emissions_skims_local_path
 from ...common import resolve_latest_events_local_path
-from ...common import resolve_osm_pbf_local_path
 from ...common import register_managed_input
 from ...consist_artifacts import BEAM_EVENTS_PREFIX
-from ...consist_artifacts import BEAM_HOUSEHOLDS_PREFIX
 from ...consist_artifacts import BEAM_NETWORK_PREFIX
-from ...consist_artifacts import BEAM_POPULATION_PREFIX
-from ...consist_artifacts import BEAM_R5_OSM_FILE_KEY
-from ...consist_artifacts import find_beam_r5_osm_reference
-from ...consist_artifacts import find_latest_beam_events_reference
-from ...consist_artifacts import find_latest_beam_households_reference
-from ...consist_artifacts import find_latest_beam_network_reference
-from ...consist_artifacts import find_latest_beam_population_reference
-from ...consist_artifacts import resolve_logged_path
 from ...config.path_registry import build_registry
 from ...config.settings import presim_activities_inventory_root
 from ...config.settings import presim_activities_tmp_root
@@ -35,6 +24,7 @@ from ...manifest.file_ops import resolve_path
 from ...manifest.file_ops import resolve_required_path
 from ...manifest.file_ops import is_remote_path
 from ...manifest.file_ops import load_structured_file
+from ...manifest.file_ops import file_entry
 from ...manifest.schema import ActivitiesManifest
 from ...isrm_store import localize_isrm_store
 
@@ -66,11 +56,6 @@ def _register_manifest_input(
     )
 
 
-def _use_existing_reference(manifest_inputs: Dict[str, Any], key: str, entry: Dict[str, Any]) -> str:
-    manifest_inputs[key] = entry
-    return resolve_logged_path(entry)
-
-
 def _resolve_emfacid_path(inventory_path: str, *, label: str) -> str:
     source = Path(inventory_path).resolve()
     name = source.name
@@ -89,7 +74,23 @@ def _resolve_emfacid_path(inventory_path: str, *, label: str) -> str:
 
 
 def _locate_exchange_file(folder: Path, stem: str) -> Optional[str]:
-    return find_preferred_file(str(folder), [f"{stem}.csv.gz", f"{stem}.csv", f"{stem}.parquet"])
+    if not folder.is_dir():
+        return None
+    names = [f"{stem}.csv.gz", f"{stem}.csv", f"{stem}.parquet"]
+    for name in names:
+        direct = folder / name
+        if direct.is_file():
+            return str(direct)
+    for name in names:
+        matches = sorted(path for path in folder.rglob(name) if path.is_file())
+        if len(matches) > 1:
+            raise ValueError(
+                f"Multiple {stem} population files named {name} found under {folder}; "
+                "configure impacts.population.passenger_folder to the intended dataset."
+            )
+        if matches:
+            return str(matches[0])
+    return None
 
 
 def _find_emfacid_file(folder: Path, pattern: str) -> str | None:
@@ -107,6 +108,11 @@ def _glob_vehicle_types_file(folder: Path, source: str) -> str | None:
         str(f) for f in folder.iterdir()
         if f.is_file() and not f.name.startswith(".") and source in f.name.lower() and "--em" in f.name.lower()
     )
+    if len(matches) > 1:
+        raise ValueError(
+            f"Multiple {source} vehicle type files found under {folder}; "
+            "set the corresponding impacts.emissions vehicle types file explicitly."
+        )
     return matches[0] if matches else None
 
 
@@ -181,20 +187,16 @@ def run(
     progress = make_progress("Preprocess Step 1.1", total=3, unit="task", leave=False)
     try:
         _set_progress_task(progress, "network", step_label="Preprocess Step 1.1")
-        network_entry = find_latest_beam_network_reference(optional=True)
-        if network_entry:
-            staged_network = _use_existing_reference(manifest_inputs, "network", network_entry)
-        else:
-            network_source = resolve_beam_network_local_path(beam_output_root)
-            staged_network = _register_manifest_input(
-                manifest_inputs,
-                input_root=input_root,
-                key="network",
-                source_path=network_source,
-                relative_target=Path(network_source).name,
-                artifact_key=BEAM_NETWORK_PREFIX,
-                metadata={"artifact_family": BEAM_NETWORK_PREFIX},
-            )
+        network_source = resolve_beam_network_local_path(beam_output_root)
+        staged_network = _register_manifest_input(
+            manifest_inputs,
+            input_root=input_root,
+            key="network",
+            source_path=network_source,
+            relative_target=Path(network_source).name,
+            artifact_key=BEAM_NETWORK_PREFIX,
+            metadata={"artifact_family": BEAM_NETWORK_PREFIX},
+        )
         progress.update(1)
 
         _set_progress_task(progress, "skims", step_label="Preprocess Step 1.1")
@@ -211,22 +213,18 @@ def run(
         progress.update(1)
 
         _set_progress_task(progress, "events", step_label="Preprocess Step 1.1")
-        events_entry = find_latest_beam_events_reference(optional=True)
-        if events_entry:
-            staged_events = _use_existing_reference(manifest_inputs, "events_input", events_entry)
-        else:
-            events_source = resolve_latest_events_local_path(Path(beam_output_root))
-            if events_source:
-                staged_events = _register_manifest_input(
-                    manifest_inputs,
-                    input_root=input_root,
-                    key="events_input",
-                    source_path=events_source,
-                    relative_target=Path(events_source).name,
-                    artifact_key=BEAM_EVENTS_PREFIX,
-                    metadata={"artifact_family": BEAM_EVENTS_PREFIX},
-                    optional=True,
-                )
+        events_source = resolve_latest_events_local_path(Path(beam_output_root))
+        if events_source:
+            staged_events = _register_manifest_input(
+                manifest_inputs,
+                input_root=input_root,
+                key="events_input",
+                source_path=events_source,
+                relative_target=Path(events_source).name,
+                artifact_key=BEAM_EVENTS_PREFIX,
+                metadata={"artifact_family": BEAM_EVENTS_PREFIX},
+                optional=True,
+            )
         progress.update(1)
     finally:
         progress.close()
@@ -238,24 +236,45 @@ def run(
     progress = make_progress("Preprocess Step 1.2", total=substep_12_total, unit="task", leave=False)
     try:
         _set_progress_task(progress, "osm", step_label="Preprocess Step 1.2")
-        osm_entry = find_beam_r5_osm_reference(optional=True)
-        if osm_entry:
-            staged_osm = _use_existing_reference(manifest_inputs, "osm_network", osm_entry)
-        else:
-            osm_root = str(registry.locate_required(
-                emissions.osm_network_folder, label="impacts.emissions.osm_network_folder"
-            ))
-            osm_source = resolve_osm_pbf_local_path(osm_root) or required_local_path(
-                osm_root, "impacts.emissions.osm_network_folder"
+        if emissions.osm_network_file:
+            label = "impacts.emissions.osm_network_file"
+            osm_source_path = registry.locate_required(emissions.osm_network_file, label=label)
+            if not osm_source_path.is_file() or not osm_source_path.name.lower().endswith(".pbf"):
+                raise ValueError(f"{label} must point to an OSM PBF file: {osm_source_path}")
+            osm_entry = file_entry(kind="local", path=osm_source_path, staged_path=osm_source_path)
+            if emissions.osm_network_artifact_id:
+                osm_entry["artifact_id"] = emissions.osm_network_artifact_id
+            manifest_inputs["osm_network"] = osm_entry
+            staged_osm = str(osm_source_path)
+        elif beam.router_directory:
+            label = "beam.router_directory"
+            osm_folder = registry.locate_required(beam.router_directory, label=label)
+            if not osm_folder.is_dir():
+                raise ValueError(f"{label} must point to a directory: {osm_folder}")
+            vex_candidates = sorted(
+                [path for path in osm_folder.iterdir() if path.is_file() and path.suffix.lower() == ".vex"],
+                key=lambda path: path.name,
             )
-            staged_osm = _register_manifest_input(
-                manifest_inputs,
-                input_root=input_root,
-                key="osm_network",
-                source_path=osm_source,
-                relative_target=Path(osm_source).name,
-                artifact_key=BEAM_R5_OSM_FILE_KEY,
-                metadata={"artifact_family": BEAM_R5_OSM_FILE_KEY},
+            if vex_candidates:
+                logger.info(
+                    "Ignoring R5 VEX file(s) for IMPACTS; it requires a PBF: %s",
+                    ", ".join(path.name for path in vex_candidates),
+                )
+            pbf_candidates = sorted(
+                [path for path in osm_folder.iterdir() if path.is_file() and path.suffix.lower() == ".pbf"],
+                key=lambda path: path.name,
+            )
+            if not pbf_candidates:
+                raise ValueError(f"{label} has no top-level .pbf file required by IMPACTS: {osm_folder}")
+            osm_source_path = pbf_candidates[0].resolve()
+            manifest_inputs["osm_network"] = file_entry(
+                kind="local", path=osm_source_path, staged_path=osm_source_path
+            )
+            staged_osm = str(osm_source_path)
+        else:
+            raise ValueError(
+                "Configure impacts.emissions.osm_network_file with the exact OSM PBF path, "
+                "or set beam.router_directory to the R5 input directory used by BEAM."
             )
         progress.update(1)
 
@@ -564,23 +583,11 @@ def run(
     if pipeline.exposure:
         log_substep_banner("1.5", "register exposure population inputs", logger=logger)
         population_root = region_input_root / str(population.passenger_folder)
-        population_artifact_entries = {
-            "persons": find_latest_beam_population_reference(optional=True),
-            "households": find_latest_beam_households_reference(optional=True),
-        }
-        population_artifact_keys = {
-            "persons": BEAM_POPULATION_PREFIX,
-            "households": BEAM_HOUSEHOLDS_PREFIX,
-        }
+        population_artifact_keys = {"persons": "persons", "households": "households"}
         progress = make_progress("Preprocess Step 1.5", total=2, unit="task", leave=False)
         try:
             for stem in ("persons", "households"):
                 _set_progress_task(progress, stem, step_label="Preprocess Step 1.5")
-                existing_entry = population_artifact_entries[stem]
-                if existing_entry is not None:
-                    population_inputs[stem] = existing_entry
-                    progress.update(1)
-                    continue
                 source_path = _locate_exchange_file(population_root, stem)
                 if source_path:
                     register_managed_input(
@@ -591,7 +598,7 @@ def run(
                         relative_target=str(Path(population.passenger_folder) / Path(source_path).name),
                         artifact_key=population_artifact_keys[stem],
                         prefer_reference=True,
-                        metadata={"artifact_family": population_artifact_keys[stem]},
+                        metadata={"artifact_family": f"impacts_population_{stem}"},
                     )
                 progress.update(1)
         finally:

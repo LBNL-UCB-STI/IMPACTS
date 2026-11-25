@@ -524,7 +524,8 @@ def test_build_settings_from_pilates_template_uses_builtin_impacts_settings(tmp_
     assert config.beam.local_input_folder == "pilates/beam/production"
     assert config.beam.local_output_folder == "beam/beam_output"
     assert config.beam.router_directory == "beam/beam_output/r5/sfbay-cbg5500-weakConn-network"
-    assert config.impacts.emissions.osm_network_folder.endswith("r5/sfbay-cbg5500-weakConn-network")
+    assert config.impacts.emissions.osm_network_file is None
+    assert config.impacts.emissions.osm_network_artifact_id is None
     assert config.impacts.scenario == "2017-Baseline"
     assert config.impacts.pipeline.inmap is True
     assert config.impacts.dispersions.inmap.isrm_zarr == "~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr"

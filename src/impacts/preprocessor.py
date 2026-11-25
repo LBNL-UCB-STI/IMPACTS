@@ -238,7 +238,6 @@ def build_preprocess_manifest(
         "population_inputs": dict(step1_outputs["population_inputs"]),
         "notes": [
             "Only maintained modules are part of this contract.",
-            "ActivitySim population integration is currently best-effort and relies on staged population tables carrying usable cell ids.",
             f"Settings file registered at {settings_entry_path}",
         ],
     }

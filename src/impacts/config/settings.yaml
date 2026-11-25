@@ -112,6 +112,10 @@ impacts:
         electricity+gasoline: [phev]
       income_bins: [0, 30, 60, 100, 200, 9999]
   emissions:
+    # PILATES sets osm_network_file to the exact same-run R5 artifact.
+    # Standalone runs select the BEAM-compatible R5 candidate in beam.router_directory.
+    osm_network_file:
+    osm_network_artifact_id:
     pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
     include_non_osm_car_links: true
     include_passenger: true

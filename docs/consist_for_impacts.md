@@ -1,82 +1,13 @@
-# Consist For Impacts
+# Consist For IMPACTS
 
-`impacts` now treats source-input staging as artifact registration, not file copying. Preprocess records source inputs in the manifest and uses Consist when available. Generated intermediates are still written under the workspace.
+IMPACTS reads the exact source paths selected for its run and records them in its preprocessing manifest. It may register inputs with Consist for provenance, but it does not query Consist to discover or substitute a newer upstream file. PILATES passes run-specific BEAM paths into the mounted workspace; standalone runs use the paths configured in settings.
 
-## Mental model
+## Upstream inputs
 
-Consist staging:
+- `network`: `network.csv.gz` or `network.parquet` under `beam.local_output_folder`. Duplicate candidates are an error.
+- `emissions_skims_input` and optional `events_input`: selected from the single `ITERS` tree under `beam.local_output_folder`. If multiple `ITERS` trees are present, IMPACTS asks for a narrower output root. Within that tree, it selects the highest numbered iteration.
+- `osm_network`: PILATES supplies the exact PBF path and optional Consist artifact ID in `impacts.emissions.osm_network_file` and `osm_network_artifact_id`. Standalone IMPACTS uses the first top-level `.pbf` by filename in `beam.router_directory`, matching PILATES's R5 choice; `.vex` files are logged and ignored.
+- Exposure population: `persons` and `households` files are read from `impacts.population.passenger_folder`. PILATES points it to the current run's population files when available. Standalone runs use their configured population folder. Duplicate matches are an error.
+- Other configured inputs, including vehicle type tables, EMFAC data, dispersion grids, and ISRM, are resolved from their declared settings and recorded in the manifest.
 
-- find an upstream file
-- log it as a Consist input artifact
-- or, when Consist is unavailable or no active Consist run is present, store the original source path without copying
-- store the tracked entry under a stable key in `manifest_inputs`
-- resolve the artifact to a path only when a step needs to read it
-
-## Stable keys
-
-The current manifest keys are already close to what Consist needs. These should become the primary artifact keys:
-
-- `settings`
-- `network`
-- `emissions_skims_input`
-- `events_input`
-- `osm_network`
-- `rates_folder`
-- `inmap_grid`
-- `isrm_nox_to_no2_ratios_file`
-- `asrv_patterns_file`
-- `isrm`
-
-## PILATES-aligned lookup order
-
-For upstream BEAM-origin files, `impacts` tries PILATES-style artifact keys first and uses local filesystem discovery when nothing is published yet.
-
-- `network`: query latest `beam_network_final_*`, otherwise discover the BEAM network locally and register it
-- `events_input`: query latest `events_parquet_*`, otherwise discover the latest local BEAM events file and register it
-- `osm_network`: query canonical `beam_r5_osm_file`, otherwise resolve the local `.osm.pbf` under the configured BEAM network input folder and register it
-- `population_inputs["persons"]`: query latest `beam_population_final_*`, otherwise discover local `persons.*` and register it
-- `population_inputs["households"]`: query latest `beam_households_final_*`, otherwise discover local `households.*` and register it
-
-Other inputs that do not already have a known PILATES handoff key are still registered in Consist under their maintained `impacts` manifest key.
-
-## Recommended integration shape
-
-1. Preprocess or workflow code resolves upstream files as it does today.
-2. Source inputs are registered through `register_local_input(...)` or `register_managed_input(...)`, which do not physically copy the source file.
-3. `manifest_inputs[key]` stores a Consist-backed entry when there is an active Consist run, otherwise it stores a no-copy local entry that still points at the original source path.
-4. Workflow steps resolve the manifest entry to a concrete path right before `read_table(...)`, `read_vector(...)`, or other file IO.
-5. Generated outputs can be logged with `log_output_reference(...)` and stored in the run manifest by stable key.
-
-## Minimal API sketch
-
-`impacts` should add a small local wrapper rather than importing Consist calls all over the codebase:
-
-```python
-def log_input(*, key: str, source_path: str, optional: bool = False) -> dict[str, Any]:
-    ...
-
-def log_output(*, key: str, path: str, optional: bool = False) -> dict[str, Any]:
-    ...
-
-def resolve_logged_path(entry: dict[str, Any]) -> str:
-    ...
-```
-
-That wrapper should hide:
-
-- Consist import details
-- artifact metadata shape
-- path normalization
-- direct-path registration behavior for standalone runs without an active Consist run
-
-## Where to start
-
-Current state:
-
-- source inputs are registered instead of copied
-- workflow skims/event/network resolution can follow manifest entries instead of re-discovering copied inputs
-- generated intermediates are still written under the workspace and referenced by path
-
-The important rule for `impacts` is:
-
-“Use Consist to register and find files by logical identity. Resolve to filesystem paths only at the edge where the code actually reads or writes the file.”
+IMPACTS generates its EMFAC activity and fleet tables from the configured EMFAC source archive. Generated intermediates and outputs remain under the configured IMPACTS workspace.

@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.4 - 2026-11-25
+
+### Changed
+
+- Pass the exact BEAM and exposure inputs into IMPACTS instead of querying Consist for the latest artifacts.
+- Require a single matching run when standalone file discovery encounters multiple BEAM outputs or population files.
+- Accept an explicit same-run OSM PBF path and Consist artifact ID; standalone runs match PILATES by selecting the first top-level PBF in `beam.router_directory`.
+
+### Tests
+
+- Added focused BEAM output selection checks and updated the settings and Consist tests for explicit input paths.
+
 ## 2026-11-25
 
 ### Changed
