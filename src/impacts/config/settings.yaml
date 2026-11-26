@@ -112,6 +112,10 @@ impacts:
         electricity+gasoline: [phev]
       income_bins: [0, 30, 60, 100, 200, 9999]
   emissions:
+    # PILATES sets osm_network_file to the exact same-run R5 artifact.
+    # Standalone runs select the BEAM-compatible R5 candidate in beam.router_directory.
+    osm_network_file:
+    osm_network_artifact_id:
     pollutants: [NH3, NOx, PM25, SOx, ROG, BC]
     include_non_osm_car_links: true
     include_passenger: true
@@ -140,6 +144,9 @@ impacts:
     # - impute_inmap_primary_in_aermod_domain
     # - scale_aermod_to_inmap_domain_primary
     primary_pm25_integration_strategy: impute_inmap_primary_in_aermod_domain
+    # The unmodified UrbanSim HDF5 used for this run. IMPACTS reads the year-scoped
+    # persons, households, and blocks tables and assigns residents to the grid.
+    population_h5:
   analysis:
     # Optional baseline beam_concentration_distribution.parquet used by postprocess Step 6.
     # Relative paths are resolved from --impact-input-dir. Deltas are current run minus baseline.

@@ -1,6 +1,6 @@
 # Consist For Impacts
 
-`impacts` now treats source-input staging as artifact registration, not file copying. Preprocess records source inputs in the manifest and uses Consist when available. Generated intermediates are still written under the workspace.
+`impacts` records source inputs in its manifest; generated intermediates are written under the workspace. When running through PILATES, IMPACTS consumes the materialized BEAM files and raw UrbanSim HDF5 selected for that workflow step. It does not query Consist for a newer or latest upstream artifact. Standalone runs resolve files only under the configured BEAM output, R5, and population input paths.
 
 ## Mental model
 
@@ -27,17 +27,17 @@ The current manifest keys are already close to what Consist needs. These should 
 - `asrv_patterns_file`
 - `isrm`
 
-## PILATES-aligned lookup order
+## Upstream model input selection
 
-For upstream BEAM-origin files, `impacts` tries PILATES-style artifact keys first and uses local filesystem discovery when nothing is published yet.
+PILATES materializes the selected files for the current step in the workspace and points the generated IMPACTS settings at those locations. Outside PILATES, IMPACTS uses the configured folders and the same deterministic filename selection rules for inputs that support local discovery.
 
-- `network`: query latest `beam_network_final_*`, otherwise discover the BEAM network locally and register it
-- `events_input`: query latest `events_parquet_*`, otherwise discover the latest local BEAM events file and register it
-- `osm_network`: query canonical `beam_r5_osm_file`, otherwise resolve the local `.osm.pbf` under the configured BEAM network input folder and register it
-- `population_inputs["persons"]`: query latest `beam_population_final_*`, otherwise discover local `persons.*` and register it
-- `population_inputs["households"]`: query latest `beam_households_final_*`, otherwise discover local `households.*` and register it
+- `network`: resolve the selected `network.csv.gz` or `network.parquet` under `beam.local_output_folder`; duplicate candidates are an error
+- `emissions_skims_input`: select the highest numbered iteration's emissions skims from the single `ITERS` tree under `beam.local_output_folder`; multiple `ITERS` trees are an error
+- `events_input`: optionally select the highest numbered iteration's local BEAM events file from that same `ITERS` tree
+- `osm_network`: read the explicit PILATES-supplied PBF and record its path and artifact ID; standalone uses the first top-level `.pbf` in `beam.router_directory` by filename, logging and ignoring `.vex` files
+- `exposure_population_h5`: the raw UrbanSim HDF5 selected by PILATES; IMPACTS reads the exact-year persons, households, and blocks tables itself. `impacts.population.passenger_folder` remains for fleet generation and is not an exposure fallback
 
-Other inputs that do not already have a known PILATES handoff key are still registered in Consist under their maintained `impacts` manifest key.
+Other configured inputs—such as passenger and freight vehicle type tables, EMFAC rates and inventories, dispersion grids, and ISRM data—are resolved from their declared IMPACTS settings and recorded in the manifest. If vehicle type files are discovered from the configured vehicle folder, there must be exactly one match for each model. IMPACTS builds its EMFAC activity and fleet tables from the configured EMFAC source data. Exposure reads residents, households, and home coordinates from the raw year-scoped UrbanSim HDF5, including residents with no BEAM plans. IMPACTS does not query Consist for substitute BEAM or UrbanSim outputs.
 
 ## Recommended integration shape
 
