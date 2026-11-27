@@ -1,10 +1,7 @@
 """Preprocess Step 4 — Build AERMOD cell attributes and population staging.
 
-Writes one attribute row for every AERMOD study-area cell. When population
-inputs are available, it also spatially joins UrbanSim persons/households to the
-AERMOD grid for exposure outputs. Cells without residents remain in the
-attribute table with person_count=0 and source_urban_class=0 so source
-attributes never shrink the dispersion domain to populated cells.
+Reads the unmodified UrbanSim HDF5 supplied to IMPACTS, assigns resident homes
+to the configured grid for exposure, and builds AERMOD cell attributes.
 """
 from __future__ import annotations
 
@@ -22,7 +19,6 @@ import pandas as pd
 from ...common import configure_duckdb_connection
 from ...common import log_step_banner
 from ...common import log_substep_banner
-from ...common import read_table
 from ...common import read_vector
 from ...common import resolve_required_manifest_input
 from ...manifest.schema import PipelineConfig
@@ -30,8 +26,6 @@ from ...manifest.schema import PipelineConfig
 logger = logging.getLogger(__name__)
 
 _AERMOD_CELL_ID = "aermod_cell_id"
-_PERSON_REQUIRED = ["person_id", "household_id", "home_x", "home_y"]
-_HOUSEHOLD_REQUIRED = ["household_id"]
 _OUTPUT_FILENAME = "aermod_cell_attributes.parquet"
 _STAGED_POPULATION_FILENAME = "staged_population.parquet"
 
@@ -45,45 +39,70 @@ def _classify_urban(person_count: pd.Series) -> pd.Series:
     )
 
 
-def _load_and_merge_population(
+def _load_urbansim_population(
     *,
-    persons_entry: Dict[str, Any],
-    households_entry: Dict[str, Any],
+    population_h5_entry: Dict[str, Any],
+    year: int,
     target_epsg: int,
 ) -> tuple[gpd.GeoDataFrame, int, int]:
-    persons = read_table(resolve_required_manifest_input({"persons": persons_entry}, key="persons")).copy()
-    households = read_table(resolve_required_manifest_input({"households": households_entry}, key="households")).copy()
+    population_h5 = Path(
+        resolve_required_manifest_input(
+            {"population_h5": population_h5_entry}, key="population_h5"
+        )
+    )
+    table_paths = {name: f"/{year}/{name}" for name in ("persons", "households", "blocks")}
+    with pd.HDFStore(population_h5, mode="r") as store:
+        missing_tables = [key for key in table_paths.values() if key not in store]
+        if missing_tables:
+            raise ValueError(
+                "Preprocess Step 4: UrbanSim HDF5 is missing exact-year tables "
+                f"for {year}: {missing_tables}"
+            )
+        persons, households, blocks = (
+            store[table_paths[name]].copy() for name in ("persons", "households", "blocks")
+        )
 
-    for field in ("person_id", "household_id"):
-        if field not in persons.columns and persons.index.name == field:
-            persons = persons.reset_index()
-    for field in ("household_id",):
-        if field not in households.columns and households.index.name == field:
-            households = households.reset_index()
+    for frame, key in (
+        (persons, "person_id"),
+        (households, "household_id"),
+        (blocks, "block_id"),
+    ):
+        if key in frame.columns:
+            frame.set_index(key, inplace=True)
+        if frame.index.name != key or frame.index.hasnans or not frame.index.is_unique:
+            raise ValueError(
+                f"Preprocess Step 4: UrbanSim {key} identifiers must be unique and non-null"
+            )
 
-    missing_p = [c for c in _PERSON_REQUIRED if c not in persons.columns]
-    if missing_p:
-        raise ValueError(f"Preprocess Step 4: persons table missing columns: {missing_p}")
-    missing_h = [c for c in _HOUSEHOLD_REQUIRED if c not in households.columns]
-    if missing_h:
-        raise ValueError(f"Preprocess Step 4: households table missing columns: {missing_h}")
-    if persons["person_id"].isna().any() or persons["household_id"].isna().any():
-        raise ValueError("Preprocess Step 4: persons table has missing person_id or household_id values")
-    if households["household_id"].isna().any():
-        raise ValueError("Preprocess Step 4: households table has missing household_id values")
-    if persons["person_id"].duplicated().any():
-        raise ValueError("Preprocess Step 4: persons table contains duplicate person_id values")
-    if households["household_id"].duplicated().any():
-        raise ValueError("Preprocess Step 4: households table contains duplicate household_id values")
+    missing_person_columns = [c for c in ("household_id",) if c not in persons.columns]
+    missing_household_columns = [c for c in ("block_id",) if c not in households.columns]
+    missing_block_columns = [c for c in ("x", "y") if c not in blocks.columns]
+    if missing_person_columns or missing_household_columns or missing_block_columns:
+        raise ValueError(
+            "Preprocess Step 4: UrbanSim HDF5 lacks columns needed to locate home "
+            f"coordinates (persons={missing_person_columns}, "
+            f"households={missing_household_columns}, blocks={missing_block_columns})"
+        )
 
-    for col in households.columns:
-        if col != "household_id" and col in persons.columns:
-            households = households.rename(columns={col: f"household_{col}"})
-
-    merged = persons.merge(households, how="left", on="household_id")
+    home_coordinates = households[["block_id"]].join(
+        blocks[["x", "y"]], on="block_id", validate="many_to_one"
+    )
+    households = households.copy()
+    households["home_x"] = pd.to_numeric(home_coordinates["x"], errors="coerce")
+    households["home_y"] = pd.to_numeric(home_coordinates["y"], errors="coerce")
+    people_with_homes = persons.copy()
+    people_with_homes["home_x"] = people_with_homes["household_id"].map(
+        households["home_x"]
+    )
+    people_with_homes["home_y"] = people_with_homes["household_id"].map(
+        households["home_y"]
+    )
+    merged = people_with_homes.reset_index()
     merged["home_x"] = pd.to_numeric(merged["home_x"], errors="coerce")
     merged["home_y"] = pd.to_numeric(merged["home_y"], errors="coerce")
     supplied = len(merged)
+    valid_lonlat = merged["home_x"].between(-180, 180) & merged["home_y"].between(-90, 90)
+    merged.loc[~valid_lonlat, ["home_x", "home_y"]] = np.nan
     valid_coordinates = (
         np.isfinite(merged["home_x"].to_numpy(dtype=float))
         & np.isfinite(merged["home_y"].to_numpy(dtype=float))
@@ -211,20 +230,19 @@ def run(
     log_substep_banner("4.2", "assign population to AERMOD cells", logger=logger)
     if pipeline.exposure_enabled and (
         not population_inputs
-        or not all(population_inputs.get(key) for key in ("persons", "households", "source_manifest"))
+        or not population_inputs.get("h5")
     ):
         raise ValueError(
-            "Exposure is enabled, but explicit persons, households, and source_manifest "
-            "inputs were not supplied by PILATES."
+            "Exposure is enabled, but the UrbanSim HDF5 was not supplied to IMPACTS."
         )
-    if not population_inputs or not population_inputs.get("persons") or not population_inputs.get("households"):
+    if not population_inputs or not population_inputs.get("h5"):
         logger.info(
-            "Preprocess Step 4.2: no population inputs available; staged population output will be skipped."
+            "Preprocess Step 4.2: no UrbanSim HDF5 available; staged population output will be skipped."
         )
     else:
-        population_gdf, supplied_count, missing_coordinates = _load_and_merge_population(
-            persons_entry=population_inputs["persons"],
-            households_entry=population_inputs["households"],
+        population_gdf, supplied_count, missing_coordinates = _load_urbansim_population(
+            population_h5_entry=population_inputs["h5"],
+            year=int(population_inputs.get("year") or pipeline.start_year),
             target_epsg=int(pipeline.output_epsg),
         )
         logger.info(

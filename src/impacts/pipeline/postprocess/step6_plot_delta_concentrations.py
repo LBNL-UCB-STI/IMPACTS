@@ -138,7 +138,10 @@ def _build_concentration_delta(conc_gdf, delta_baseline_concentration_path: str 
     try:
         configure_duckdb_connection(con, working_dir=output_dir, show_progress=False, profile="balanced")
 
-        dupes = con.execute(f"SELECT COUNT(*) - COUNT(DISTINCT {key}) FROM {baseline_scan}").fetchone()[0]
+        duplicate_rows = con.execute(
+            f"SELECT COUNT(*) - COUNT(DISTINCT {key}) FROM {baseline_scan}"
+        ).fetchall()
+        dupes = duplicate_rows[0][0]
         if dupes:
             raise ValueError(
                 "Delta baseline beam_concentration_distribution has duplicate aermod_cell_id values; "

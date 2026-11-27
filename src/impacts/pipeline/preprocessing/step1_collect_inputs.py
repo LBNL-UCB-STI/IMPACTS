@@ -73,41 +73,23 @@ def _resolve_emfacid_path(inventory_path: str, *, label: str) -> str:
     return str(derived)
 
 
-def _resolve_exposure_population_inputs(settings, *, config_path: Path) -> Dict[str, Any]:
-    """Resolve only explicit resident files supplied by PILATES."""
+def _resolve_exposure_population_h5(settings, *, config_path: Path) -> Path:
+    """Resolve the raw UrbanSim HDF5 supplied for exposure processing."""
     exposure = settings.impacts.exposure
-    required = {
-        "persons": exposure.persons_file,
-        "households": exposure.households_file,
-        "source_manifest": exposure.source_manifest,
-    }
-    missing = [key for key, value in required.items() if not value]
-    if missing:
+    if not exposure.population_h5:
         raise ValueError(
-            "Postsim exposure requires explicit impacts.exposure.persons_file, "
-            "impacts.exposure.households_file, and impacts.exposure.source_manifest; "
-            f"missing: {missing}"
+            "Postsim exposure requires impacts.exposure.population_h5 containing "
+            "the UrbanSim HDF5 for this run."
         )
-
-    resolved: Dict[str, Path] = {}
-    for key, raw in required.items():
-        candidate = Path(str(raw)).expanduser()
-        if not candidate.is_absolute():
-            candidate = config_path.parent / candidate
-        candidate = candidate.resolve()
-        if not candidate.is_file():
-            raise FileNotFoundError(f"Configured exposure {key} file was not found: {candidate}")
-        resolved[key] = candidate
-
-    source_manifest = load_structured_file(resolved["source_manifest"])
-    return {
-        "persons": file_entry(kind="local", path=resolved["persons"], staged_path=resolved["persons"]),
-        "households": file_entry(kind="local", path=resolved["households"], staged_path=resolved["households"]),
-        "source_manifest": {
-            "path": str(resolved["source_manifest"]),
-            "document": source_manifest,
-        },
-    }
+    candidate = Path(str(exposure.population_h5)).expanduser()
+    if not candidate.is_absolute():
+        candidate = config_path.parent / candidate
+    candidate = candidate.resolve()
+    if not candidate.is_file():
+        raise FileNotFoundError(
+            f"Configured exposure UrbanSim HDF5 was not found: {candidate}"
+        )
+    return candidate
 
 
 def _find_emfacid_file(folder: Path, pattern: str) -> str | None:
@@ -202,15 +184,20 @@ def run(
 
     population_inputs: Dict[str, Any] = {}
     if pipeline.exposure:
-        log_substep_banner("1.5", "register explicit exposure population inputs", logger=logger)
-        population_inputs.update(
-            _resolve_exposure_population_inputs(settings, config_path=config_path)
+        log_substep_banner("1.5", "register UrbanSim population HDF5", logger=logger)
+        population_h5_source = _resolve_exposure_population_h5(
+            settings, config_path=config_path
         )
-        manifest_inputs["exposure_population_source_manifest"] = file_entry(
-            kind="local",
-            path=population_inputs["source_manifest"]["path"],
-            staged_path=population_inputs["source_manifest"]["path"],
+        _register_manifest_input(
+            manifest_inputs,
+            input_root=input_root,
+            key="exposure_population_h5",
+            source_path=str(population_h5_source),
+            relative_target="population/urbansim.h5",
+            metadata={"artifact_family": "exposure_population_h5"},
         )
+        population_inputs["h5"] = manifest_inputs["exposure_population_h5"]
+        population_inputs["year"] = int(settings.run.start_year)
 
     log_substep_banner("1.1", "register BEAM output files", logger=logger)
     progress = make_progress("Preprocess Step 1.1", total=3, unit="task", leave=False)

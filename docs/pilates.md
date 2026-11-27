@@ -22,17 +22,9 @@ Set `impacts.analysis.basemap` to `carto` (the default) to add Carto tiles, or `
 
 PILATES should point `beam.local_output_folder` at the materialized BEAM outputs for the current run. IMPACTS reads the network, emissions skims, and optional events from that tree and does not query Consist for a different run's files.
 
-Exposure residents are separate from BEAM's plan-bearing population. When exposure is enabled, PILATES must pass the run-specific full-resident persons and households files and their source manifest through explicit settings. IMPACTS does not use `impacts.population.passenger_folder` as an exposure fallback; that setting remains for fleet generation.
+Exposure residents are separate from BEAM's plan-bearing population. When exposure is enabled, PILATES passes through the raw UrbanSim HDF5 selected for that run. IMPACTS reads the exact-year `persons`, `households`, and `blocks` tables and assigns residents to its grid. PILATES does not transform or export population tables. `impacts.population.passenger_folder` remains for fleet generation and is never an exposure fallback. The generated bridge points `impacts.exposure.population_h5` at the mounted HDF5.
 
-```yaml
-impacts:
-  exposure:
-    persons_file: /app/workspace/impacts/exposure-population/urbansim-forecast-2018/persons.parquet
-    households_file: /app/workspace/impacts/exposure-population/urbansim-forecast-2018/households.parquet
-    source_manifest: /app/workspace/impacts/exposure-population/urbansim-forecast-2018/population_source.yaml
-```
-
-The source manifest and resident-assignment summary are carried into the postsim manifest. The summary reports supplied residents, residents assigned to the 100 m grid, missing home coordinates, and residents outside the grid.
+The postsim manifest records the source HDF5 artifact and resident-assignment summary. The summary reports supplied residents, residents assigned to the 100 m grid, residents missing home coordinates, and residents outside the grid. IMPACTS does not query Consist or use BEAM's plan-bearing population files as a substitute.
 
 Pass the exact PBF selected from the final `beam.routing.r5.directory` as `impacts.emissions.osm_network_file`, and pass its Consist ID as `osm_network_artifact_id` when available. IMPACTS reads that PBF directly and records the path and ID in its manifest. Standalone settings can omit the file path; IMPACTS then chooses the first top-level `.pbf` by filename in the configured `beam.router_directory`, matching the PILATES R5 choice. It logs and ignores `.vex` files because IMPACTS requires a PBF.
 

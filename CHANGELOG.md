@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.5 - 2026-11-27
+
+### Added
+
+- Read the exact-year UrbanSim `persons`, `households`, and `blocks` tables from the raw HDF5 supplied by PILATES for exposure population assignment.
+- Add PyTables as a runtime dependency for reading UrbanSim HDF5 files.
+
+### Fixed
+
+- Drain the DuckDB scalar query result before registering a relation, avoiding a connection-in-use error in concentration delta processing.
+
 ## v0.2.4 - 2026-11-25
 
 ### Changed
