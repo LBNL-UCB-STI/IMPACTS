@@ -5,8 +5,6 @@ import sys
 import types
 
 from impacts.common import register_managed_input
-from impacts.consist_artifacts import find_beam_r5_osm_reference
-from impacts.consist_artifacts import find_latest_beam_events_reference
 
 
 def test_register_managed_input_tracks_source_without_copy_when_consist_unavailable(monkeypatch, tmp_path: Path):
@@ -95,75 +93,3 @@ def test_register_managed_input_uses_local_entry_when_consist_has_no_active_run(
     assert staged_path == str(source.resolve())
     assert manifest_inputs["network"]["kind"] == "local"
     assert manifest_inputs["network"]["staged_path"] == str(source.resolve())
-
-
-def test_find_latest_beam_events_reference_prefers_exact_key(monkeypatch, tmp_path: Path):
-    exact = tmp_path / "0.events.parquet"
-    exact.write_text("exact", encoding="utf-8")
-    sub1 = tmp_path / "0.events.sub1.parquet"
-    sub1.write_text("sub1", encoding="utf-8")
-    sub2 = tmp_path / "0.events.sub2.parquet"
-    sub2.write_text("sub2", encoding="utf-8")
-
-    fake_consist = types.SimpleNamespace(
-        get_run_outputs=lambda: {
-            "events_parquet_2018_0_sub1": str(sub1),
-            "events_parquet_2018_0_sub2": str(sub2),
-            "events_parquet_2018_0": str(exact),
-        }
-    )
-    monkeypatch.setitem(sys.modules, "consist", fake_consist)
-
-    entry = find_latest_beam_events_reference(optional=True)
-
-    assert entry is not None
-    assert entry["staged_path"] == str(exact.resolve())
-    assert entry["consist"]["artifact_key"] == "events_parquet_2018_0"
-
-
-def test_find_beam_r5_osm_reference_reads_canonical_key(monkeypatch, tmp_path: Path):
-    osm = tmp_path / "network.osm.pbf"
-    osm.write_text("osm", encoding="utf-8")
-
-    fake_consist = types.SimpleNamespace(
-        find_artifact=lambda *, key, metadata=None: str(osm) if key == "beam_r5_osm_file" else None,
-    )
-    monkeypatch.setitem(sys.modules, "consist", fake_consist)
-
-    entry = find_beam_r5_osm_reference(optional=True)
-
-    assert entry is not None
-    assert entry["staged_path"] == str(osm.resolve())
-    assert entry["consist"]["artifact_key"] == "beam_r5_osm_file"
-
-
-def test_find_beam_r5_osm_reference_uses_local_fallback_without_active_run(monkeypatch):
-    def _raise_no_active_run():
-        raise RuntimeError("No active Consist run found. Ensure you are within a start_run block.")
-
-    def _unexpected_lookup(**_kwargs):
-        raise AssertionError("Artifact lookup should be skipped without an active run")
-
-    fake_consist = types.SimpleNamespace(
-        get_run_outputs=_raise_no_active_run,
-        get_artifact=_unexpected_lookup,
-    )
-    monkeypatch.setitem(sys.modules, "consist", fake_consist)
-
-    assert find_beam_r5_osm_reference(optional=True) is None
-
-
-def test_find_beam_r5_osm_reference_keeps_warning_for_active_run_lookup_error(
-    monkeypatch, caplog
-):
-    def _legacy_get_artifact(run_id, key):
-        raise AssertionError("The incompatible legacy lookup should not be invoked")
-
-    fake_consist = types.SimpleNamespace(
-        get_run_outputs=lambda: {},
-        get_artifact=_legacy_get_artifact,
-    )
-    monkeypatch.setitem(sys.modules, "consist", fake_consist)
-
-    assert find_beam_r5_osm_reference(optional=True) is None
-    assert "Consist get_artifact lookup failed" in caplog.text

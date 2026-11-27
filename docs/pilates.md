@@ -18,6 +18,18 @@ Mount the persistent PILATES run workspace at `/app/workspace`, the BEAM input t
 
 Set `impacts.analysis.basemap` to `carto` (the default) to add Carto tiles, or `none` for offline plotting. With `none`, IMPACTS still writes the plots with concentration layers, road overlays, and scale bars. The former `skip_web_tiles` boolean remains accepted as a compatibility alias.
 
+## Run-specific BEAM inputs
+
+PILATES should point `beam.local_output_folder` at the materialized BEAM outputs for the current run. IMPACTS reads the network, emissions skims, and optional events from that tree and does not query Consist for a different run's files.
+
+Exposure residents are separate from BEAM's plan-bearing population. When exposure is enabled, PILATES passes through the raw UrbanSim HDF5 selected for that run. IMPACTS reads the exact-year `persons`, `households`, and `blocks` tables and assigns residents to its grid. PILATES does not transform or export population tables. `impacts.population.passenger_folder` remains for fleet generation and is never an exposure fallback. The generated bridge points `impacts.exposure.population_h5` at the mounted HDF5.
+
+The postsim manifest records the source HDF5 artifact and resident-assignment summary. The summary reports supplied residents, residents assigned to the 100 m grid, residents missing home coordinates, and residents outside the grid. IMPACTS does not query Consist or use BEAM's plan-bearing population files as a substitute.
+
+Pass the exact PBF selected from the final `beam.routing.r5.directory` as `impacts.emissions.osm_network_file`, and pass its Consist ID as `osm_network_artifact_id` when available. IMPACTS reads that PBF directly and records the path and ID in its manifest. Standalone settings can omit the file path; IMPACTS then chooses the first top-level `.pbf` by filename in the configured `beam.router_directory`, matching the PILATES R5 choice. It logs and ignores `.vex` files because IMPACTS requires a PBF.
+
+Other inputs—such as vehicle type tables, EMFAC source data, dispersion grids, and ISRM—come from their explicit settings and mounted input roots. IMPACTS generates its EMFAC activity and fleet tables during presim.
+
 When InMAP is enabled, `impacts.dispersions.inmap.isrm_zarr` may point to a local Zarr store or a public `s3://`, `http://`, or `https://` Zarr store; IMPACTS copies either source into the shared cache. Remote URLs must expose a recursively listable Zarr store; a web page or a link to an archive is not a Zarr store URL. ISRM cache entries are keyed by source URL or local path. EMFAC raw cache entries are keyed by archive path, size, and modification time. To refresh data changed in place, remove the corresponding cache entry. The image does not contain ISRM or other scenario data. A local ISRM source mount is needed only when populating its cache for the first time. Omit the InMAP source mount if that stage is disabled or the configured ISRM store is public.
 
 For example, with Docker:

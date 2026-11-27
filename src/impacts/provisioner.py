@@ -279,10 +279,7 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
     metadata_path = settings.impacts.emissions.vehicle_category_metadata_file
     if not metadata_path:
         raise ValueError("Missing required value: impacts.emissions.vehicle_category_metadata_file")
-    vehicle_category_metadata_file = (
-        registry.locate(str(metadata_path))
-        or registry.locate(Path(str(metadata_path)).name)
-    )
+    vehicle_category_metadata_file = registry.locate(str(metadata_path))
     if not vehicle_category_metadata_file:
         raise FileNotFoundError(
             f"Could not find vehicle_category_metadata_file '{metadata_path}'. "

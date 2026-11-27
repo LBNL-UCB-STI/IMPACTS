@@ -370,12 +370,13 @@ class Dispersions:
 @dataclass(frozen=True)
 class Exposure:
     primary_pm25_integration_strategy: str = default_primary_pm25_integration_strategy
+    population_h5: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Exposure":
         _reject_unknown_keys(
             payload,
-            {"primary_pm25_integration_strategy"},
+            {"primary_pm25_integration_strategy", "population_h5"},
             "impacts.exposure",
         )
         strategy = _optional_string(payload.get("primary_pm25_integration_strategy"))
@@ -385,7 +386,10 @@ class Exposure:
                 "impacts.exposure.primary_pm25_integration_strategy must be one of "
                 f"{sorted(default_primary_pm25_integration_strategies)}, got {strategy!r}"
             )
-        return cls(primary_pm25_integration_strategy=strategy)
+        return cls(
+            primary_pm25_integration_strategy=strategy,
+            population_h5=_optional_string(payload.get("population_h5")),
+        )
 
 
 @dataclass(frozen=True)
@@ -461,7 +465,8 @@ class Emissions:
                 )
         default_annualization_days: "Emissions.Defaults.AnnualizationDays"
 
-    osm_network_folder: Optional[str]
+    osm_network_file: Optional[str]
+    osm_network_artifact_id: Optional[str]
     rates_folder: str
     inventory: EmissionsInventory
     vehicle_category_metadata_file: Optional[str]
@@ -474,7 +479,8 @@ class Emissions:
         _reject_unknown_keys(
             payload,
             {
-                "osm_network_folder",
+                "osm_network_file",
+                "osm_network_artifact_id",
                 "rates_folder",
                 "inventory_folder",
                 "vehicle_category_metadata_file",
@@ -498,8 +504,16 @@ class Emissions:
         ):
             if correction_key in payload:
                 inventory_payload[correction_key] = payload.get(correction_key)
+        osm_network_file = _optional_string(payload.get("osm_network_file"))
+        osm_network_artifact_id = _optional_string(payload.get("osm_network_artifact_id"))
+        if osm_network_artifact_id and not osm_network_file:
+            raise ValueError(
+                "impacts.emissions.osm_network_artifact_id requires "
+                "impacts.emissions.osm_network_file"
+            )
         return cls(
-            osm_network_folder=_optional_string(payload.get("osm_network_folder")),
+            osm_network_file=osm_network_file,
+            osm_network_artifact_id=osm_network_artifact_id,
             rates_folder=_required_string(
                 payload.get("rates_folder"),
                 "impacts.emissions.rates_folder",
@@ -960,12 +974,6 @@ class ImpactsSettings:
         payload = _normalize_settings_payload(payload)
         beam_payload = dict(payload.get("beam", {}) or {})
         impacts_payload = dict(payload.get("impacts", {}) or {})
-        router_directory = beam_payload.get("router_directory")
-        if router_directory:
-            emissions_payload = dict(impacts_payload.get("emissions", {}) or {})
-            if not emissions_payload.get("osm_network_folder"):
-                emissions_payload["osm_network_folder"] = router_directory
-                impacts_payload = {**impacts_payload, "emissions": emissions_payload}
         return cls(
             run=Run.from_dict(payload.get("run", {}) or {}),
             shared=Shared.from_dict(payload.get("shared", {}) or {}),
@@ -1020,6 +1028,7 @@ class ImpactsSettings:
                     "primary_pm25_integration_strategy": (
                         self.impacts.exposure.primary_pm25_integration_strategy
                     ),
+                    "population_h5": self.impacts.exposure.population_h5,
                 },
                 "population": {
                     "passenger_folder": self.impacts.population.passenger_folder,
@@ -1034,6 +1043,14 @@ class ImpactsSettings:
                 "activities": self.impacts.activities,
                 "fleet": self.impacts.fleet,
                 "emissions": {
+                        **{
+                            key: value
+                            for key, value in (
+                                ("osm_network_file", self.impacts.emissions.osm_network_file),
+                                ("osm_network_artifact_id", self.impacts.emissions.osm_network_artifact_id),
+                            )
+                            if value is not None
+                        },
                         "include_non_osm_car_links": self.impacts.emissions.beam.include_non_osm_car_links,
                         "include_passenger": self.impacts.emissions.beam.include_passenger,
                         "include_freight": self.impacts.emissions.beam.include_freight,
