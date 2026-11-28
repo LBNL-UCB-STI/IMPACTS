@@ -110,6 +110,7 @@ def run(
             target_households=target_households,
             target_population=target_population,
         )
+        county_weights = weights.loc[mask]
         diagnostics[geoid] = {
             "acs_households": target_households,
             "acs_households_moe": float(household_controls.at[geoid, "moe"]),
@@ -121,6 +122,10 @@ def run(
             "calibrated_residents": float(
                 (weights.loc[mask].to_numpy() * county_households["household_size"].to_numpy()).sum()
             ),
+            "household_weight_min": float(county_weights.min()),
+            "household_weight_median": float(county_weights.median()),
+            "household_weight_p95": float(county_weights.quantile(0.95)),
+            "household_weight_max": float(county_weights.max()),
         }
 
     result = households[["household_id", "county_geoid", "household_size"]].copy()

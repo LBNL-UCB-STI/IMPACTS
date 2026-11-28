@@ -131,7 +131,12 @@ def _resolve_region_input_root(*, beam_input_root: Path, region: str) -> Path:
     raise FileNotFoundError(f"Region input root not found: {candidate}")
 
 
-def _resolve_census_bundle_path(configured_path: str, region_input_root: Path) -> Path:
+def _resolve_census_bundle_path(configured_path: Optional[str], region_input_root: Path) -> Path:
+    if not configured_path:
+        raise ValueError(
+            "Exposure requires impacts.exposure.census_bundle with the baseline-year ACS, "
+            "P42, and LUCA inputs; IMPACTS does not download Census data at runtime."
+        )
     raw = Path(configured_path).expanduser()
     region_root = region_input_root.resolve()
     candidate = raw if raw.is_absolute() else region_root / raw
@@ -197,9 +202,7 @@ def run(
         population_inputs["h5"] = manifest_inputs["exposure_population_h5"]
         population_inputs["year"] = int(settings.run.start_year)
 
-        from ...acs_data import acquire_acs_tables
-
-        log_substep_banner("1.6", "acquire baseline-year ACS summary tables", logger=logger)
+        log_substep_banner("1.6", "stage baseline-year Census input bundle", logger=logger)
         if impacts.shared_input_cache_dir:
             acs_cache_root = Path(resolve_path(impacts.shared_input_cache_dir, config_path))
         else:
@@ -210,27 +213,20 @@ def run(
                     "impacts.local_input_folder",
                 )
             ) / "input_cache"
-        if impacts.exposure.census_bundle:
-            from ...census_bundle import stage_census_bundle
+        from ...census_bundle import stage_census_bundle
 
-            bundle_path = _resolve_census_bundle_path(
-                impacts.exposure.census_bundle, Path(region_input_root)
-            )
-            bundle = stage_census_bundle(
-                bundle_path,
-                acs_cache_root,
-                year=settings.run.start_year,
-                region=settings.run.region,
-                state_fips=settings.shared.geography.fips.state,
-            )
-            population_inputs["acs_tables"] = bundle.pop("acs_tables")
-            population_inputs["acs_manifest"] = bundle["manifest"]
-            population_inputs["census_bundle"] = bundle
-        else:
-            population_inputs["acs_tables"] = acquire_acs_tables(settings.run.start_year, acs_cache_root)
-            population_inputs["acs_manifest"] = str(
-                acs_cache_root / "acs" / str(settings.run.start_year) / "manifest.json"
-            )
+        bundle_path = _resolve_census_bundle_path(
+            impacts.exposure.census_bundle, Path(region_input_root)
+        )
+        bundle = stage_census_bundle(
+            bundle_path,
+            acs_cache_root,
+            year=settings.run.start_year,
+            region=settings.run.region,
+            state_fips=settings.shared.geography.fips.state,
+        )
+        population_inputs["acs_tables"] = bundle.pop("acs_tables")
+        population_inputs["census_bundle"] = bundle
 
     log_substep_banner("1.1", "register BEAM output files", logger=logger)
     progress = make_progress("Preprocess Step 1.1", total=3, unit="task", leave=False)

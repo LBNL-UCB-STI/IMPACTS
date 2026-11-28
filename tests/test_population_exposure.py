@@ -185,7 +185,9 @@ def test_offline_census_bundle_allocates_tract_targets_to_the_grid(tmp_path: Pat
     assert pd.read_parquet(cell_path)["group_quarters_population"].tolist() == [60, 30]
     assert report["acs_tract_target"] == 150
     assert report["assigned_to_grid"] == 90
+    assert report["blocks_missing_coordinates"] == 0
     assert report["outside_grid"] == 60
+    assert report["blocks_outside_grid"] == 1
     Path(bundle["luca"]).write_text("corrupt", encoding="utf-8")
     with pytest.raises(ValueError, match="checksum mismatch"):
         stage_census_bundle(archive_path, cache, year=2018, region="sfbay", state_fips="06")
@@ -205,6 +207,8 @@ def test_census_bundle_path_is_resolved_from_beam_region_root(tmp_path: Path) ->
     bundle.touch()
 
     assert _resolve_census_bundle_path("impacts/census/bundle.tar.gz", region_root) == bundle.resolve()
+    with pytest.raises(ValueError, match="does not download Census data at runtime"):
+        _resolve_census_bundle_path(None, region_root)
     with pytest.raises(FileNotFoundError, match="BEAM input region"):
         _resolve_census_bundle_path("impacts/census/missing.tar.gz", region_root)
     with pytest.raises(ValueError, match="stay inside the BEAM input region"):

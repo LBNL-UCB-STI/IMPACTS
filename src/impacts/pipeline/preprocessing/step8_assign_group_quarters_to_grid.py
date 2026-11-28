@@ -168,7 +168,9 @@ def run(
     report = {
         "acs_tract_target": float(targets["tract_target"].sum()),
         "assigned_to_grid": float(blocks.loc[assigned, POPULATION].sum()),
+        "blocks_missing_coordinates": int((~has_coordinates).sum()),
         "missing_block_coordinates": float(blocks.loc[~has_coordinates, POPULATION].sum()),
+        "blocks_outside_grid": int((has_coordinates & ~assigned).sum()),
         "outside_grid": float(blocks.loc[has_coordinates & ~assigned, POPULATION].sum()),
         "allocated_by_method": blocks.groupby("method")[POPULATION].sum().to_dict(),
     }

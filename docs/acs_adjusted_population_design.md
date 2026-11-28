@@ -2,9 +2,9 @@
 
 ## Status and scope
 
-IMPACTS uses baseline-year ACS tables to calibrate whole-household weights to county controls and assign the weighted residents to the existing grid. With a Census bundle configured, it also allocates the group quarters population to the grid. The exposure table reports raw UrbanSim population, ACS-adjusted household population, group quarters population, and the adjusted total side by side.
+When exposure is enabled, IMPACTS requires a baseline-year Census bundle. It calibrates whole-household weights to county ACS controls and assigns weighted residents to the existing grid, then separately allocates group-quarters population. The exposure table reports raw UrbanSim population, ACS-adjusted household population, group-quarters population, and their adjusted total side by side.
 
-The configured baseline year is `run.start_year` (currently 2018). All ACS acquisition derives its release year from this setting. For a baseline year `Y`, the corresponding five-year ACS release is `Y-4` through `Y`; the one-year release is `Y` when the requested geography and table are available. Do not silently substitute a newer release.
+The configured baseline year is `run.start_year` (currently 2018). The supplied bundle must contain ACS 1-year data for `Y` and ACS 5-year data for `Y-4` through `Y`; IMPACTS validates the bundle year and does not download or substitute Census files at runtime.
 
 For the current baseline, that means:
 
@@ -71,7 +71,7 @@ The 2018 ACS 1-year GQ county total is 138,195, but the location source for assi
 
 Keep input acquisition, household calibration, GQ allocation, and grid assignment separate:
 
-1. **ACS acquisition/cache module:** fetch only the release derived from `run.start_year`; cache immutable source tables under a durable path keyed by product, year or period, table IDs, geography, and boundary vintage. Record retrieval URL, retrieval date, checksums, and ACS metadata. This is input management, not a pipeline transformation.
+1. **Census input bundle:** PILATES supplies the baseline-year archive through the read-only BEAM input mount. IMPACTS verifies and extracts the ACS, P42, and LUCA files into the shared cache. Runtime network downloads are not part of the pipeline.
 2. **Population calibration step:** use the persons, households, and blocks tables for the configured year in the UrbanSim HDF5 registered in preprocessing Step 1. Produce a distinct adjusted household population and calibration diagnostics.
 3. **GQ preparation/allocation step:** create GQ population records or cell totals separately from household records. Record the ACS geography and any ancillary spatial source and allocation method.
 4. **Cell assignment step:** assign raw household, adjusted household, and GQ components to the existing exposure grid. Do not hide ACS calibration or GQ placement inside the existing AERMOD cell-attribute builder.
@@ -81,7 +81,7 @@ This separation fits the current code: preprocessing Step 1 resolves explicit po
 
 ## Group quarters allocation in preprocessing Step 8
 
-The household-weight step targets the selected 2018 ACS 1-year county controls and has fixture tests. It was also run against the downloaded ACS tables and the `/2018/households` table in `/Volumes/HG40/Workspace/BREATHE/urbansim/model_data_2019.h5`; county household and household-person controls matched. The HDF5 input's block IDs and `county_id` are 2010-vintage Census geography.
+The household-weight step targets the selected 2018 ACS 1-year county controls and has fixture tests. It was run against the supplied Census bundle and `/2018/households` in the BREATHE `model_data_2019.h5`. All nine county household and household-person controls matched exactly; the input contained 2,731,126 households and 7,195,368 residents. The HDF5 input's block IDs and `county_id` are 2010-vintage Census geography.
 
 The BREATHE bundle contains the baseline ACS tables, 2010 P42 block counts,
 and January 2018 LUCA group quarters address counts. Set
@@ -103,6 +103,10 @@ the corresponding file entry. Bundle v2 has no verified occupancy CSV.
 
 The block allocation table records each tract target, allocation method,
 block share, and assigned grid cell. Placement uses the UrbanSim block
-coordinates. Missing coordinates and points outside the grid stay in
-the block totals and are reported in the manifest. They contribute no
-population to the grid exposure results.
+coordinates. Missing coordinates and points outside the grid stay in the
+block totals and are reported in the manifest. They contribute no population
+to the grid exposure results. Against the supplied data, all 138,195 ACS GQ
+residents were allocated across 1,170 positive-target tracts. Of 3,911
+candidate blocks, 3,907 matched UrbanSim block coordinates; four unmatched
+blocks account for 37.7 residents and are reported as missing coordinates
+rather than assigned to invented locations.

@@ -29,11 +29,15 @@ def run(
         {"acs_household_weights": household_weights_entry}, key="acs_household_weights"
     )
     population = pd.read_parquet(staged_path, columns=["person_id", "household_id", "aermod_cell_id"])
-    weights = pd.read_parquet(weights_path, columns=["household_id", "acs_household_weight"])
+    weights = pd.read_parquet(
+        weights_path, columns=["household_id", "household_size", "acs_household_weight"]
+    )
     if population["person_id"].duplicated().any():
         raise ValueError("Raw resident assignments must contain one row per person_id")
     if weights["household_id"].duplicated().any():
         raise ValueError("ACS household weights must contain one row per household_id")
+    if weights[["household_size", "acs_household_weight"]].isna().to_numpy().any():
+        raise ValueError("ACS household sizes and weights must be present for every household")
 
     log_substep_banner("7.2", "apply each household weight to its residents", logger=logger)
     assigned = population.merge(weights, on="household_id", how="left", validate="many_to_one")
@@ -46,16 +50,28 @@ def run(
             f"ACS household weights are missing for {missing_weights} assigned residents; "
             f"example household_ids={missing_households}"
         )
+    assigned_per_household = assigned.groupby("household_id").size()
+    household_sizes = weights.set_index("household_id")["household_size"]
+    if not assigned_per_household.eq(household_sizes.reindex(assigned_per_household.index)).all():
+        raise ValueError("Assigned resident rows do not match their UrbanSim household sizes")
     counts = (
         assigned.groupby("aermod_cell_id", as_index=False)
         .agg(acs_household_population=("acs_household_weight", "sum"))
     )
+    calibrated_population = float((weights["household_size"] * weights["acs_household_weight"]).sum())
+    assigned_population = float(assigned["acs_household_weight"].sum())
+    if assigned_population > calibrated_population + max(1e-6, calibrated_population * 1e-10):
+        raise ValueError("Grid-assigned ACS household population exceeds the calibrated total")
     output_root.mkdir(parents=True, exist_ok=True)
     output_path = output_root / "acs_household_population_cell_counts.parquet"
     counts.to_parquet(output_path, index=False)
     summary = {
         "residents_assigned_to_grid": float(len(assigned)),
-        "acs_household_population_assigned_to_grid": float(assigned["acs_household_weight"].sum()),
+        "acs_household_population_calibrated_total": calibrated_population,
+        "acs_household_population_assigned_to_grid": assigned_population,
+        "acs_household_population_not_assigned_to_grid": max(
+            0.0, calibrated_population - assigned_population
+        ),
         "aermod_cells_with_acs_household_population": float(len(counts)),
     }
     logger.info("Preprocess Step 7 assignment summary: %s", summary)
