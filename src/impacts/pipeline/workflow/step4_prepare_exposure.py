@@ -49,6 +49,19 @@ def _trace_frame(step: str, label: str, df: pd.DataFrame) -> None:
     logger.info("%s trace %s columns(%d): %s%s", _step_label(f"4.{step}"), label, len(df.columns), preview, suffix)
 
 
+def _attach_acs_household_counts(cell_counts: pd.DataFrame, acs_counts: pd.DataFrame) -> pd.DataFrame:
+    if acs_counts[_AERMOD_SOURCE_ID_COLUMN].duplicated().any():
+        raise ValueError("ACS household population counts must contain one row per aermod_cell_id")
+    result = cell_counts.merge(
+        acs_counts[[_AERMOD_SOURCE_ID_COLUMN, "acs_household_population"]],
+        on=_AERMOD_SOURCE_ID_COLUMN,
+        how="left",
+        validate="one_to_one",
+    )
+    result["acs_household_population"] = result["acs_household_population"].fillna(0.0)
+    return result
+
+
 def _prepare_inmap_exposure_inputs(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     if _INMAP_SOURCE_ID_COLUMN not in gdf.columns:
         raise ValueError(f"InMAP concentrations must include '{_INMAP_SOURCE_ID_COLUMN}'.")
@@ -339,14 +352,14 @@ def run(
     if "staged_population" not in manifest or "aermod_cell_attributes" not in manifest:
         raise ValueError(
             "Step 4 requires staged_population and aermod_cell_attributes from preprocessing. "
-            "Ensure preprocessing step 4 ran successfully before running the workflow."
+            "Ensure preprocessing population-assignment and AERMOD-attribute steps ran successfully."
         )
 
     log_substep_banner("4.3", "write population distribution", logger=logger)
     staged_path = resolve_required_manifest_input(manifest, key="staged_population")
     population_table = read_table(staged_path)
     if _AERMOD_SOURCE_ID_COLUMN not in population_table.columns:
-        raise ValueError("staged_population is missing aermod_cell_id — rerun preprocessing step 4.")
+        raise ValueError("staged_population is missing aermod_cell_id — rerun preprocessing Step 4.")
     _trace_frame("3", "population_distribution", population_table)
     population_distribution_output_path = raw_dir / "beam_population_distribution.parquet"
     population_distribution_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -357,6 +370,15 @@ def run(
     cell_attributes_path = resolve_required_manifest_input(manifest, key="aermod_cell_attributes")
     cell_counts = read_table(cell_attributes_path)[[_AERMOD_SOURCE_ID_COLUMN, "person_count"]]
     cell_counts[_AERMOD_SOURCE_ID_COLUMN] = pd.to_numeric(cell_counts[_AERMOD_SOURCE_ID_COLUMN], errors="coerce").astype(int)
+    acs_counts_entry = manifest.get("acs_household_population_cell_counts")
+    if acs_counts_entry:
+        acs_counts_path = resolve_required_manifest_input(
+            manifest, key="acs_household_population_cell_counts"
+        )
+        acs_counts = read_table(acs_counts_path)[
+            [_AERMOD_SOURCE_ID_COLUMN, "acs_household_population"]
+        ]
+        cell_counts = _attach_acs_household_counts(cell_counts, acs_counts)
     grid_lookup = full_exposure_grid[[_AERMOD_SOURCE_ID_COLUMN, "geometry"]].drop_duplicates(subset=[_AERMOD_SOURCE_ID_COLUMN])
     population_counts = gpd.GeoDataFrame(
         grid_lookup.merge(cell_counts, how="inner", on=_AERMOD_SOURCE_ID_COLUMN),

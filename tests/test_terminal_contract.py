@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from impacts.__main__ import _run_presim_from_settings
 from impacts.__main__ import main
 from impacts.config.path_registry import PathRegistry
 from impacts.config.settings_builder import build_settings_from_pilates
@@ -524,7 +525,6 @@ def test_build_settings_from_pilates_template_uses_builtin_impacts_settings(tmp_
     assert config.beam.local_input_folder == "pilates/beam/production"
     assert config.beam.local_output_folder == "beam/beam_output"
     assert config.beam.router_directory == "beam/beam_output/r5/sfbay-cbg5500-weakConn-network"
-    assert config.impacts.emissions.osm_network_folder.endswith("r5/sfbay-cbg5500-weakConn-network")
     assert config.impacts.scenario == "2017-Baseline"
     assert config.impacts.pipeline.inmap is True
     assert config.impacts.dispersions.inmap.isrm_zarr == "~/Workspace/Simulation/sfbay/inmap/isrm_v1.2.1.zarr"
@@ -749,6 +749,8 @@ def test_build_preprocess_manifest_runs_step3_and_registers_intersections(monkey
 
     import impacts.pipeline.preprocessing.step1_collect_inputs as step1_collect_inputs
     import impacts.pipeline.preprocessing.step2_prepare_grids as step2_prepare_grids
+    import impacts.pipeline.preprocessing.step4_assign_raw_population_to_grid as step4_assign_raw_population_to_grid
+    import impacts.pipeline.preprocessing.step5_build_aermod_cell_attributes as step5_build_aermod_cell_attributes
     import impacts.preprocessor as preprocessor_module
 
     config_path = tmp_path / "settings.yaml"
@@ -756,6 +758,7 @@ def test_build_preprocess_manifest_runs_step3_and_registers_intersections(monkey
     output_root = tmp_path / "impacts_output"
     input_root = output_root / "preprocess"
     calls = {}
+    preprocessing_steps = []
 
     settings = SimpleNamespace(
         run=SimpleNamespace(region="sfbay", start_year=2018),
@@ -869,12 +872,24 @@ def test_build_preprocess_manifest_runs_step3_and_registers_intersections(monkey
 
     monkeypatch.setattr(step1_collect_inputs, "run", _fake_step1)
     monkeypatch.setattr(step2_prepare_grids, "run", _fake_step2)
+
+    def _fake_step4(*_args, **_kwargs):
+        preprocessing_steps.append("assign_population")
+        return None, None, None, None
+
+    def _fake_step5(*_args, **_kwargs):
+        preprocessing_steps.append("build_aermod_attributes")
+        return None
+
+    monkeypatch.setattr(step4_assign_raw_population_to_grid, "run", _fake_step4)
+    monkeypatch.setattr(step5_build_aermod_cell_attributes, "run", _fake_step5)
     fake_step3_module = ModuleType("impacts.pipeline.preprocessing.step3_integrate_grids")
     fake_step3_module.run = _fake_step3
     monkeypatch.setitem(sys.modules, "impacts.pipeline.preprocessing.step3_integrate_grids", fake_step3_module)
 
     manifest = preprocessor_module.build_preprocess_manifest(config_path)
 
+    assert preprocessing_steps == ["assign_population", "build_aermod_attributes"]
     assert calls["step3"]["input_root"] == input_root
     assert manifest["maintained_execution_path"] == [
         "impacts.pipeline.workflow.step1_process_emissions",
@@ -902,6 +917,47 @@ def test_cli_fleet_uses_activities_manifest(monkeypatch, tmp_path: Path) -> None
 
     assert main(["fleet", "--activities-manifest", str(tmp_path / "activities_manifest.yaml")]) == 0
     assert captured["activities_manifest_path"].endswith("activities_manifest.yaml")
+
+
+def test_presim_runs_activities_then_fleet_from_manifest(monkeypatch, tmp_path: Path) -> None:
+    calls = []
+    manifest_path = tmp_path / "activities_manifest.yaml"
+    settings = SimpleNamespace(impacts=SimpleNamespace())
+    monkeypatch.setattr("impacts.__main__.load_settings_from_yaml", lambda _: settings)
+
+    def _ensure_activities(loaded_settings, config_path):
+        calls.append(("activities", loaded_settings, config_path))
+        return {"activities_manifest_path": str(manifest_path)}
+
+    def _run_fleet(*, activities_manifest_path):
+        calls.append(("fleet", activities_manifest_path))
+
+    monkeypatch.setattr("impacts.provisioner.ensure_emfac_activities_outputs", _ensure_activities)
+    monkeypatch.setattr("impacts.provisioner.run_fleet", _run_fleet)
+
+    config_path = tmp_path / "settings.yaml"
+    _run_presim_from_settings(str(config_path))
+
+    assert calls == [
+        ("activities", settings, Path(config_path)),
+        ("fleet", str(manifest_path)),
+    ]
+
+
+def test_pipeline_runs_presim_before_postsim_without_presim_switches(monkeypatch, tmp_path: Path) -> None:
+    calls = []
+    monkeypatch.setattr(
+        "impacts.__main__._run_presim_from_settings",
+        lambda path: calls.append(("presim", path)),
+    )
+    monkeypatch.setattr(
+        "impacts.__main__._run_postsim_from_settings",
+        lambda path: calls.append(("postsim", path)),
+    )
+
+    config_path = tmp_path / "settings.yaml"
+    assert main(["pipeline", "--config", str(config_path)]) == 0
+    assert calls == [("presim", str(config_path)), ("postsim", str(config_path))]
 
 
 def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_path: Path):
@@ -1304,6 +1360,7 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
 
             class analysis:
                 delta_baseline_concentration_distribution_file = str(baseline_path)
+                basemap = "none"
                 sector_targets = [
                     SimpleNamespace(
                         source="mobile_onroad",
@@ -1343,6 +1400,7 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
     def _fake_step4(*, output_dir: Path, **_kwargs):
         output_dirs["step4"] = Path(output_dir)
         step4_calls["called"] = True
+        step4_calls["basemap"] = _kwargs["basemap"]
         return {"step4_output": str(Path(output_dir) / "concentration.png")}
 
     def _fake_step6(*, output_dir: Path, delta_baseline_concentration_path: str, **_kwargs):
@@ -1392,6 +1450,7 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
         "step7": output_root / "postprocess" / "delta_exposure",
     }
     assert step4_calls["called"] is True
+    assert step4_calls["basemap"] == "none"
     assert step6_calls["delta_baseline_concentration_path"] == str(baseline_path.resolve())
     assert step7_calls["concentration_delta_path"] == str(
         output_root / "postprocess" / "delta_concentrations" / "concentration_delta.parquet"

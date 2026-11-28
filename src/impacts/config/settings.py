@@ -669,7 +669,7 @@ class Analysis:
     delta_baseline_concentration_distribution_file: Optional[str] = None
     inventory_targets: List[AnalysisTarget] = field(default_factory=list)
     sector_targets: List[AnalysisSectorTarget] = field(default_factory=list)
-    skip_web_tiles: bool = False
+    basemap: str = "carto"
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Analysis":
@@ -679,7 +679,7 @@ class Analysis:
                 "delta_baseline_concentration_distribution_file",
                 "targets",
                 "inventory_targets",
-                "skip_web_tiles",
+                "basemap",
             },
             "impacts.analysis",
         )
@@ -705,7 +705,7 @@ class Analysis:
             and raw_inventory_targets is None
             and all(v is None for v in raw_pollutant_targets.values())
             and payload.get("delta_baseline_concentration_distribution_file") is None
-            and payload.get("skip_web_tiles") is None
+            and payload.get("basemap") is None
         ):
             return cls()
         if raw_inventory_targets is None:
@@ -725,15 +725,20 @@ class Analysis:
             raw_pollutant_targets=raw_pollutant_targets,
             path_prefix="impacts.analysis.targets",
         )
+        raw_basemap = payload.get("basemap")
+        basemap = _required_string(
+            "carto" if raw_basemap is None else raw_basemap,
+            "impacts.analysis.basemap",
+        )
+        if basemap not in {"carto", "none"}:
+            raise ValueError("impacts.analysis.basemap must be one of: carto, none")
         return cls(
             delta_baseline_concentration_distribution_file=_optional_string(
                 payload.get("delta_baseline_concentration_distribution_file")
             ),
             inventory_targets=inventory_targets,
             sector_targets=sector_targets,
-            skip_web_tiles=_required_bool(
-                payload.get("skip_web_tiles", False), "impacts.analysis.skip_web_tiles"
-            ),
+            basemap=basemap,
         )
 
 @dataclass(frozen=True)
@@ -821,22 +826,6 @@ class Impacts:
 @dataclass(frozen=True)
 class Pipeline:
     @dataclass(frozen=True)
-    class Presim:
-        activities: bool = True
-        fleet: bool = True
-
-        @classmethod
-        def from_dict(cls, payload: Dict[str, Any]) -> "Pipeline.Presim":
-            _reject_unknown_keys(payload, {"activities", "fleet"}, "impacts.pipeline.presim")
-            def _flag(key: str) -> bool:
-                val = payload.get(key)
-                return True if val is None else bool(val)
-            return cls(
-                activities=_flag("activities"),
-                fleet=_flag("fleet"),
-            )
-
-    @dataclass(frozen=True)
     class Postsim:
         emissions: bool = True
         inmap: bool = True
@@ -860,24 +849,14 @@ class Pipeline:
                 exposure=_flag("exposure"),
             )
 
-    presim: "Pipeline.Presim" = field(default_factory=Presim)
     postsim: "Pipeline.Postsim" = field(default_factory=Postsim)
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Pipeline":
-        _reject_unknown_keys(payload, {"presim", "postsim"}, "impacts.pipeline")
+        _reject_unknown_keys(payload, {"postsim"}, "impacts.pipeline")
         return cls(
-            presim=Pipeline.Presim.from_dict(dict(payload.get("presim", {}) or {})),
             postsim=Pipeline.Postsim.from_dict(dict(payload.get("postsim", {}) or {})),
         )
-
-    @property
-    def activities(self) -> bool:
-        return self.presim.activities
-
-    @property
-    def fleet(self) -> bool:
-        return self.presim.fleet
 
     @property
     def emissions(self) -> bool:
@@ -985,10 +964,6 @@ class ImpactsSettings:
                 "seed": self.impacts.seed,
                 "scenario": self.impacts.scenario,
                 "pipeline": {
-                    "presim": {
-                        "activities": self.impacts.pipeline.presim.activities,
-                        "fleet": self.impacts.pipeline.presim.fleet,
-                    },
                     "postsim": {
                         "emissions": self.impacts.pipeline.postsim.emissions,
                         "inmap": self.impacts.pipeline.postsim.inmap,
@@ -1053,8 +1028,8 @@ class ImpactsSettings:
                     },
                     "analysis": {
                         **(
-                            {"skip_web_tiles": True}
-                            if self.impacts.analysis.skip_web_tiles
+                            {"basemap": self.impacts.analysis.basemap}
+                            if self.impacts.analysis.basemap != "carto"
                             else {}
                         ),
                         **(

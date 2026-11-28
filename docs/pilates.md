@@ -14,9 +14,15 @@ presim --config /app/workspace/settings.yaml
 postsim --config /app/workspace/settings.yaml
 ```
 
+## Run order and fleet handoff
+
+PILATES owns the cross-model order. Its single IMPACTS-enabled choice runs `presim` before the first BEAM run, makes the generated fleet available to BEAM through its normal artifact handoff, then runs `postsim` after the final BEAM run. PILATES does not need separate switches for presim activities or fleet. IMPACTS does not launch BEAM.
+
+`presim` ensures EMFAC activities first, writes `activities_manifest.yaml`, then runs fleet generation from that manifest. The manifest records the passenger and freight activity, fleet, and rate output paths. PILATES should register the actual generated files with Consist and hand the matching fleet files to BEAM. The manifest is IMPACTS' activities-to-fleet contract; `postsim --config` does not accept a separate fleet manifest. Postsim reads BEAM inputs through the settings and mounted input paths.
+
 Mount the persistent PILATES run workspace at `/app/workspace`, the BEAM input tree at `/app/beam_input`, and one durable shared cache directory at `/app/impacts_cache`. The bridge settings should point IMPACTS outputs and run-specific inputs into `/app/workspace`, BEAM inputs into `/app/beam_input`, and set `impacts.shared_input_cache_dir` to `/app/impacts_cache`. PILATES should mount the same host cache for presim and postsim; by default its host location is `<run.output_directory>/.pilates-cache/impacts`, outside timestamped run folders. IMPACTS stores ISRM copies under `isrm/` and extracted EMFAC raw archives under `emfac_raw/<archive-key>/` within that shared directory.
 
-For offline runs, set `impacts.analysis.skip_web_tiles: true`. IMPACTS still writes the plots with concentration layers, road overlays, and scale bars, without requesting Carto tiles.
+For offline runs, set `impacts.analysis.basemap: none`. IMPACTS still writes the plots with concentration layers, road overlays, and scale bars, without requesting Carto tiles.
 
 ## OSM input selection
 
@@ -118,9 +124,6 @@ impacts:
   seed: 0
   scenario: 2018-Baseline
   pipeline:
-    presim:
-      activities: true
-      fleet: true
     postsim:
       emissions: true
       inmap: true

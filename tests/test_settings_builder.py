@@ -1,3 +1,5 @@
+import pytest
+
 from impacts.config.settings_builder import _deep_merge
 from impacts.config.settings_builder import build_settings_from_pilates
 
@@ -62,7 +64,16 @@ def test_impacts_override_does_not_clobber_other_defaults():
     }
     settings = build_settings_from_pilates(bridge)
     assert settings.impacts.pipeline.postsim.emissions is True
-    assert settings.impacts.pipeline.presim.fleet is True
+    assert "presim" not in settings.to_dict()["impacts"]["pipeline"]
+
+
+def test_presim_does_not_accept_independent_activity_or_fleet_switches():
+    bridge = {
+        **_MINIMAL_BRIDGE,
+        "impacts": {"pipeline": {"presim": {"activities": False, "fleet": False}}},
+    }
+    with pytest.raises(ValueError, match="Unsupported keys under impacts.pipeline"):
+        build_settings_from_pilates(bridge)
 
 
 def test_scenario_defaults_to_start_year_when_not_supplied():

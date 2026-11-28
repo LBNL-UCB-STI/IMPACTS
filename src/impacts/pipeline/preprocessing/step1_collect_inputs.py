@@ -180,6 +180,25 @@ def run(
         population_inputs["h5"] = manifest_inputs["exposure_population_h5"]
         population_inputs["year"] = int(settings.run.start_year)
 
+        from ...acs_data import acquire_acs_tables
+
+        log_substep_banner("1.6", "acquire baseline-year ACS summary tables", logger=logger)
+        if impacts.shared_input_cache_dir:
+            acs_cache_root = Path(resolve_path(impacts.shared_input_cache_dir, config_path))
+        else:
+            acs_cache_root = Path(
+                resolve_required_path(
+                    impacts.local_input_folder,
+                    config_path,
+                    "impacts.local_input_folder",
+                )
+            ) / "input_cache"
+        acs_tables = acquire_acs_tables(settings.run.start_year, acs_cache_root)
+        population_inputs["acs_tables"] = acs_tables
+        population_inputs["acs_manifest"] = str(
+            acs_cache_root / "acs" / str(settings.run.start_year) / "manifest.json"
+        )
+
     log_substep_banner("1.1", "register BEAM output files", logger=logger)
     progress = make_progress("Preprocess Step 1.1", total=3, unit="task", leave=False)
     try:

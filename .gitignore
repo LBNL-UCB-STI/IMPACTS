@@ -75,6 +75,7 @@ output/
 workspace/
 downstream/
 example/
+/impacts/impacts_inputs/input_cache/
 
 # Virtual environments and local Python config
 .venv/

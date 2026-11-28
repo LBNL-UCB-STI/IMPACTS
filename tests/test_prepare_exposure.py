@@ -10,6 +10,7 @@ from shapely.geometry import Polygon
 from impacts.manifest.schema import PipelineConfig
 from impacts.pipeline.workflow.step4_prepare_exposure import _prepare_aermod_exposure_inputs
 from impacts.pipeline.workflow.step4_prepare_exposure import _build_full_exposure_grid
+from impacts.pipeline.workflow.step4_prepare_exposure import _attach_acs_household_counts
 
 
 def _pipeline(
@@ -59,6 +60,18 @@ def _pipeline(
             "primary_pm25_integration_strategy": primary_pm25_integration_strategy,
         }
     )
+
+
+def test_attach_acs_household_counts_preserves_raw_counts_and_fills_unassigned_cells() -> None:
+    raw = pd.DataFrame({"aermod_cell_id": [11, 22], "person_count": [4, 7]})
+    acs = pd.DataFrame({"aermod_cell_id": [11], "acs_household_population": [3.5]})
+
+    result = _attach_acs_household_counts(raw, acs)
+
+    assert result.to_dict("records") == [
+        {"aermod_cell_id": 11, "person_count": 4, "acs_household_population": 3.5},
+        {"aermod_cell_id": 22, "person_count": 7, "acs_household_population": 0.0},
+    ]
 
 
 def test_build_full_exposure_grid_uses_inmap_secondary_and_aermod_primary(tmp_path: Path) -> None:

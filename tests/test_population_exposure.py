@@ -10,9 +10,10 @@ from shapely.geometry import box
 from impacts.manifest.file_ops import file_entry
 from impacts.manifest.schema import PipelineConfig
 from impacts.pipeline.preprocessing.step1_collect_inputs import _resolve_exposure_population_h5
-from impacts.pipeline.preprocessing.step4_build_cell_attributes import _classify_urban
-from impacts.pipeline.preprocessing.step4_build_cell_attributes import _counts_from_joined
-from impacts.pipeline.preprocessing.step4_build_cell_attributes import run as run_cell_attribute_step
+from impacts.pipeline.preprocessing.step4_assign_raw_population_to_grid import run as run_population_assignment_step
+from impacts.pipeline.preprocessing.step5_build_aermod_cell_attributes import _classify_urban
+from impacts.pipeline.preprocessing.step5_build_aermod_cell_attributes import _complete_cell_attributes
+from impacts.pipeline.preprocessing.step5_build_aermod_cell_attributes import run as run_cell_attribute_step
 
 
 def _pipeline(
@@ -57,23 +58,20 @@ def _pipeline(
     )
 
 
-def test_counts_from_joined_keeps_unpopulated_domain_cells(tmp_path: Path) -> None:
-    joined = pd.DataFrame(
-        {
-            "person_id": [1, 2, 3, 4, 5],
-            "aermod_cell_id": [10, 10, 20, 20, 20],
-        }
-    )
+def test_cell_attributes_keep_unpopulated_domain_cells() -> None:
     aermod_grid = pd.DataFrame({"aermod_cell_id": [10, 20, 30]})
+    population_counts = pd.DataFrame(
+        {"aermod_cell_id": [10, 20], "person_count": [2, 3]}
+    )
 
-    result = _counts_from_joined(joined, aermod_grid=aermod_grid, working_dir=tmp_path)
+    result = _complete_cell_attributes(aermod_grid, population_counts)
 
     assert result["aermod_cell_id"].tolist() == [10, 20, 30]
     assert result["person_count"].tolist() == [2, 3, 0]
     assert result["source_urban_class"].tolist() == [0, 0, 0]
 
 
-def test_population_step_writes_zero_attributes_without_population_inputs(tmp_path: Path) -> None:
+def test_population_and_aermod_steps_have_separate_outputs(tmp_path: Path) -> None:
     grid_path = tmp_path / "aermod_grid.parquet"
     grid = gpd.GeoDataFrame(
         {"aermod_cell_id": [10, 20]},
@@ -82,14 +80,20 @@ def test_population_step_writes_zero_attributes_without_population_inputs(tmp_pa
     )
     grid.to_parquet(grid_path, index=False)
 
-    cell_path, staged_path, assignment = run_cell_attribute_step(
+    staged_path, counts_path, assignment, household_metadata_path = run_population_assignment_step(
         _pipeline(tmp_path, grid_path),
         tmp_path / "preprocess",
         population_inputs={},
     )
 
     assert staged_path is None
+    assert counts_path is None
     assert assignment is None
+    assert household_metadata_path is None
+    cell_path = run_cell_attribute_step(
+        _pipeline(tmp_path, grid_path),
+        tmp_path / "preprocess",
+    )
     result = pd.read_parquet(cell_path)
     assert result.to_dict(orient="records") == [
         {"aermod_cell_id": 10, "person_count": 0, "source_urban_class": 0},
@@ -117,7 +121,7 @@ def test_raw_urbansim_h5_assigns_all_residents_once(tmp_path: Path) -> None:
         store.put(
             "/2018/households",
             pd.DataFrame(
-                {"household_id": [7, 8, 9], "block_id": [70, 80, 90]}
+                {"household_id": [7, 8, 9], "block_id": [70, 80, 90], "persons": [2, 1, 1]}
             ).set_index("household_id"),
         )
         store.put(
@@ -125,6 +129,7 @@ def test_raw_urbansim_h5_assigns_all_residents_once(tmp_path: Path) -> None:
             pd.DataFrame(
                 {
                     "block_id": [70, 80, 90],
+                    "county_id": ["06001", "06001", "06001"],
                     "x": [0.5, None, 3.0],
                     "y": [0.5, None, 3.0],
                 }
@@ -136,8 +141,9 @@ def test_raw_urbansim_h5_assigns_all_residents_once(tmp_path: Path) -> None:
             kind="local", path=population_h5, staged_path=population_h5
         ),
         "year": 2018,
+        "acs_tables": {"1yr": {}, "5yr": {}},
     }
-    cell_path, staged_path, assignment = run_cell_attribute_step(
+    staged_path, counts_path, assignment, household_metadata_path = run_population_assignment_step(
         _pipeline(tmp_path, grid_path, exposure_enabled=True, output_epsg=4326),
         tmp_path / "preprocess",
         population_inputs=inputs,
@@ -150,9 +156,23 @@ def test_raw_urbansim_h5_assigns_all_residents_once(tmp_path: Path) -> None:
         "residents_outside_grid": 1,
     }
     assert staged_path is not None
+    assert counts_path is not None
+    assert household_metadata_path is not None
+    assert not (tmp_path / "preprocess" / "aermod_cell_attributes.parquet").exists()
     assigned = pd.read_parquet(staged_path)
     assert assigned["person_id"].tolist() == [1, 2]
     assert assigned["aermod_cell_id"].tolist() == [10, 10]
+    households = pd.read_parquet(household_metadata_path)
+    assert households[["household_id", "county_geoid", "household_size"]].to_dict("records") == [
+        {"household_id": 7, "county_geoid": "06001", "household_size": 2},
+        {"household_id": 8, "county_geoid": "06001", "household_size": 1},
+        {"household_id": 9, "county_geoid": "06001", "household_size": 1},
+    ]
+    cell_path = run_cell_attribute_step(
+        _pipeline(tmp_path, grid_path, exposure_enabled=True, output_epsg=4326),
+        tmp_path / "preprocess",
+        population_counts_path=counts_path,
+    )
     counts = pd.read_parquet(cell_path).set_index("aermod_cell_id")["person_count"]
     assert counts.loc[10] == 2
 

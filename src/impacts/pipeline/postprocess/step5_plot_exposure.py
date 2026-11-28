@@ -66,10 +66,14 @@ _BV_COLORS: dict[tuple[int, int], str] = {
 # InMAP exposure aggregation
 # ---------------------------------------------------------------------------
 
-def _aggregate_exposure_to_inmap(pop_gdf, conc_gdf, inmap_gdf, *, output_dir: Path):
+def _aggregate_exposure_to_inmap(
+    pop_gdf, conc_gdf, inmap_gdf, *, output_dir: Path, population_column: str = "person_count"
+):
     import duckdb
 
-    pop_df = pd.DataFrame(pop_gdf[["aermod_cell_id", "person_count"]])
+    if population_column not in {"person_count", "acs_household_population"}:
+        raise ValueError(f"Unsupported exposure population column: {population_column}")
+    pop_df = pd.DataFrame(pop_gdf[["aermod_cell_id", population_column]])
     conc_df = pd.DataFrame(conc_gdf[["aermod_cell_id", "inmap_cell_id", "TotalPM25"]])
 
     con = duckdb.connect()
@@ -78,14 +82,14 @@ def _aggregate_exposure_to_inmap(pop_gdf, conc_gdf, inmap_gdf, *, output_dir: Pa
         con.register("pop_tbl", pop_df)
         con.register("conc_tbl", conc_df)
 
-        result_df = con.execute("""
+        result_df = con.execute(f"""
             SELECT
                 TRY_CAST(c.inmap_cell_id AS BIGINT) AS inmap_cell_id,
-                SUM(TRY_CAST(p.person_count AS DOUBLE)) AS population,
-                SUM(TRY_CAST(c.TotalPM25 AS DOUBLE) * TRY_CAST(p.person_count AS DOUBLE)) AS exposure_burden
+                SUM(TRY_CAST(p."{population_column}" AS DOUBLE)) AS population,
+                SUM(TRY_CAST(c.TotalPM25 AS DOUBLE) * TRY_CAST(p."{population_column}" AS DOUBLE)) AS exposure_burden
             FROM pop_tbl p
             INNER JOIN conc_tbl c ON p.aermod_cell_id = c.aermod_cell_id
-            WHERE TRY_CAST(p.person_count AS DOUBLE) > 0
+            WHERE TRY_CAST(p."{population_column}" AS DOUBLE) > 0
               AND TRY_CAST(c.TotalPM25 AS DOUBLE) IS NOT NULL
               AND TRY_CAST(c.inmap_cell_id AS BIGINT) IS NOT NULL
             GROUP BY c.inmap_cell_id
@@ -121,6 +125,7 @@ def _plot_inmap_scalar(
     cmap,
     out_path: Path,
     gamma: float = 1.0,
+    basemap: str = "carto",
 ) -> Optional[str]:
     values = inmap_exposure_gdf[column].dropna()
     positive = values[values > 0]
@@ -147,7 +152,7 @@ def _plot_inmap_scalar(
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymin, ymax)
     _add_network(ax, net_gdf)
-    _add_basemap(ax, crs=plot_gdf.crs)
+    _add_basemap(ax, crs=plot_gdf.crs, basemap=basemap)
     _add_colorbar(fig, ax, cmap, vmax, colorbar_label, norm=norm, intensity_alpha=True)
 
     ax.set_title(title, fontsize=MAP_TITLE_FONTSIZE, pad=16)
@@ -193,7 +198,34 @@ def _tertile_classes(values: pd.Series) -> pd.Series:
     return pd.qcut(values.rank(method="first"), q=3, labels=[0, 1, 2]).astype(int)
 
 
-def _plot_bivariate(inmap_exposure_gdf, net_gdf, out_path: Path) -> Optional[str]:
+def _combine_population_exposure_frames(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    combined = None
+    for basis, frame in frames.items():
+        if frame["inmap_cell_id"].duplicated().any():
+            raise ValueError(f"{basis} exposure results must contain one row per inmap_cell_id")
+        metrics = frame[
+            ["inmap_cell_id", "population", "exposure_burden", "pwc_pm25"]
+        ].rename(
+            columns={
+                "population": f"{basis}_population",
+                "exposure_burden": f"{basis}_exposure_burden",
+                "pwc_pm25": f"{basis}_pwc_pm25",
+            }
+        )
+        combined = metrics if combined is None else combined.merge(
+            metrics, on="inmap_cell_id", how="outer", validate="one_to_one"
+        )
+    return combined if combined is not None else pd.DataFrame(columns=["inmap_cell_id"])
+
+
+def _plot_bivariate(
+    inmap_exposure_gdf,
+    net_gdf,
+    out_path: Path,
+    *,
+    basemap: str = "carto",
+    population_label: str = "population",
+) -> Optional[str]:
     from matplotlib.colors import BoundaryNorm, ListedColormap
 
     merged = inmap_exposure_gdf[
@@ -234,11 +266,11 @@ def _plot_bivariate(inmap_exposure_gdf, net_gdf, out_path: Path) -> Optional[str
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymin, ymax)
     _add_network(ax, net_gdf)
-    _add_basemap(ax, crs=inmap_exposure_gdf.crs)
+    _add_basemap(ax, crs=inmap_exposure_gdf.crs, basemap=basemap)
     _add_bivariate_legend(ax)
 
     ax.set_title(
-        "Population-weighted PM₂.₅ × population by InMAP cell",
+        f"Population-weighted PM₂.₅ × {population_label} by InMAP cell",
         fontsize=MAP_TITLE_FONTSIZE,
         pad=16,
     )
@@ -262,6 +294,7 @@ def run(
     network_path: str,
     inmap_cells_path: str | None = None,
     output_dir: Path,
+    basemap: str = "carto",
 ) -> dict[str, str]:
     """Render all exposure maps.
 
@@ -285,7 +318,7 @@ def run(
     output_dir = Path(output_dir)
 
     logger.info("Loading population …")
-    pop_gdf = gpd.read_parquet(population_path, columns=["aermod_cell_id", "person_count", "geometry"])
+    pop_gdf = gpd.read_parquet(population_path)
     logger.info("Loading concentration …")
     conc_gdf = pd.read_parquet(concentration_path, columns=["aermod_cell_id", "inmap_cell_id", "TotalPM25"])
     logger.info("Loading network …")
@@ -301,57 +334,92 @@ def run(
         net_gdf = net_gdf.to_crs(pop_gdf.crs)
     if inmap_gdf.crs != pop_gdf.crs:
         inmap_gdf = inmap_gdf.to_crs(pop_gdf.crs)
-    logger.info("Aggregating exposure metrics to InMAP cells …")
-    inmap_exposure_gdf = _aggregate_exposure_to_inmap(pop_gdf, conc_gdf, inmap_gdf, output_dir=output_dir)
-    inmap_exposure_gdf = inmap_exposure_gdf.loc[
-        inmap_exposure_gdf["population"].gt(0)
-        & inmap_exposure_gdf["pwc_pm25"].notna()
-    ].copy()
-    if inmap_exposure_gdf.empty:
-        logger.warning("Skipping Step 5: no populated InMAP cells with PM2.5 concentration.")
-        return {}
-
     outputs: dict[str, str] = {}
-
-    progress = _map_progress(3, "Postprocess Step 5")
+    population_bases = [
+        ("raw_urbansim", "person_count", "population", "Population"),
+    ]
+    if "acs_household_population" in pop_gdf.columns:
+        population_bases.append(
+            (
+                "acs_household_adjusted",
+                "acs_household_population",
+                "acs_household_population",
+                "ACS-adjusted household population",
+            )
+        )
+    logger.info("Aggregating exposure metrics to InMAP cells for %d population bases …", len(population_bases))
+    progress = _map_progress(3 * len(population_bases), "Postprocess Step 5")
+    exposure_frames = {}
     try:
-        _set_progress_task(progress, "population inmap", step_label="Postprocess Step 5")
-        result = _plot_inmap_scalar(
-            inmap_exposure_gdf,
-            net_gdf,
-            column="population",
-            title="Population by InMAP cell",
-            colorbar_label="Population per InMAP cell",
-            cmap=CMAP_POP,
-            out_path=output_dir / "population.png",
-            gamma=0.55,
-        )
-        if result:
-            outputs["population_map"] = result
-        _advance_progress(progress)
+        for basis, population_column, filename_prefix, label in population_bases:
+            output_prefix = "" if basis == "raw_urbansim" else f"{basis}_"
+            _set_progress_task(progress, f"{basis} exposure", step_label="Postprocess Step 5")
+            inmap_exposure_gdf = _aggregate_exposure_to_inmap(
+                pop_gdf,
+                conc_gdf,
+                inmap_gdf,
+                output_dir=output_dir,
+                population_column=population_column,
+            )
+            inmap_exposure_gdf = inmap_exposure_gdf.loc[
+                inmap_exposure_gdf["population"].gt(0)
+                & inmap_exposure_gdf["pwc_pm25"].notna()
+            ].copy()
+            if not inmap_exposure_gdf.empty:
+                exposure_frames[basis] = inmap_exposure_gdf
 
-        _set_progress_task(progress, "pwc inmap", step_label="Postprocess Step 5")
-        result = _plot_inmap_scalar(
-            inmap_exposure_gdf,
-            net_gdf,
-            column="pwc_pm25",
-            title="Population-weighted PM₂.₅ concentration by InMAP cell",
-            colorbar_label="Population-weighted PM₂.₅ (μg/m³)",
-            cmap=CMAP_PM25,
-            out_path=output_dir / "pwc_inmap.png",
-            gamma=0.65,
-        )
-        if result:
-            outputs["pwc_inmap_map"] = result
-        _advance_progress(progress)
+                result = _plot_inmap_scalar(
+                    inmap_exposure_gdf,
+                    net_gdf,
+                    column="population",
+                    title=f"{label} by InMAP cell",
+                    colorbar_label=f"{label} per InMAP cell",
+                    cmap=CMAP_POP,
+                    out_path=output_dir / f"{filename_prefix}.png",
+                    gamma=0.55,
+                    basemap=basemap,
+                )
+                if result:
+                    outputs[f"{output_prefix}population_map"] = result
 
-        _set_progress_task(progress, "bivariate", step_label="Postprocess Step 5")
-        result = _plot_bivariate(inmap_exposure_gdf, net_gdf, output_dir / "bivariate.png")
-        if result:
-            outputs["bivariate_map"] = result
-        _advance_progress(progress)
+                result = _plot_inmap_scalar(
+                    inmap_exposure_gdf,
+                    net_gdf,
+                    column="pwc_pm25",
+                    title=f"Population-weighted PM₂.₅ for {label} by InMAP cell",
+                    colorbar_label="Population-weighted PM₂.₅ (μg/m³)",
+                    cmap=CMAP_PM25,
+                    out_path=output_dir / f"{filename_prefix}_pwc_inmap.png",
+                    gamma=0.65,
+                    basemap=basemap,
+                )
+                if result:
+                    outputs[f"{output_prefix}pwc_inmap_map"] = result
+
+                result = _plot_bivariate(
+                    inmap_exposure_gdf,
+                    net_gdf,
+                    output_dir / f"{filename_prefix}_bivariate.png",
+                    basemap=basemap,
+                    population_label=label,
+                )
+                if result:
+                    outputs[f"{output_prefix}bivariate_map"] = result
+            for _ in range(3):
+                _advance_progress(progress)
     finally:
         _close_progress(progress)
+
+    if not exposure_frames:
+        logger.warning("Skipping Step 5: no populated InMAP cells with PM2.5 concentration.")
+        return {}
+    exposure_summary = _combine_population_exposure_frames(exposure_frames)
+    exposure_summary = inmap_gdf[["inmap_cell_id", "geometry"]].merge(
+        exposure_summary, on="inmap_cell_id", how="inner", validate="one_to_one"
+    )
+    table_path = output_dir / "population_exposure.parquet"
+    exposure_summary.to_parquet(table_path, index=False)
+    outputs["population_exposure"] = str(table_path)
 
     logger.info("Postprocess Step 5 complete: %d maps written to %s", len(outputs), output_dir)
     return outputs

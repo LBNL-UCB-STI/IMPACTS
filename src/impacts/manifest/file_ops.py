@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 from typing import Any
@@ -8,142 +7,22 @@ from typing import Dict
 from typing import Optional
 
 
-def _parse_scalar(raw: str):
-    value = raw.strip()
-    if value in ("", "null", "Null", "NULL", "none", "None", "~"):
-        return None
-    if value in ("true", "True", "TRUE"):
-        return True
-    if value in ("false", "False", "FALSE"):
-        return False
-    if (value.startswith('"') and value.endswith('"')) or (
-        value.startswith("'") and value.endswith("'")
-    ):
-        return value[1:-1]
-    try:
-        if "." in value:
-            return float(value)
-        return int(value)
-    except ValueError:
-        return value
-
-
-def _simple_yaml_load(text: str):
-    records = []
-    for raw_line in text.splitlines():
-        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
-            continue
-        indent = len(raw_line) - len(raw_line.lstrip(" "))
-        stripped = raw_line.strip()
-        records.append((indent, stripped))
-
-    def parse_block(index: int, indent: int):
-        if index >= len(records):
-            return {}, index
-        current_indent, stripped = records[index]
-        if current_indent != indent:
-            return {}, index
-        if stripped.startswith("- "):
-            return parse_list(index, indent)
-        return parse_map(index, indent)
-
-    def parse_map(index: int, indent: int):
-        data: Dict[str, Any] = {}
-        while index < len(records):
-            current_indent, stripped = records[index]
-            if current_indent < indent:
-                break
-            if current_indent > indent:
-                break
-            if stripped.startswith("- "):
-                break
-            if ":" not in stripped:
-                index += 1
-                continue
-            key, raw_val = stripped.split(":", 1)
-            key = key.strip()
-            raw_val = raw_val.strip()
-            index += 1
-            if raw_val != "":
-                data[key] = _parse_scalar(raw_val)
-                continue
-            if index >= len(records):
-                data[key] = None
-                continue
-            next_indent, next_stripped = records[index]
-            if next_indent <= current_indent:
-                data[key] = None
-            elif next_stripped.startswith("- "):
-                value, index = parse_list(index, next_indent)
-                data[key] = value
-            else:
-                value, index = parse_map(index, next_indent)
-                data[key] = value
-        return data, index
-
-    def parse_list(index: int, indent: int):
-        items = []
-        while index < len(records):
-            current_indent, stripped = records[index]
-            if current_indent < indent:
-                break
-            if current_indent != indent or not stripped.startswith("- "):
-                break
-            value = stripped[2:].strip()
-            index += 1
-            if value:
-                items.append(_parse_scalar(value))
-                continue
-            if index >= len(records):
-                items.append(None)
-                continue
-            next_indent, next_stripped = records[index]
-            if next_indent <= current_indent:
-                items.append(None)
-            elif next_stripped.startswith("- "):
-                value, index = parse_list(index, next_indent)
-                items.append(value)
-            else:
-                value, index = parse_map(index, next_indent)
-                items.append(value)
-        return items, index
-
-    parsed, _ = parse_block(0, records[0][0] if records else 0)
-    return parsed
-
-
 def load_structured_file(path: str | Path) -> Dict[str, Any]:
     manifest_path = Path(path)
-    text = manifest_path.read_text(encoding="utf-8")
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    import yaml
 
-    try:
-        import yaml  # type: ignore
-
-        loaded = yaml.safe_load(text) or {}
-        if isinstance(loaded, dict):
-            return loaded
-    except Exception:
-        pass
-
-    loaded = _simple_yaml_load(text)
-    if isinstance(loaded, dict):
-        return loaded
-    raise ValueError(f"Could not parse structured file: {manifest_path}")
+    loaded = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(loaded, dict):
+        raise ValueError(f"Expected a mapping in structured file: {manifest_path}")
+    return loaded
 
 
 def write_structured_file(path: str | Path, payload: Dict[str, Any]) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        import yaml  # type: ignore
+    import yaml
 
-        text = yaml.safe_dump(payload, sort_keys=False)
-    except Exception:
-        text = json.dumps(payload, indent=2, sort_keys=False)
+    text = yaml.safe_dump(payload, sort_keys=False)
     output_path.write_text(text, encoding="utf-8")
 
 

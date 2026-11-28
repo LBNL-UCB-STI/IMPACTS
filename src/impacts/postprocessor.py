@@ -341,20 +341,55 @@ def _resolve_optional_population_assignment_paths(
     output_root: Path | None = None,
     registry: "PathRegistry",
 ) -> tuple[Path | None, Path | None]:
+    _, _, _, inputs = _load_context(
+        settings_path, run_manifest_path=run_manifest_path, output_root=output_root,
+    )
+    assignment_keys = ("passenger_vehicles_input", "freight_carriers_input")
+    if any(key in inputs for key in assignment_keys):
+        passenger = (
+            _resolve_input_path(
+                inputs, key="passenger_vehicles_input", output_root=output_root, registry=registry
+            )
+            if "passenger_vehicles_input" in inputs
+            else None
+        )
+        freight = (
+            _resolve_input_path(
+                inputs, key="freight_carriers_input", output_root=output_root, registry=registry
+            )
+            if "freight_carriers_input" in inputs
+            else None
+        )
+        return passenger, freight
+
     passenger_vehicle_types_path, freight_vehicle_types_path = _resolve_vehicle_types_paths(
         settings_path,
         run_manifest_path=run_manifest_path,
         output_root=output_root,
         registry=registry,
     )
-    passenger_candidates = list(
-        passenger_vehicle_types_path.parents[1].glob("urbansim/**/vehicles--*--EM.parquet")
+    passenger_candidates = sorted(
+        path.resolve()
+        for path in passenger_vehicle_types_path.parents[1].glob("urbansim/**/vehicles--*--EM.parquet")
+        if path.is_file()
     )
-    passenger_vehicles_path = passenger_candidates[0].resolve() if passenger_candidates else None
-    freight_candidates = list(
-        freight_vehicle_types_path.parents[1].glob("**/carriers--*--EM.parquet")
+    if len(passenger_candidates) > 1:
+        raise ValueError(
+            "Multiple BEAM passenger assignment files found under "
+            f"{passenger_vehicle_types_path.parents[1]}; narrow the configured BEAM input folder."
+        )
+    freight_candidates = sorted(
+        path.resolve()
+        for path in freight_vehicle_types_path.parents[1].glob("**/carriers--*--EM.parquet")
+        if path.is_file()
     )
-    freight_carriers_path = freight_candidates[0].resolve() if freight_candidates else None
+    if len(freight_candidates) > 1:
+        raise ValueError(
+            "Multiple BEAM freight assignment files found under "
+            f"{freight_vehicle_types_path.parents[1]}; narrow the configured BEAM input folder."
+        )
+    passenger_vehicles_path = passenger_candidates[0] if passenger_candidates else None
+    freight_carriers_path = freight_candidates[0] if freight_candidates else None
     return passenger_vehicles_path, freight_carriers_path
 
 
@@ -726,6 +761,7 @@ def _run_postprocess_steps(
             concentration_path=str(conc_path),
             network_path=str(net_path),
             output_dir=output_dir / "concentrations",
+            basemap=settings.impacts.analysis.basemap,
         )
         for key, value in map_outputs.items():
             outputs[f"concentration_{key}"] = value
@@ -745,6 +781,7 @@ def _run_postprocess_steps(
             network_path=str(net_path),
             inmap_cells_path=str(inmap_cells_path) if inmap_cells_path.exists() else None,
             output_dir=output_dir / "exposure",
+            basemap=settings.impacts.analysis.basemap,
         )
         for key, value in exp_outputs.items():
             outputs[f"exposure_{key}"] = value
@@ -767,6 +804,7 @@ def _run_postprocess_steps(
             delta_baseline_concentration_path=str(delta_baseline_concentration_path),
             network_path=str(net_path),
             output_dir=output_dir / "delta_concentrations",
+            basemap=settings.impacts.analysis.basemap,
         )
         delta_table_path = delta_outputs.get("delta_table")
         for key, value in delta_outputs.items():
@@ -789,6 +827,7 @@ def _run_postprocess_steps(
             network_path=str(net_path),
             inmap_cells_path=str(inmap_cells_path),
             output_dir=output_dir / "delta_exposure",
+            basemap=settings.impacts.analysis.basemap,
         )
         for key, value in delta_exposure_outputs.items():
             outputs[f"delta_exposure_{key}"] = value
@@ -844,6 +883,11 @@ def postprocess_from_pipeline_manifest(
         "postprocess_outputs": postprocess_outputs,
         "validation": {
             "completed": True,
+            "population_source": (
+                pipeline_manifest.get("population_inputs", {})
+                if pipeline_manifest.get("pipeline", {}).get("exposure_enabled")
+                else None
+            ),
         },
         "notes": [
             "Postprocess runs maintained outputs after workflow completion.",

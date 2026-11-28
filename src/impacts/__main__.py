@@ -66,16 +66,10 @@ def _run_presim_from_settings(settings_path: str) -> None:
     from impacts.provisioner import ensure_emfac_activities_outputs
 
     settings = load_settings_from_yaml(settings_path)
-    activities_manifest_path: str | None = None
-    if settings.impacts.pipeline.presim.activities or settings.impacts.pipeline.presim.fleet:
-        activities_manifest = ensure_emfac_activities_outputs(settings, Path(settings_path))
-        activities_manifest_path = activities_manifest["activities_manifest_path"]
-    if settings.impacts.pipeline.presim.fleet:
-        run_fleet(activities_manifest_path=activities_manifest_path)
-    if activities_manifest_path:
-        logger.info("Presim stage complete: activities_manifest=%s", activities_manifest_path)
-    else:
-        logger.info("Presim stage complete: no presim stages enabled")
+    activities_manifest = ensure_emfac_activities_outputs(settings, Path(settings_path))
+    activities_manifest_path = activities_manifest["activities_manifest_path"]
+    run_fleet(activities_manifest_path=activities_manifest_path)
+    logger.info("Presim stage complete: activities_manifest=%s", activities_manifest_path)
 
 
 def _run_postsim_from_settings(
@@ -621,9 +615,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "pipeline":
         _print_pipeline_banner()
-        settings = load_settings_from_yaml(args.config)
-        if settings.impacts.pipeline.presim.activities or settings.impacts.pipeline.presim.fleet:
-            _run_presim_from_settings(args.config)
+        _run_presim_from_settings(args.config)
         _run_postsim_from_settings(args.config)
         logger.info("Pipeline command complete")
         return 0

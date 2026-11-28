@@ -30,9 +30,6 @@ impacts:
   seed: 0
   scenario: 2018-Baseline
   pipeline:
-    presim:
-      activities: true
-      fleet: true
     postsim:
       emissions: true
       inmap: true

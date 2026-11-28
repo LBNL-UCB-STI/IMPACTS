@@ -22,9 +22,6 @@ impacts:
     inmap:
       isrm_zarr: /app/inmap/isrm_v1.2.1.zarr
   pipeline:
-    presim:
-      activities: false
-      fleet: false
     postsim:
       emissions: false
       inmap: false

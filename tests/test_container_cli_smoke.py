@@ -27,7 +27,17 @@ def _run_smoke(tmp_path: Path):
     payload = settings.to_dict()
     payload["impacts"]["local_output_folder"] = str(tmp_path / "impacts_output")
     settings_path.write_text(yaml.safe_dump(payload), encoding="utf-8")
-    assert cli.main(["presim", "--config", str(settings_path)]) == 0
+    activities_manifest = tmp_path / "activities_manifest.yaml"
+    with (
+        patch(
+            "impacts.provisioner.ensure_emfac_activities_outputs",
+            return_value={"activities_manifest_path": str(activities_manifest)},
+        ) as ensure_activities,
+        patch("impacts.provisioner.run_fleet") as run_fleet,
+    ):
+        assert cli.main(["presim", "--config", str(settings_path)]) == 0
+        ensure_activities.assert_called_once()
+        run_fleet.assert_called_once_with(activities_manifest_path=str(activities_manifest))
 
     manifest = tmp_path / "pipeline_manifest.yaml"
     manifest.write_text("output_dir: fixture\n", encoding="utf-8")

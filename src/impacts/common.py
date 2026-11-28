@@ -173,48 +173,39 @@ def find_first_matching(root: str, pattern: str) -> Optional[str]:
     return None
 
 
-def find_preferred_file(root: str, names: list[str]) -> Optional[str]:
+def find_unique_iters_dir(root: str) -> Optional[Path]:
     path = Path(root)
     if not path.exists():
         return None
+    candidates = sorted(candidate for candidate in path.rglob("ITERS") if candidate.is_dir())
+    if len(candidates) > 1:
+        raise ValueError(
+            f"Multiple BEAM ITERS directories found under configured output root {path}; "
+            "set beam.local_output_folder to the directory for the intended BEAM run."
+        )
+    return candidates[0] if candidates else None
+
+
+def _find_unique_preferred_file(root: Path, names: list[str], *, label: str) -> Optional[str]:
+    """Find a preferred file in one configured tree without choosing among duplicate runs."""
     for name in names:
-        direct = path / name
-        if direct.exists():
+        direct = root / name
+        if direct.is_file():
             return str(direct)
-    pending = set(names)
-    found: dict[str, Path] = {}
-    for dirpath, _, _ in _scan_paths_with_progress(path, f"Scanning {path.name} for preferred files"):
-        for name in list(pending):
-            matches = sorted(candidate for candidate in dirpath.glob(name) if candidate.is_file())
-            if not matches:
-                continue
-            found[name] = matches[0]
-            pending.remove(name)
-        if not pending:
-            break
     for name in names:
-        if name in found:
-            return str(found[name])
+        matches = sorted(
+            candidate
+            for candidate in root.rglob(name)
+            if candidate.is_file() and not candidate.name.startswith(".")
+        )
+        if len(matches) > 1:
+            raise ValueError(
+                f"Multiple {label} files named {name} found under {root}; "
+                "set the configured input folder to the intended run or provide the file explicitly."
+            )
+        if matches:
+            return str(matches[0])
     return None
-
-
-def find_latest_iters_dir(root: str) -> Optional[Path]:
-    path = Path(root)
-    if not path.exists():
-        return None
-    latest_candidate: Optional[Path] = None
-    latest_mtime = -1.0
-    for dirpath, dirnames, _ in _scan_paths_with_progress(path, f"Scanning {path.name} for ITERS"):
-        if "ITERS" not in dirnames:
-            continue
-        candidate = dirpath / "ITERS"
-        if not candidate.is_dir():
-            continue
-        candidate_mtime = candidate.stat().st_mtime
-        if candidate_mtime > latest_mtime:
-            latest_candidate = candidate
-            latest_mtime = candidate_mtime
-    return latest_candidate
 
 
 def find_latest_iteration_events(iters_dir: Path) -> Optional[Path]:
@@ -262,43 +253,58 @@ def find_latest_iteration_skims(iters_dir: Path) -> Optional[Path]:
 
 def resolve_beam_network_local_path(root: str) -> str:
     resolved = required_local_path(root, "BEAM output root")
-    network_path = find_preferred_file(resolved, ["network.csv.gz", "network.parquet"])
+    network_path = _find_unique_preferred_file(
+        Path(resolved), ["network.csv.gz", "network.parquet"], label="BEAM network"
+    )
     if network_path:
         return network_path
-    latest_iters_dir = find_latest_iters_dir(resolved)
-    if latest_iters_dir:
-        run_root = latest_iters_dir.parent
-        for candidate in [run_root / "network.csv.gz", run_root / "network.parquet"]:
-            if candidate.exists():
-                return str(candidate)
     raise FileNotFoundError(f"No BEAM network file found under configured BEAM output root: {resolved}")
 
 
 def resolve_emissions_skims_local_path(root: str) -> str:
     resolved = required_local_path(root, "BEAM output root")
-    latest_iters_dir = find_latest_iters_dir(resolved)
-    if latest_iters_dir:
-        latest_skims = find_latest_iteration_skims(latest_iters_dir)
+    iters_dir = find_unique_iters_dir(resolved)
+    if iters_dir:
+        latest_skims = find_latest_iteration_skims(iters_dir)
         if latest_skims:
             return str(latest_skims)
-    for pattern in ("*.skimsEmissions*.parquet",):
-        match = find_first_matching(resolved, pattern)
-        if match:
-            return match
+    matches = sorted(
+        candidate
+        for candidate in Path(resolved).rglob("*.skimsEmissions*.parquet")
+        if candidate.is_file() and not candidate.name.startswith(".")
+    )
+    if len(matches) > 1:
+        raise ValueError(
+            f"Multiple BEAM emissions skims found under {resolved}; set beam.local_output_folder "
+            "to the intended BEAM run or provide a run-specific output directory."
+        )
+    if matches:
+        return str(matches[0])
     raise FileNotFoundError(f"No BEAM skims emissions file found under configured BEAM output root: {resolved}")
 
 
 def resolve_latest_events_local_path(root: str) -> Optional[str]:
-    """Return the latest events file under root, or None if not found."""
+    """Return the BEAM events file for the configured output tree, or None if absent."""
     resolved = Path(root)
     if not resolved.exists():
         return None
-    latest_iters_dir = find_latest_iters_dir(str(resolved))
-    if latest_iters_dir:
-        latest_events = find_latest_iteration_events(latest_iters_dir)
+    iters_dir = find_unique_iters_dir(str(resolved))
+    if iters_dir:
+        latest_events = find_latest_iteration_events(iters_dir)
         if latest_events:
             return str(latest_events)
-    return None
+    matches = sorted(
+        candidate
+        for pattern in ("*.events.parquet", "*.events.csv.gz")
+        for candidate in resolved.rglob(pattern)
+        if candidate.is_file() and not candidate.name.startswith(".")
+    )
+    if len(matches) > 1:
+        raise ValueError(
+            f"Multiple BEAM events files found under {resolved}; set beam.local_output_folder "
+            "to the intended BEAM run."
+        )
+    return str(matches[0]) if matches else None
 
 
 def resolve_osm_pbf_local_path(path: Optional[str]) -> Optional[str]:

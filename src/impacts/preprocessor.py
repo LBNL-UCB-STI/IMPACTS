@@ -184,11 +184,46 @@ def build_preprocess_manifest(
                 source_path=path,
             )
 
-    from .pipeline.preprocessing.step4_build_cell_attributes import run as preprocess_step4
-    aermod_cell_attributes_path, staged_population_path = preprocess_step4(
+    from .pipeline.preprocessing.step4_assign_raw_population_to_grid import run as preprocess_step4
+    (
+        staged_population_path,
+        population_counts_path,
+        population_assignment,
+        household_metadata_path,
+    ) = preprocess_step4(
         pipeline_config,
         input_root,
         population_inputs=step1_outputs.get("population_inputs"),
+    )
+    if population_assignment is not None:
+        step1_outputs["population_inputs"]["assignment"] = population_assignment
+    if staged_population_path:
+        register_local_input(
+            manifest_inputs=manifest_inputs,
+            input_root=input_root,
+            key="staged_population",
+            source_path=staged_population_path,
+        )
+    if population_counts_path:
+        register_local_input(
+            manifest_inputs=manifest_inputs,
+            input_root=input_root,
+            key="population_cell_counts",
+            source_path=population_counts_path,
+        )
+    if household_metadata_path:
+        register_local_input(
+            manifest_inputs=manifest_inputs,
+            input_root=input_root,
+            key="population_households",
+            source_path=household_metadata_path,
+        )
+
+    from .pipeline.preprocessing.step5_build_aermod_cell_attributes import run as preprocess_step5
+    aermod_cell_attributes_path = preprocess_step5(
+        pipeline_config,
+        input_root,
+        population_counts_path=population_counts_path,
     )
     if aermod_cell_attributes_path:
         register_local_input(
@@ -197,13 +232,44 @@ def build_preprocess_manifest(
             key="aermod_cell_attributes",
             source_path=aermod_cell_attributes_path,
         )
-    if staged_population_path:
-        register_local_input(
-            manifest_inputs=manifest_inputs,
-            input_root=input_root,
-            key="staged_population",
-            source_path=staged_population_path,
+
+    if household_metadata_path and step1_outputs["population_inputs"].get("acs_tables"):
+        from .pipeline.preprocessing.step6_calibrate_acs_household_population import run as calibrate_acs_population
+
+        acs_weights_path, acs_summary_path, acs_diagnostics = calibrate_acs_population(
+            household_metadata_path=household_metadata_path,
+            acs_tables=step1_outputs["population_inputs"]["acs_tables"],
+            state_fips=geography.fips.state,
+            county_fips_codes=list(geography.fips.counties),
+            year=settings.run.start_year,
+            output_root=input_root,
         )
+        step1_outputs["population_inputs"]["acs_calibration"] = acs_diagnostics
+        for key, path in (
+            ("acs_household_weights", acs_weights_path),
+            ("acs_household_calibration", acs_summary_path),
+        ):
+            register_local_input(
+                manifest_inputs=manifest_inputs,
+                input_root=input_root,
+                key=key,
+                source_path=path,
+            )
+        if staged_population_path:
+            from .pipeline.preprocessing.step7_assign_acs_household_population_to_grid import run as assign_acs_population
+
+            acs_cell_counts_path, acs_assignment_summary = assign_acs_population(
+                staged_population_entry=manifest_inputs["staged_population"],
+                household_weights_entry=manifest_inputs["acs_household_weights"],
+                output_root=input_root,
+            )
+            step1_outputs["population_inputs"]["acs_assignment"] = acs_assignment_summary
+            register_local_input(
+                manifest_inputs=manifest_inputs,
+                input_root=input_root,
+                key="acs_household_population_cell_counts",
+                source_path=acs_cell_counts_path,
+            )
 
     maintained_execution_path = ["impacts.pipeline.workflow.step1_process_emissions"]
     if pipeline.inmap:
@@ -238,7 +304,6 @@ def build_preprocess_manifest(
         "population_inputs": dict(step1_outputs["population_inputs"]),
         "notes": [
             "Only maintained modules are part of this contract.",
-            "ActivitySim population integration is currently best-effort and relies on staged population tables carrying usable cell ids.",
             f"Settings file registered at {settings_entry_path}",
         ],
     }
@@ -290,6 +355,9 @@ def preprocess_workflow(
             "beam_population_distribution": None,
             "beam_population_counts": None,
             "beam_population_counts_gpkg": None,
+            "acs_household_population_cell_counts": inputs_payload.get(
+                "acs_household_population_cell_counts", {}
+            ).get("staged_path"),
         },
         "pipeline": typed_manifest.to_dict()["pipeline"],
         "population_inputs": typed_manifest.to_dict()["population_inputs"],
