@@ -207,8 +207,6 @@ def test_census_bundle_path_is_resolved_from_beam_region_root(tmp_path: Path) ->
     bundle.touch()
 
     assert _resolve_census_bundle_path("impacts/census/bundle.tar.gz", region_root) == bundle.resolve()
-    with pytest.raises(ValueError, match="does not download Census data at runtime"):
-        _resolve_census_bundle_path(None, region_root)
     with pytest.raises(FileNotFoundError, match="BEAM input region"):
         _resolve_census_bundle_path("impacts/census/missing.tar.gz", region_root)
     with pytest.raises(ValueError, match="stay inside the BEAM input region"):

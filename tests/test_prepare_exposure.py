@@ -102,6 +102,42 @@ def test_prepare_exposure_writes_group_quarters_and_combined_counts(tmp_path: Pa
     assert counts["acs_total_population"].tolist() == [1.25, 10.5]
 
 
+def test_prepare_exposure_without_census_inputs_keeps_raw_population(tmp_path: Path) -> None:
+    grid = gpd.GeoDataFrame(
+        {"aermod_cell_id": [11], "inmap_cell_id": [101]},
+        geometry=[box(0, 0, 100, 100)],
+        crs=26910,
+    )
+    grid_path = tmp_path / "grid.parquet"
+    grid.to_parquet(grid_path)
+    inmap_path = tmp_path / "concentrations.parquet"
+    gpd.GeoDataFrame(
+        {"inmap_cell_id": [101], "TotalPM25": [3.0], "PrimaryPM25": [2.0], "BC": [1.0], "NO2": [1.0]},
+        geometry=[box(0, 0, 100, 100)],
+        crs=26910,
+    ).to_parquet(inmap_path)
+    manifest = {}
+    for key, data in {
+        "staged_population": {"aermod_cell_id": [11], "person_id": [1]},
+        "aermod_cell_attributes": {"aermod_cell_id": [11], "person_count": [1]},
+    }.items():
+        path = tmp_path / f"{key}.parquet"
+        pd.DataFrame(data).to_parquet(path)
+        manifest[key] = file_entry(kind="local", path=path, staged_path=path)
+
+    *_, counts_path = prepare_exposure(
+        pipeline=_pipeline(tmp_path, grid_path),
+        raw_dir=tmp_path / "exposure",
+        inmap_concentrations_path=str(inmap_path),
+        manifest_inputs=manifest,
+    )
+
+    counts = pd.read_parquet(counts_path)
+    assert counts["person_count"].tolist() == [1]
+    assert "acs_household_population" not in counts
+    assert "group_quarters_population" not in counts
+
+
 def test_attach_acs_household_counts_preserves_raw_counts_and_fills_unassigned_cells() -> None:
     raw = pd.DataFrame({"aermod_cell_id": [11, 22], "person_count": [4, 7]})
     acs = pd.DataFrame({"aermod_cell_id": [11], "acs_household_population": [3.5]})

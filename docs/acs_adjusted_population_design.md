@@ -2,9 +2,9 @@
 
 ## Status and scope
 
-When exposure is enabled, IMPACTS requires a baseline-year Census bundle. It calibrates whole-household weights to county ACS controls and assigns weighted residents to the existing grid, then separately allocates group-quarters population. The exposure table reports raw UrbanSim population, ACS-adjusted household population, group-quarters population, and their adjusted total side by side.
+When an optional baseline-year Census bundle is configured, IMPACTS calibrates whole-household weights to county ACS controls and separately allocates group-quarters population. Without a bundle, exposure uses the raw UrbanSim population only. The exposure table reports the raw result in either case and adds ACS-adjusted household, GQ, and combined populations when the bundle is present.
 
-The configured baseline year is `run.start_year` (currently 2018). The supplied bundle must contain ACS 1-year data for `Y` and ACS 5-year data for `Y-4` through `Y`; IMPACTS validates the bundle year and does not download or substitute Census files at runtime.
+The configured baseline year is `run.start_year` (currently 2018). When supplied, the bundle must contain ACS 1-year data for `Y` and ACS 5-year data for `Y-4` through `Y`; IMPACTS validates the bundle year and does not download or substitute Census files at runtime.
 
 For the current baseline, that means:
 

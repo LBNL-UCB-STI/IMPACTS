@@ -51,9 +51,10 @@ member, then extracts it once under
 manifest records the bundle ID, archive and source-manifest checksums, source
 files and vintages, plus the group-quarters allocation totals and methods.
 ACS, P42, and LUCA remain shared bundle inputs; IMPACTS does not copy them into
-each run's input directory. `impacts.exposure.census_bundle` is required when
-exposure is enabled. IMPACTS never downloads ACS or Census source files at
-runtime.
+each run's input directory. `impacts.exposure.census_bundle` identifies the
+archive within the mounted BEAM input tree. It is optional: if unset, IMPACTS
+produces raw UrbanSim exposure without ACS weighting or GQ allocation. IMPACTS
+never downloads ACS or Census source files at runtime.
 
 ## BREATHE container paths
 
