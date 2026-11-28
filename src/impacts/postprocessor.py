@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -13,9 +14,11 @@ from .config.settings_builder import load_settings_from_yaml
 from .manifest.file_ops import load_structured_file
 from .manifest.file_ops import resolve_path
 from .manifest.file_ops import write_structured_file
-from .manifest.schema import PostprocessManifest
 from .manifest.schema import PipelineManifest
 from .manifest.schema import PreprocessManifest
+from .reference_scenario import pin_reference_scenario
+from .reference_scenario import validate_reference_grid
+from .reference_scenario import write_analysis_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +68,12 @@ def _localized_pipeline_manifest(
     output_root: Path | None = None,
 ) -> dict[str, Any]:
     run_manifest = PipelineManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
+    manifest_dir = Path(run_manifest_path).resolve().parent
     if output_root is None:
-        return run_manifest
-
-    output_root = Path(output_root).resolve()
+        raw_output_dir = Path(str(run_manifest.get("output_dir") or "."))
+        output_root = raw_output_dir.resolve() if raw_output_dir.is_absolute() else (manifest_dir / raw_output_dir).resolve()
+    else:
+        output_root = Path(output_root).resolve()
     run_manifest["output_dir"] = str(output_root)
     if run_manifest.get("preprocess_manifest_path"):
         run_manifest["preprocess_manifest_path"] = str(
@@ -76,14 +81,45 @@ def _localized_pipeline_manifest(
         )
     outputs = run_manifest.get("outputs", {}) or {}
     run_manifest["outputs"] = {
-        key: str(_localize_output_path(value, output_root)) if value else value
+        key: str(
+            (output_root / value).resolve()
+            if not Path(str(value)).is_absolute()
+            else _localize_output_path(value, output_root)
+        ) if value else value
         for key, value in outputs.items()
     }
+    inputs = run_manifest.get("inputs", {}) or {}
+    run_manifest["inputs"] = {
+        key: {
+            **entry,
+            **{
+                field: str(_localize_output_path(entry[field], output_root))
+                for field in ("staged_path", "path")
+                if entry.get(field)
+            },
+        }
+        if isinstance(entry, dict)
+        else entry
+        for key, entry in inputs.items()
+    }
+    for key in ("analysis_manifest_path", "postsim_manifest_path", "pipeline_manifest_path"):
+        value = run_manifest.get(key)
+        if value and not Path(str(value)).is_absolute():
+            run_manifest[key] = str((output_root / str(value)).resolve())
     return run_manifest
 
 
 def _resolve_settings_path(run_manifest_path: str | Path, *, output_root: Path | None = None) -> Path:
     run_manifest = _localized_pipeline_manifest(run_manifest_path, output_root=output_root)
+    if run_manifest.get("settings_source"):
+        if output_root is not None and (Path(output_root) / "settings.yaml").is_file():
+            return (Path(output_root) / "settings.yaml").resolve()
+        settings_source = _localize_output_path(run_manifest["settings_source"], output_root)
+        if settings_source.exists():
+            return settings_source
+        if output_root is not None and (Path(output_root) / "settings.yaml").is_file():
+            return (Path(output_root) / "settings.yaml").resolve()
+        return settings_source
     preprocess_manifest_path = run_manifest.get("preprocess_manifest_path")
     if not preprocess_manifest_path:
         raise ValueError("Postprocess requires preprocess_manifest_path in pipeline manifest.")
@@ -125,13 +161,26 @@ def _resolve_pipeline_manifest_path(
             return candidate
         raise FileNotFoundError(f"Postprocess run manifest was not found: {candidate}")
 
-    candidate = (
-        Path(resolve_path(load_settings_from_yaml(settings_path).impacts.local_output_folder, settings_path)).resolve()
-        / "pipeline_manifest.yaml"
-    )
+    settings = load_settings_from_yaml(settings_path)
+    output_root = Path(resolve_path(settings.impacts.local_output_folder, settings_path)).resolve()
+    if getattr(settings, "run", None) is not None:
+        from .config.settings import impacts_run_root
+
+        run_root = impacts_run_root(
+            output_root,
+            year=settings.run.start_year,
+            region=settings.run.region,
+            output_run_name=settings.run.output_run_name,
+            run_scenario=settings.run.scenario,
+        )
+        candidates = (run_root / "postsim" / "postsim_manifest.yaml", output_root / "pipeline_manifest.yaml")
+    else:
+        candidates = (output_root / "pipeline_manifest.yaml",)
+    candidate = next((path for path in candidates if path.exists()), candidates[0])
     if not candidate.exists():
         raise FileNotFoundError(
-            "Postprocess requires workflow pipeline_manifest.yaml in the configured impacts.local_output_folder. "
+            "Postprocess requires a postsim_manifest.yaml in the configured run output directory "
+            "(legacy pipeline_manifest.yaml archives are also accepted). "
             f"Expected {candidate}."
         )
     return candidate
@@ -195,6 +244,9 @@ def _load_context(
         run_manifest_path=run_manifest_path,
         output_root=output_root,
     )
+    if run_manifest.get("inputs") is not None and run_manifest.get("settings_source"):
+        inputs = run_manifest.get("inputs", {}) or {}
+        return run_manifest_path, run_manifest, run_manifest, inputs
     preprocess_manifest_path = run_manifest.get("preprocess_manifest_path")
     if not preprocess_manifest_path:
         raise ValueError("Postprocess requires preprocess_manifest_path in pipeline manifest.")
@@ -228,6 +280,14 @@ def _locate_registry_path(registry: "PathRegistry", raw: str | Path) -> Path | N
         if result is not None:
             return result
     return None
+
+
+def _resolve_reference_source(raw: str, *, settings_path: str | Path, registry: "PathRegistry") -> str:
+    from urllib.parse import urlparse
+
+    if urlparse(raw).scheme in {"http", "https"}:
+        return raw
+    return str(registry.locate(raw) or resolve_path(raw, settings_path) or raw)
 
 
 def _resolve_modeled_emissions_path(
@@ -413,19 +473,23 @@ def _resolve_emissions_inventory_path(
     except ValueError:
         pass
     # Fallback for runs where preprocessing pre-dates emissions_inventory_file manifest registration.
-    # The presim activities _tmp dir is a sibling of the postsim output dir under the same parent.
+    # Keep the presim inventory fallback for older archives missing its manifest entry.
     if settings is not None and output_root is not None:
-        from .config.settings import presim_activities_tmp_root
+        from .config.settings import presim_activities_inventory_root
+        from .manifest.file_ops import resolve_path
         _acts = settings.impacts.activities if isinstance(settings.impacts.activities, dict) else {}
         region_slug = str(_acts.get("region_label") or settings.run.region).lower()
         year = int(settings.run.start_year)
-        fallback_tmp = presim_activities_tmp_root(
-            output_root.parent,
+        outputs_root = resolve_path(settings.impacts.local_output_folder, settings_path)
+        fallback_root = presim_activities_inventory_root(
+            outputs_root,
+            settings.impacts.scenario or "",
+            year=int(settings.run.start_year),
             region=str(settings.run.region),
             output_run_name=getattr(settings.run, "output_run_name", None),
             run_scenario=str(settings.run.scenario),
         )
-        fallback = fallback_tmp / f"{region_slug}-emfac-{year}-inventory-intermediate-with-activity.parquet"
+        fallback = fallback_root / f"{region_slug}-emfac-{year}-inventory-intermediate-with-activity.parquet"
         if fallback.exists():
             logger.info("Resolved emissions inventory via presim fallback: %s", fallback)
             return fallback
@@ -433,24 +497,6 @@ def _resolve_emissions_inventory_path(
         "Postprocess step 3 requires the EMFAC emissions inventory file. "
         "Re-run the preprocessing workflow: python -m impacts preprocess --config <config>"
     )
-
-
-def _resolve_delta_baseline_concentration_path(
-    raw: str,
-    *,
-    registry: "PathRegistry",
-) -> Path | None:
-    raw_text = str(raw).strip()
-    result = _locate_registry_path(registry, raw_text)
-    if result is not None:
-        return result
-    logger.warning(
-        "Delta baseline concentration distribution was configured but not found — "
-        "skipping Steps 6-7. Searched: %s. Configured path: %s",
-        ", ".join(str(r) for r in registry.roots),
-        raw_text,
-    )
-    return None
 
 
 def _remove_stale_postprocess_delta_outputs(output_dir: Path) -> None:
@@ -545,6 +591,7 @@ def _run_postprocess_steps(
     allow_missing_source_inputs: bool = False,
     input_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
     baseline_concentration_override: str | Path | None = None,
+    reference_scenario_out: dict | None = None,
 ) -> dict[str, str]:
     from .pipeline.postprocess.step1_compare_fleet import run as run_step1
     from .pipeline.postprocess.step2_compare_annual_targets import run as run_step2
@@ -573,7 +620,7 @@ def _run_postprocess_steps(
         run_manifest_path=run_manifest_path,
         output_root=output_root,
     )
-    output_dir = output_root / "postprocess"
+    output_dir = output_root / "analysis"
     modeled_emissions_path = _resolve_modeled_emissions_path(
         settings_path,
         run_manifest_path=run_manifest_path,
@@ -734,28 +781,37 @@ def _run_postprocess_steps(
     if not inmap_cells_path.exists():
         inmap_cells_path = output_root / "preprocess" / "inmap_grid.parquet"
     delta_baseline_concentration_path = None
+    reference_scenario_info = None
+    delta_baseline_raw = getattr(settings.impacts.analysis, "delta_baseline_concentration_distribution_file", None)
+    expected_sha256 = getattr(
+        settings.impacts.analysis,
+        "delta_baseline_concentration_distribution_sha256",
+        None,
+    )
+    run_root = output_root
     if baseline_concentration_override is not None:
-        p = Path(baseline_concentration_override).expanduser().resolve()
-        if p.exists():
-            delta_baseline_concentration_path = p
-        else:
-            logger.warning(
-                "Delta baseline concentration distribution was configured but not found — "
-                "skipping Steps 6-7. Path: %s",
-                baseline_concentration_override,
-            )
-            _remove_stale_postprocess_delta_outputs(output_dir)
+        delta_baseline_raw = str(baseline_concentration_override)
+    if delta_baseline_raw:
+        reference_source = _resolve_reference_source(
+            str(delta_baseline_raw),
+            settings_path=settings_path,
+            registry=registry,
+        )
+        reference_scenario_info = pin_reference_scenario(
+            reference_source,
+            output_root,
+            reference_root=(
+                Path(resolve_path(settings.impacts.local_input_folder, settings_path)).resolve() / "reference"
+            ),
+            expected_sha256=expected_sha256,
+        )
+        delta_baseline_concentration_path = (
+            output_root / str(reference_scenario_info["saved_path"])
+        ).resolve()
+        if conc_path.exists():
+            validate_reference_grid(conc_path, delta_baseline_concentration_path)
     else:
-        delta_baseline_raw = getattr(settings.impacts.analysis, "delta_baseline_concentration_distribution_file", None)
-        if delta_baseline_raw:
-            delta_baseline_concentration_path = _resolve_delta_baseline_concentration_path(
-                delta_baseline_raw,
-                registry=registry,
-            )
-            if delta_baseline_concentration_path is None:
-                _remove_stale_postprocess_delta_outputs(output_dir)
-        else:
-            _remove_stale_postprocess_delta_outputs(output_dir)
+        _remove_stale_postprocess_delta_outputs(output_dir)
     if conc_path.exists() and net_path.exists():
         map_outputs = run_step4(
             concentration_path=str(conc_path),
@@ -834,7 +890,9 @@ def _run_postprocess_steps(
     elif delta_baseline_concentration_path is not None:
         logger.info("Skipping Step 7: delta table, population, network, or InMAP cell output not found at %s", output_root)
 
-    logger.info("Postprocess steps complete: output_dir=%s outputs=%d", output_dir, len(outputs))
+    if reference_scenario_out is not None:
+        reference_scenario_out["reference_scenario"] = reference_scenario_info
+    logger.info("Analysis steps complete: output_dir=%s outputs=%d", output_dir, len(outputs))
     return outputs
 
 
@@ -858,12 +916,14 @@ def postprocess_from_pipeline_manifest(
         if settings_override is not None
         else _resolve_settings_path(run_manifest_path, output_root=output_root_arg)
     )
+    reference_holder: dict[str, Any] = {}
     if output_root_arg is None:
         postprocess_outputs = _run_postprocess_steps(
             settings_path,
             run_manifest_path=run_manifest_path,
             input_roots=input_roots_arg,
             baseline_concentration_override=baseline_concentration_override,
+            reference_scenario_out=reference_holder,
         )
     else:
         postprocess_outputs = _run_postprocess_steps(
@@ -873,35 +933,49 @@ def postprocess_from_pipeline_manifest(
             allow_missing_source_inputs=True,
             input_roots=input_roots_arg,
             baseline_concentration_override=baseline_concentration_override,
+            reference_scenario_out=reference_holder,
         )
 
-    postprocess_manifest = {
-        "contract_version": pipeline_manifest.get("contract_version", "1"),
-        "model": "impacts",
-        "pipeline_manifest_path": str(Path(run_manifest_path).resolve()),
-        "output_dir": str(output_root),
-        "postprocess_outputs": postprocess_outputs,
-        "validation": {
-            "completed": True,
-            "population_source": (
-                pipeline_manifest.get("population_inputs", {})
-                if pipeline_manifest.get("pipeline", {}).get("exposure_enabled")
-                else None
-            ),
-        },
-        "notes": [
-            "Postprocess runs maintained outputs after workflow completion.",
-            "Pipeline completion is logged after postprocess steps and manifest writing.",
-        ],
+    reference_scenario = reference_holder.get("reference_scenario")
+    analysis_manifest_path = output_root / "analysis" / "analysis_manifest.yaml"
+    write_analysis_manifest(
+        analysis_manifest_path,
+        outputs=postprocess_outputs,
+        reference_scenario=reference_scenario,
+        run_root=output_root,
+    )
+    pipeline_manifest["analysis_manifest_path"] = "analysis/analysis_manifest.yaml"
+    pipeline_manifest["execution"] = {
+        **(pipeline_manifest.get("execution", {}) or {}),
+        "analysis_completed": True,
     }
-    output_manifest = Path(manifest_path) if manifest_path else output_root / "postprocess_manifest.yaml"
-    postprocess_manifest["postprocess_manifest_path"] = str(output_manifest)
-    typed_manifest = PostprocessManifest.from_dict(postprocess_manifest)
+    output_manifest = (
+        Path(manifest_path)
+        if manifest_path
+        else Path(pipeline_manifest.get("postsim_manifest_path") or run_manifest_path)
+    )
+    pipeline_manifest["output_dir"] = "."
+    pipeline_manifest["outputs"] = {
+        key: os.path.relpath(value, output_root)
+        if isinstance(value, str)
+        and Path(value).is_absolute()
+        and Path(value).resolve().is_relative_to(output_root)
+        else value
+        for key, value in (pipeline_manifest.get("outputs", {}) or {}).items()
+    }
+    pipeline_manifest["postsim_manifest_path"] = output_manifest.name
+    pipeline_manifest["pipeline_manifest_path"] = output_manifest.name
+    typed_manifest = PipelineManifest.from_dict(pipeline_manifest)
     write_structured_file(output_manifest, typed_manifest.to_dict())
-    logger.info("Postprocess manifest written: %s", output_manifest)
+    logger.info("Postsim manifest written: %s", output_manifest)
     log_step_banner("Pipeline", "Impacts Complete", logger=logger)
-    logger.info("Pipeline complete: postprocess_manifest=%s", output_manifest)
-    return typed_manifest.to_dict()
+    logger.info("Pipeline complete: postsim_manifest=%s", output_manifest)
+    result = typed_manifest.to_dict()
+    result["postsim_manifest_path"] = str(output_manifest)
+    result["pipeline_manifest_path"] = str(output_manifest)
+    # Preserve the old result key for API callers during the manifest-name transition.
+    result["postprocess_manifest_path"] = str(output_manifest)
+    return result
 
 
 def postprocess_from_settings(

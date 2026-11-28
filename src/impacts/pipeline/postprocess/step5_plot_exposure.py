@@ -71,9 +71,9 @@ def _aggregate_exposure_to_inmap(
 ):
     import duckdb
 
-    if population_column not in {"person_count", "acs_household_population"}:
-        raise ValueError(f"Unsupported exposure population column: {population_column}")
-    pop_df = pd.DataFrame(pop_gdf[["aermod_cell_id", population_column]])
+    pop_df = pd.DataFrame(pop_gdf[["aermod_cell_id", population_column]]).rename(
+        columns={population_column: "population_weight"}
+    )
     conc_df = pd.DataFrame(conc_gdf[["aermod_cell_id", "inmap_cell_id", "TotalPM25"]])
 
     con = duckdb.connect()
@@ -82,14 +82,14 @@ def _aggregate_exposure_to_inmap(
         con.register("pop_tbl", pop_df)
         con.register("conc_tbl", conc_df)
 
-        result_df = con.execute(f"""
+        result_df = con.execute("""
             SELECT
                 TRY_CAST(c.inmap_cell_id AS BIGINT) AS inmap_cell_id,
-                SUM(TRY_CAST(p."{population_column}" AS DOUBLE)) AS population,
-                SUM(TRY_CAST(c.TotalPM25 AS DOUBLE) * TRY_CAST(p."{population_column}" AS DOUBLE)) AS exposure_burden
+                SUM(TRY_CAST(p.population_weight AS DOUBLE)) AS population,
+                SUM(TRY_CAST(c.TotalPM25 AS DOUBLE) * TRY_CAST(p.population_weight AS DOUBLE)) AS exposure_burden
             FROM pop_tbl p
             INNER JOIN conc_tbl c ON p.aermod_cell_id = c.aermod_cell_id
-            WHERE TRY_CAST(p."{population_column}" AS DOUBLE) > 0
+            WHERE TRY_CAST(p.population_weight AS DOUBLE) > 0
               AND TRY_CAST(c.TotalPM25 AS DOUBLE) IS NOT NULL
               AND TRY_CAST(c.inmap_cell_id AS BIGINT) IS NOT NULL
             GROUP BY c.inmap_cell_id
@@ -215,7 +215,13 @@ def _combine_population_exposure_frames(frames: dict[str, pd.DataFrame]) -> pd.D
         combined = metrics if combined is None else combined.merge(
             metrics, on="inmap_cell_id", how="outer", validate="one_to_one"
         )
-    return combined if combined is not None else pd.DataFrame(columns=["inmap_cell_id"])
+    if combined is None:
+        return pd.DataFrame(columns=["inmap_cell_id"])
+    return combined.fillna({
+        f"{basis}_{metric}": 0.0
+        for basis in frames
+        for metric in ("population", "exposure_burden")
+    })
 
 
 def _plot_bivariate(
@@ -338,15 +344,15 @@ def run(
     population_bases = [
         ("raw_urbansim", "person_count", "population", "Population"),
     ]
-    if "acs_household_population" in pop_gdf.columns:
-        population_bases.append(
-            (
-                "acs_household_adjusted",
-                "acs_household_population",
-                "acs_household_population",
-                "ACS-adjusted household population",
-            )
+    population_bases.extend(
+        (basis, column, column, label)
+        for basis, column, label in (
+            ("acs_household_adjusted", "acs_household_population", "ACS-adjusted household population"),
+            ("group_quarters", "group_quarters_population", "Group quarters population"),
+            ("acs_total", "acs_total_population", "ACS-adjusted total population"),
         )
+        if column in pop_gdf
+    )
     logger.info("Aggregating exposure metrics to InMAP cells for %d population bases …", len(population_bases))
     progress = _map_progress(3 * len(population_bases), "Postprocess Step 5")
     exposure_frames = {}
@@ -365,9 +371,8 @@ def run(
                 inmap_exposure_gdf["population"].gt(0)
                 & inmap_exposure_gdf["pwc_pm25"].notna()
             ].copy()
+            exposure_frames[basis] = inmap_exposure_gdf
             if not inmap_exposure_gdf.empty:
-                exposure_frames[basis] = inmap_exposure_gdf
-
                 result = _plot_inmap_scalar(
                     inmap_exposure_gdf,
                     net_gdf,
@@ -410,7 +415,7 @@ def run(
     finally:
         _close_progress(progress)
 
-    if not exposure_frames:
+    if all(frame.empty for frame in exposure_frames.values()):
         logger.warning("Skipping Step 5: no populated InMAP cells with PM2.5 concentration.")
         return {}
     exposure_summary = _combine_population_exposure_frames(exposure_frames)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import re
 from types import SimpleNamespace
 
 import impacts.__main__ as impacts_main
@@ -75,7 +74,7 @@ def test_postsim_from_settings_uses_hpc_timestamp_output_root(monkeypatch, tmp_p
     assert calls["input_roots"] == (tmp_path / "input-root",)
 
 
-def test_postsim_from_settings_creates_local_timestamp_output_root(monkeypatch, tmp_path: Path) -> None:
+def test_postsim_from_settings_uses_year_and_run_root(monkeypatch, tmp_path: Path) -> None:
     settings_path = tmp_path / "settings.yaml"
     settings_path.write_text("impacts:\n  local_output_folder: impacts_output\n", encoding="utf-8")
     calls: dict[str, object] = {}
@@ -105,8 +104,7 @@ def test_postsim_from_settings_creates_local_timestamp_output_root(monkeypatch, 
 
     postsim_output_root = calls["preprocess_output_root"]
     assert isinstance(postsim_output_root, Path)
-    assert postsim_output_root.parent == tmp_path / "impacts_output"
-    assert re.fullmatch(r"impacts-postsim--sfbay--base--\d{8}-\d{6}", postsim_output_root.name)
+    assert postsim_output_root == tmp_path / "impacts_output" / "2018" / "base" / "postsim"
     assert calls["postprocess_output_root"] == postsim_output_root
     assert postsim_output_root.exists()
 
@@ -124,8 +122,7 @@ def test_postsim_output_root_uses_output_run_name_when_available(monkeypatch, tm
 
     postsim_output_root = impacts_main._resolve_postsim_output_root(str(settings_path))
 
-    assert postsim_output_root.parent == tmp_path / "impacts_output"
-    assert re.fullmatch(r"impacts-postsim--sfbay--calibration-a--\d{8}-\d{6}", postsim_output_root.name)
+    assert postsim_output_root == tmp_path / "impacts_output" / "2018" / "calibration-a" / "postsim"
 
 
 def test_presim_activities_paths_are_under_presim_activities(tmp_path: Path) -> None:
@@ -137,31 +134,35 @@ def test_presim_activities_paths_are_under_presim_activities(tmp_path: Path) -> 
         "region_label": "SFBAY",
         "run_region": "sfbay",
         "run_scenario": "base",
+        "run_year": 2018,
         "output_run_name": None,
     }
 
     presim_kwargs = {
+        "year": 2018,
         "region": "sfbay",
         "output_run_name": None,
         "run_scenario": "base",
     }
 
     assert presim_activities_manifest_path(output_root, **presim_kwargs) == (
-        output_root / "impacts_presim--sfbay--base" / "activities" / "activities_manifest.yaml"
+        output_root / "2018" / "base" / "presim" / "presim_manifest.yaml"
     )
     assert presim_activities_inventory_root(output_root, scenario, **presim_kwargs) == (
-        output_root / "impacts_presim--sfbay--base" / "activities" / scenario / "inventory"
+        output_root / "2018" / "base" / "presim" / "emissions" / scenario / "inventory"
     )
     assert presim_activities_rates_root(output_root, scenario, **presim_kwargs) == (
-        output_root / "impacts_presim--sfbay--base" / "activities" / scenario / "rates"
+        output_root / "2018" / "base" / "presim" / "emissions" / scenario / "rates"
     )
     assert presim_activities_tmp_root(output_root, **presim_kwargs) == (
-        output_root / "impacts_presim--sfbay--base" / "activities" / "_tmp"
+        output_root / "2018" / "base" / "presim" / "scratch"
     )
     assert _expected_output_path(cfg, 2018) == (
         output_root
-        / "impacts_presim--sfbay--base"
-        / "activities"
+        / "2018"
+        / "base"
+        / "presim"
+        / "emissions"
         / scenario
         / "inventory"
         / "sfbay-emfac-2018-inventory-final-passenger-activity-by-emfacid.parquet"
@@ -275,6 +276,6 @@ def test_runner_uses_pipeline_manifest_output_dir_for_stage_outputs(monkeypatch,
 
     result = run_emissions_from_pipeline_manifest(run_manifest_path=run_manifest_path)
 
-    assert result["output_dir"] == str(postsim_output.resolve())
+    assert result["output_dir"] == "."
     assert calls["raw_dir"] == postsim_output / "emissions"
     assert calls["output_dir"] == postsim_output / "emissions"

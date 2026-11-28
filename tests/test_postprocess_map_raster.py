@@ -232,11 +232,17 @@ def test_population_exposure_output_keeps_one_row_per_inmap_cell() -> None:
     )
 
     result = _combine_population_exposure_frames(
-        {"raw_urbansim": raw, "acs_household_adjusted": acs}
+        {
+            "raw_urbansim": raw,
+            "acs_household_adjusted": acs,
+            "group_quarters": pd.DataFrame(
+                {"inmap_cell_id": [200], "population": [5], "exposure_burden": [10], "pwc_pm25": [2.0]}
+            ),
+        }
     )
 
-    assert len(result) == 1
-    assert result.iloc[0].to_dict() == {
+    assert result["inmap_cell_id"].tolist() == [100, 200]
+    assert result.iloc[0].drop(labels=["group_quarters_pwc_pm25"]).to_dict() == {
         "inmap_cell_id": 100.0,
         "raw_urbansim_population": 40.0,
         "raw_urbansim_exposure_burden": 140.0,
@@ -244,4 +250,8 @@ def test_population_exposure_output_keeps_one_row_per_inmap_cell() -> None:
         "acs_household_adjusted_population": 30.5,
         "acs_household_adjusted_exposure_burden": 110.0,
         "acs_household_adjusted_pwc_pm25": 3.61,
+        "group_quarters_population": 0.0,
+        "group_quarters_exposure_burden": 0.0,
     }
+    assert result.loc[1, "raw_urbansim_population"] == 0
+    assert pd.isna(result.loc[1, "raw_urbansim_pwc_pm25"])

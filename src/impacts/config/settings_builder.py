@@ -63,6 +63,16 @@ def build_settings_from_pilates(
     shared = dict(pilates_payload.get("shared", {}) or {})
     geography = dict(shared.get("geography", {}) or {})
     pilates_impacts = dict(pilates_payload.get("impacts", {}) or {})
+    pipeline = dict(pilates_impacts.get("pipeline", {}) or {})
+    presim = pipeline.get("presim")
+    if (
+        isinstance(presim, dict)
+        and presim.keys() == {"activities", "fleet"}
+        and all(value is True for value in presim.values())
+    ):
+        # Older PILATES bridges send this even though presim always runs both steps.
+        del pipeline["presim"]
+        pilates_impacts["pipeline"] = pipeline
     impacts_section = _deep_merge(
         dict(default_payload.get("impacts", {}) or {}),
         pilates_impacts,

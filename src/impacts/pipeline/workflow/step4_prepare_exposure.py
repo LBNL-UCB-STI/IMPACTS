@@ -379,6 +379,18 @@ def run(
             [_AERMOD_SOURCE_ID_COLUMN, "acs_household_population"]
         ]
         cell_counts = _attach_acs_household_counts(cell_counts, acs_counts)
+    if "group_quarters_cell_counts" in manifest:
+        gq_counts_path = resolve_required_manifest_input(manifest, key="group_quarters_cell_counts")
+        cell_counts = cell_counts.merge(
+            read_table(gq_counts_path),
+            on=_AERMOD_SOURCE_ID_COLUMN,
+            how="left",
+            validate="one_to_one",
+        )
+        cell_counts["group_quarters_population"] = cell_counts["group_quarters_population"].fillna(0.0)
+        cell_counts["acs_total_population"] = (
+            cell_counts["acs_household_population"] + cell_counts["group_quarters_population"]
+        )
     grid_lookup = full_exposure_grid[[_AERMOD_SOURCE_ID_COLUMN, "geometry"]].drop_duplicates(subset=[_AERMOD_SOURCE_ID_COLUMN])
     population_counts = gpd.GeoDataFrame(
         grid_lookup.merge(cell_counts, how="inner", on=_AERMOD_SOURCE_ID_COLUMN),

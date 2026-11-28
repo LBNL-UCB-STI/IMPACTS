@@ -757,10 +757,10 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
         _resolve_vehicle_types_paths,
     )
 
-    from ._common import settings_path_from_output_dir
+    from ._common import run_manifest_path_from_output_dir, settings_path_from_output_dir
 
     output_dir = Path(output_dir)
-    run_manifest_path = output_dir / "pipeline_manifest.yaml"
+    run_manifest_path = run_manifest_path_from_output_dir(output_dir)
     settings_path = settings_path_from_output_dir(output_dir)
     _, run_manifest = _load_pipeline_manifest(
         settings_path,

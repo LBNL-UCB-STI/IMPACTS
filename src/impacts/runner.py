@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import sys
 import time
@@ -71,8 +72,11 @@ def _resolve_existing_run_manifest_path(
     if run_manifest_path:
         candidate = Path(run_manifest_path).resolve()
         return candidate if candidate.exists() else None
-    candidate = output_root / "pipeline_manifest.yaml"
-    return candidate if candidate.exists() else None
+    for name in ("postsim_manifest.yaml", "pipeline_manifest.yaml"):
+        candidate = output_root / name
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def _load_existing_run_manifest(
@@ -83,16 +87,37 @@ def _load_existing_run_manifest(
     candidate = _resolve_existing_run_manifest_path(output_root=output_root, run_manifest_path=run_manifest_path)
     if candidate is None:
         return {}
-    return PipelineManifest.from_dict(load_structured_file(candidate)).to_dict()
+    return _resolve_run_manifest_paths(
+        PipelineManifest.from_dict(load_structured_file(candidate)).to_dict(),
+        candidate,
+    )
+
+
+def _resolve_run_manifest_paths(manifest: Dict[str, Any], manifest_path: str | Path) -> Dict[str, Any]:
+    base = Path(manifest_path).resolve().parent
+    output_dir = Path(str(manifest.get("output_dir") or "."))
+    if not output_dir.is_absolute():
+        output_dir = (base / output_dir).resolve()
+    manifest["output_dir"] = str(output_dir)
+    manifest["outputs"] = {
+        key: str((output_dir / value).resolve())
+        if isinstance(value, str) and not Path(value).is_absolute()
+        else value
+        for key, value in (manifest.get("outputs", {}) or {}).items()
+    }
+    return manifest
 
 
 def _load_run_manifest_context(
     run_manifest_path: str | Path,
 ) -> tuple[dict[str, Any], Path, str]:
     manifest = PipelineManifest.from_dict(load_structured_file(run_manifest_path)).to_dict()
+    manifest = _resolve_run_manifest_paths(manifest, run_manifest_path)
     preprocess_manifest_path = manifest.get("preprocess_manifest_path")
-    if not preprocess_manifest_path:
-        raise ValueError("Pipeline manifest is missing preprocess_manifest_path.")
+    if manifest.get("settings_source") and manifest.get("inputs") is not None:
+        preprocess_manifest_path = str(Path(run_manifest_path).resolve())
+    elif not preprocess_manifest_path:
+        raise ValueError("Postsim manifest is missing its input records.")
     output_dir = manifest.get("output_dir")
     if not output_dir:
         raise ValueError("Pipeline manifest is missing output_dir.")
@@ -137,7 +162,11 @@ def _run_stages_from_preprocess_manifest(
     run_exposure: bool | None = None,
     output_root_override: str | Path | None = None,
 ) -> Dict[str, Any]:
-    manifest = PreprocessManifest.from_dict(load_structured_file(preprocess_manifest_path)).to_dict()
+    raw_manifest = load_structured_file(preprocess_manifest_path)
+    if raw_manifest.get("settings_source") and raw_manifest.get("inputs") is not None:
+        manifest = raw_manifest
+    else:
+        manifest = PreprocessManifest.from_dict(raw_manifest).to_dict()
     pipeline = PipelineConfig.from_dict(manifest.get("pipeline", {}) or {})
     population_inputs = manifest.get("population_inputs", {}) or {}
     manifest_inputs = manifest.get("inputs", {}) or {}
@@ -306,8 +335,16 @@ def _run_stages_from_preprocess_manifest(
     run_manifest = {
         "contract_version": manifest.get("contract_version", "1"),
         "model": "impacts",
-        "preprocess_manifest_path": str(Path(preprocess_manifest_path).resolve()),
-        "output_dir": str(output_root),
+        "preprocess_manifest_path": (
+            "" if manifest.get("postsim_manifest_path") or manifest.get("pipeline_manifest_path")
+            else str(Path(preprocess_manifest_path).resolve())
+        ),
+        "settings_source": manifest.get("settings_source"),
+        "input_dir": manifest.get("input_dir"),
+        "inputs": manifest.get("inputs", {}),
+        "preprocess": manifest.get("preprocess", {}),
+        "analysis_manifest_path": existing_run_manifest.get("analysis_manifest_path"),
+        "output_dir": ".",
         "command": " ".join(sys.argv),
         "image": "not_recorded",
         "outputs": {
@@ -365,8 +402,17 @@ def _run_stages_from_preprocess_manifest(
         },
     }
     shutil.rmtree(output_root / "_tmp", ignore_errors=True)
-    output_manifest = Path(run_manifest_path) if run_manifest_path else output_root / "pipeline_manifest.yaml"
-    run_manifest["pipeline_manifest_path"] = str(output_manifest)
+    run_manifest["outputs"] = {
+        key: os.path.relpath(value, output_root)
+        if isinstance(value, str)
+        and Path(value).is_absolute()
+        and Path(value).resolve().is_relative_to(output_root)
+        else value
+        for key, value in run_manifest["outputs"].items()
+    }
+    output_manifest = Path(run_manifest_path) if run_manifest_path else output_root / "postsim_manifest.yaml"
+    run_manifest["pipeline_manifest_path"] = output_manifest.name
+    run_manifest["postsim_manifest_path"] = output_manifest.name
     typed_manifest = PipelineManifest.from_dict(run_manifest)
     write_structured_file(output_manifest, typed_manifest.to_dict())
     logger.info("Pipeline manifest written: %s", output_manifest)
@@ -375,7 +421,10 @@ def _run_stages_from_preprocess_manifest(
         run_manifest["execution"]["stopped_after"],
         output_manifest,
     )
-    return typed_manifest.to_dict()
+    result = typed_manifest.to_dict()
+    result["pipeline_manifest_path"] = str(output_manifest)
+    result["postsim_manifest_path"] = str(output_manifest)
+    return result
 
 
 def run_emissions_from_pipeline_manifest(

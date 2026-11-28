@@ -19,7 +19,6 @@ from ...consist_artifacts import BEAM_NETWORK_PREFIX
 from ...consist_artifacts import BEAM_EVENTS_PREFIX
 from ...config.path_registry import build_registry
 from ...config.settings import presim_activities_inventory_root
-from ...config.settings import presim_activities_tmp_root
 from ...manifest.file_ops import resolve_path
 from ...manifest.file_ops import resolve_required_path
 from ...manifest.file_ops import is_remote_path
@@ -132,6 +131,24 @@ def _resolve_region_input_root(*, beam_input_root: Path, region: str) -> Path:
     raise FileNotFoundError(f"Region input root not found: {candidate}")
 
 
+def _resolve_census_bundle_path(configured_path: str, region_input_root: Path) -> Path:
+    raw = Path(configured_path).expanduser()
+    region_root = region_input_root.resolve()
+    candidate = raw if raw.is_absolute() else region_root / raw
+    candidate = candidate.resolve()
+    if not raw.is_absolute() and not candidate.is_relative_to(region_root):
+        raise ValueError(
+            "Relative impacts.exposure.census_bundle must stay inside the BEAM input region: "
+            f"{configured_path}"
+        )
+    if not candidate.is_file():
+        raise FileNotFoundError(
+            "Configured impacts.exposure.census_bundle was not found under the BEAM input region: "
+            f"{candidate}"
+        )
+    return candidate
+
+
 def run(
     *,
     manifest_inputs: Dict[str, Any],
@@ -193,11 +210,27 @@ def run(
                     "impacts.local_input_folder",
                 )
             ) / "input_cache"
-        acs_tables = acquire_acs_tables(settings.run.start_year, acs_cache_root)
-        population_inputs["acs_tables"] = acs_tables
-        population_inputs["acs_manifest"] = str(
-            acs_cache_root / "acs" / str(settings.run.start_year) / "manifest.json"
-        )
+        if impacts.exposure.census_bundle:
+            from ...census_bundle import stage_census_bundle
+
+            bundle_path = _resolve_census_bundle_path(
+                impacts.exposure.census_bundle, Path(region_input_root)
+            )
+            bundle = stage_census_bundle(
+                bundle_path,
+                acs_cache_root,
+                year=settings.run.start_year,
+                region=settings.run.region,
+                state_fips=settings.shared.geography.fips.state,
+            )
+            population_inputs["acs_tables"] = bundle.pop("acs_tables")
+            population_inputs["acs_manifest"] = bundle["manifest"]
+            population_inputs["census_bundle"] = bundle
+        else:
+            population_inputs["acs_tables"] = acquire_acs_tables(settings.run.start_year, acs_cache_root)
+            population_inputs["acs_manifest"] = str(
+                acs_cache_root / "acs" / str(settings.run.start_year) / "manifest.json"
+            )
 
     log_substep_banner("1.1", "register BEAM output files", logger=logger)
     progress = make_progress("Preprocess Step 1.1", total=3, unit="task", leave=False)
@@ -385,6 +418,7 @@ def run(
     _inv_folder = presim_activities_inventory_root(
         local_output_folder,
         impacts.scenario or "",
+        year=settings.run.start_year,
         region=settings.run.region,
         output_run_name=getattr(settings.run, "output_run_name", None),
         run_scenario=settings.run.scenario,
@@ -476,16 +510,10 @@ def run(
 
         if settings.impacts.analysis.inventory_targets:
             _set_progress_task(progress, "emissions inventory", step_label="Preprocess Step 1.3")
-            _tmp_root = presim_activities_tmp_root(
-                local_output_folder,
-                region=settings.run.region,
-                output_run_name=getattr(settings.run, "output_run_name", None),
-                run_scenario=settings.run.scenario,
-            )
             _acts = settings.impacts.activities if isinstance(settings.impacts.activities, dict) else {}
             region_slug = str(_acts.get("region_label") or settings.run.region).lower()
             year = int(settings.run.start_year)
-            emissions_inv_path = _tmp_root / f"{region_slug}-emfac-{year}-inventory-intermediate-with-activity.parquet"
+            emissions_inv_path = _inv_folder / f"{region_slug}-emfac-{year}-inventory-intermediate-with-activity.parquet"
             required_local_path(emissions_inv_path, "emissions_inventory_file (inventory-intermediate-with-activity)")
             _register_manifest_input(
                 manifest_inputs,

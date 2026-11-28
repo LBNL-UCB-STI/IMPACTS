@@ -110,7 +110,7 @@ def _load_urbansim_population(
 
 
 def _join_population_to_grid(
-    *, population: gpd.GeoDataFrame, grid: gpd.GeoDataFrame
+    *, population: gpd.GeoDataFrame, grid: gpd.GeoDataFrame, id_column: str = "person_id"
 ) -> pd.DataFrame:
     joined = gpd.sjoin(
         population,
@@ -119,7 +119,7 @@ def _join_population_to_grid(
         predicate="within",
     )
     # Overlapping grid features must not count a resident more than once.
-    joined = joined.sort_values(_AERMOD_CELL_ID).drop_duplicates("person_id", keep="first")
+    joined = joined.sort_values(_AERMOD_CELL_ID).drop_duplicates(id_column, keep="first")
     return pd.DataFrame(joined.drop(columns=["index_right", "geometry"], errors="ignore"))
 
 

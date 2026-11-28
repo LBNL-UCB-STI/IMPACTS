@@ -587,20 +587,28 @@ def load_postprocess_vehicle_metadata(
 # Manifest-based path helpers for standalone postprocess step entry points.
 # ---------------------------------------------------------------------------
 
+def run_manifest_path_from_output_dir(output_dir: Path) -> Path:
+    output_dir = Path(output_dir)
+    for name in ("postsim_manifest.yaml", "pipeline_manifest.yaml"):
+        candidate = output_dir / name
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(f"No postsim manifest found in {output_dir}")
+
 def settings_path_from_output_dir(output_dir: Path) -> Path:
-    """Walk pipeline_manifest → preprocess_manifest → settings_source."""
+    """Resolve settings from a current postsim manifest or a legacy pipeline archive."""
     from impacts.postprocessor import _resolve_settings_path
 
     output_dir = Path(output_dir)
-    return _resolve_settings_path(output_dir / "pipeline_manifest.yaml", output_root=output_dir)
+    return _resolve_settings_path(run_manifest_path_from_output_dir(output_dir), output_root=output_dir)
 
 
 def pipeline_outputs(output_dir: Path) -> dict:
-    """Return the ``outputs`` section of ``pipeline_manifest.yaml``."""
+    """Return output paths from the current or legacy run manifest."""
     from impacts.postprocessor import _localized_pipeline_manifest
 
     output_dir = Path(output_dir)
     return _localized_pipeline_manifest(
-        output_dir / "pipeline_manifest.yaml",
+        run_manifest_path_from_output_dir(output_dir),
         output_root=output_dir,
     ).get("outputs", {}) or {}

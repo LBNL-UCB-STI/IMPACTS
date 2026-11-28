@@ -122,7 +122,7 @@ def test_example_settings_yaml_is_current_settings_file():
     assert config.impacts.emissions.beam.include_freight is True
     assert len(config.impacts.analysis.sector_targets) == 6
     assert config.impacts.emissions.vehicle_category_metadata_file.endswith(
-        "vehicle-tech/emissions/emissions_vehicle_categories.csv"
+        "impacts/emissions/emissions_vehicle_categories.csv"
     )
     assert config.impacts.emissions.defaults.default_annualization_days.light_duty == 327.0
     assert config.impacts.emissions.defaults.default_annualization_days.medium_heavy_duty == 312.0
@@ -372,7 +372,7 @@ def test_postsim_profile_time_uses_timestamped_output_env(monkeypatch, tmp_path:
     monkeypatch.setattr(
         "impacts.__main__.load_settings_from_yaml",
         lambda _: SimpleNamespace(
-            run=SimpleNamespace(region="sfbay", scenario="base", output_run_name=None),
+            run=SimpleNamespace(region="sfbay", scenario="base", output_run_name=None, start_year=2018),
             impacts=SimpleNamespace(local_output_folder="impacts_output"),
         ),
     )
@@ -387,8 +387,7 @@ def test_postsim_profile_time_uses_timestamped_output_env(monkeypatch, tmp_path:
 
     assert main(["postsim", "--config", str(config_path), "--profile", "time"]) == 0
     postsim_output_root = Path(captured["env"]["IMPACTS_POSTSIM_OUTPUT_DIR"])
-    assert postsim_output_root.parent == (tmp_path / "impacts_output").resolve()
-    assert re.fullmatch(r"impacts-postsim--sfbay--base--\d{8}-\d{6}", postsim_output_root.name)
+    assert postsim_output_root == (tmp_path / "impacts_output" / "2018" / "base" / "postsim").resolve()
     assert captured["command"] == [
         "/usr/bin/time",
         "-l",
@@ -539,7 +538,7 @@ def test_build_settings_from_pilates_template_uses_builtin_impacts_settings(tmp_
     assert len(config.impacts.analysis.sector_targets) == 6
     assert (
         config.impacts.emissions.vehicle_category_metadata_file
-        == "vehicle-tech/emissions/emissions_vehicle_categories.csv"
+        == "impacts/emissions/emissions_vehicle_categories.csv"
     )
     assert config.impacts.analysis.inventory_targets == []
 
@@ -922,7 +921,11 @@ def test_cli_fleet_uses_activities_manifest(monkeypatch, tmp_path: Path) -> None
 def test_presim_runs_activities_then_fleet_from_manifest(monkeypatch, tmp_path: Path) -> None:
     calls = []
     manifest_path = tmp_path / "activities_manifest.yaml"
-    settings = SimpleNamespace(impacts=SimpleNamespace())
+    settings = SimpleNamespace(
+        run=SimpleNamespace(region="sfbay", scenario="base", output_run_name=None, start_year=2018),
+        impacts=SimpleNamespace(local_output_folder=str(tmp_path / "impacts_output")),
+    )
+    monkeypatch.setattr("impacts.__main__.resolve_path", lambda path, _: str(tmp_path / path))
     monkeypatch.setattr("impacts.__main__.load_settings_from_yaml", lambda _: settings)
 
     def _ensure_activities(loaded_settings, config_path):
@@ -936,6 +939,7 @@ def test_presim_runs_activities_then_fleet_from_manifest(monkeypatch, tmp_path: 
     monkeypatch.setattr("impacts.provisioner.run_fleet", _run_fleet)
 
     config_path = tmp_path / "settings.yaml"
+    config_path.write_text("test: true\n", encoding="utf-8")
     _run_presim_from_settings(str(config_path))
 
     assert calls == [
@@ -1019,17 +1023,21 @@ def test_postprocess_from_settings_delegates_through_runner(monkeypatch, tmp_pat
 
 
 def test_postprocess_logs_pipeline_complete_after_steps_and_manifest(monkeypatch, caplog, tmp_path: Path):
-    output_root = tmp_path / "impacts_output"
-    run_manifest_path = output_root / "pipeline_manifest.yaml"
+    output_root = tmp_path / "impacts_output" / "2018" / "base" / "postsim"
+    run_manifest_path = output_root / "postsim_manifest.yaml"
     run_manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    preprocess_manifest_path = output_root / "preprocess_manifest.yaml"
+    settings_path = output_root / "settings.yaml"
+    settings_path.write_text("impacts:\n  local_output_folder: ../../..\n", encoding="utf-8")
     run_manifest_path.write_text(
         json.dumps(
             {
                 "contract_version": "1",
                 "model": "impacts",
-                "preprocess_manifest_path": str(preprocess_manifest_path),
-                "output_dir": str(output_root),
+                "preprocess_manifest_path": "",
+                "settings_source": str(settings_path),
+                "input_dir": str(output_root),
+                "inputs": {},
+                "output_dir": ".",
                 "command": "python -m impacts postsim",
                 "image": "unknown",
                 "outputs": {"skims_emissions": str(tmp_path / "prepared.parquet")},
@@ -1038,25 +1046,6 @@ def test_postprocess_logs_pipeline_complete_after_steps_and_manifest(monkeypatch
                 "deterministic_contract": {},
                 "execution": {"dispersion_completed": True, "stopped_after": "step4_prepare_exposure"},
                 "pipeline_manifest_path": str(run_manifest_path),
-            }
-        ),
-        encoding="utf-8",
-    )
-    preprocess_manifest_path.write_text(
-        json.dumps(
-            {
-                "contract_version": "1",
-                "model": "impacts",
-                "settings_source": str(tmp_path / "settings.yaml"),
-                "staging_dir": str(output_root / "preprocess"),
-                "input_dir": str(output_root / "preprocess"),
-                "preprocess_manifest_path": str(preprocess_manifest_path),
-                "maintained_execution_path": [],
-                "inputs": {},
-                "pipeline": _pipeline_payload(tmp_path),
-                "pilates_contract": {"stage": "terminal_postprocessing"},
-                "population_inputs": {},
-                "notes": [],
             }
         ),
         encoding="utf-8",
@@ -1072,13 +1061,17 @@ def test_postprocess_logs_pipeline_complete_after_steps_and_manifest(monkeypatch
         result = postprocess_from_pipeline_manifest(run_manifest_path=run_manifest_path)
 
     messages = [record.getMessage() for record in caplog.records]
-    steps_index = messages.index(f"postprocess steps complete for {tmp_path / 'settings.yaml'}")
-    manifest_index = messages.index(f"Postprocess manifest written: {output_root / 'postprocess_manifest.yaml'}")
-    complete_index = messages.index(f"Pipeline complete: postprocess_manifest={output_root / 'postprocess_manifest.yaml'}")
+    steps_index = messages.index(f"postprocess steps complete for {output_root / 'settings.yaml'}")
+    manifest_index = messages.index(f"Postsim manifest written: {run_manifest_path}")
+    complete_index = messages.index(f"Pipeline complete: postsim_manifest={run_manifest_path}")
 
-    assert result["postprocess_manifest_path"].endswith("postprocess_manifest.yaml")
+    assert result["postsim_manifest_path"].endswith("postsim_manifest.yaml")
     assert steps_index < manifest_index < complete_index
-    assert messages[-1] == f"Pipeline complete: postprocess_manifest={output_root / 'postprocess_manifest.yaml'}"
+    assert messages[-1] == f"Pipeline complete: postsim_manifest={run_manifest_path}"
+    saved_manifest = yaml.safe_load(run_manifest_path.read_text(encoding="utf-8"))
+    assert "analysis_outputs" not in saved_manifest
+    assert saved_manifest["analysis_manifest_path"] == "analysis/analysis_manifest.yaml"
+    assert (output_root / "analysis" / "analysis_manifest.yaml").is_file()
 
 
 def test_postprocess_impact_output_dir_cli_passes_output_root_override_and_impact_input_dir(monkeypatch, tmp_path: Path):
@@ -1235,6 +1228,7 @@ def test_postprocess_output_root_override_localizes_stale_manifest_paths(
         allow_missing_source_inputs=False,
         input_roots=None,
         baseline_concentration_override=None,
+        reference_scenario_out=None,
     ):
         calls["settings_path"] = str(settings_path)
         calls["run_manifest_path"] = str(run_manifest_path)
@@ -1251,8 +1245,8 @@ def test_postprocess_output_root_override_localizes_stale_manifest_paths(
         output_root_override=output_root,
     )
 
-    assert result["output_dir"] == str(output_root.resolve())
-    assert result["postprocess_manifest_path"] == str(output_root / "postprocess_manifest.yaml")
+    assert result["output_dir"] == "."
+    assert result["postprocess_manifest_path"] == str(run_manifest_path)
     assert calls["settings_path"] == str(local_settings_path.resolve())
     assert calls["run_manifest_path"] == str(run_manifest_path)
     assert calls["output_root"] == str(output_root.resolve())
@@ -1310,7 +1304,7 @@ def test_postprocess_input_root_localizes_manifest_source_paths(monkeypatch, tmp
     assert metadata_resolved == metadata.resolve()
 
 
-def test_postprocess_delta_baseline_path_can_be_relative_to_impact_input_dir(tmp_path: Path):
+def test_reference_path_can_be_relative_to_impact_input_dir(tmp_path: Path):
     import impacts.postprocessor as postprocessor_module
 
     input_root = tmp_path / "beam-data" / "sfbay"
@@ -1318,12 +1312,13 @@ def test_postprocess_delta_baseline_path_can_be_relative_to_impact_input_dir(tmp
     baseline_path.parent.mkdir(parents=True)
     baseline_path.write_text("", encoding="utf-8")
 
-    resolved = postprocessor_module._resolve_delta_baseline_concentration_path(
+    resolved = postprocessor_module._resolve_reference_source(
         "baseline/beam_concentration_distribution.parquet",
+        settings_path=tmp_path / "settings.yaml",
         registry=PathRegistry([input_root]),
     )
 
-    assert resolved == baseline_path.resolve()
+    assert Path(resolved) == baseline_path.resolve()
 
 
 def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp_path: Path):
@@ -1357,6 +1352,7 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
     class _Settings:
         class impacts:
             local_output_folder = str(output_root)
+            local_input_folder = str(tmp_path / "impacts_inputs")
 
             class analysis:
                 delta_baseline_concentration_distribution_file = str(baseline_path)
@@ -1423,6 +1419,21 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
     monkeypatch.setattr(postprocessor_module, "_resolve_vehicle_category_metadata_path", lambda *_args, **_kwargs: output_root / "metadata.csv")
     monkeypatch.setattr(postprocessor_module, "_resolve_county_boundaries_path", lambda *_args, **_kwargs: output_root / "county.gpkg")
     monkeypatch.setattr(postprocessor_module, "_resolve_emissions_inventory_path", lambda *_args, **_kwargs: output_root / "inventory.parquet")
+    pinned_reference = Path(_Settings.impacts.local_input_folder) / "reference" / "beam_concentration_distribution.parquet"
+    pinned_reference.parent.mkdir(parents=True, exist_ok=True)
+    pinned_reference.write_bytes(b"reference")
+    monkeypatch.setattr(
+        postprocessor_module,
+        "pin_reference_scenario",
+        lambda *_args, **_kwargs: {
+            "source": str(baseline_path),
+            "resolved_source": str(baseline_path),
+            "saved_path": "../impacts_inputs/reference/beam_concentration_distribution.parquet",
+            "sha256": "fixture",
+            "reused": False,
+        },
+    )
+    monkeypatch.setattr(postprocessor_module, "validate_reference_grid", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(step1_module, "run", _fake_step("step1"))
     monkeypatch.setattr(step2_module, "run", _fake_step("step2"))
     monkeypatch.setattr(step3_module, "run", _fake_step("step3"))
@@ -1439,24 +1450,23 @@ def test_postprocess_steps_write_named_dirs_not_analysis_subdir(monkeypatch, tmp
     )
 
     assert output_dirs == {
-        "step1": output_root / "postprocess" / "fleet",
-        "step2": output_root / "postprocess" / "annual_targets",
-        "step3": output_root / "postprocess" / "emissions_inventory",
-        "step4": output_root / "postprocess" / "concentrations",
-        "step4b": output_root / "postprocess" / "concentration_transects",
-        "step5": output_root / "postprocess" / "exposure",
-        "step6": output_root / "postprocess" / "delta_concentrations",
-        "step6b": output_root / "postprocess" / "delta_transects",
-        "step7": output_root / "postprocess" / "delta_exposure",
+        "step1": output_root / "analysis" / "fleet",
+        "step2": output_root / "analysis" / "annual_targets",
+        "step3": output_root / "analysis" / "emissions_inventory",
+        "step4": output_root / "analysis" / "concentrations",
+        "step4b": output_root / "analysis" / "concentration_transects",
+        "step5": output_root / "analysis" / "exposure",
+        "step6": output_root / "analysis" / "delta_concentrations",
+        "step6b": output_root / "analysis" / "delta_transects",
+        "step7": output_root / "analysis" / "delta_exposure",
     }
     assert step4_calls["called"] is True
     assert step4_calls["basemap"] == "none"
-    assert step6_calls["delta_baseline_concentration_path"] == str(baseline_path.resolve())
+    assert step6_calls["delta_baseline_concentration_path"] == str(pinned_reference.resolve())
     assert step7_calls["concentration_delta_path"] == str(
-        output_root / "postprocess" / "delta_concentrations" / "concentration_delta.parquet"
+        output_root / "analysis" / "delta_concentrations" / "concentration_delta.parquet"
     )
-    analysis_subdir = Path("postprocess") / "analysis"
-    assert all(str(analysis_subdir) not in str(path) for path in output_dirs.values())
+    assert all("postprocess/analysis" not in str(path) for path in output_dirs.values())
     assert set(outputs) == {
         "fleet_step1_output",
         "annual_targets_step2_output",

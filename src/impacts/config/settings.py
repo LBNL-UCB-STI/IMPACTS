@@ -31,41 +31,78 @@ def _run_output_label(output_run_name: str | None, run_scenario: str | None) -> 
 def presim_run_root(
     outputs_root: str | Path,
     *,
+    year: int | None = None,
+    region: str,
+    output_run_name: str | None,
+    run_scenario: str,
+) -> Path:
+    root = Path(str(outputs_root)).expanduser()
+    if year is not None:
+        root /= str(int(year))
+    return root / _run_output_label(output_run_name, run_scenario) / "presim"
+
+
+def impacts_run_root(
+    outputs_root: str | Path,
+    *,
+    year: int,
     region: str,
     output_run_name: str | None,
     run_scenario: str,
 ) -> Path:
     return (
         Path(str(outputs_root)).expanduser()
-        / f"impacts_presim--{region}--{_run_output_label(output_run_name, run_scenario)}"
+        / str(int(year))
+        / _run_output_label(output_run_name, run_scenario)
     )
 
 
 def presim_activities_root(
     outputs_root: str | Path,
     *,
+    year: int | None = None,
     region: str,
     output_run_name: str | None,
     run_scenario: str,
 ) -> Path:
     return presim_run_root(
         outputs_root,
+        year=year,
         region=region,
         output_run_name=output_run_name,
         run_scenario=run_scenario,
-    ) / "activities"
+    ) / "emissions"
+
+
+def presim_fleet_root(
+    outputs_root: str | Path,
+    *,
+    year: int | None = None,
+    region: str,
+    output_run_name: str | None,
+    run_scenario: str,
+) -> Path:
+    return presim_run_root(
+        outputs_root,
+        year=year,
+        region=region,
+        output_run_name=output_run_name,
+        run_scenario=run_scenario,
+    ) / "fleet"
 
 
 def presim_activities_inventory_root(
     outputs_root: str | Path,
     activity_scenario: str,
     *,
+    year: int | None = None,
     region: str,
     output_run_name: str | None,
     run_scenario: str,
 ) -> Path:
     return presim_activities_root(
         outputs_root,
+        year=year,
         region=region,
         output_run_name=output_run_name,
         run_scenario=run_scenario,
@@ -76,12 +113,14 @@ def presim_activities_rates_root(
     outputs_root: str | Path,
     activity_scenario: str,
     *,
+    year: int | None = None,
     region: str,
     output_run_name: str | None,
     run_scenario: str,
 ) -> Path:
     return presim_activities_root(
         outputs_root,
+        year=year,
         region=region,
         output_run_name=output_run_name,
         run_scenario=run_scenario,
@@ -91,31 +130,35 @@ def presim_activities_rates_root(
 def presim_activities_tmp_root(
     outputs_root: str | Path,
     *,
+    year: int | None = None,
     region: str,
     output_run_name: str | None,
     run_scenario: str,
 ) -> Path:
-    return presim_activities_root(
+    return presim_run_root(
         outputs_root,
+        year=year,
         region=region,
         output_run_name=output_run_name,
         run_scenario=run_scenario,
-    ) / "_tmp"
+    ) / "scratch"
 
 
 def presim_activities_manifest_path(
     outputs_root: str | Path,
     *,
+    year: int | None = None,
     region: str,
     output_run_name: str | None,
     run_scenario: str,
 ) -> Path:
-    return presim_activities_root(
+    return presim_run_root(
         outputs_root,
+        year=year,
         region=region,
         output_run_name=output_run_name,
         run_scenario=run_scenario,
-    ) / "activities_manifest.yaml"
+    ) / "presim_manifest.yaml"
 
 
 def normalize_epsg(value: Any) -> Optional[str]:
@@ -371,12 +414,13 @@ class Dispersions:
 class Exposure:
     primary_pm25_integration_strategy: str = default_primary_pm25_integration_strategy
     population_h5: Optional[str] = None
+    census_bundle: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Exposure":
         _reject_unknown_keys(
             payload,
-            {"primary_pm25_integration_strategy", "population_h5"},
+            {"primary_pm25_integration_strategy", "population_h5", "census_bundle"},
             "impacts.exposure",
         )
         strategy = _optional_string(payload.get("primary_pm25_integration_strategy"))
@@ -389,6 +433,7 @@ class Exposure:
         return cls(
             primary_pm25_integration_strategy=strategy,
             population_h5=_optional_string(payload.get("population_h5")),
+            census_bundle=_optional_string(payload.get("census_bundle")),
         )
 
 
@@ -667,6 +712,7 @@ def _parse_analysis_sector_targets(
 @dataclass(frozen=True)
 class Analysis:
     delta_baseline_concentration_distribution_file: Optional[str] = None
+    delta_baseline_concentration_distribution_sha256: Optional[str] = None
     inventory_targets: List[AnalysisTarget] = field(default_factory=list)
     sector_targets: List[AnalysisSectorTarget] = field(default_factory=list)
     basemap: str = "carto"
@@ -677,6 +723,7 @@ class Analysis:
             payload,
             {
                 "delta_baseline_concentration_distribution_file",
+                "delta_baseline_concentration_distribution_sha256",
                 "targets",
                 "inventory_targets",
                 "basemap",
@@ -705,6 +752,7 @@ class Analysis:
             and raw_inventory_targets is None
             and all(v is None for v in raw_pollutant_targets.values())
             and payload.get("delta_baseline_concentration_distribution_file") is None
+            and payload.get("delta_baseline_concentration_distribution_sha256") is None
             and payload.get("basemap") is None
         ):
             return cls()
@@ -732,10 +780,20 @@ class Analysis:
         )
         if basemap not in {"carto", "none"}:
             raise ValueError("impacts.analysis.basemap must be one of: carto, none")
+        reference_sha256 = _optional_string(
+            payload.get("delta_baseline_concentration_distribution_sha256")
+        )
+        if reference_sha256 is not None and (
+            len(reference_sha256) != 64 or any(char not in "0123456789abcdefABCDEF" for char in reference_sha256)
+        ):
+            raise ValueError(
+                "impacts.analysis.delta_baseline_concentration_distribution_sha256 must be a 64-character SHA-256 hex digest"
+            )
         return cls(
             delta_baseline_concentration_distribution_file=_optional_string(
                 payload.get("delta_baseline_concentration_distribution_file")
             ),
+            delta_baseline_concentration_distribution_sha256=reference_sha256,
             inventory_targets=inventory_targets,
             sector_targets=sector_targets,
             basemap=basemap,
@@ -976,6 +1034,7 @@ class ImpactsSettings:
                         self.impacts.exposure.primary_pm25_integration_strategy
                     ),
                     "population_h5": self.impacts.exposure.population_h5,
+                    "census_bundle": self.impacts.exposure.census_bundle,
                 },
                 "population": {
                     "passenger_folder": self.impacts.population.passenger_folder,
@@ -995,6 +1054,7 @@ class ImpactsSettings:
                             for key, value in (
                                 ("osm_network_file", self.impacts.emissions.osm_network_file),
                                 ("osm_network_artifact_id", self.impacts.emissions.osm_network_artifact_id),
+                                ("vehicle_category_metadata_file", self.impacts.emissions.vehicle_category_metadata_file),
                             )
                             if value is not None
                         },
@@ -1039,6 +1099,15 @@ class ImpactsSettings:
                                 ),
                             }
                             if self.impacts.analysis.delta_baseline_concentration_distribution_file
+                            else {}
+                        ),
+                        **(
+                            {
+                                "delta_baseline_concentration_distribution_sha256": (
+                                    self.impacts.analysis.delta_baseline_concentration_distribution_sha256
+                                ),
+                            }
+                            if self.impacts.analysis.delta_baseline_concentration_distribution_sha256
                             else {}
                         ),
                         **(
@@ -1629,17 +1698,34 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
     activities_output_root = presim_activities_inventory_root(
         outputs_root,
         emissions_store_name,
+        year=year,
         region=presim_region,
         output_run_name=presim_output_run_name,
         run_scenario=presim_run_scenario,
     )
     tmp_root = presim_activities_tmp_root(
         outputs_root,
+        year=year,
         region=presim_region,
         output_run_name=presim_output_run_name,
         run_scenario=presim_run_scenario,
     )
     trace_dir = tmp_root / "traces"
+    rates_output_root = presim_activities_rates_root(
+        outputs_root,
+        emissions_store_name,
+        year=year,
+        region=presim_region,
+        output_run_name=presim_output_run_name,
+        run_scenario=presim_run_scenario,
+    )
+    fleet_output_root = presim_fleet_root(
+        outputs_root,
+        year=year,
+        region=presim_region,
+        output_run_name=presim_output_run_name,
+        run_scenario=presim_run_scenario,
+    )
     region_slug = region.lower()
     base_name = f"{region_slug}-emfac-{year}"
     final_name = f"{base_name}-project-analysis-final"
@@ -1692,26 +1778,27 @@ def _build_activities_workflow(raw: dict[str, object], source_path: Path) -> dic
             "project_analysis_bc": str(tmp_root / f"{base_name}-project-analysis-bc.parquet"),
             "project_analysis_prdust": str(tmp_root / f"{base_name}-project-analysis-prdust.parquet"),
             "project_analysis_nh3_rates": str(tmp_root / f"{base_name}-project-analysis-nh3-rates.parquet"),
-            "emissions_inventory": str(tmp_root / f"{base_name}-inventory-intermediate-with-activity.parquet"),
+            "emissions_inventory": str(activities_output_root / f"{base_name}-inventory-intermediate-with-activity.parquet"),
             "statewide_inventory": str(tmp_root / f"statewide-emfac-{year}-emissions-inventory.parquet"),
             "matching_activity_output_passenger": str(tmp_root / f"{base_name}-inventory-matching-passenger-activity.parquet"),
             "matching_activity_output_freight": str(tmp_root / f"{base_name}-inventory-matching-freight-activity.parquet"),
-            "final_output_passenger": str(activities_output_root / f"{final_name}-passenger-rates.parquet"),
+            "final_output_passenger": str(rates_output_root / f"{final_name}-passenger-rates.parquet"),
             "final_activity_by_model_year_output_passenger": str(activities_output_root / f"{inventory_final_name}-passenger-activity-by-model-year.parquet"),
             "final_activity_by_emfacid_output_passenger": str(
                 activities_output_root / f"{inventory_final_name}-passenger-activity-by-emfacid.parquet"
             ),
-            "final_fleet_output_passenger": str(activities_output_root / f"{inventory_final_name}-passenger-fleet.parquet"),
-            "final_output_freight": str(activities_output_root / f"{final_name}-freight-rates.parquet"),
+            "final_fleet_output_passenger": str(fleet_output_root / f"{inventory_final_name}-passenger-fleet.parquet"),
+            "final_output_freight": str(rates_output_root / f"{final_name}-freight-rates.parquet"),
             "final_activity_by_model_year_output_freight": str(activities_output_root / f"{inventory_final_name}-freight-activity-by-model-year.parquet"),
             "final_activity_by_emfacid_output_freight": str(
                 activities_output_root / f"{inventory_final_name}-freight-activity-by-emfacid.parquet"
             ),
-            "final_fleet_output_freight": str(activities_output_root / f"{inventory_final_name}-freight-fleet.parquet"),
+            "final_fleet_output_freight": str(fleet_output_root / f"{inventory_final_name}-freight-fleet.parquet"),
             "emissions_store_root": str(
                 presim_activities_rates_root(
                     outputs_root,
                     emissions_store_name,
+                    year=year,
                     region=presim_region,
                     output_run_name=presim_output_run_name,
                     run_scenario=presim_run_scenario,
@@ -2238,26 +2325,44 @@ def _derive_emfac_output_paths(emfac: dict[str, object]) -> dict[str, object]:
     activities_output_root = presim_activities_inventory_root(
         outputs_root,
         str(scenario),
+        year=int(calendar_year),
         region=presim_region,
         output_run_name=presim_output_run_name,
         run_scenario=presim_run_scenario,
     )
     tmp_root = presim_activities_tmp_root(
         outputs_root,
+        year=int(calendar_year),
         region=presim_region,
         output_run_name=presim_output_run_name,
         run_scenario=presim_run_scenario,
     )
-    emfac["passenger_rates_file"] = str((activities_output_root / f"{project_analysis_name}-passenger-rates.parquet").resolve())
+    fleet_output_root = presim_fleet_root(
+        outputs_root,
+        year=int(calendar_year),
+        region=presim_region,
+        output_run_name=presim_output_run_name,
+        run_scenario=presim_run_scenario,
+    )
+    rates_output_root = presim_activities_rates_root(
+        outputs_root,
+        str(scenario),
+        year=int(calendar_year),
+        region=presim_region,
+        output_run_name=presim_output_run_name,
+        run_scenario=presim_run_scenario,
+    )
+    emfac["passenger_rates_file"] = str((rates_output_root / f"{project_analysis_name}-passenger-rates.parquet").resolve())
     emfac["passenger_activity_file"] = str((tmp_root / f"{inventory_matching_name}-passenger-activity.parquet").resolve())
-    emfac["passenger_fleet_file"] = str((activities_output_root / f"{inventory_final_name}-passenger-fleet.parquet").resolve())
-    emfac["freight_rates_file"] = str((activities_output_root / f"{project_analysis_name}-freight-rates.parquet").resolve())
+    emfac["passenger_fleet_file"] = str((fleet_output_root / f"{inventory_final_name}-passenger-fleet.parquet").resolve())
+    emfac["freight_rates_file"] = str((rates_output_root / f"{project_analysis_name}-freight-rates.parquet").resolve())
     emfac["freight_activity_file"] = str((tmp_root / f"{inventory_matching_name}-freight-activity.parquet").resolve())
-    emfac["freight_fleet_file"] = str((activities_output_root / f"{inventory_final_name}-freight-fleet.parquet").resolve())
+    emfac["freight_fleet_file"] = str((fleet_output_root / f"{inventory_final_name}-freight-fleet.parquet").resolve())
     emfac["emissions_store_root"] = str(
         presim_activities_rates_root(
             outputs_root,
             str(scenario),
+            year=int(calendar_year),
             region=presim_region,
             output_run_name=presim_output_run_name,
             run_scenario=presim_run_scenario,
@@ -2597,7 +2702,7 @@ def load_fleet_workflow_from_activities_manifest(activities_manifest_path: str |
     raw = _build_fleet_config_from_root(_build_emfac_root_from_settings_file(settings_source))
     _validate_fleet(raw, settings_source)
     raw = _ingest_fleet_sources(raw)
-    raw["activities"] = {
+    raw["activities"].update({
         "outputs": manifest["outputs"]["outputs_root"],
         "passenger_rates_file": manifest["outputs"]["passenger_rates_file"],
         "passenger_activity_file": manifest["outputs"]["passenger_activity_file"],
@@ -2606,7 +2711,7 @@ def load_fleet_workflow_from_activities_manifest(activities_manifest_path: str |
         "freight_activity_file": manifest["outputs"]["freight_activity_file"],
         "freight_fleet_file": manifest["outputs"]["freight_fleet_file"],
         "emissions_store_root": manifest["outputs"]["emissions_store_root"],
-    }
+    })
     raw["vehicle_category_metadata_file"] = manifest["vehicle_category_metadata_file"]
     return _build_loaded_fleet_workflow(raw)
 

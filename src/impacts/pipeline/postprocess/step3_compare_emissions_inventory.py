@@ -385,12 +385,12 @@ def run_from_output_dir(output_dir: Path) -> dict[str, str]:
     )
     from impacts.config.path_registry import build_registry
 
-    from ._common import settings_path_from_output_dir
+    from ._common import run_manifest_path_from_output_dir, settings_path_from_output_dir
     from ...common import normalize_county_fips
     from ...config.settings_builder import load_settings_from_yaml
 
     output_dir = Path(output_dir)
-    run_manifest_path = output_dir / "pipeline_manifest.yaml"
+    run_manifest_path = run_manifest_path_from_output_dir(output_dir)
     settings_path = settings_path_from_output_dir(output_dir)
     settings = load_settings_from_yaml(settings_path)
     if not settings.impacts.analysis.inventory_targets:

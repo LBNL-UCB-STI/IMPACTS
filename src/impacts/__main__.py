@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
 import logging
 import os
 from pathlib import Path
@@ -10,6 +9,7 @@ import subprocess
 import sys
 
 from impacts.config.settings_builder import load_settings_from_yaml
+from impacts.config.settings import impacts_run_root
 from impacts.manifest.file_ops import load_structured_file
 from impacts.manifest.file_ops import resolve_path
 
@@ -37,6 +37,17 @@ def _resolve_pipeline_output_root(settings_path: str) -> Path:
 def _resolve_pipeline_manifest_path(settings_path: str, manifest_name: str) -> Path:
     candidate = _resolve_pipeline_output_root(settings_path) / manifest_name
     if not candidate.exists():
+        settings = load_settings_from_yaml(settings_path)
+        run_root = impacts_run_root(
+            _resolve_pipeline_output_root(settings_path),
+            year=settings.run.start_year,
+            region=settings.run.region,
+            output_run_name=settings.run.output_run_name,
+            run_scenario=settings.run.scenario,
+        )
+        if manifest_name == "pipeline_manifest.yaml":
+            candidate = run_root / "postsim" / "postsim_manifest.yaml"
+    if not candidate.exists():
         raise FileNotFoundError(
             f"Expected {manifest_name} in the configured impacts.local_output_folder, but it was not found: {candidate}"
         )
@@ -51,14 +62,13 @@ def _resolve_postsim_output_root(settings_path: str) -> Path:
     base_output_root = Path(
         resolve_path(settings.impacts.local_output_folder, settings_path) or settings.impacts.local_output_folder
     ).resolve()
-    label = settings.run.output_run_name or settings.run.scenario
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    candidate = base_output_root / f"impacts-postsim--{settings.run.region}--{label}--{stamp}"
-    suffix = 2
-    while candidate.exists():
-        candidate = base_output_root / f"impacts-postsim--{settings.run.region}--{label}--{stamp}_{suffix:02d}"
-        suffix += 1
-    return candidate
+    return impacts_run_root(
+        base_output_root,
+        year=settings.run.start_year,
+        region=settings.run.region,
+        output_run_name=settings.run.output_run_name,
+        run_scenario=settings.run.scenario,
+    ) / "postsim"
 
 
 def _run_presim_from_settings(settings_path: str) -> None:
@@ -69,6 +79,11 @@ def _run_presim_from_settings(settings_path: str) -> None:
     activities_manifest = ensure_emfac_activities_outputs(settings, Path(settings_path))
     activities_manifest_path = activities_manifest["activities_manifest_path"]
     run_fleet(activities_manifest_path=activities_manifest_path)
+    presim_root = _presim_output_root(settings_path)
+    presim_root.mkdir(parents=True, exist_ok=True)
+    import shutil
+
+    shutil.copy2(settings_path, presim_root / "settings.yaml")
     logger.info("Presim stage complete: activities_manifest=%s", activities_manifest_path)
 
 
@@ -127,7 +142,7 @@ def _run_postsim_from_settings(
         output_root_override=postsim_output_root,
         input_roots=build_registry(settings, settings_path).roots,
     )
-    logger.info("Postsim stage complete: pipeline_manifest=%s", pipeline_manifest_path)
+    logger.info("Postsim stage complete: postsim_manifest=%s", pipeline_manifest_path)
 
 
 def _resolve_profile_output(*, output_root: Path, stem: str) -> Path:
@@ -151,6 +166,7 @@ def _presim_output_root(settings_path: str | Path) -> Path:
     base_output_root = _resolve_pipeline_output_root(str(settings_path))
     return presim_run_root(
         base_output_root,
+        year=settings.run.start_year,
         region=settings.run.region,
         output_run_name=settings.run.output_run_name,
         run_scenario=settings.run.scenario,
@@ -175,7 +191,7 @@ def _postprocess_profile_output_root(args: argparse.Namespace) -> Path:
     if args.run_manifest:
         return _run_output_root_from_manifest(args.run_manifest)
     if args.config:
-        return _resolve_pipeline_output_root(args.config)
+        return _resolve_postsim_output_root(args.config)
     raise ValueError("Cannot resolve postprocess profile output root")
 
 
@@ -351,7 +367,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    preprocess = subparsers.add_parser("preprocess", help="Stage explicit inputs and write preprocess_manifest.yaml")
+    preprocess = subparsers.add_parser("preprocess", help="Stage explicit inputs and initialize postsim_manifest.yaml")
     preprocess.add_argument("--config", required=True)
     preprocess.add_argument("--manifest-path")
     _add_profile_argument(preprocess)
@@ -390,10 +406,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     postprocess = subparsers.add_parser("postprocess", help="Run postprocess comparisons and map plots")
     postprocess_group = postprocess.add_mutually_exclusive_group(required=False)
-    postprocess_group.add_argument("--run-manifest", help="Path to an existing pipeline_manifest.yaml.")
+    postprocess_group.add_argument("--run-manifest", help="Path to an existing postsim manifest (or legacy pipeline manifest).")
     postprocess_group.add_argument(
         "--impact-output-dir",
-        help="Path to a completed pipeline output folder containing pipeline_manifest.yaml.",
+        help="Path to a completed postsim output folder containing postsim_manifest.yaml (legacy archives are accepted).",
     )
     postprocess.add_argument(
         "--config",
@@ -404,7 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
             "analysis config (inventory_targets, etc.) without re-running the pipeline."
         ),
     )
-    postprocess.add_argument("--postprocess-manifest")
+    postprocess.add_argument("--postsim-manifest", "--postprocess-manifest", dest="postprocess_manifest")
     postprocess.add_argument(
         "--impact-input-dir",
         action="append",
@@ -588,9 +604,11 @@ def main(argv: list[str] | None = None) -> int:
                 run_manifest_path = args.run_manifest
                 output_root_override = None
             else:
-                run_manifest_path = Path(args.impact_output_dir) / "pipeline_manifest.yaml"
+                run_manifest_path = Path(args.impact_output_dir) / "postsim_manifest.yaml"
                 if not Path(run_manifest_path).exists():
-                    parser.error(f"pipeline_manifest.yaml not found in {args.impact_output_dir}")
+                    run_manifest_path = Path(args.impact_output_dir) / "pipeline_manifest.yaml"
+                if not Path(run_manifest_path).exists():
+                    parser.error(f"No postsim manifest found in {args.impact_output_dir}")
                 output_root_override = args.impact_output_dir
             postprocess_from_pipeline_manifest(
                 run_manifest_path=run_manifest_path,

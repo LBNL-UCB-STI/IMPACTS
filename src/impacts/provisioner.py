@@ -11,6 +11,7 @@ from .config.settings import presim_activities_inventory_root
 from .config.settings import presim_activities_manifest_path
 from .config.settings import presim_activities_rates_root
 from .config.settings import presim_activities_tmp_root
+from .config.settings import presim_fleet_root
 from .manifest.file_ops import write_structured_file
 from .manifest.file_ops import resolve_path
 from .manifest.schema import ActivitiesManifest
@@ -25,6 +26,7 @@ def _outputs_exist(workflow: dict[str, Any]) -> bool:
 
 def _presim_identity_kwargs(cfg: dict[str, Any]) -> dict[str, str | None]:
     return {
+        "year": int(cfg["run_year"]),
         "region": str(cfg["run_region"]),
         "output_run_name": cfg.get("output_run_name"),
         "run_scenario": str(cfg["run_scenario"]),
@@ -111,6 +113,11 @@ def _write_activities_manifest_from_cfg(
         **presim_identity,
     )
     tmp_root = presim_activities_tmp_root(outputs_root, **presim_identity)
+    rates_root = presim_activities_rates_root(
+        outputs_root,
+        str(cfg["scenario"]),
+        **presim_identity,
+    )
     project_analysis_name = f"{region_slug}-emfac-{int(calendar_year)}-project-analysis-final"
     inventory_final_name = f"{region_slug}-emfac-{int(calendar_year)}-inventory-final"
     inventory_matching_name = f"{region_slug}-emfac-{int(calendar_year)}-inventory-matching"
@@ -135,12 +142,12 @@ def _write_activities_manifest_from_cfg(
                         **presim_identity,
                     ).resolve()
                 ),
-                "passenger_rates_file": str((activities_output_root / f"{project_analysis_name}-passenger-rates.parquet").resolve()),
+                "passenger_rates_file": str((rates_root / f"{project_analysis_name}-passenger-rates.parquet").resolve()),
                 "passenger_activity_file": str((tmp_root / f"{inventory_matching_name}-passenger-activity.parquet").resolve()),
-                "passenger_fleet_file": str((activities_output_root / f"{inventory_final_name}-passenger-fleet.parquet").resolve()),
-                "freight_rates_file": str((activities_output_root / f"{project_analysis_name}-freight-rates.parquet").resolve()),
+                "passenger_fleet_file": str((presim_fleet_root(outputs_root, year=calendar_year, **presim_identity) / f"{inventory_final_name}-passenger-fleet.parquet").resolve()),
+                "freight_rates_file": str((rates_root / f"{project_analysis_name}-freight-rates.parquet").resolve()),
                 "freight_activity_file": str((tmp_root / f"{inventory_matching_name}-freight-activity.parquet").resolve()),
-                "freight_fleet_file": str((activities_output_root / f"{inventory_final_name}-freight-fleet.parquet").resolve()),
+                "freight_fleet_file": str((presim_fleet_root(outputs_root, year=calendar_year, **presim_identity) / f"{inventory_final_name}-freight-fleet.parquet").resolve()),
                 "final_activity_by_emfacid_output_passenger": str(
                     (activities_output_root / f"{inventory_final_name}-passenger-activity-by-emfacid.parquet").resolve()
                 ),
@@ -148,7 +155,7 @@ def _write_activities_manifest_from_cfg(
                     (activities_output_root / f"{inventory_final_name}-freight-activity-by-emfacid.parquet").resolve()
                 ),
                 "emissions_inventory": str(
-                    (tmp_root / f"{region_slug}-emfac-{int(calendar_year)}-inventory-intermediate-with-activity.parquet").resolve()
+                    (activities_output_root / f"{region_slug}-emfac-{int(calendar_year)}-inventory-intermediate-with-activity.parquet").resolve()
                 ),
             },
             "notes": [
@@ -210,7 +217,7 @@ def _extract_archive(archive: Path, destination: Path) -> None:
             stderr=subprocess.PIPE,
             check=True,
         )
-        subprocess.run(["tar", "--warning=no-unknown-keyword", "-xf", "-", "-C", str(destination)], input=zstd.stdout, check=True)
+        subprocess.run(["tar", "-xf", "-", "-C", str(destination)], input=zstd.stdout, check=True)
         return
     except (FileNotFoundError, subprocess.CalledProcessError):
         pass
@@ -303,6 +310,7 @@ def _resolve_activities_config(settings, config_path: Path) -> dict[str, Any]:
         "scenario": settings.impacts.scenario,
         "run_region": settings.run.region,
         "run_scenario": settings.run.scenario,
+        "run_year": settings.run.start_year,
         "output_run_name": getattr(settings.run, "output_run_name", None),
         "seed": settings.impacts.seed,
         "output_root": local_output_folder,

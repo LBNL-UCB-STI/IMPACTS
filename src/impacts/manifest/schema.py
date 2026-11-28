@@ -302,6 +302,13 @@ class PipelineManifest:
     deterministic_contract: Dict[str, Any]
     execution: Dict[str, Any]
     pipeline_manifest_path: str
+    settings_source: Optional[str] = None
+    input_dir: Optional[str] = None
+    inputs: Dict[str, Any] = field(default_factory=dict)
+    preprocess: Dict[str, Any] = field(default_factory=dict)
+    analysis_outputs: Dict[str, Any] = field(default_factory=dict)
+    analysis_manifest_path: Optional[str] = None
+    postsim_manifest_path: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PipelineManifest":
@@ -320,6 +327,13 @@ class PipelineManifest:
                 "deterministic_contract",
                 "execution",
                 "pipeline_manifest_path",
+                "settings_source",
+                "input_dir",
+                "inputs",
+                "preprocess",
+                "analysis_outputs",
+                "analysis_manifest_path",
+                "postsim_manifest_path",
             },
             "pipeline manifest",
         )
@@ -329,7 +343,7 @@ class PipelineManifest:
         return cls(
             contract_version=_required_string(payload.get("contract_version"), "contract_version"),
             model=_required_string(payload.get("model"), "model"),
-            preprocess_manifest_path=_required_string(payload.get("preprocess_manifest_path"), "preprocess_manifest_path"),
+            preprocess_manifest_path=str(payload.get("preprocess_manifest_path") or ""),
             output_dir=_required_string(payload.get("output_dir"), "output_dir"),
             command=_required_string(payload.get("command"), "command"),
             image=_required_string(payload.get("image"), "image"),
@@ -338,11 +352,27 @@ class PipelineManifest:
             population_inputs=_required_dict(payload.get("population_inputs"), "population_inputs"),
             deterministic_contract=_required_dict(payload.get("deterministic_contract"), "deterministic_contract"),
             execution=_required_dict(payload.get("execution"), "execution"),
-            pipeline_manifest_path=_required_string(payload.get("pipeline_manifest_path"), "pipeline_manifest_path"),
+            pipeline_manifest_path=_required_string(
+                payload.get("postsim_manifest_path") or payload.get("pipeline_manifest_path"),
+                "postsim_manifest_path",
+            ),
+            settings_source=_optional_string(payload.get("settings_source")),
+            input_dir=_optional_string(payload.get("input_dir")),
+            inputs=dict(payload.get("inputs", {}) or {}),
+            preprocess=dict(payload.get("preprocess", {}) or {}),
+            analysis_outputs=dict(payload.get("analysis_outputs", {}) or {}),
+            analysis_manifest_path=_optional_string(payload.get("analysis_manifest_path")),
+            postsim_manifest_path=_optional_string(payload.get("postsim_manifest_path")),
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        if not payload.get("preprocess_manifest_path"):
+            payload.pop("preprocess_manifest_path", None)
+        if payload.get("postsim_manifest_path"):
+            payload.pop("pipeline_manifest_path", None)
+            payload.pop("analysis_outputs", None)
+        return payload
 
     def path(self) -> Path:
         return Path(self.pipeline_manifest_path)

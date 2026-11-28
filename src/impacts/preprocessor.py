@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 from typing import Any
 from typing import Dict
@@ -271,6 +272,22 @@ def build_preprocess_manifest(
                 source_path=acs_cell_counts_path,
             )
 
+    population_inputs = step1_outputs["population_inputs"]
+    if population_inputs.get("census_bundle"):
+        from .pipeline.preprocessing.step8_assign_group_quarters_to_grid import run as assign_group_quarters
+
+        block_path, count_path, report = assign_group_quarters(
+            pipeline_config, input_root, population_inputs=population_inputs
+        )
+        population_inputs["group_quarters_assignment"] = report
+        for key, path in (
+            ("group_quarters_block_allocations", block_path),
+            ("group_quarters_cell_counts", count_path),
+        ):
+            register_local_input(
+                manifest_inputs=manifest_inputs, input_root=input_root, key=key, source_path=path
+            )
+
     maintained_execution_path = ["impacts.pipeline.workflow.step1_process_emissions"]
     if pipeline.inmap:
         maintained_execution_path.append("impacts.pipeline.workflow.step2_compute_inmap_concentrations")
@@ -283,7 +300,7 @@ def build_preprocess_manifest(
         "settings_source": str(config_path),
         "staging_dir": str(input_root),
         "input_dir": str(input_root),
-        "preprocess_manifest_path": str(output_root / "preprocess_manifest.yaml"),
+        "preprocess_manifest_path": str(output_root / "postsim_manifest.yaml"),
         "maintained_execution_path": maintained_execution_path,
         "inputs": manifest_inputs,
         "pipeline": pipeline_config.to_dict(),
@@ -299,7 +316,7 @@ def build_preprocess_manifest(
             "entrypoint": "python -m impacts emissions",
             "command_template": "python -m impacts emissions --run-manifest {run_manifest}",
             "canonical_output_filenames": ["impacts_exposure_table.parquet"],
-            "manifest_filenames": ["preprocess_manifest.yaml", "pipeline_manifest.yaml", "postprocess_manifest.yaml"],
+            "manifest_filenames": ["presim_manifest.yaml", "postsim_manifest.yaml", "analysis/analysis_manifest.yaml"],
         },
         "population_inputs": dict(step1_outputs["population_inputs"]),
         "notes": [
@@ -319,21 +336,27 @@ def preprocess_workflow(
         settings_path=settings_path,
         output_root_override=output_root_override,
     )
-    output_manifest = Path(manifest_path) if manifest_path else Path(manifest["preprocess_manifest_path"])
+    output_manifest = (
+        Path(manifest_path)
+        if manifest_path
+        else Path(manifest["preprocess_manifest_path"]).parent / "postsim_manifest.yaml"
+    )
     manifest["preprocess_manifest_path"] = str(output_manifest)
     typed_manifest = PreprocessManifest.from_dict(manifest)
-    write_structured_file(output_manifest, typed_manifest.to_dict())
-    pipeline_manifest_path = Path(manifest["preprocess_manifest_path"]).resolve().parent / "pipeline_manifest.yaml"
+    pipeline_manifest_path = output_manifest.resolve()
     pipeline = PipelineConfig.from_dict(typed_manifest.to_dict()["pipeline"])
     inputs_payload = typed_manifest.to_dict()["inputs"]
     output_root = pipeline_manifest_path.parent.resolve()
     input_root = Path(typed_manifest.to_dict()["input_dir"]).resolve()
+    effective_settings = output_root / "settings.yaml"
+    if Path(settings_path).resolve() != effective_settings.resolve():
+        shutil.copy2(settings_path, effective_settings)
     prepared_skims_candidate = prepared_table_target(output_root / "emissions", "prepared_skims_for_grid_allocation")
     initial_pipeline_manifest = {
         "contract_version": typed_manifest.contract_version,
         "model": "impacts",
-        "preprocess_manifest_path": str(Path(manifest["preprocess_manifest_path"]).resolve()),
-        "output_dir": str(output_root),
+        "preprocess_manifest_path": "",
+        "output_dir": ".",
         "command": "python -m impacts preprocess",
         "image": "not_recorded",
         "outputs": {
@@ -358,9 +381,23 @@ def preprocess_workflow(
             "acs_household_population_cell_counts": inputs_payload.get(
                 "acs_household_population_cell_counts", {}
             ).get("staged_path"),
+            "group_quarters_cell_counts": inputs_payload.get(
+                "group_quarters_cell_counts", {}
+            ).get("staged_path"),
+            "group_quarters_block_allocations": inputs_payload.get(
+                "group_quarters_block_allocations", {}
+            ).get("staged_path"),
         },
         "pipeline": typed_manifest.to_dict()["pipeline"],
         "population_inputs": typed_manifest.to_dict()["population_inputs"],
+        "settings_source": typed_manifest.settings_source,
+        "input_dir": typed_manifest.input_dir,
+        "inputs": inputs_payload,
+        "preprocess": {
+            "maintained_execution_path": typed_manifest.maintained_execution_path,
+            "pilates_contract": typed_manifest.pilates_contract,
+            "notes": typed_manifest.notes,
+        },
         "deterministic_contract": {
             "uses_only_manifest_paths": True,
             "uses_baked_work_data": False,
@@ -370,17 +407,17 @@ def preprocess_workflow(
             "stage_timings_seconds": {},
             "stopped_after": "preprocess",
         },
-        "pipeline_manifest_path": str(pipeline_manifest_path),
+        "pipeline_manifest_path": "postsim_manifest.yaml",
+        "postsim_manifest_path": "postsim_manifest.yaml",
     }
     typed_pipeline_manifest = PipelineManifest.from_dict(initial_pipeline_manifest)
     write_structured_file(pipeline_manifest_path, typed_pipeline_manifest.to_dict())
-    logger.info("Preprocess complete: wrote preprocess manifest %s", output_manifest)
-    logger.info("Preprocess seeded pipeline manifest %s", pipeline_manifest_path)
+    logger.info("Preprocess complete: wrote postsim manifest %s", output_manifest)
     logger.info(
-        "Preprocess stage complete: preprocess_manifest=%s pipeline_manifest=%s",
+        "Preprocess stage complete: postsim_manifest=%s",
         output_manifest,
-        pipeline_manifest_path,
     )
     result = typed_manifest.to_dict()
     result["pipeline_manifest_path"] = str(pipeline_manifest_path)
+    result["postsim_manifest_path"] = str(pipeline_manifest_path)
     return result

@@ -377,10 +377,13 @@ def load_rates_store_relative_paths(
     required_emfac_ids: list[str],
     require_duckdb: bool = False,
 ) -> dict[str, str]:
-    activities_output_root = Path(str(config["activities"]["outputs"])).expanduser().resolve()
-    frism_year = config["frism"]["year"]
-    scenario_id = str(scenario).strip()
-    store_root = activities_output_root / "emissions" / f"{frism_year}-{scenario_id}"
+    activities = config["activities"]
+    if activities.get("emissions_store_root"):
+        store_root = Path(activities["emissions_store_root"]).expanduser().resolve()
+    else:
+        activities_output_root = Path(activities["outputs"]).expanduser().resolve()
+        frism_year = config["frism"]["year"]
+        store_root = activities_output_root / "emissions" / f"{frism_year}-{str(scenario).strip()}"
     parquet_root = store_root / "dataset"
     duckdb_path = store_root / "dataset.duckdb"
     output_root_path = Path(str(output_root)).expanduser().resolve()
